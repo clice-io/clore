@@ -1,0 +1,51 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.o
+*.obj
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Fortran module files
+*.mod
+*.smod
+
+# Build & Toolchain
+*build*/
+temp/
+.cache/
+.llvm*/
+compile_commands.json
+
+# Python & Testing
+__pycache__/
+.pytest_cache/
+
+# IDEs & Editors
+.vscode/
+.vs/
+.idea/
+.clangd
+
+# pixi environments
+.env
+.pixi/
+!.pixi/config.toml
+
+.codex/
+.claude/
+dist/
+docs/
