@@ -1,5 +1,6 @@
 #include "extract/extract.h"
 
+#include <algorithm>
 #include <chrono>
 #include <expected>
 #include <filesystem>
@@ -18,7 +19,7 @@ namespace {
 
 /// Returns true if `relative` matches the configured pattern.
 ///
-/// Patterns are interpreted as *project-relative path prefixes* (with forward
+/// Patterns are interpreted as *workspace-relative path prefixes* (with forward
 /// slashes), not as arbitrary substrings. This prevents accidental matches like
 /// "src/" matching "build/_deps/.../src/...".
 bool path_prefix_matches(std::string_view relative, std::string_view pattern) {
@@ -37,9 +38,9 @@ bool path_prefix_matches(std::string_view relative, std::string_view pattern) {
 }
 
 auto project_relative_path(const std::filesystem::path& file,
-                           const std::filesystem::path& project_root)
+                           const std::filesystem::path& root_path)
     -> std::optional<std::filesystem::path> {
-    auto rel = file.lexically_relative(project_root);
+    auto rel = file.lexically_relative(root_path);
     if(rel.empty()) return std::nullopt;
     for(const auto& part : rel) {
         if(part == "..") return std::nullopt;
@@ -73,14 +74,14 @@ auto resolve_path_under_directory(const std::string& path,
 /// Returns true if `file` should be processed according to `filter`.
 ///
 /// Security: rejects any path whose fs::relative result contains a ".."
-/// component, which would mean `file` escapes `project_root` and could be
+/// component, which would mean `file` escapes `filter_root` and could be
 /// used to bypass the expected-path boundary.
 bool matches_filter(const std::string& file, const config::FilterRule& filter,
-                    const std::string& project_root) {
+                    const std::filesystem::path& filter_root) {
     namespace fs = std::filesystem;
 
     auto file_path = fs::path(file).lexically_normal();
-    auto root_path = fs::path(project_root).lexically_normal();
+    auto root_path = filter_root.lexically_normal();
 
     auto rel_opt = project_relative_path(file_path, root_path);
     if(!rel_opt.has_value()) return false;
@@ -109,8 +110,171 @@ bool matches_filter(const std::string& file, const config::FilterRule& filter,
     return true;
 }
 
+auto filter_root_path(const config::TaskConfig& config) -> std::filesystem::path {
+    namespace fs = std::filesystem;
+
+    if(!config.workspace_root.empty()) {
+        return fs::path(config.workspace_root).lexically_normal();
+    }
+
+    return fs::path(config.project_root).lexically_normal();
+}
+
 using Clock = std::chrono::steady_clock;
 using Ms    = std::chrono::milliseconds;
+
+template <typename T>
+void append_unique(std::vector<T>& values, const T& value) {
+    if(std::find(values.begin(), values.end(), value) == values.end()) {
+        values.push_back(value);
+    }
+}
+
+template <typename T>
+void append_unique_range(std::vector<T>& values, const std::vector<T>& incoming) {
+    for(const auto& value : incoming) {
+        append_unique(values, value);
+    }
+}
+
+template <typename T>
+void deduplicate(std::vector<T>& values) {
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end()), values.end());
+}
+
+auto merge_symbol_info(SymbolInfo& current, SymbolInfo&& incoming) -> void {
+    const bool prefer_incoming_definition =
+        incoming.definition_location.has_value() && !current.definition_location.has_value();
+    const bool prefer_incoming_snippet =
+        prefer_incoming_definition ||
+        (current.source_snippet.size() < incoming.source_snippet.size() &&
+         !incoming.source_snippet.empty());
+
+    if(current.name.empty() && !incoming.name.empty()) {
+        current.name = std::move(incoming.name);
+    }
+    if(current.qualified_name.empty() && !incoming.qualified_name.empty()) {
+        current.qualified_name = std::move(incoming.qualified_name);
+    }
+    if(!current.declaration_location.is_known() && incoming.declaration_location.is_known()) {
+        current.declaration_location = incoming.declaration_location;
+    }
+    if((!current.definition_location.has_value() && incoming.definition_location.has_value()) ||
+       (prefer_incoming_definition && incoming.definition_location.has_value())) {
+        current.definition_location = incoming.definition_location;
+    }
+    if((current.signature.empty() && !incoming.signature.empty()) ||
+       (prefer_incoming_definition && !incoming.signature.empty())) {
+        current.signature = std::move(incoming.signature);
+    }
+    if(current.doc_comment.empty() && !incoming.doc_comment.empty()) {
+        current.doc_comment = std::move(incoming.doc_comment);
+    }
+    if(prefer_incoming_snippet) {
+        current.source_snippet = std::move(incoming.source_snippet);
+    } else if(current.source_snippet.empty() && !incoming.source_snippet.empty()) {
+        current.source_snippet = std::move(incoming.source_snippet);
+    }
+    if(!current.parent.has_value() && incoming.parent.has_value()) {
+        current.parent = incoming.parent;
+    }
+    if(current.access.empty() && !incoming.access.empty()) {
+        current.access = std::move(incoming.access);
+    }
+    if(!current.is_template && incoming.is_template) {
+        current.is_template = true;
+        current.template_params = std::move(incoming.template_params);
+    } else if(current.template_params.empty() && !incoming.template_params.empty()) {
+        current.template_params = std::move(incoming.template_params);
+    }
+
+    append_unique_range(current.children, incoming.children);
+    append_unique_range(current.bases, incoming.bases);
+    append_unique_range(current.derived, incoming.derived);
+    append_unique_range(current.calls, incoming.calls);
+    append_unique_range(current.called_by, incoming.called_by);
+    append_unique_range(current.references, incoming.references);
+    append_unique_range(current.referenced_by, incoming.referenced_by);
+
+    deduplicate(current.children);
+    deduplicate(current.bases);
+    deduplicate(current.derived);
+    deduplicate(current.calls);
+    deduplicate(current.called_by);
+    deduplicate(current.references);
+    deduplicate(current.referenced_by);
+}
+
+auto rebuild_model_indexes(const config::TaskConfig& config, ProjectModel& model) -> void {
+    namespace fs = std::filesystem;
+
+    for(auto& [_, file_info] : model.files) {
+        file_info.symbols.clear();
+        deduplicate(file_info.includes);
+    }
+
+    model.namespaces.clear();
+
+    for(auto& [_, sym] : model.symbols) {
+        deduplicate(sym.calls);
+        deduplicate(sym.references);
+        sym.children.clear();
+        sym.derived.clear();
+        sym.called_by.clear();
+        sym.referenced_by.clear();
+    }
+
+    auto filter_root = filter_root_path(config);
+
+    for(auto& [symbol_id, sym] : model.symbols) {
+        auto owner_path = fs::path(sym.declaration_location.file);
+        if(owner_path.is_relative()) {
+            owner_path = filter_root / owner_path;
+        }
+        owner_path = owner_path.lexically_normal();
+
+        if(matches_filter(owner_path.string(), config.filter, filter_root)) {
+            auto owner_key = owner_path.generic_string();
+            auto& owner_file_info = model.files[owner_key];
+            owner_file_info.path = owner_key;
+            append_unique(owner_file_info.symbols, symbol_id);
+        }
+
+        auto ns_end = sym.qualified_name.rfind("::");
+        if(ns_end != std::string::npos) {
+            auto ns_name = sym.qualified_name.substr(0, ns_end);
+            auto& ns_info = model.namespaces[ns_name];
+            ns_info.name = ns_name;
+            append_unique(ns_info.symbols, symbol_id);
+        }
+
+        if(sym.parent.has_value()) {
+            auto parent_it = model.symbols.find(*sym.parent);
+            if(parent_it != model.symbols.end()) {
+                append_unique(parent_it->second.children, symbol_id);
+            }
+        }
+
+        for(const auto& base_id : sym.bases) {
+            auto base_it = model.symbols.find(base_id);
+            if(base_it != model.symbols.end()) {
+                append_unique(base_it->second.derived, symbol_id);
+            }
+        }
+    }
+
+    for(auto& [_, file_info] : model.files) {
+        deduplicate(file_info.symbols);
+    }
+    for(auto& [_, ns_info] : model.namespaces) {
+        deduplicate(ns_info.symbols);
+    }
+    for(auto& [_, sym] : model.symbols) {
+        deduplicate(sym.children);
+        deduplicate(sym.derived);
+    }
+}
 
 }  // namespace
 
@@ -134,6 +298,7 @@ auto extract_project(const config::TaskConfig& config)
     //     only process files that pass the user's include/exclude rules.
     //     This avoids expensive preprocessor and AST work on irrelevant files.
     CompilationDatabase filtered_db;
+    auto filter_root = filter_root_path(config);
     for(auto& entry : db.entries) {
         auto entry_copy = entry;
         auto abs_path = resolve_path_under_directory(entry_copy.file, entry_copy.directory);
@@ -142,7 +307,7 @@ auto extract_project(const config::TaskConfig& config)
         }
         entry_copy.file = abs_path->string();  // keep OS-native separators for clang
 
-        if(matches_filter(entry_copy.file, config.filter, config.project_root)) {
+        if(matches_filter(entry_copy.file, config.filter, filter_root)) {
             filtered_db.entries.push_back(std::move(entry_copy));
         }
     }
@@ -205,9 +370,8 @@ auto extract_project(const config::TaskConfig& config)
         auto cache_key = fs::path(entry.file).lexically_normal().string();
         auto cache_it = scan_cache.find(cache_key);
 
-        // Build file info
-        FileInfo file_info;
-        file_info.path = normalized;
+        auto& current_file_info = model.files[normalized];
+        current_file_info.path = normalized;
         std::size_t includes_kept = 0;
 
         if(cache_it != scan_cache.end()) {
@@ -221,8 +385,8 @@ auto extract_project(const config::TaskConfig& config)
                     inc_path = fs::path(entry.directory) / inc_path;
                 }
                 inc_path = inc_path.lexically_normal();
-                if(matches_filter(inc_path.string(), config.filter, config.project_root)) {
-                    file_info.includes.push_back(inc_path.string());
+                if(matches_filter(inc_path.string(), config.filter, filter_root)) {
+                    append_unique(current_file_info.includes, inc_path.generic_string());
                     ++includes_kept;
                 }
             }
@@ -243,8 +407,8 @@ auto extract_project(const config::TaskConfig& config)
                     inc_path = fs::path(entry.directory) / inc_path;
                 }
                 inc_path = inc_path.lexically_normal();
-                if(matches_filter(inc_path.string(), config.filter, config.project_root)) {
-                    file_info.includes.push_back(inc_path.string());
+                if(matches_filter(inc_path.string(), config.filter, filter_root)) {
+                    append_unique(current_file_info.includes, inc_path.generic_string());
                     ++includes_kept;
                 }
             }
@@ -263,38 +427,31 @@ auto extract_project(const config::TaskConfig& config)
             }
             decl_file = decl_file.lexically_normal();
 
-            if(!matches_filter(decl_file.string(), config.filter, config.project_root)) {
+            if(!matches_filter(decl_file.string(), config.filter, filter_root)) {
                 continue;
             }
 
-            file_info.symbols.push_back(sym.id);
-            ++symbols_kept;
-
-            // Register in namespace
-            auto ns_end = sym.qualified_name.rfind("::");
-            if(ns_end != std::string::npos) {
-                auto ns_name = sym.qualified_name.substr(0, ns_end);
-                model.namespaces[ns_name].name = ns_name;
-                model.namespaces[ns_name].symbols.push_back(sym.id);
+            auto owner_path_result = resolve_path_under_directory(sym.declaration_location.file,
+                                                                  entry.directory);
+            if(!owner_path_result.has_value()) {
+                return std::unexpected(std::move(owner_path_result.error()));
             }
 
-            // Register children with parent
-            if(sym.parent.has_value()) {
-                auto parent_it = model.symbols.find(*sym.parent);
-                if(parent_it != model.symbols.end()) {
-                    parent_it->second.children.push_back(sym.id);
-                }
+            auto owner_path = owner_path_result->lexically_normal();
+            if(!matches_filter(owner_path.string(), config.filter, filter_root)) {
+                continue;
             }
 
-            // Register derived with base
-            for(auto& base_id : sym.bases) {
-                auto base_it = model.symbols.find(base_id);
-                if(base_it != model.symbols.end()) {
-                    base_it->second.derived.push_back(sym.id);
-                }
-            }
+            auto symbol_id = sym.id;
 
-            model.symbols.emplace(sym.id, std::move(sym));
+            auto sym_it = model.symbols.find(symbol_id);
+            if(sym_it == model.symbols.end()) {
+                auto [inserted_it, _] = model.symbols.emplace(symbol_id, std::move(sym));
+                sym_it = inserted_it;
+                ++symbols_kept;
+            } else {
+                merge_symbol_info(sym_it->second, std::move(sym));
+            }
         }
 
         // Wire forward call/reference edges onto SymbolInfo.
@@ -303,17 +460,17 @@ auto extract_project(const config::TaskConfig& config)
             if(from_it == model.symbols.end()) continue;
 
             if(rel.is_call) {
-                from_it->second.calls.push_back(rel.to);
+                append_unique(from_it->second.calls, rel.to);
             } else {
-                from_it->second.references.push_back(rel.to);
+                append_unique(from_it->second.references, rel.to);
             }
         }
-
-        model.files.emplace(normalized, std::move(file_info));
         auto dt_file = std::chrono::duration_cast<Ms>(Clock::now() - t_file);
         logging::info("  kept: {} symbols, {} includes ({}ms)",
                       symbols_kept, includes_kept, dt_file.count());
     }
+
+    rebuild_model_indexes(config, model);
 
     // 4. Build reverse edges (called_by / referenced_by).
     //    Forward edges (calls / references) were written above; now iterate
@@ -324,13 +481,13 @@ auto extract_project(const config::TaskConfig& config)
         for(auto& callee_id : sym.calls) {
             auto callee_it = model.symbols.find(callee_id);
             if(callee_it != model.symbols.end()) {
-                callee_it->second.called_by.push_back(id);
+                append_unique(callee_it->second.called_by, id);
             }
         }
         for(auto& ref_id : sym.references) {
             auto ref_it = model.symbols.find(ref_id);
             if(ref_it != model.symbols.end()) {
-                ref_it->second.referenced_by.push_back(id);
+                append_unique(ref_it->second.referenced_by, id);
             }
         }
     }

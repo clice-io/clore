@@ -1,0 +1,10 @@
+[clore]
+language = "简体中文"
+
+[filter]
+include = ["src/"]
+exclude = []
+
+[[frontmatter.fields]]
+key = "sidebar_label"
+value = "Clore API"

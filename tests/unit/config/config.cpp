@@ -1,5 +1,8 @@
 #include "eventide/zest/zest.h"
 
+#include <filesystem>
+#include <fstream>
+
 #include "config/config.h"
 
 using namespace clore::config;
@@ -10,6 +13,7 @@ TEST_SUITE(config_schema) {
         EXPECT_TRUE(config.compile_commands_path.empty());
         EXPECT_TRUE(config.project_root.empty());
         EXPECT_TRUE(config.output_root.empty());
+        EXPECT_TRUE(config.workspace_root.empty());
         EXPECT_TRUE(config.filter.include.empty());
         EXPECT_TRUE(config.filter.exclude.empty());
         EXPECT_TRUE(config.frontmatter.fields.empty());
@@ -152,5 +156,26 @@ model = "gpt-5.2"
     TEST_CASE(load_from_nonexistent_file) {
         auto result = load_config("/nonexistent/path/config.toml");
         EXPECT_FALSE(result.has_value());
+    }
+
+    TEST_CASE(load_config_sets_workspace_root_from_file_location) {
+        namespace fs = std::filesystem;
+
+        auto temp_dir = fs::temp_directory_path() / "clore_config_workspace_root";
+        fs::remove_all(temp_dir);
+        fs::create_directories(temp_dir);
+
+        auto config_path = temp_dir / "clore.toml";
+        {
+            std::ofstream f(config_path);
+            f << "log_level = \"info\"\n";
+        }
+
+        auto result = load_config(config_path.string());
+        ASSERT_TRUE(result.has_value());
+        EXPECT_EQ(fs::path(result->workspace_root).lexically_normal().generic_string(),
+                  temp_dir.lexically_normal().generic_string());
+
+        fs::remove_all(temp_dir);
     }
 };

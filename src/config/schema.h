@@ -38,6 +38,10 @@ struct TaskConfig {
     std::string project_root;
     std::string output_root;
 
+    /// Base directory for config-relative assets and filter patterns.
+    /// Defaults to the current working directory when no config file is loaded.
+    std::string workspace_root;
+
     FilterRule filter;
     ExtractConfig extract;
 

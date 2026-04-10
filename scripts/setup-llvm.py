@@ -259,6 +259,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Setup LLVM dependencies for CMake")
     parser.add_argument("--version", required=True)
     parser.add_argument("--build-type", required=True)
+    parser.add_argument("--artifact-build-type")
     parser.add_argument("--binary-dir", required=True)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--install-path")
@@ -270,13 +271,18 @@ def main() -> None:
     log(
         "Args: "
         f"version={args.version}, build_type={args.build_type}, "
+        f"artifact_build_type={args.artifact_build_type or args.build_type}, "
         f"binary_dir={args.binary_dir}, install_path={args.install_path or '(auto)'}, "
         f"enable_lto={args.enable_lto}, offline={args.offline}"
     )
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     build_type = args.build_type
+    artifact_build_type = args.artifact_build_type or build_type
     platform_name = detect_platform()
-    log(f"Platform detected: {platform_name}, normalized build type: {build_type}")
+    log(
+        f"Platform detected: {platform_name}, normalized build type: {build_type}, "
+        f"artifact build type: {artifact_build_type}"
+    )
     manifest = read_manifest(Path(args.manifest))
 
     binary_dir = Path(args.binary_dir).resolve()
@@ -304,7 +310,7 @@ def main() -> None:
     if install_path is None:
         needs_install = True
         artifact = pick_artifact(
-            manifest, args.version, build_type, args.enable_lto, platform_name
+            manifest, args.version, artifact_build_type, args.enable_lto, platform_name
         )
         log(f"Selected artifact: {artifact.get('filename')} for download")
         filename = artifact["filename"]
@@ -317,7 +323,7 @@ def main() -> None:
         install_path = install_root
     elif needs_install:
         artifact = pick_artifact(
-            manifest, args.version, build_type, args.enable_lto, platform_name
+            manifest, args.version, artifact_build_type, args.enable_lto, platform_name
         )
         log(f"Selected artifact: {artifact.get('filename')} for download")
         filename = artifact["filename"]

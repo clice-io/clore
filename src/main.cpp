@@ -1,5 +1,7 @@
 #include <cstdint>
+#include <filesystem>
 #include <iostream>
+#include <optional>
 #include <print>
 #include <string>
 
@@ -16,7 +18,7 @@ using deco::decl::KVStyle;
 
 struct Options {
     DecoKV(style = KVStyle::JoinedOrSeparate,
-           help = "Path to clore configuration file (TOML)",
+            help = "Path to clore configuration file (defaults to ./clore.toml when present)",
            required = false)
     <std::string> config;
 
@@ -26,14 +28,14 @@ struct Options {
     <std::string> compile_commands;
 
     DecoKV(style = KVStyle::JoinedOrSeparate,
-           help = "Project root directory",
+            help = "Source root directory used for relative output paths",
            required = false)
-    <std::string> project_root;
+    <std::string> source_dir;
 
     DecoKV(style = KVStyle::JoinedOrSeparate,
            help = "Output root directory",
            required = false)
-    <std::string> output;
+    <std::string> output_dir;
 
     DecoKV(style = KVStyle::JoinedOrSeparate,
            names = {"--log-level", "--log-level="},
@@ -48,23 +50,38 @@ struct Options {
     <std::uint32_t> max_snippet_bytes;
 
     DecoKV(style = KVStyle::JoinedOrSeparate,
-           names = {"--llm-model", "--llm-model="},
-           help = "LLM model name for generation",
-           required = false)
-    <std::string> llm_model;
+            names = {"--model", "--model="},
+            help = "Model name for generation",
+            required = false)
+        <std::string> model;
+
+        DecoFlag(names = {"--dry-run"},
+              help = "Write assembled prompts to --output-dir and skip LLM requests",
+              required = false)
+        dry_run;
 
     DecoFlag(names = {"-h", "--help"}, help = "Show help message", required = false)
     help;
 
     DecoFlag(names = {"-v", "--version"}, help = "Show version", required = false)
     version;
-
-    DecoFlag(names = {"--dry-run"}, help = "Validate config and extract without generating output",
-             required = false)
-    dry_run;
 };
 
 }  // namespace clore
+
+namespace {
+
+auto discover_default_config_path() -> std::optional<std::string> {
+    namespace fs = std::filesystem;
+
+    auto candidate = (fs::current_path() / "clore.toml").lexically_normal();
+    if(fs::is_regular_file(candidate)) {
+        return candidate.string();
+    }
+    return std::nullopt;
+}
+
+}  // namespace
 
 int main(int argc, const char** argv) {
     auto args = deco::util::argvify(argc, argv);
@@ -76,6 +93,8 @@ int main(int argc, const char** argv) {
     }
 
     auto& opts = result->options;
+    auto prompt_dry_run = opts.dry_run.value_or(false);
+    auto has_model = opts.model.has_value();
 
     if(opts.help.value_or(false)) {
         deco::cli::write_usage_for<clore::Options>(std::cout, "clore [OPTIONS]");
@@ -94,48 +113,63 @@ int main(int argc, const char** argv) {
     }
     clore::logging::stderr_logger("clore");
 
+    if(prompt_dry_run == has_model) {
+        clore::logging::err("exactly one of --dry-run or --model is required");
+        return 1;
+    }
+
+    namespace fs = std::filesystem;
+
     // Load optional configuration
     clore::config::TaskConfig task_config;
-
+    std::optional<std::string> config_path;
     if(opts.config.has_value()) {
-        auto cfg_result = clore::config::load_config(*opts.config);
+        config_path = *opts.config;
+    }
+    if(!config_path.has_value()) {
+        config_path = discover_default_config_path();
+    }
+
+    if(config_path.has_value()) {
+        auto cfg_result = clore::config::load_config(*config_path);
         if(!cfg_result.has_value()) {
             clore::logging::err("failed to load config: {}", cfg_result.error().message);
             return 1;
         }
         task_config = std::move(*cfg_result);
+    } else {
+        task_config.workspace_root = fs::current_path().string();
     }
 
     if(!opts.compile_commands.has_value()) {
         clore::logging::err("--compile-commands is required");
         return 1;
     }
-    if(!opts.project_root.has_value()) {
-        clore::logging::err("--project-root is required");
+    if(!opts.source_dir.has_value()) {
+        clore::logging::err("--source-dir is required");
         return 1;
     }
-    if(!opts.output.has_value()) {
-        clore::logging::err("--output is required");
-        return 1;
-    }
-    if(!opts.dry_run.value_or(false) && !opts.llm_model.has_value()) {
-        clore::logging::err("generation requires --llm-model");
+    if(!opts.output_dir.has_value()) {
+        clore::logging::err("--output-dir is required");
         return 1;
     }
 
     task_config.compile_commands_path = *opts.compile_commands;
-    task_config.project_root = *opts.project_root;
-    task_config.output_root = *opts.output;
+    task_config.project_root = *opts.source_dir;
+    task_config.output_root = *opts.output_dir;
     task_config.extract.max_snippet_bytes =
         opts.max_snippet_bytes.has_value() ? std::optional{*opts.max_snippet_bytes}
                                            : std::optional<std::uint32_t>{8192};
+    if(task_config.workspace_root.empty()) {
+        task_config.workspace_root = fs::current_path().string();
+    }
 
     std::string llm_model;
-    if(opts.llm_model.has_value()) {
-        llm_model = *opts.llm_model;
+    if(opts.model.has_value()) {
+        llm_model = *opts.model;
     }
-    if(!opts.dry_run.value_or(false) && llm_model.empty()) {
-        clore::logging::err("llm model must not be empty");
+    if(!prompt_dry_run && llm_model.empty()) {
+        clore::logging::err("model must not be empty");
         return 1;
     }
 
@@ -157,11 +191,12 @@ int main(int argc, const char** argv) {
 
     clore::logging::info("configuration validated successfully");
     clore::logging::info("  compile_commands: {}", task_config.compile_commands_path);
-    clore::logging::info("  project_root: {}", task_config.project_root);
+    clore::logging::info("  source_dir: {}", task_config.project_root);
     clore::logging::info("  output_root: {}", task_config.output_root);
+    clore::logging::info("  workspace_root: {}", task_config.workspace_root);
     clore::logging::info("  max_snippet_bytes: {}", *task_config.extract.max_snippet_bytes);
-    if(!opts.dry_run.value_or(false)) {
-        clore::logging::info("  llm_model: {}", llm_model);
+    if(!prompt_dry_run) {
+        clore::logging::info("  model: {}", llm_model);
     }
 
     // Extract
@@ -177,8 +212,22 @@ int main(int argc, const char** argv) {
     clore::logging::info("  {} files", model.files.size());
     clore::logging::info("  {} namespaces", model.namespaces.size());
 
-    if(opts.dry_run.value_or(false)) {
-        clore::logging::info("dry-run mode: skipping output generation");
+    if(prompt_dry_run) {
+        auto prompt_result = clore::generate::build_prompts(task_config, model);
+        if(!prompt_result.has_value()) {
+            clore::logging::err("dry-run failed: {}", prompt_result.error().message);
+            return 1;
+        }
+
+        auto write_prompt_result = clore::generate::write_prompts(*prompt_result,
+                                                                  task_config.output_root);
+        if(!write_prompt_result.has_value()) {
+            clore::logging::err("dry-run failed: {}", write_prompt_result.error().message);
+            return 1;
+        }
+
+        clore::logging::info("dry-run complete: prompts written to {}",
+                             task_config.output_root);
         return 0;
     }
 
@@ -190,6 +239,13 @@ int main(int argc, const char** argv) {
     }
 
     auto& pages = *gen_result;
+    auto write_result = clore::generate::write_pages(pages, task_config.output_root);
+    if(!write_result.has_value()) {
+        clore::logging::err("failed to write generated pages: {}",
+                            write_result.error().message);
+        return 1;
+    }
+
     clore::logging::info("generated {} pages", pages.size());
     clore::logging::info("documentation written to {}", task_config.output_root);
 

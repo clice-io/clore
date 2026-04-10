@@ -38,7 +38,7 @@ install(
 
 if(CLORE_ENABLE_TEST)
     file(GLOB_RECURSE CLORE_TEST_SOURCES CONFIGURE_DEPENDS
-        "${PROJECT_SOURCE_DIR}/tests/unit/*/*_tests.cpp"
+        "${PROJECT_SOURCE_DIR}/tests/unit/*/*.cpp"
     )
 
     add_executable(unit_tests
@@ -50,4 +50,12 @@ if(CLORE_ENABLE_TEST)
         "${PROJECT_SOURCE_DIR}/tests/unit"
     )
     target_link_libraries(unit_tests PRIVATE clore::core eventide::zest eventide::deco)
+endif()
+
+if(CLORE_ENABLE_IPO)
+    set_property(TARGET clore-core PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET clore PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    if(CLORE_ENABLE_TEST)
+        set_property(TARGET unit_tests PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif()
 endif()

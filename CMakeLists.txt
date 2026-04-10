@@ -8,13 +8,14 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(GNUInstallDirs)
+include(CheckIPOSupported)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
 
-option(CLORE_ENABLE_LTO "Enable ThinLTO for all targets" OFF)
+option(CLORE_ENABLE_LTO "Enable ThinLTO for all targets" ON)
 option(CLORE_OFFLINE_BUILD "Disable network downloads during configuration" OFF)
-option(CLORE_ENABLE_TEST "Build unit tests" OFF)
+option(CLORE_ENABLE_TEST "Build unit tests" ON)
 
 # Global flags that apply to all targets (including FetchContent dependencies).
 if(NOT MSVC)
@@ -39,46 +40,30 @@ else()
     string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,--gc-sections")
 endif()
 
+set(CLORE_ENABLE_IPO OFF)
+set(CLORE_USE_LTO_ARTIFACT OFF)
 if(CLORE_ENABLE_LTO)
-    string(APPEND CMAKE_C_FLAGS " -flto=thin")
-    string(APPEND CMAKE_CXX_FLAGS " -flto=thin")
-    string(APPEND CMAKE_EXE_LINKER_FLAGS " -flto=thin")
-    string(APPEND CMAKE_SHARED_LINKER_FLAGS " -flto=thin")
-    string(APPEND CMAKE_MODULE_LINKER_FLAGS " -flto=thin")
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        message(STATUS "Interprocedural optimization disabled for Debug builds.")
+    else()
+        check_ipo_supported(RESULT CLORE_IPO_SUPPORTED OUTPUT CLORE_IPO_ERROR LANGUAGES C CXX)
+        if(CLORE_IPO_SUPPORTED)
+            set(CLORE_ENABLE_IPO ON)
+            set(CLORE_USE_LTO_ARTIFACT ON)
+            message(STATUS "Interprocedural optimization enabled for ${CMAKE_BUILD_TYPE} builds.")
+        else()
+            message(WARNING "LTO requested but IPO is not supported by the active toolchain: ${CLORE_IPO_ERROR}")
+        endif()
+    endif()
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    add_compile_options(-fsanitize=address)
-
-    if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-        # clang-cl (MSVC frontend): manually link ASan runtime since clang-cl
-        # doesn't handle -fsanitize=address linking automatically.
-        execute_process(
-            COMMAND ${CMAKE_CXX_COMPILER} --print-resource-dir
-            OUTPUT_VARIABLE CLANG_RESOURCE_DIR
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
-        set(ASAN_LIB_PATH "${CLANG_RESOURCE_DIR}/lib/windows")
-        link_directories(${ASAN_LIB_PATH})
-
-        set(ASAN_LINK_FLAGS "")
-        list(APPEND ASAN_LINK_FLAGS "clang_rt.asan_dynamic-x86_64.lib")
-        list(APPEND ASAN_LINK_FLAGS "/wholearchive:clang_rt.asan_dynamic_runtime_thunk-x86_64.lib")
-
-        foreach(flag ${ASAN_LINK_FLAGS})
-            string(APPEND CMAKE_EXE_LINKER_FLAGS " ${flag}")
-            string(APPEND CMAKE_SHARED_LINKER_FLAGS " ${flag}")
-            string(APPEND CMAKE_MODULE_LINKER_FLAGS " ${flag}")
-        endforeach()
+    if(WIN32)
+        message(STATUS "AddressSanitizer disabled on Windows Debug builds: the current MSVC-targeting clang toolchain and prebuilt LLVM static libraries are not ASan-safe in this repo.")
     else()
+        add_compile_options(-fsanitize=address)
         string(APPEND CMAKE_EXE_LINKER_FLAGS " -fsanitize=address")
         string(APPEND CMAKE_SHARED_LINKER_FLAGS " -fsanitize=address")
-    endif()
-
-    if(WIN32)
-        # Disable Identical COMDAT Folding in Debug to avoid ASan ODR false positives.
-        string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,/OPT:NOICF")
-        string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,/OPT:NOICF")
     endif()
 endif()
 

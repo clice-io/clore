@@ -110,6 +110,11 @@ auto load_config(std::string_view path) -> std::expected<TaskConfig, ConfigError
     namespace fs = std::filesystem;
 
     auto config_path = fs::path(path);
+    if(config_path.is_relative()) {
+        config_path = fs::absolute(config_path);
+    }
+    config_path = config_path.lexically_normal();
+
     if(!fs::exists(config_path)) {
         return std::unexpected(ConfigError{
             .message = std::format("configuration file not found: {}", path)});
@@ -123,7 +128,14 @@ auto load_config(std::string_view path) -> std::expected<TaskConfig, ConfigError
 
     std::ostringstream ss;
     ss << file.rdbuf();
-    return load_config_from_string(ss.str());
+
+    auto config = load_config_from_string(ss.str());
+    if(!config.has_value()) {
+        return config;
+    }
+
+    config->workspace_root = config_path.parent_path().string();
+    return config;
 }
 
 auto load_config_from_string(std::string_view toml_content) -> std::expected<TaskConfig, ConfigError> {

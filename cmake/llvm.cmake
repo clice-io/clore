@@ -5,15 +5,21 @@ function(setup_llvm LLVM_VERSION)
 
     set(LLVM_SETUP_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/.llvm/setup-llvm.json")
     set(LLVM_SETUP_SCRIPT "${PROJECT_SOURCE_DIR}/scripts/setup-llvm.py")
+    set(LLVM_ARTIFACT_BUILD_TYPE "${CMAKE_BUILD_TYPE}")
+    if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(LLVM_ARTIFACT_BUILD_TYPE "RelWithDebInfo")
+        message(STATUS "Windows Debug builds use the non-ASan RelWithDebInfo LLVM artifact because ASan is disabled for this toolchain.")
+    endif()
     set(LLVM_SETUP_ARGS
         "--version" "${LLVM_VERSION}"
         "--build-type" "${CMAKE_BUILD_TYPE}"
+        "--artifact-build-type" "${LLVM_ARTIFACT_BUILD_TYPE}"
         "--binary-dir" "${CMAKE_CURRENT_BINARY_DIR}"
         "--manifest" "${PROJECT_SOURCE_DIR}/config/llvm-manifest.json"
         "--output" "${LLVM_SETUP_OUTPUT}"
     )
 
-    if(CLORE_ENABLE_LTO)
+    if(CLORE_USE_LTO_ARTIFACT)
         list(APPEND LLVM_SETUP_ARGS "--enable-lto")
     endif()
 

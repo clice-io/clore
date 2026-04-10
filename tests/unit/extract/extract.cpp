@@ -1,5 +1,6 @@
 #include "eventide/zest/zest.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -9,6 +10,7 @@
 #include "extract/extract.h"
 #include "extract/scan.h"
 #include "extract/compdb_test_utils.h"
+#include "generate/generate.h"
 
 using namespace clore;
 
@@ -205,8 +207,8 @@ TEST_SUITE(extract_filter_security) {
 };
 
 TEST_SUITE(extract_filter_semantics) {
-    // "src/" should match only project-root-relative "src/..." paths, not any
-    // random ".../src/..." segment in dependency trees such as build/_deps.
+    // "src/" should be interpreted relative to the workspace root even when
+    // the source root itself is nested under that workspace.
     TEST_CASE(include_src_does_not_match_deps_src) {
         namespace fs = std::filesystem;
 
@@ -257,8 +259,9 @@ TEST_SUITE(extract_filter_semantics) {
 
         config::TaskConfig cfg;
         cfg.compile_commands_path = (root / "compile_commands.json").string();
-        cfg.project_root = root.string();
+        cfg.project_root = project_src.string();
         cfg.output_root = (root / "out").string();
+        cfg.workspace_root = root.string();
         cfg.extract.max_snippet_bytes = 512;
         cfg.filter.include = {"src/"};
 
@@ -278,6 +281,154 @@ TEST_SUITE(extract_filter_semantics) {
         }
         EXPECT_TRUE(found_keep);
         EXPECT_FALSE(found_drop);
+
+        fs::remove_all(root);
+    }
+};
+
+TEST_SUITE(extract_symbol_ownership) {
+    TEST_CASE(shared_header_symbols_are_not_duplicated_in_including_sources) {
+        namespace fs = std::filesystem;
+
+        auto root = fs::temp_directory_path() / "clore_symbol_ownership_test";
+        fs::remove_all(root);
+        fs::create_directories(root / "src");
+
+        {
+            std::ofstream f(root / "src" / "shared.h");
+            f << R"(
+#pragma once
+
+namespace demo::config {
+
+struct Shared {
+    int value;
+};
+
+}  // namespace demo::config
+)";
+        }
+
+        {
+            std::ofstream f(root / "src" / "load.cpp");
+            f << R"(
+#include "shared.h"
+
+int load_value() {
+    demo::config::Shared shared{42};
+    return shared.value;
+}
+)";
+        }
+
+        {
+            std::ofstream f(root / "src" / "other.cpp");
+            f << R"(
+#include "shared.h"
+
+int other_value() {
+    demo::config::Shared shared{7};
+    return shared.value;
+}
+)";
+        }
+
+        clore::testing::write_compile_commands(
+            root / "compile_commands.json",
+            {{
+                 .directory = root / "src",
+                 .file = root / "src" / "load.cpp",
+                 .arguments = {
+                     "clang++",
+                     "-std=c++23",
+                     std::format("-I{}", (root / "src").string()),
+                     "-c",
+                     "load.cpp",
+                     "-o",
+                     "load.o",
+                 },
+             },
+             {
+                 .directory = root / "src",
+                 .file = root / "src" / "other.cpp",
+                 .arguments = {
+                     "clang++",
+                     "-std=c++23",
+                     std::format("-I{}", (root / "src").string()),
+                     "-c",
+                     "other.cpp",
+                     "-o",
+                     "other.o",
+                 },
+             }});
+
+        config::TaskConfig cfg;
+        cfg.compile_commands_path = (root / "compile_commands.json").string();
+        cfg.project_root = root.string();
+        cfg.output_root = (root / "out").string();
+        cfg.workspace_root = root.string();
+        cfg.extract.max_snippet_bytes = 1024;
+
+        auto model_result = extract::extract_project(cfg);
+        ASSERT_TRUE(model_result.has_value());
+
+        auto& model = *model_result;
+        auto shared_header = (root / "src" / "shared.h").lexically_normal().generic_string();
+        auto load_cpp = (root / "src" / "load.cpp").lexically_normal().generic_string();
+
+        ASSERT_TRUE(model.files.contains(shared_header));
+        ASSERT_TRUE(model.files.contains(load_cpp));
+
+        auto shared_it = std::ranges::find_if(model.symbols, [](const auto& item) {
+            return item.second.qualified_name == "demo::config::Shared";
+        });
+        ASSERT_TRUE(shared_it != model.symbols.end());
+        auto namespace_it = std::ranges::find_if(model.symbols, [](const auto& item) {
+            return item.second.kind == extract::SymbolKind::Namespace &&
+                   item.second.qualified_name == "demo::config";
+        });
+        ASSERT_TRUE(namespace_it != model.symbols.end());
+
+        auto shared_id = shared_it->first;
+        auto namespace_id = namespace_it->first;
+
+        EXPECT_EQ(std::count(model.files.at(shared_header).symbols.begin(),
+                             model.files.at(shared_header).symbols.end(),
+                             shared_id),
+                  1);
+        EXPECT_EQ(std::count(model.files.at(shared_header).symbols.begin(),
+                             model.files.at(shared_header).symbols.end(),
+                             namespace_id),
+                  1);
+        EXPECT_EQ(std::count(model.files.at(load_cpp).symbols.begin(),
+                             model.files.at(load_cpp).symbols.end(),
+                             shared_id),
+                  0);
+        EXPECT_EQ(std::count(model.symbols.at(namespace_id).children.begin(),
+                             model.symbols.at(namespace_id).children.end(),
+                             shared_id),
+                  1);
+
+        auto parent_namespace_it = std::ranges::find_if(model.symbols, [](const auto& item) {
+            return item.second.kind == extract::SymbolKind::Namespace &&
+                   item.second.qualified_name == "demo";
+        });
+        ASSERT_TRUE(parent_namespace_it != model.symbols.end());
+        EXPECT_EQ(std::count(parent_namespace_it->second.children.begin(),
+                             parent_namespace_it->second.children.end(),
+                             namespace_id),
+                  1);
+
+        auto prompts_result = generate::build_prompts(cfg, model);
+        ASSERT_TRUE(prompts_result.has_value());
+        auto load_prompt_it = std::ranges::find_if(*prompts_result, [](const generate::PromptPage& page) {
+            return page.relative_path == "src/load.md";
+        });
+        ASSERT_TRUE(load_prompt_it != prompts_result->end());
+        EXPECT_EQ(load_prompt_it->prompt.find("#### struct: `demo::config::Shared`"),
+                  std::string::npos);
+        EXPECT_EQ(load_prompt_it->prompt.find("#### namespace: `demo::config`"),
+                  std::string::npos);
 
         fs::remove_all(root);
     }

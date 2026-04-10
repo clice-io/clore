@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <expected>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -56,6 +58,12 @@ struct PageGraph {
 
 // ── output ──────────────────────────────────────────────────────────
 
+struct PromptPage {
+    std::string relative_path;
+    std::string title;
+    std::string prompt;
+};
+
 struct GeneratedPage {
     std::string relative_path;
     std::string content;
@@ -70,9 +78,15 @@ struct GenerateError {
 auto build_page_graph(const config::TaskConfig& config, const extract::ProjectModel& model)
     -> PageGraph;
 
+auto build_prompts(const config::TaskConfig& config, const extract::ProjectModel& model)
+    -> std::expected<std::vector<PromptPage>, GenerateError>;
+
 auto generate_pages(const config::TaskConfig& config, const extract::ProjectModel& model,
                     std::string_view llm_model)
     -> std::expected<std::vector<GeneratedPage>, GenerateError>;
+
+auto write_prompts(const std::vector<PromptPage>& prompts, std::string_view output_root)
+    -> std::expected<void, GenerateError>;
 
 auto write_pages(const std::vector<GeneratedPage>& pages, std::string_view output_root)
     -> std::expected<void, GenerateError>;
