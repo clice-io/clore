@@ -56,6 +56,3 @@ jobs:
           name: clore-docs
           path: clore-docs.zip
           retention-days: 30
-
-      - name: Stop sccache
-        run: sccache --stop-server
