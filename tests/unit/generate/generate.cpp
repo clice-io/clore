@@ -315,26 +315,26 @@ TEST_SUITE(generate) {
         auto graph = build_page_graph(config, model);
 
         ASSERT_EQ(graph.nodes.size(), 3u);
-        ASSERT_TRUE(graph.nodes.contains("demo.util.md"));
-        ASSERT_TRUE(graph.nodes.contains("demo.math.md"));
+        ASSERT_TRUE(graph.nodes.contains("demo.util/index.md"));
+        ASSERT_TRUE(graph.nodes.contains("demo.math/index.md"));
         ASSERT_TRUE(graph.nodes.contains("demo.math/detail.md"));
 
-        auto& main_node = graph.nodes.at("demo.math.md");
+        auto& main_node = graph.nodes.at("demo.math/index.md");
         auto& partition_node = graph.nodes.at("demo.math/detail.md");
 
-        EXPECT_EQ(std::count(main_node.depends_on.begin(), main_node.depends_on.end(), "demo.util.md"),
+        EXPECT_EQ(std::count(main_node.depends_on.begin(), main_node.depends_on.end(), "demo.util/index.md"),
                   1);
         EXPECT_EQ(std::count(partition_node.depends_on.begin(), partition_node.depends_on.end(),
-                             "demo.util.md"),
+                             "demo.util/index.md"),
                   1);
         EXPECT_EQ(std::count(partition_node.depends_on.begin(), partition_node.depends_on.end(),
-                             "demo.math.md"),
+                             "demo.math/index.md"),
                   1);
 
         auto pos_util = std::find(graph.generation_order.begin(), graph.generation_order.end(),
-                                  "demo.util.md");
+                                  "demo.util/index.md");
         auto pos_main = std::find(graph.generation_order.begin(), graph.generation_order.end(),
-                                  "demo.math.md");
+                                  "demo.math/index.md");
         auto pos_partition = std::find(graph.generation_order.begin(), graph.generation_order.end(),
                                        "demo.math/detail.md");
         ASSERT_TRUE(pos_util != graph.generation_order.end());
@@ -349,7 +349,7 @@ TEST_SUITE(generate) {
 
         auto main_prompt_it = std::find_if(prompts_result->begin(), prompts_result->end(),
                                            [](const PromptPage& page) {
-                                               return page.relative_path == "demo.math.md";
+                                               return page.relative_path == "demo.math/index.md";
                                            });
         ASSERT_TRUE(main_prompt_it != prompts_result->end());
         EXPECT_NE(main_prompt_it->prompt.find("## Module: `demo.math`"), std::string::npos);

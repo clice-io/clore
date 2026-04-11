@@ -188,7 +188,7 @@ auto output_path_for_source_file(const std::filesystem::path& file_path,
 // ── module-aware output path ────────────────────────────────────────
 
 /// Convert a module name to a documentation output path.
-/// Main modules: "foo.bar" → "foo.bar.md"
+/// Main modules: "foo.bar" → "foo.bar/index.md"
 /// Partitions:   "foo.bar:baz" → "foo.bar/baz.md"
 auto output_path_for_module(const std::string& module_name) -> std::string {
     auto colon_pos = module_name.find(':');
@@ -198,8 +198,8 @@ auto output_path_for_module(const std::string& module_name) -> std::string {
         auto partition_name = module_name.substr(colon_pos + 1);
         return main_name + "/" + partition_name + ".md";
     }
-    // Main module: "foo.bar" → "foo.bar.md"
-    return module_name + ".md";
+    // Main module: "foo.bar" → "foo.bar/index.md"
+    return module_name + "/index.md";
 }
 
 auto append_unique_page_ref(std::vector<std::string>& refs, const std::string& ref) -> bool {
