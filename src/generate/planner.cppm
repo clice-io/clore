@@ -411,7 +411,9 @@ auto enumerate_index_page(PlanBuilder& builder) -> std::expected<void, PlanError
 
     auto path_result = compute_page_path(identity, builder.config.path_rules);
     if(!path_result.has_value()) {
-        return std::unexpected(PlanError{.message = path_result.error().message});
+        return std::unexpected(PlanError{
+            .message =
+                "failed to compute path for index page: " + path_result.error().message});
     }
 
     auto page_id = std::string("index");
