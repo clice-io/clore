@@ -86,7 +86,7 @@ struct ProjectModel {
 
     std::vector<std::string> file_order;
 
-    /// Module units indexed by module name (e.g. "foo", "foo:bar").
+    /// Module units indexed by normalized source file path.
     std::unordered_map<std::string, ModuleUnit> modules;
 
     /// True if the project uses C++20 modules (at least one module declaration found).

@@ -202,6 +202,31 @@ auto output_path_for_module(const std::string& module_name) -> std::string {
     return module_name + ".md";
 }
 
+auto append_unique_page_ref(std::vector<std::string>& refs, const std::string& ref) -> bool {
+    if(std::ranges::find(refs, ref) != refs.end()) {
+        return false;
+    }
+    refs.push_back(ref);
+    return true;
+}
+
+auto add_page_dependency(PageGraph& graph, const std::string& dependent_page,
+                         const std::string& dependency_page) -> void {
+    if(dependent_page == dependency_page) {
+        return;
+    }
+
+    auto dependent_it = graph.nodes.find(dependent_page);
+    auto dependency_it = graph.nodes.find(dependency_page);
+    if(dependent_it == graph.nodes.end() || dependency_it == graph.nodes.end()) {
+        return;
+    }
+
+    append_unique_page_ref(dependent_it->second.depends_on, dependency_page);
+    append_unique_page_ref(dependent_it->second.plan.linked_pages, dependency_page);
+    append_unique_page_ref(dependency_it->second.depended_by, dependent_page);
+}
+
 // ── symbol context assembly ─────────────────────────────────────────
 
 auto lookup_symbol(const extract::ProjectModel& model, extract::SymbolID id)
@@ -309,9 +334,7 @@ auto build_file_page_graph(const config::TaskConfig& config,
             if(*page_b == *page_a) continue;
             if(graph.nodes.find(*page_b) == graph.nodes.end()) continue;
 
-            graph.nodes[*page_a].depends_on.push_back(*page_b);
-            graph.nodes[*page_b].depended_by.push_back(*page_a);
-            graph.nodes[*page_a].plan.linked_pages.push_back(*page_b);
+            add_page_dependency(graph, *page_a, *page_b);
         }
     }
 
@@ -323,18 +346,12 @@ auto build_file_page_graph(const config::TaskConfig& config,
         }
     }
     for(auto& [page_path, node] : graph.nodes) {
-        std::unordered_set<std::string> already;
-        for(auto& dep : node.depends_on) already.insert(dep);
-
         for(auto& ctx : node.plan.contexts) {
             for(auto& callee_id : ctx.self.calls) {
                 auto it = sym_to_page.find(callee_id);
                 if(it == sym_to_page.end()) continue;
                 if(it->second == page_path) continue;
-                if(!already.insert(it->second).second) continue;
-                node.depends_on.push_back(it->second);
-                graph.nodes[it->second].depended_by.push_back(page_path);
-                node.plan.linked_pages.push_back(it->second);
+                add_page_dependency(graph, page_path, it->second);
             }
         }
     }
@@ -348,65 +365,59 @@ auto build_module_page_graph(const config::TaskConfig& config,
                              const extract::ProjectModel& model) -> PageGraph {
     PageGraph graph;
 
-    // One page per module unit, path based on module name hierarchy
-    for(auto& [mod_name, mod_unit] : model.modules) {
-        if(!mod_unit.is_interface) continue;
+    std::unordered_map<std::string, std::vector<const extract::ModuleUnit*>> units_by_name;
+    for(auto& [source_file, mod_unit] : model.modules) {
+        (void)source_file;
+        units_by_name[mod_unit.name].push_back(&mod_unit);
+    }
+
+    std::unordered_map<std::string, std::string> mod_to_page;
+    for(auto& [mod_name, mod_units] : units_by_name) {
+        auto has_interface = std::ranges::any_of(mod_units, [](const extract::ModuleUnit* unit) {
+            return unit->is_interface;
+        });
+        if(!has_interface) continue;
 
         auto out_path = output_path_for_module(mod_name);
         auto& node = graph.nodes[out_path];
         node.plan.relative_path = out_path;
         node.plan.level = PageLevel::Module;
+        node.plan.title = mod_name;
+        mod_to_page.emplace(mod_name, out_path);
 
-        // Title: module name (without the partition colon for display)
-        auto colon_pos = mod_name.find(':');
-        if(colon_pos != std::string::npos) {
-            node.plan.title = mod_name.substr(colon_pos + 1);
-        } else {
-            node.plan.title = mod_name;
+        std::vector<extract::SymbolID> page_symbol_ids;
+        for(auto* mod_unit : mod_units) {
+            for(auto& sym_id : mod_unit->symbols) {
+                if(std::ranges::find(page_symbol_ids, sym_id) == page_symbol_ids.end()) {
+                    page_symbol_ids.push_back(sym_id);
+                }
+            }
         }
 
-        // Collect symbols for this module unit
-        for(auto& sym_id : mod_unit.symbols) {
+        for(auto& sym_id : page_symbol_ids) {
             auto sym_it = model.symbols.find(sym_id);
             if(sym_it == model.symbols.end()) continue;
-            auto exists = std::ranges::any_of(node.plan.contexts, [&](const SymbolContext& ctx) {
-                return ctx.self.id == sym_id;
-            });
-            if(exists) continue;
-            node.plan.contexts.push_back(build_symbol_context(sym_it->second, model, mod_unit.symbols));
+            node.plan.contexts.push_back(build_symbol_context(sym_it->second, model, page_symbol_ids));
         }
     }
 
-    // Build dependency edges from module imports
-    // Map module name → output path
-    std::unordered_map<std::string, std::string> mod_to_page;
-    for(auto& [mod_name, mod_unit] : model.modules) {
-        if(!mod_unit.is_interface) continue;
-        mod_to_page[mod_name] = output_path_for_module(mod_name);
-    }
+    for(auto& [mod_name, mod_units] : units_by_name) {
+        auto page_it = mod_to_page.find(mod_name);
+        if(page_it == mod_to_page.end()) continue;
 
-    for(auto& [mod_name, mod_unit] : model.modules) {
-        if(!mod_unit.is_interface) continue;
-        auto page_a = output_path_for_module(mod_name);
-        auto node_a_it = graph.nodes.find(page_a);
-        if(node_a_it == graph.nodes.end()) continue;
-
-        for(auto& import_name : mod_unit.imports) {
-            auto it = mod_to_page.find(import_name);
-            if(it == mod_to_page.end()) continue;
-            if(it->second == page_a) continue;
-
-            node_a_it->second.depends_on.push_back(it->second);
-            graph.nodes[it->second].depended_by.push_back(page_a);
-            node_a_it->second.plan.linked_pages.push_back(it->second);
+        auto& page_a = page_it->second;
+        for(auto* mod_unit : mod_units) {
+            for(auto& import_name : mod_unit->imports) {
+                auto it = mod_to_page.find(import_name);
+                if(it == mod_to_page.end()) continue;
+                add_page_dependency(graph, page_a, it->second);
+            }
         }
 
-        // Partition imports from main module: if this is a partition, depend on the main module
         if(auto colon_pos = mod_name.find(':'); colon_pos != std::string::npos) {
             auto main_name = mod_name.substr(0, colon_pos);
-            auto main_it = mod_to_page.find(main_name);
-            if(main_it != mod_to_page.end() && main_it->second != page_a) {
-                node_a_it->second.plan.linked_pages.push_back(main_it->second);
+            if(auto main_it = mod_to_page.find(main_name); main_it != mod_to_page.end()) {
+                add_page_dependency(graph, page_a, main_it->second);
             }
         }
     }
@@ -419,18 +430,12 @@ auto build_module_page_graph(const config::TaskConfig& config,
         }
     }
     for(auto& [page_path, node] : graph.nodes) {
-        std::unordered_set<std::string> already;
-        for(auto& dep : node.depends_on) already.insert(dep);
-
         for(auto& ctx : node.plan.contexts) {
             for(auto& callee_id : ctx.self.calls) {
                 auto it = sym_to_page.find(callee_id);
                 if(it == sym_to_page.end()) continue;
                 if(it->second == page_path) continue;
-                if(!already.insert(it->second).second) continue;
-                node.depends_on.push_back(it->second);
-                graph.nodes[it->second].depended_by.push_back(page_path);
-                node.plan.linked_pages.push_back(it->second);
+                add_page_dependency(graph, page_path, it->second);
             }
         }
     }
@@ -634,7 +639,8 @@ auto build_page_graph(const config::TaskConfig& config, const extract::ProjectMo
     PageGraph graph;
 
     if(model.uses_modules) {
-        logging::info("building module-based page graph ({} modules)", model.modules.size());
+        logging::info("building module-based page graph ({} module units)",
+                      model.modules.size());
         graph = build_module_page_graph(config, model);
     } else {
         graph = build_file_page_graph(config, model);

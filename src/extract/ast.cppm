@@ -4,6 +4,7 @@ module;
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <memory>
 #include <string>
 #include <unordered_set>
 #include <vector>

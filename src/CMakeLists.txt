@@ -5,17 +5,9 @@ file(GLOB_RECURSE CLORE_MODULE_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/support/*.cppm"
 )
 
-# ── locate clang-scan-deps (required for C++20 module compilation) ───
-find_program(CLANG_SCAN_DEPS_EXE
-    NAMES clang-scan-deps
-    HINTS
-        "${CMAKE_CXX_COMPILER}/../"
-        "$ENV{CONDA_PREFIX}/Library/bin"
-        "$ENV{CONDA_PREFIX}/bin"
-)
-if(CLANG_SCAN_DEPS_EXE)
-    set(CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS "${CLANG_SCAN_DEPS_EXE}" CACHE FILEPATH "" FORCE)
-    message(STATUS "Found clang-scan-deps: ${CLANG_SCAN_DEPS_EXE}")
+# ── report clang-scan-deps configuration for C++20 module compilation ───
+if(CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS)
+    message(STATUS "Found clang-scan-deps: ${CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS}")
 else()
     message(STATUS "clang-scan-deps not found; will rely on CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS cache")
 endif()

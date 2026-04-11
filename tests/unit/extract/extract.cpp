@@ -1,6 +1,7 @@
 #include "eventide/zest/zest.h"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -154,6 +155,88 @@ void Widget::set_value(int v) { value_ = v; }
         EXPECT_TRUE(found_widget);
 
         fs::remove_all(temp_dir);
+    }
+
+    TEST_CASE(detects_distinct_module_units_in_project_model) {
+        namespace fs = std::filesystem;
+
+        auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
+        auto root = fs::temp_directory_path() /
+                    std::format("clore_module_extract_test_{}", ticks);
+        fs::create_directories(root / "src");
+
+        {
+            std::ofstream f(root / "src" / "math.cppm");
+            f << R"(
+export module demo.math;
+
+export int add(int lhs, int rhs) {
+    return lhs + rhs;
+}
+)";
+        }
+
+        {
+            std::ofstream f(root / "src" / "math.detail.cppm");
+            f << R"(
+export module demo.math:detail;
+
+export int detail() {
+    return 7;
+}
+)";
+        }
+
+        clore::testing::write_compile_commands(
+            root / "compile_commands.json",
+            {{
+                 .directory = root / "src",
+                 .file = root / "src" / "math.cppm",
+                 .arguments = {
+                     "clang++",
+                     "-std=c++23",
+                     "-c",
+                     "math.cppm",
+                     "-o",
+                     "math.pcm",
+                 },
+             },
+             {
+                 .directory = root / "src",
+                 .file = root / "src" / "math.detail.cppm",
+                 .arguments = {
+                     "clang++",
+                     "-std=c++23",
+                     "-c",
+                     "math.detail.cppm",
+                     "-o",
+                     "math.detail.pcm",
+                 },
+             }});
+
+        config::TaskConfig cfg;
+        cfg.compile_commands_path = (root / "compile_commands.json").string();
+        cfg.project_root = root.string();
+        cfg.output_root = (root / "out").string();
+        cfg.workspace_root = root.string();
+        cfg.extract.max_snippet_bytes = 1024;
+
+        auto result = extract::extract_project(cfg);
+        ASSERT_TRUE(result.has_value());
+
+        EXPECT_TRUE(result->uses_modules);
+        ASSERT_EQ(result->modules.size(), 2u);
+
+        auto math_path = (root / "src" / "math.cppm").lexically_normal().generic_string();
+        auto detail_path = (root / "src" / "math.detail.cppm").lexically_normal().generic_string();
+        ASSERT_TRUE(result->modules.contains(math_path));
+        ASSERT_TRUE(result->modules.contains(detail_path));
+        EXPECT_EQ(result->modules.at(math_path).name, "demo.math");
+        EXPECT_EQ(result->modules.at(detail_path).name, "demo.math:detail");
+        EXPECT_TRUE(result->modules.at(math_path).is_interface);
+        EXPECT_TRUE(result->modules.at(detail_path).is_interface);
+
+        fs::remove_all(root);
     }
 };
 

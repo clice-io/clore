@@ -5,6 +5,7 @@ module;
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <memory>
 #include <queue>
 #include <string>
 #include <string_view>
@@ -81,6 +82,31 @@ auto topological_order(const DependencyGraph& graph)
 namespace clore::extract {
 
 namespace {
+
+auto append_unique_import(ScanResult& result, std::string import_name) -> void {
+    if(std::ranges::find(result.module_imports, import_name) != result.module_imports.end()) {
+        return;
+    }
+    result.module_imports.push_back(std::move(import_name));
+}
+
+auto normalize_partition_import(std::string_view current_module_name,
+                                std::string import_name) -> std::string {
+    if(import_name.starts_with(':') && !current_module_name.empty()) {
+        auto main_name = current_module_name;
+        if(auto colon_pos = current_module_name.find(':'); colon_pos != std::string::npos) {
+            main_name = current_module_name.substr(0, colon_pos);
+        }
+
+        std::string normalized;
+        normalized.reserve(main_name.size() + import_name.size());
+        normalized += main_name;
+        normalized += import_name;
+        return normalized;
+    }
+
+    return import_name;
+}
 
 class ScanPPCallbacks : public clang::PPCallbacks {
 public:
@@ -187,7 +213,9 @@ auto scan_module_decl(std::string_view file_content, ScanResult& result) -> void
             }
 
             if(!import_name.empty()) {
-                result.module_imports.push_back(std::move(import_name));
+                append_unique_import(result,
+                                     normalize_partition_import(result.module_name,
+                                                                std::move(import_name)));
             }
         }
     }

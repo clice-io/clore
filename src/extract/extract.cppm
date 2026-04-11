@@ -287,21 +287,22 @@ auto rebuild_model_indexes(const config::TaskConfig& config, ProjectModel& model
 
 /// Populate module information from scan cache into the project model.
 auto build_module_info(ProjectModel& model, const ScanCache& scan_cache) -> void {
+    namespace fs = std::filesystem;
+
     for(auto& [file_path, scan_result] : scan_cache) {
         if(scan_result.module_name.empty()) continue;
 
         model.uses_modules = true;
 
-        auto& mod_unit = model.modules[scan_result.module_name];
+        auto source_file = fs::path(file_path).lexically_normal().generic_string();
+        auto& mod_unit = model.modules[source_file];
         mod_unit.name = scan_result.module_name;
         mod_unit.is_interface = scan_result.is_interface_unit;
-        mod_unit.source_file = file_path;
+        mod_unit.source_file = source_file;
         mod_unit.imports = scan_result.module_imports;
 
         // Associate symbols from that file to this module unit
-        namespace fs = std::filesystem;
-        auto generic_path = fs::path(file_path).generic_string();
-        auto file_it = model.files.find(generic_path);
+        auto file_it = model.files.find(source_file);
         if(file_it != model.files.end()) {
             mod_unit.symbols = file_it->second.symbols;
         }
@@ -398,20 +399,7 @@ auto extract_project(const config::TaskConfig& config)
         current_file_info.path = normalized;
         std::size_t includes_kept = 0;
 
-        if(cache_it != scan_cache.end()) {
-            for(auto& inc : cache_it->second.includes) {
-                namespace fs = std::filesystem;
-                auto inc_path = fs::path(inc.path);
-                if(inc_path.is_relative()) {
-                    inc_path = fs::path(entry.directory) / inc_path;
-                }
-                inc_path = inc_path.lexically_normal();
-                if(matches_filter(inc_path.string(), config.filter, filter_root)) {
-                    append_unique(current_file_info.includes, inc_path.generic_string());
-                    ++includes_kept;
-                }
-            }
-        } else {
+        if(cache_it == scan_cache.end()) {
             logging::warn("scan cache miss for {}, re-scanning", entry.file);
             auto scan_result = scan_file(entry);
             if(!scan_result.has_value()) {
@@ -419,17 +407,21 @@ auto extract_project(const config::TaskConfig& config)
                     .message = std::format("failed to scan includes for {}: {}",
                                            entry.file, scan_result.error().message)});
             }
-            for(auto& inc : scan_result->includes) {
-                namespace fs = std::filesystem;
-                auto inc_path = fs::path(inc.path);
-                if(inc_path.is_relative()) {
-                    inc_path = fs::path(entry.directory) / inc_path;
-                }
-                inc_path = inc_path.lexically_normal();
-                if(matches_filter(inc_path.string(), config.filter, filter_root)) {
-                    append_unique(current_file_info.includes, inc_path.generic_string());
-                    ++includes_kept;
-                }
+
+            auto [rescanned_it, _] = scan_cache.insert_or_assign(cache_key, std::move(*scan_result));
+            cache_it = rescanned_it;
+        }
+
+        for(auto& inc : cache_it->second.includes) {
+            namespace fs = std::filesystem;
+            auto inc_path = fs::path(inc.path);
+            if(inc_path.is_relative()) {
+                inc_path = fs::path(entry.directory) / inc_path;
+            }
+            inc_path = inc_path.lexically_normal();
+            if(matches_filter(inc_path.string(), config.filter, filter_root)) {
+                append_unique(current_file_info.includes, inc_path.generic_string());
+                ++includes_kept;
             }
         }
 
@@ -510,9 +502,9 @@ auto extract_project(const config::TaskConfig& config)
     build_module_info(model, scan_cache);
     if(model.uses_modules) {
         logging::info("detected {} module units", model.modules.size());
-        for(auto& [name, mod] : model.modules) {
+        for(auto& [source_file, mod] : model.modules) {
             logging::info("  module '{}' (interface={}) from {}",
-                          name, mod.is_interface, mod.source_file);
+                          mod.name, mod.is_interface, source_file);
         }
     }
 

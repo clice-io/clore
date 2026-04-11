@@ -1,5 +1,6 @@
 module;
 
+#include <algorithm>
 #include <expected>
 #include <filesystem>
 #include <format>

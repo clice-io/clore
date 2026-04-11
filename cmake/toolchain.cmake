@@ -3,6 +3,11 @@ cmake_minimum_required(VERSION 3.30)
 set(CMAKE_C_COMPILER clang CACHE STRING "")
 set(CMAKE_CXX_COMPILER clang++ CACHE STRING "")
 
+find_program(CLANG_SCAN_DEPS_PATH "clang-scan-deps")
+if(CLANG_SCAN_DEPS_PATH)
+    set(CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS "${CLANG_SCAN_DEPS_PATH}" CACHE FILEPATH "")
+endif()
+
 find_program(LLVM_AR_PATH "llvm-ar")
 if(LLVM_AR_PATH)
     set(CMAKE_AR "${LLVM_AR_PATH}" CACHE FILEPATH "")

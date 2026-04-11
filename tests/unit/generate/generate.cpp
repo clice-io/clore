@@ -1,6 +1,8 @@
 #include "eventide/zest/zest.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -77,6 +79,24 @@ auto make_model(const fs::path& project_root) -> extract::ProjectModel {
     model.file_order.push_back(file_path);
 
     return model;
+}
+
+auto make_symbol(std::uint64_t id, std::string_view name, std::string_view qualified_name,
+                 std::string_view signature, const std::string& file)
+    -> extract::SymbolInfo {
+    extract::SymbolInfo symbol;
+    symbol.id = extract::SymbolID{.hash = id};
+    symbol.kind = extract::SymbolKind::Function;
+    symbol.name = std::string(name);
+    symbol.qualified_name = std::string(qualified_name);
+    symbol.signature = std::string(signature);
+    symbol.source_snippet = std::format("{} {{}}", signature);
+    symbol.declaration_location = extract::SourceLocation{
+        .file = file,
+        .line = 1,
+        .column = 1,
+    };
+    return symbol;
 }
 
 }  // namespace
@@ -229,5 +249,119 @@ TEST_SUITE(generate) {
         auto target = output_root / "src" / "math.md";
         ASSERT_TRUE(fs::exists(target));
         EXPECT_EQ(read_text_file(target), "# Math\n");
+    }
+
+    TEST_CASE(build_module_graph_and_prompts_preserve_distinct_module_units) {
+        ScopedTempDir temp("build_module_prompts");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_config(temp.path);
+
+        extract::ProjectModel model;
+        model.uses_modules = true;
+
+        auto util_file = (temp.path / "src" / "util.cppm").generic_string();
+        auto main_file = (temp.path / "src" / "math.cppm").generic_string();
+        auto partition_file = (temp.path / "src" / "math.detail.cppm").generic_string();
+        auto impl_file = (temp.path / "src" / "math_impl.cpp").generic_string();
+
+        auto util_symbol = make_symbol(10, "helper", "demo::util::helper", "int helper()", util_file);
+        auto api_symbol = make_symbol(11, "add", "demo::math::add", "int add(int lhs, int rhs)", main_file);
+        auto partition_symbol = make_symbol(12, "detail", "demo::math::detail", "int detail()", partition_file);
+        auto impl_symbol = make_symbol(13, "internal", "demo::math::internal", "int internal()", impl_file);
+
+        model.symbols.emplace(util_symbol.id, util_symbol);
+        model.symbols.emplace(api_symbol.id, api_symbol);
+        model.symbols.emplace(partition_symbol.id, partition_symbol);
+        model.symbols.emplace(impl_symbol.id, impl_symbol);
+
+        model.modules.emplace(
+            util_file,
+            extract::ModuleUnit{
+                .name = "demo.util",
+                .is_interface = true,
+                .source_file = util_file,
+                .imports = {},
+                .symbols = {util_symbol.id},
+            });
+        model.modules.emplace(
+            main_file,
+            extract::ModuleUnit{
+                .name = "demo.math",
+                .is_interface = true,
+                .source_file = main_file,
+                .imports = {"demo.util", "demo.util"},
+                .symbols = {api_symbol.id},
+            });
+        model.modules.emplace(
+            partition_file,
+            extract::ModuleUnit{
+                .name = "demo.math:detail",
+                .is_interface = true,
+                .source_file = partition_file,
+                .imports = {"demo.util"},
+                .symbols = {partition_symbol.id},
+            });
+        model.modules.emplace(
+            impl_file,
+            extract::ModuleUnit{
+                .name = "demo.math",
+                .is_interface = false,
+                .source_file = impl_file,
+                .imports = {"demo.util", "demo.util"},
+                .symbols = {impl_symbol.id},
+            });
+
+        auto graph = build_page_graph(config, model);
+
+        ASSERT_EQ(graph.nodes.size(), 3u);
+        ASSERT_TRUE(graph.nodes.contains("demo.util.md"));
+        ASSERT_TRUE(graph.nodes.contains("demo.math.md"));
+        ASSERT_TRUE(graph.nodes.contains("demo.math/detail.md"));
+
+        auto& main_node = graph.nodes.at("demo.math.md");
+        auto& partition_node = graph.nodes.at("demo.math/detail.md");
+
+        EXPECT_EQ(std::count(main_node.depends_on.begin(), main_node.depends_on.end(), "demo.util.md"),
+                  1);
+        EXPECT_EQ(std::count(partition_node.depends_on.begin(), partition_node.depends_on.end(),
+                             "demo.util.md"),
+                  1);
+        EXPECT_EQ(std::count(partition_node.depends_on.begin(), partition_node.depends_on.end(),
+                             "demo.math.md"),
+                  1);
+
+        auto pos_util = std::find(graph.generation_order.begin(), graph.generation_order.end(),
+                                  "demo.util.md");
+        auto pos_main = std::find(graph.generation_order.begin(), graph.generation_order.end(),
+                                  "demo.math.md");
+        auto pos_partition = std::find(graph.generation_order.begin(), graph.generation_order.end(),
+                                       "demo.math/detail.md");
+        ASSERT_TRUE(pos_util != graph.generation_order.end());
+        ASSERT_TRUE(pos_main != graph.generation_order.end());
+        ASSERT_TRUE(pos_partition != graph.generation_order.end());
+        EXPECT_LT(pos_util, pos_main);
+        EXPECT_LT(pos_main, pos_partition);
+
+        auto prompts_result = build_prompts(config, model);
+        ASSERT_TRUE(prompts_result.has_value());
+        ASSERT_EQ(prompts_result->size(), 3u);
+
+        auto main_prompt_it = std::find_if(prompts_result->begin(), prompts_result->end(),
+                                           [](const PromptPage& page) {
+                                               return page.relative_path == "demo.math.md";
+                                           });
+        ASSERT_TRUE(main_prompt_it != prompts_result->end());
+        EXPECT_NE(main_prompt_it->prompt.find("## Module: `demo.math`"), std::string::npos);
+        EXPECT_NE(main_prompt_it->prompt.find("#### function: `demo::math::internal`"),
+                  std::string::npos);
+
+        auto partition_prompt_it = std::find_if(prompts_result->begin(), prompts_result->end(),
+                                                [](const PromptPage& page) {
+                                                    return page.relative_path == "demo.math/detail.md";
+                                                });
+        ASSERT_TRUE(partition_prompt_it != prompts_result->end());
+        EXPECT_NE(partition_prompt_it->prompt.find("## Module: `demo.math:detail`"),
+                  std::string::npos);
     }
 };

@@ -1,21 +1,22 @@
 module;
 
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/JSON.h"
-
-#ifdef _WIN32
-#define popen _popen
-#define pclose _pclose
-#endif
+#include "llvm/Support/Program.h"
 
 export module clore.generate:llm;
 
@@ -91,13 +92,76 @@ auto escape_json_string(std::string_view s) -> std::string {
     return out;
 }
 
-auto read_pipe(FILE* pipe) -> std::string {
-    std::string result;
-    char buf[4096];
-    while(auto n = std::fread(buf, 1, sizeof(buf), pipe)) {
-        result.append(buf, n);
+struct TempFileCleanup {
+    std::vector<std::filesystem::path>& paths;
+
+    ~TempFileCleanup() {
+        for(auto& path : paths) {
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+        }
     }
-    return result;
+};
+
+auto create_temp_file(std::string_view prefix, std::string_view suffix,
+                      std::vector<std::filesystem::path>& temp_paths)
+    -> std::expected<std::filesystem::path, LLMError> {
+    llvm::SmallString<128> temp_path;
+    if(auto ec = llvm::sys::fs::createTemporaryFile(prefix, suffix, temp_path); ec) {
+        return std::unexpected(LLMError{
+            .message = std::format("failed to create temp file: {}", ec.message())});
+    }
+
+    auto path = std::filesystem::path(std::string(temp_path));
+    temp_paths.push_back(path);
+    return path;
+}
+
+auto write_text_file(const std::filesystem::path& path, std::string_view content)
+    -> std::expected<void, LLMError> {
+    std::ofstream f(path, std::ios::binary);
+    if(!f.is_open()) {
+        return std::unexpected(LLMError{
+            .message = std::format("failed to open temp file for writing: {}",
+                                   path.generic_string())});
+    }
+
+    f.write(content.data(), static_cast<std::streamsize>(content.size()));
+    if(!f) {
+        return std::unexpected(LLMError{
+            .message = std::format("failed to write temp file: {}", path.generic_string())});
+    }
+
+    return {};
+}
+
+auto read_text_file(const std::filesystem::path& path) -> std::expected<std::string, LLMError> {
+    std::ifstream f(path, std::ios::binary);
+    if(!f.is_open()) {
+        return std::unexpected(LLMError{
+            .message = std::format("failed to open temp file for reading: {}",
+                                   path.generic_string())});
+    }
+
+    std::string content((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+    if(!f.good() && !f.eof()) {
+        return std::unexpected(LLMError{
+            .message = std::format("failed to read temp file: {}", path.generic_string())});
+    }
+
+    return content;
+}
+
+auto find_curl_executable() -> std::expected<std::string, LLMError> {
+    auto curl_path = llvm::sys::findProgramByName("curl");
+    if(!curl_path) {
+        return std::unexpected(LLMError{
+            .message = std::format("failed to locate curl executable: {}",
+                                   curl_path.getError().message())});
+    }
+
+    return *curl_path;
 }
 
 }  // namespace
@@ -181,46 +245,114 @@ auto call_llm(std::string_view model, std::string_view prompt)
 
     auto url = build_chat_completions_url(*api_base_result);
 
-    auto body_path = fs::temp_directory_path() / "clore_llm_request.json";
-    {
-        std::ofstream f(body_path);
-        if(!f.is_open()) {
-            return std::unexpected(LLMError{
-                .message = "failed to create temp file for LLM request"});
-        }
-        auto body = detail::build_request_json(model, prompt);
-        f << body;
+    std::vector<fs::path> temp_paths;
+    TempFileCleanup cleanup{temp_paths};
+
+    auto body_path_result = create_temp_file("clore_llm_request", "json", temp_paths);
+    if(!body_path_result.has_value()) {
+        return std::unexpected(std::move(body_path_result.error()));
+    }
+    auto curl_config_result = create_temp_file("clore_llm_headers", "conf", temp_paths);
+    if(!curl_config_result.has_value()) {
+        return std::unexpected(std::move(curl_config_result.error()));
+    }
+    auto response_path_result = create_temp_file("clore_llm_response", "json", temp_paths);
+    if(!response_path_result.has_value()) {
+        return std::unexpected(std::move(response_path_result.error()));
+    }
+    auto stderr_path_result = create_temp_file("clore_llm_stderr", "log", temp_paths);
+    if(!stderr_path_result.has_value()) {
+        return std::unexpected(std::move(stderr_path_result.error()));
     }
 
-    auto cmd = std::format(
-        "curl -s -X POST \"{}\" "
-        "-H \"Content-Type: application/json\" "
-        "-H \"Authorization: Bearer {}\" "
-        "-d \"@{}\"",
-        url, *api_key_result, body_path.generic_string());
+    auto body_path = *body_path_result;
+    auto curl_config_path = *curl_config_result;
+    auto response_path = *response_path_result;
+    auto stderr_path = *stderr_path_result;
+
+    if(auto write_result = write_text_file(body_path, detail::build_request_json(model, prompt));
+       !write_result.has_value()) {
+        return std::unexpected(std::move(write_result.error()));
+    }
+
+    auto curl_config = std::format(
+        "header = \"Content-Type: application/json\"\n"
+        "header = \"Authorization: Bearer {}\"\n",
+        *api_key_result);
+    if(auto write_result = write_text_file(curl_config_path, curl_config);
+       !write_result.has_value()) {
+        return std::unexpected(std::move(write_result.error()));
+    }
+
+    auto curl_path_result = find_curl_executable();
+    if(!curl_path_result.has_value()) {
+        return std::unexpected(std::move(curl_path_result.error()));
+    }
+    auto curl_path = *curl_path_result;
+
+    auto body_arg = std::string("@") + body_path.string();
+    auto response_path_string = response_path.string();
+    auto stderr_path_string = stderr_path.string();
+    std::vector<std::string> arg_storage{
+        curl_path,
+        "--silent",
+        "--show-error",
+        "--request",
+        "POST",
+        url,
+        "--config",
+        curl_config_path.string(),
+        "--data-binary",
+        body_arg,
+    };
+    llvm::SmallVector<llvm::StringRef, 10> args;
+    args.reserve(arg_storage.size());
+    for(auto& arg : arg_storage) {
+        args.push_back(arg);
+    }
+
+    std::array<std::optional<llvm::StringRef>, 3> redirects{
+        std::nullopt,
+        llvm::StringRef(response_path_string),
+        llvm::StringRef(stderr_path_string),
+    };
 
     logging::info("calling LLM: {} model={}", url, model);
 
-    auto* pipe = popen(cmd.c_str(), "r");
-    if(!pipe) {
-        fs::remove(body_path);
-        return std::unexpected(LLMError{.message = "failed to execute curl"});
-    }
+    std::string err_msg;
+    bool execution_failed = false;
+    auto exit_code = llvm::sys::ExecuteAndWait(curl_path, args, std::nullopt, redirects,
+                                               0, 0, &err_msg, &execution_failed);
 
-    auto response = read_pipe(pipe);
-    auto exit_code = pclose(pipe);
-    fs::remove(body_path);
+    auto stderr_result = read_text_file(stderr_path);
+    auto stderr_text = stderr_result.has_value() ? *stderr_result : std::string{};
+
+    if(execution_failed) {
+        auto message = err_msg.empty() ? stderr_text : err_msg;
+        if(message.empty()) {
+            message = "failed to execute curl";
+        }
+        return std::unexpected(LLMError{.message = std::move(message)});
+    }
 
     if(exit_code != 0) {
         return std::unexpected(LLMError{
-            .message = std::format("curl exited with code {}", exit_code)});
+            .message = stderr_text.empty()
+                           ? std::format("curl exited with code {}", exit_code)
+                           : std::format("curl exited with code {}: {}",
+                                         exit_code, stderr_text)});
     }
 
-    if(response.empty()) {
+    auto response_result = read_text_file(response_path);
+    if(!response_result.has_value()) {
+        return std::unexpected(std::move(response_result.error()));
+    }
+
+    if(response_result->empty()) {
         return std::unexpected(LLMError{.message = "empty response from LLM"});
     }
 
-    return detail::parse_response(response);
+    return detail::parse_response(*response_result);
 }
 
 }  // namespace clore::generate
