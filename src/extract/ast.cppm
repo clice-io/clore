@@ -1,8 +1,13 @@
-#include "extract/ast.h"
+module;
 
 #include <algorithm>
+#include <cstdint>
+#include <expected>
 #include <format>
+#include <memory>
+#include <string>
 #include <unordered_set>
+#include <vector>
 
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/Comment.h"
@@ -16,8 +21,37 @@
 #include "clang/Index/USRGeneration.h"
 #include "llvm/Support/Error.h"
 
-#include "extract/tooling.h"
-#include "support/logging.h"
+export module extract:ast;
+
+import :compdb;
+import :model;
+import :symbol;
+import :tooling;
+import support;
+
+export namespace clore::extract {
+
+struct ASTError {
+    std::string message;
+};
+
+struct ExtractedRelation {
+    SymbolID from;
+    SymbolID to;
+    bool is_call;  ///< true = call edge, false = reference edge
+};
+
+struct ASTResult {
+    std::vector<SymbolInfo> symbols;
+    std::vector<ExtractedRelation> relations;
+};
+
+auto extract_symbols(const CompileEntry& entry, std::uint32_t max_snippet_bytes)
+    -> std::expected<ASTResult, ASTError>;
+
+}  // namespace clore::extract
+
+// ── implementation ──────────────────────────────────────────────────
 
 namespace clore::extract {
 
@@ -116,7 +150,6 @@ struct RelationEdge {
     RelationKind kind;
 };
 
-/// Produce a hash for de-duplicating (from, to, kind) triples.
 auto edge_hash(SymbolID from, SymbolID to, RelationKind kind) -> std::uint64_t {
     auto h = std::hash<std::uint64_t>{}(from.hash);
     h ^= std::hash<std::uint64_t>{}(to.hash) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
@@ -132,11 +165,7 @@ public:
     std::string main_file;
     std::uint32_t max_snippet_bytes;
 
-    /// Stack of enclosing function/method decls so we know the "from" side of
-    /// call / reference edges.
     std::vector<SymbolID> enclosing_stack;
-
-    /// De-duplicate edges per (from, to, kind) triple within this TU.
     std::unordered_set<std::uint64_t> seen_edges;
 
     SymbolExtractorVisitor(clang::ASTContext& ctx, std::vector<SymbolInfo>& syms,
@@ -155,13 +184,11 @@ public:
         auto loc = decl->getLocation();
         if(loc.isInvalid()) return true;
 
-        // Only process declarations from the main file or its includes
         if(sm.isInSystemHeader(loc)) return true;
 
         auto kind = classify_decl(decl);
         if(kind == SymbolKind::Unknown) return true;
 
-        // Skip anonymous declarations
         if(decl->getDeclName().isEmpty()) return true;
 
         auto id = compute_symbol_id(decl);
@@ -174,12 +201,10 @@ public:
         info.qualified_name = decl->getQualifiedNameAsString();
         info.declaration_location = make_source_location(sm, decl->getLocation());
 
-        // Try to get definition location
         if(auto* func = llvm::dyn_cast<clang::FunctionDecl>(decl)) {
             if(func->isThisDeclarationADefinition()) {
                 info.definition_location = make_source_location(sm, func->getLocation());
             }
-            // Get signature
             std::string sig;
             llvm::raw_string_ostream os(sig);
             func->print(os, context.getPrintingPolicy());
@@ -187,7 +212,6 @@ public:
         } else if(auto* record = llvm::dyn_cast<clang::CXXRecordDecl>(decl)) {
             if(record->isThisDeclarationADefinition()) {
                 info.definition_location = make_source_location(sm, record->getLocation());
-                // Collect base classes
                 for(auto& base : record->bases()) {
                     auto* base_type = base.getType()->getAsCXXRecordDecl();
                     if(base_type) {
@@ -204,16 +228,10 @@ public:
             }
         }
 
-        // Access specifier
         info.access = get_access_string(decl->getAccess());
-
-        // Doc comment
         info.doc_comment = get_doc_comment(context, decl);
-
-        // Source snippet
         info.source_snippet = get_source_snippet(context, decl, max_snippet_bytes);
 
-        // Parent (for methods -> class, fields -> struct, etc.)
         auto* parent_ctx = decl->getDeclContext();
         if(auto* parent_decl = llvm::dyn_cast_or_null<clang::NamedDecl>(
                clang::Decl::castFromDeclContext(parent_ctx))) {
@@ -223,7 +241,6 @@ public:
             }
         }
 
-        // Template parameters
         if(auto* tmpl = llvm::dyn_cast<clang::TemplateDecl>(decl)) {
             info.is_template = true;
             auto* params = tmpl->getTemplateParameters();
@@ -246,8 +263,6 @@ public:
         return true;
     }
 
-    // ── scope tracking for call/reference collection ────────────────
-
     bool TraverseFunctionDecl(clang::FunctionDecl* decl) {
         auto id = compute_symbol_id(decl);
         if(id.is_valid()) enclosing_stack.push_back(id);
@@ -264,8 +279,6 @@ public:
         return result;
     }
 
-    // ── call edges ──────────────────────────────────────────────────
-
     bool VisitCallExpr(clang::CallExpr* expr) {
         if(enclosing_stack.empty()) return true;
 
@@ -279,7 +292,7 @@ public:
         if(!callee_id.is_valid()) return true;
 
         auto from = enclosing_stack.back();
-        if(from == callee_id) return true;  // skip self-recursion edges
+        if(from == callee_id) return true;
 
         auto h = edge_hash(from, callee_id, RelationKind::Call);
         if(seen_edges.insert(h).second) {
@@ -288,8 +301,6 @@ public:
         }
         return true;
     }
-
-    // ── reference edges ─────────────────────────────────────────────
 
     bool VisitDeclRefExpr(clang::DeclRefExpr* expr) {
         if(enclosing_stack.empty()) return true;
@@ -300,7 +311,6 @@ public:
         auto* referenced = llvm::dyn_cast<clang::NamedDecl>(expr->getDecl());
         if(!referenced) return true;
 
-        // Skip function calls — those are captured by VisitCallExpr.
         if(llvm::isa<clang::FunctionDecl>(referenced)) return true;
 
         auto ref_id = compute_symbol_id(referenced);
@@ -326,7 +336,6 @@ public:
         auto* member = expr->getMemberDecl();
         if(!member) return true;
 
-        // Skip method calls — captured by VisitCallExpr via CXXMemberCallExpr.
         if(llvm::isa<clang::FunctionDecl>(member)) return true;
 
         auto member_id = compute_symbol_id(member);
@@ -414,7 +423,6 @@ auto extract_symbols(const CompileEntry& entry, std::uint32_t max_snippet_bytes)
 
     action.EndSourceFile();
 
-    // Convert internal RelationEdge to public ExtractedRelation.
     result.relations.reserve(raw_relations.size());
     for(auto& edge : raw_relations) {
         result.relations.push_back(ExtractedRelation{

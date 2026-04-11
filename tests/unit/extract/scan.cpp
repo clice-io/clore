@@ -1,6 +1,8 @@
 #include "eventide/zest/zest.h"
 
-#include "extract/scan.h"
+#include <string>
+
+import extract;
 
 using namespace clore::extract;
 
@@ -80,5 +82,23 @@ TEST_SUITE(scan) {
         EXPECT_LT(pos_base, pos_right);
         EXPECT_LT(pos_left, pos_top);
         EXPECT_LT(pos_right, pos_top);
+    }
+
+    TEST_CASE(scan_module_decl_normalizes_partition_imports_and_deduplicates) {
+        ScanResult result;
+
+        scan_module_decl(R"(
+export module extract:scan;
+import :tooling;
+import :tooling;
+import support;
+)",
+                         result);
+
+        EXPECT_EQ(result.module_name, "extract:scan");
+        EXPECT_TRUE(result.is_interface_unit);
+        ASSERT_EQ(result.module_imports.size(), 2u);
+        EXPECT_EQ(result.module_imports[0], "extract:tooling");
+        EXPECT_EQ(result.module_imports[1], "support");
     }
 };

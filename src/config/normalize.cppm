@@ -1,15 +1,32 @@
-#include "config/normalize.h"
+module;
 
+#include <expected>
 #include <filesystem>
 #include <format>
+#include <optional>
+#include <string>
+
+export module config:normalize;
+
+import :schema;
+
+export namespace clore::config {
+
+struct NormalizeError {
+    std::string message;
+};
+
+auto normalize(TaskConfig& config) -> std::expected<void, NormalizeError>;
+
+}  // namespace clore::config
+
+// ── implementation ──────────────────────────────────────────────────
 
 namespace clore::config {
 
 auto normalize(TaskConfig& config) -> std::expected<void, NormalizeError> {
     namespace fs = std::filesystem;
 
-    // Reject empty required path fields before any filesystem operations.
-    // fs::absolute("") silently resolves to cwd, which would bypass validation.
     auto make_absolute = [](std::string& path,
                             std::string_view field,
                             const std::optional<fs::path>& base = std::nullopt)
@@ -62,7 +79,6 @@ auto normalize(TaskConfig& config) -> std::expected<void, NormalizeError> {
         return r;
     }
 
-    // Normalize path separators to forward slashes.
     auto normalize_separators = [](std::string& path) {
         for(auto& c : path) {
             if(c == '\\') {

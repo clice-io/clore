@@ -1,17 +1,111 @@
-#include "generate/generate.h"
+module;
 
 #include <algorithm>
+#include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <optional>
 #include <queue>
+#include <ranges>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
-#include "generate/llm.h"
-#include "support/logging.h"
+export module generate;
+
+export import :llm;
+
+import config;
+import extract;
+import support;
+
+export namespace clore::generate {
+
+// ── page hierarchy ──────────────────────────────────────────────────
+
+enum class PageLevel : std::uint8_t {
+    Symbol,
+    ClassStruct,
+    File,
+    Module,      ///< A C++20 module unit.
+    Namespace,
+    Repository,
+};
+
+// ── structured page context ─────────────────────────────────────────
+
+struct SymbolContext {
+    extract::SymbolInfo self;
+    std::vector<extract::SymbolInfo> direct_callers;
+    std::vector<extract::SymbolInfo> direct_callees;
+    std::vector<extract::SymbolInfo> siblings;
+    std::optional<extract::SymbolInfo> parent_class;
+};
+
+struct StructuredPagePlan {
+    std::string relative_path;
+    std::string title;
+    PageLevel level = PageLevel::File;
+    std::vector<SymbolContext> contexts;
+    std::vector<std::string> linked_pages;
+};
+
+// ── page graph ──────────────────────────────────────────────────────
+
+struct PageNode {
+    StructuredPagePlan plan;
+    std::vector<std::string> depends_on;
+    std::vector<std::string> depended_by;
+};
+
+struct PageGraph {
+    std::unordered_map<std::string, PageNode> nodes;
+    std::vector<std::string> generation_order;
+};
+
+// ── output ──────────────────────────────────────────────────────────
+
+struct PromptPage {
+    std::string relative_path;
+    std::string title;
+    std::string prompt;
+};
+
+struct GeneratedPage {
+    std::string relative_path;
+    std::string content;
+};
+
+struct GenerateError {
+    std::string message;
+};
+
+// ── public API ──────────────────────────────────────────────────────
+
+auto build_page_graph(const config::TaskConfig& config, const extract::ProjectModel& model)
+    -> PageGraph;
+
+auto build_prompts(const config::TaskConfig& config, const extract::ProjectModel& model)
+    -> std::expected<std::vector<PromptPage>, GenerateError>;
+
+auto generate_pages(const config::TaskConfig& config, const extract::ProjectModel& model,
+                    std::string_view llm_model)
+    -> std::expected<std::vector<GeneratedPage>, GenerateError>;
+
+auto write_prompts(const std::vector<PromptPage>& prompts, std::string_view output_root)
+    -> std::expected<void, GenerateError>;
+
+auto write_pages(const std::vector<GeneratedPage>& pages, std::string_view output_root)
+    -> std::expected<void, GenerateError>;
+
+}  // namespace clore::generate
+
+// ── implementation ──────────────────────────────────────────────────
 
 namespace clore::generate {
 
@@ -40,7 +134,6 @@ auto write_page_to_root(const GeneratedPage& page, std::string_view output_root)
 
     auto target = (root / rel).lexically_normal();
 
-    // Create parent directories
     auto parent = target.parent_path();
     if(!fs::exists(parent)) {
         std::error_code ec;
@@ -52,7 +145,6 @@ auto write_page_to_root(const GeneratedPage& page, std::string_view output_root)
         }
     }
 
-    // Write file
     std::ofstream f(target);
     if(!f.is_open()) {
         return std::unexpected(GenerateError{
@@ -93,6 +185,48 @@ auto output_path_for_source_file(const std::filesystem::path& file_path,
     return *rel + ".md";
 }
 
+// ── module-aware output path ────────────────────────────────────────
+
+/// Convert a module name to a documentation output path.
+/// Main modules: "foo.bar" → "foo.bar/index.md"
+/// Partitions:   "foo.bar:baz" → "foo.bar/baz.md"
+auto output_path_for_module(const std::string& module_name) -> std::string {
+    auto colon_pos = module_name.find(':');
+    if(colon_pos != std::string::npos) {
+        // Partition: "foo.bar:baz" → "foo.bar/baz.md"
+        auto main_name = module_name.substr(0, colon_pos);
+        auto partition_name = module_name.substr(colon_pos + 1);
+        return main_name + "/" + partition_name + ".md";
+    }
+    // Main module: "foo.bar" → "foo.bar/index.md"
+    return module_name + "/index.md";
+}
+
+auto append_unique_page_ref(std::vector<std::string>& refs, const std::string& ref) -> bool {
+    if(std::ranges::find(refs, ref) != refs.end()) {
+        return false;
+    }
+    refs.push_back(ref);
+    return true;
+}
+
+auto add_page_dependency(PageGraph& graph, const std::string& dependent_page,
+                         const std::string& dependency_page) -> void {
+    if(dependent_page == dependency_page) {
+        return;
+    }
+
+    auto dependent_it = graph.nodes.find(dependent_page);
+    auto dependency_it = graph.nodes.find(dependency_page);
+    if(dependent_it == graph.nodes.end() || dependency_it == graph.nodes.end()) {
+        return;
+    }
+
+    append_unique_page_ref(dependent_it->second.depends_on, dependency_page);
+    append_unique_page_ref(dependent_it->second.plan.linked_pages, dependency_page);
+    append_unique_page_ref(dependency_it->second.depended_by, dependent_page);
+}
+
 // ── symbol context assembly ─────────────────────────────────────────
 
 auto lookup_symbol(const extract::ProjectModel& model, extract::SymbolID id)
@@ -104,14 +238,13 @@ auto lookup_symbol(const extract::ProjectModel& model, extract::SymbolID id)
 
 auto build_symbol_context(const extract::SymbolInfo& sym,
                           const extract::ProjectModel& model,
-                          const extract::FileInfo& file_info) -> SymbolContext {
+                          const std::vector<extract::SymbolID>& sibling_ids) -> SymbolContext {
     SymbolContext ctx;
     ctx.self = sym;
     std::unordered_set<extract::SymbolID> seen_callers;
     std::unordered_set<extract::SymbolID> seen_callees;
     std::unordered_set<extract::SymbolID> seen_siblings;
 
-    // Direct callers (called_by) — limit to keep context manageable.
     for(auto& caller_id : sym.called_by) {
         if(!seen_callers.insert(caller_id).second) continue;
         if(auto s = lookup_symbol(model, caller_id)) {
@@ -120,7 +253,6 @@ auto build_symbol_context(const extract::SymbolInfo& sym,
         }
     }
 
-    // Direct callees (calls).
     for(auto& callee_id : sym.calls) {
         if(!seen_callees.insert(callee_id).second) continue;
         if(auto s = lookup_symbol(model, callee_id)) {
@@ -129,8 +261,7 @@ auto build_symbol_context(const extract::SymbolInfo& sym,
         }
     }
 
-    // Siblings: other symbols in the same file.
-    for(auto& sib_id : file_info.symbols) {
+    for(auto& sib_id : sibling_ids) {
         if(sib_id == sym.id) continue;
         if(!seen_siblings.insert(sib_id).second) continue;
         if(auto s = lookup_symbol(model, sib_id)) {
@@ -139,7 +270,6 @@ auto build_symbol_context(const extract::SymbolInfo& sym,
         }
     }
 
-    // Parent class / struct.
     if(sym.parent.has_value()) {
         if(auto p = lookup_symbol(model, *sym.parent)) {
             if(p->kind == extract::SymbolKind::Class ||
@@ -152,15 +282,20 @@ auto build_symbol_context(const extract::SymbolInfo& sym,
     return ctx;
 }
 
-// ── planner: build PageGraph ────────────────────────────────────────
+auto build_symbol_context_from_file(const extract::SymbolInfo& sym,
+                                    const extract::ProjectModel& model,
+                                    const extract::FileInfo& file_info) -> SymbolContext {
+    return build_symbol_context(sym, model, file_info.symbols);
+}
 
-auto build_page_graph_impl(const config::TaskConfig& config,
+// ── file-based page graph (traditional) ─────────────────────────────
+
+auto build_file_page_graph(const config::TaskConfig& config,
                            const extract::ProjectModel& model) -> PageGraph {
     namespace fs = std::filesystem;
     PageGraph graph;
     auto source_root = fs::path(config.project_root).lexically_normal();
 
-    // --- Create one File-level page per source file ---
     for(auto& [file_path, file_info] : model.files) {
         if(file_info.symbols.empty()) continue;
 
@@ -176,7 +311,6 @@ auto build_page_graph_impl(const config::TaskConfig& config,
             node.plan.level = PageLevel::File;
         }
 
-        // Assemble SymbolContext for each symbol in the file.
         for(auto& sym_id : file_info.symbols) {
             auto sym_it = model.symbols.find(sym_id);
             if(sym_it == model.symbols.end()) continue;
@@ -184,33 +318,27 @@ auto build_page_graph_impl(const config::TaskConfig& config,
                 return ctx.self.id == sym_id;
             });
             if(exists) continue;
-            node.plan.contexts.push_back(build_symbol_context(sym_it->second, model, file_info));
+            node.plan.contexts.push_back(build_symbol_context_from_file(sym_it->second, model, file_info));
         }
     }
 
-    // --- Build inter-page dependency edges from include graph ---
-    // If file A includes file B and both have pages, then page(A) depends on
-    // page(B) (B's docs should be generated first).
+    // Include graph edges
     for(auto& [file_path, file_info] : model.files) {
         auto page_a = output_path_for_source_file(fs::path(file_path), source_root);
         if(!page_a.has_value()) continue;
-
         if(graph.nodes.find(*page_a) == graph.nodes.end()) continue;
 
         for(auto& inc_path : file_info.includes) {
             auto page_b = output_path_for_source_file(fs::path(inc_path), source_root);
             if(!page_b.has_value()) continue;
-
             if(*page_b == *page_a) continue;
             if(graph.nodes.find(*page_b) == graph.nodes.end()) continue;
 
-            graph.nodes[*page_a].depends_on.push_back(*page_b);
-            graph.nodes[*page_b].depended_by.push_back(*page_a);
-            graph.nodes[*page_a].plan.linked_pages.push_back(*page_b);
+            add_page_dependency(graph, *page_a, *page_b);
         }
     }
 
-    // --- Also add call-graph driven edges between pages ---
+    // Call graph edges
     std::unordered_map<extract::SymbolID, std::string> sym_to_page;
     for(auto& [page_path, node] : graph.nodes) {
         for(auto& ctx : node.plan.contexts) {
@@ -218,23 +346,100 @@ auto build_page_graph_impl(const config::TaskConfig& config,
         }
     }
     for(auto& [page_path, node] : graph.nodes) {
-        std::unordered_set<std::string> already;
-        for(auto& dep : node.depends_on) already.insert(dep);
-
         for(auto& ctx : node.plan.contexts) {
             for(auto& callee_id : ctx.self.calls) {
                 auto it = sym_to_page.find(callee_id);
                 if(it == sym_to_page.end()) continue;
                 if(it->second == page_path) continue;
-                if(!already.insert(it->second).second) continue;
-                node.depends_on.push_back(it->second);
-                graph.nodes[it->second].depended_by.push_back(page_path);
-                node.plan.linked_pages.push_back(it->second);
+                add_page_dependency(graph, page_path, it->second);
             }
         }
     }
 
-    // --- Topological sort (Kahn's) for generation order ---
+    return graph;
+}
+
+// ── module-based page graph ─────────────────────────────────────────
+
+auto build_module_page_graph(const config::TaskConfig& config,
+                             const extract::ProjectModel& model) -> PageGraph {
+    PageGraph graph;
+
+    std::unordered_map<std::string, std::vector<const extract::ModuleUnit*>> units_by_name;
+    for(auto& [source_file, mod_unit] : model.modules) {
+        (void)source_file;
+        units_by_name[mod_unit.name].push_back(&mod_unit);
+    }
+
+    std::unordered_map<std::string, std::string> mod_to_page;
+    for(auto& [mod_name, mod_units] : units_by_name) {
+        auto has_interface = std::ranges::any_of(mod_units, [](const extract::ModuleUnit* unit) {
+            return unit->is_interface;
+        });
+        if(!has_interface) continue;
+
+        auto out_path = output_path_for_module(mod_name);
+        auto& node = graph.nodes[out_path];
+        node.plan.relative_path = out_path;
+        node.plan.level = PageLevel::Module;
+        node.plan.title = mod_name;
+        mod_to_page.emplace(mod_name, out_path);
+
+        std::vector<extract::SymbolID> page_symbol_ids;
+        for(auto* mod_unit : mod_units) {
+            for(auto& sym_id : mod_unit->symbols) {
+                if(std::ranges::find(page_symbol_ids, sym_id) == page_symbol_ids.end()) {
+                    page_symbol_ids.push_back(sym_id);
+                }
+            }
+        }
+
+        for(auto& sym_id : page_symbol_ids) {
+            auto sym_it = model.symbols.find(sym_id);
+            if(sym_it == model.symbols.end()) continue;
+            node.plan.contexts.push_back(build_symbol_context(sym_it->second, model, page_symbol_ids));
+        }
+    }
+
+    for(auto& [mod_name, mod_units] : units_by_name) {
+        auto page_it = mod_to_page.find(mod_name);
+        if(page_it == mod_to_page.end()) continue;
+
+        auto& page_a = page_it->second;
+        for(auto* mod_unit : mod_units) {
+            for(auto& import_name : mod_unit->imports) {
+                auto it = mod_to_page.find(import_name);
+                if(it == mod_to_page.end()) continue;
+                add_page_dependency(graph, page_a, it->second);
+            }
+        }
+
+    }
+
+    // Call graph edges between module pages
+    std::unordered_map<extract::SymbolID, std::string> sym_to_page;
+    for(auto& [page_path, node] : graph.nodes) {
+        for(auto& ctx : node.plan.contexts) {
+            sym_to_page[ctx.self.id] = page_path;
+        }
+    }
+    for(auto& [page_path, node] : graph.nodes) {
+        for(auto& ctx : node.plan.contexts) {
+            for(auto& callee_id : ctx.self.calls) {
+                auto it = sym_to_page.find(callee_id);
+                if(it == sym_to_page.end()) continue;
+                if(it->second == page_path) continue;
+                add_page_dependency(graph, page_path, it->second);
+            }
+        }
+    }
+
+    return graph;
+}
+
+// ── topological sort for page graph ─────────────────────────────────
+
+auto sort_page_graph(PageGraph& graph) -> void {
     std::unordered_map<std::string, int> in_degree;
     for(auto& [path, _] : graph.nodes) in_degree[path] = 0;
     for(auto& [path, node] : graph.nodes) {
@@ -260,7 +465,6 @@ auto build_page_graph_impl(const config::TaskConfig& config,
         }
     }
 
-    // If cycles exist, append remaining pages in arbitrary order.
     if(graph.generation_order.size() < graph.nodes.size()) {
         for(auto& [path, _] : graph.nodes) {
             if(in_degree[path] > 0) {
@@ -269,17 +473,14 @@ auto build_page_graph_impl(const config::TaskConfig& config,
         }
     }
 
-    // De-duplicate linked_pages lists.
     for(auto& [_, node] : graph.nodes) {
         auto& lp = node.plan.linked_pages;
         std::sort(lp.begin(), lp.end());
         lp.erase(std::unique(lp.begin(), lp.end()), lp.end());
     }
-
-    return graph;
 }
 
-// ── prompt builder (consumes StructuredPagePlan) ────────────────────
+// ── prompt builder ──────────────────────────────────────────────────
 
 auto build_prompt_for_page(const StructuredPagePlan& plan,
                            const config::TaskConfig& config) -> std::string {
@@ -287,13 +488,17 @@ auto build_prompt_for_page(const StructuredPagePlan& plan,
 
     auto language = config.language.has_value() ? *config.language : std::string("English");
 
-    ss << "Generate Markdown documentation for the following C++ source file.\n\n";
-    ss << "## File: `" << plan.relative_path << "`\n\n";
+    if(plan.level == PageLevel::Module) {
+        ss << "Generate Markdown documentation for the following C++20 module.\n\n";
+        ss << "## Module: `" << plan.title << "`\n\n";
+    } else {
+        ss << "Generate Markdown documentation for the following C++ source file.\n\n";
+        ss << "## File: `" << plan.relative_path << "`\n\n";
+    }
 
     ss << "### Output language\n";
     ss << "- " << language << "\n\n";
 
-    // Linked pages for cross references
     if(!plan.linked_pages.empty()) {
         ss << "### Related pages\n";
         for(auto& lp : plan.linked_pages) {
@@ -321,7 +526,6 @@ auto build_prompt_for_page(const StructuredPagePlan& plan,
             ss << "**Source:**\n```cpp\n" << sym.source_snippet << "\n```\n\n";
         }
 
-        // Callers — "why does this exist?"
         if(!ctx.direct_callers.empty()) {
             ss << "**Called by:**\n";
             for(auto& caller : ctx.direct_callers) {
@@ -332,7 +536,6 @@ auto build_prompt_for_page(const StructuredPagePlan& plan,
             ss << "\n";
         }
 
-        // Callees — "what does this use?"
         if(!ctx.direct_callees.empty()) {
             ss << "**Calls:**\n";
             for(auto& callee : ctx.direct_callees) {
@@ -341,7 +544,6 @@ auto build_prompt_for_page(const StructuredPagePlan& plan,
             ss << "\n";
         }
 
-        // Inheritance
         if(!sym.bases.empty()) {
             ss << "**Bases:** ";
             bool first = true;
@@ -360,7 +562,6 @@ auto build_prompt_for_page(const StructuredPagePlan& plan,
             ss << "\n\n";
         }
 
-        // Members
         if(!sym.children.empty()) {
             ss << "**Members:**\n";
             for(auto& child_id : sym.children) {
@@ -379,19 +580,24 @@ auto build_prompt_for_page(const StructuredPagePlan& plan,
     }
 
     ss << "\n### Instructions\n\n";
-    ss << "1. Write a brief overview of the file's purpose.\n";
-    ss << "2. Document each class/struct with its purpose and members.\n";
-    ss << "3. Document each function: explain WHY it exists (using caller context), "
-          "parameters, and return value.\n";
-    ss << "4. Note any inheritance relationships.\n";
+    if(plan.level == PageLevel::Module) {
+        ss << "1. Write a brief overview of this module's purpose and public interface.\n";
+        ss << "2. Document each exported class/struct with its purpose and members.\n";
+        ss << "3. Document each exported function: explain WHY it exists, parameters, and return value.\n";
+        ss << "4. Note module dependencies and partition relationships.\n";
+    } else {
+        ss << "1. Write a brief overview of the file's purpose.\n";
+        ss << "2. Document each class/struct with its purpose and members.\n";
+        ss << "3. Document each function: explain WHY it exists (using caller context), "
+              "parameters, and return value.\n";
+        ss << "4. Note any inheritance relationships.\n";
+    }
     ss << "5. Include cross-references to related pages where appropriate.\n";
     ss << "6. Use proper Markdown headings and code blocks.\n";
     ss << "7. Do NOT wrap the output in a code fence.\n";
 
     return ss.str();
 }
-
-// ── frontmatter ─────────────────────────────────────────────────────
 
 auto render_frontmatter(std::string_view title,
                         const config::FrontmatterConfig& fm_config) -> std::string {
@@ -406,8 +612,6 @@ auto render_frontmatter(std::string_view title,
     ss << "---\n";
     return ss.str();
 }
-
-// ── markdown assembly ───────────────────────────────────────────────
 
 auto assemble_page(std::string_view frontmatter,
                    std::string_view llm_body) -> std::string {
@@ -426,12 +630,23 @@ auto assemble_page(std::string_view frontmatter,
 
 auto build_page_graph(const config::TaskConfig& config, const extract::ProjectModel& model)
     -> PageGraph {
-    return build_page_graph_impl(config, model);
+    PageGraph graph;
+
+    if(model.uses_modules) {
+        logging::info("building module-based page graph ({} module units)",
+                      model.modules.size());
+        graph = build_module_page_graph(config, model);
+    } else {
+        graph = build_file_page_graph(config, model);
+    }
+
+    sort_page_graph(graph);
+    return graph;
 }
 
 auto build_prompts(const config::TaskConfig& config, const extract::ProjectModel& model)
     -> std::expected<std::vector<PromptPage>, GenerateError> {
-    auto graph = build_page_graph_impl(config, model);
+    auto graph = build_page_graph(config, model);
 
     if(graph.nodes.empty()) {
         return std::unexpected(GenerateError{
@@ -482,7 +697,6 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
         logging::info("generating page {}/{}: {}",
                       i + 1, prompts.size(), prompt.relative_path);
 
-        // Call LLM
         auto llm_result = call_llm(llm_model, prompt.prompt);
         if(!llm_result.has_value()) {
             logging::warn("LLM call failed for {}: {}", prompt.relative_path,
@@ -490,10 +704,7 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
             continue;
         }
 
-        // Render frontmatter
         auto frontmatter = render_frontmatter(prompt.title, config.frontmatter);
-
-        // Assemble page
         auto content = assemble_page(frontmatter, *llm_result);
 
         auto page = GeneratedPage{
@@ -548,4 +759,3 @@ auto write_pages(const std::vector<GeneratedPage>& pages, std::string_view outpu
 }
 
 }  // namespace clore::generate
-

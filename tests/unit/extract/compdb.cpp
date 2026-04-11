@@ -3,8 +3,9 @@
 #include <filesystem>
 #include <fstream>
 
-#include "extract/compdb.h"
 #include "extract/compdb_test_utils.h"
+
+import extract;
 
 using namespace clore::extract;
 
@@ -85,5 +86,24 @@ TEST_SUITE(compdb) {
 
         auto no_results = lookup(db, "/project/src/nonexistent.cpp");
         EXPECT_EQ(no_results.size(), 0u);
+    }
+
+    TEST_CASE(lookup_resolves_relative_file_against_entry_directory) {
+        namespace fs = std::filesystem;
+
+        auto project_dir = (fs::temp_directory_path() / "clore_test_compdb_relative").lexically_normal();
+        auto source_path = (project_dir / "src" / "main.cpp").lexically_normal();
+
+        CompilationDatabase db;
+        db.entries.push_back(CompileEntry{
+            .file = "src/main.cpp",
+            .directory = project_dir.generic_string(),
+            .arguments = {"clang++", "-c", "src/main.cpp"},
+        });
+
+        auto results = lookup(db, source_path.generic_string());
+        ASSERT_EQ(results.size(), 1u);
+        EXPECT_EQ(results.front()->file, "src/main.cpp");
+        EXPECT_EQ(results.front()->directory, project_dir.generic_string());
     }
 };
