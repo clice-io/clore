@@ -364,4 +364,65 @@ TEST_SUITE(generate) {
         EXPECT_NE(partition_prompt_it->prompt.find("## Module: `demo.math:detail`"),
                   std::string::npos);
     }
+
+    TEST_CASE(build_module_graph_does_not_create_partition_main_cycle) {
+        ScopedTempDir temp("build_module_cycle");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_config(temp.path);
+
+        extract::ProjectModel model;
+        model.uses_modules = true;
+
+        auto main_file = (temp.path / "src" / "math.cppm").generic_string();
+        auto partition_file = (temp.path / "src" / "math.detail.cppm").generic_string();
+
+        auto api_symbol = make_symbol(21, "add", "demo::math::add", "int add(int lhs, int rhs)", main_file);
+        auto partition_symbol = make_symbol(22, "detail", "demo::math::detail", "int detail()", partition_file);
+
+        model.symbols.emplace(api_symbol.id, api_symbol);
+        model.symbols.emplace(partition_symbol.id, partition_symbol);
+
+        model.modules.emplace(
+            main_file,
+            extract::ModuleUnit{
+                .name = "demo.math",
+                .is_interface = true,
+                .source_file = main_file,
+                .imports = {"demo.math:detail"},
+                .symbols = {api_symbol.id},
+            });
+        model.modules.emplace(
+            partition_file,
+            extract::ModuleUnit{
+                .name = "demo.math:detail",
+                .is_interface = true,
+                .source_file = partition_file,
+                .imports = {},
+                .symbols = {partition_symbol.id},
+            });
+
+        auto graph = build_page_graph(config, model);
+
+        ASSERT_TRUE(graph.nodes.contains("demo.math/index.md"));
+        ASSERT_TRUE(graph.nodes.contains("demo.math/detail.md"));
+
+        auto& main_node = graph.nodes.at("demo.math/index.md");
+        auto& partition_node = graph.nodes.at("demo.math/detail.md");
+
+        EXPECT_EQ(std::count(main_node.depends_on.begin(), main_node.depends_on.end(),
+                             "demo.math/detail.md"),
+                  1);
+        EXPECT_EQ(std::count(partition_node.depends_on.begin(), partition_node.depends_on.end(),
+                             "demo.math/index.md"),
+                  0);
+
+        auto pos_main = std::find(graph.generation_order.begin(), graph.generation_order.end(),
+                                  "demo.math/index.md");
+        auto pos_partition = std::find(graph.generation_order.begin(), graph.generation_order.end(),
+                                       "demo.math/detail.md");
+        ASSERT_TRUE(pos_main != graph.generation_order.end());
+        ASSERT_TRUE(pos_partition != graph.generation_order.end());
+        EXPECT_LT(pos_partition, pos_main);
+    }
 };

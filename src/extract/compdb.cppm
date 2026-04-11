@@ -96,7 +96,7 @@ auto lookup(const CompilationDatabase& db, std::string_view file)
     auto target = fs::path(file).lexically_normal();
 
     for(auto& entry : db.entries) {
-        auto entry_path = fs::path(entry.file).lexically_normal();
+        auto entry_path = (fs::path(entry.directory) / entry.file).lexically_normal();
         if(entry_path == target) {
             results.push_back(&entry);
         }

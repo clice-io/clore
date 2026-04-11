@@ -414,12 +414,6 @@ auto build_module_page_graph(const config::TaskConfig& config,
             }
         }
 
-        if(auto colon_pos = mod_name.find(':'); colon_pos != std::string::npos) {
-            auto main_name = mod_name.substr(0, colon_pos);
-            if(auto main_it = mod_to_page.find(main_name); main_it != mod_to_page.end()) {
-                add_page_dependency(graph, page_a, main_it->second);
-            }
-        }
     }
 
     // Call graph edges between module pages
