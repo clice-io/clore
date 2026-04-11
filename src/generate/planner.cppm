@@ -74,6 +74,7 @@ auto is_type_kind(extract::SymbolKind kind) -> bool {
         case extract::SymbolKind::Union:
         case extract::SymbolKind::Concept:
         case extract::SymbolKind::Template:
+        case extract::SymbolKind::TypeAlias:
             return true;
         default:
             return false;
