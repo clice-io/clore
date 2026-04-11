@@ -6,7 +6,7 @@ module;
 #include <unordered_map>
 #include <vector>
 
-export module clore.extract:model;
+export module extract:model;
 
 import :symbol;
 

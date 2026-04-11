@@ -4,7 +4,7 @@
 #include <optional>
 #include <string>
 
-import clore.generate;
+import generate;
 
 using namespace clore::generate;
 

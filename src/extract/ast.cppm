@@ -21,13 +21,13 @@ module;
 #include "clang/Index/USRGeneration.h"
 #include "llvm/Support/Error.h"
 
-export module clore.extract:ast;
+export module extract:ast;
 
 import :compdb;
 import :model;
 import :symbol;
 import :tooling;
-import clore.support;
+import support;
 
 export namespace clore::extract {
 

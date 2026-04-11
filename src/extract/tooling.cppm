@@ -8,7 +8,7 @@ module;
 #include "clang/Frontend/Utils.h"
 #include "llvm/Support/VirtualFileSystem.h"
 
-export module clore.extract:tooling;
+export module extract:tooling;
 
 import :compdb;
 

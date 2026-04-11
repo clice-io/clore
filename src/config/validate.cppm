@@ -5,7 +5,7 @@ module;
 #include <format>
 #include <string>
 
-export module clore.config:validate;
+export module config:validate;
 
 import :schema;
 

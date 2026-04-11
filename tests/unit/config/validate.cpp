@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <fstream>
 
-import clore.config;
+import config;
 
 using namespace clore::config;
 

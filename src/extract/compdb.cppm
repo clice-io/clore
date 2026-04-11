@@ -12,9 +12,9 @@ module;
 #include "clang/Tooling/JSONCompilationDatabase.h"
 #include "llvm/Support/MemoryBuffer.h"
 
-export module clore.extract:compdb;
+export module extract:compdb;
 
-import clore.support;
+import support;
 
 export namespace clore::extract {
 

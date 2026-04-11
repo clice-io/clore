@@ -16,13 +16,13 @@ module;
 #include <unordered_set>
 #include <vector>
 
-export module clore.generate;
+export module generate;
 
 export import :llm;
 
-import clore.config;
-import clore.extract;
-import clore.support;
+import config;
+import extract;
+import support;
 
 export namespace clore::generate {
 

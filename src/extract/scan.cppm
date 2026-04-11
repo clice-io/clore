@@ -20,11 +20,11 @@ module;
 #include "clang/Lex/Preprocessor.h"
 #include "llvm/Support/Error.h"
 
-export module clore.extract:scan;
+export module extract:scan;
 
 import :compdb;
 import :tooling;
-import clore.support;
+import support;
 
 export namespace clore::extract {
 

@@ -6,7 +6,7 @@ module;
 #include <string>
 #include <string_view>
 
-export module clore.extract:symbol;
+export module extract:symbol;
 
 export namespace clore::extract {
 

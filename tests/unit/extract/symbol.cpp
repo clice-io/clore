@@ -1,6 +1,6 @@
 #include "eventide/zest/zest.h"
 
-import clore.extract;
+import extract;
 
 using namespace clore::extract;
 

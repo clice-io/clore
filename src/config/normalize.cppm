@@ -6,7 +6,7 @@ module;
 #include <optional>
 #include <string>
 
-export module clore.config:normalize;
+export module config:normalize;
 
 import :schema;
 

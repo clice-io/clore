@@ -2,7 +2,7 @@
 
 #include <string>
 
-import clore.extract;
+import extract;
 
 using namespace clore::extract;
 
@@ -88,17 +88,17 @@ TEST_SUITE(scan) {
         ScanResult result;
 
         scan_module_decl(R"(
-export module clore.extract:scan;
+export module extract:scan;
 import :tooling;
 import :tooling;
-import clore.support;
+import support;
 )",
                          result);
 
-        EXPECT_EQ(result.module_name, "clore.extract:scan");
+        EXPECT_EQ(result.module_name, "extract:scan");
         EXPECT_TRUE(result.is_interface_unit);
         ASSERT_EQ(result.module_imports.size(), 2u);
-        EXPECT_EQ(result.module_imports[0], "clore.extract:tooling");
-        EXPECT_EQ(result.module_imports[1], "clore.support");
+        EXPECT_EQ(result.module_imports[0], "extract:tooling");
+        EXPECT_EQ(result.module_imports[1], "support");
     }
 };

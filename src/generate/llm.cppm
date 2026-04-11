@@ -18,9 +18,9 @@ module;
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/Program.h"
 
-export module clore.generate:llm;
+export module generate:llm;
 
-import clore.support;
+import support;
 
 export namespace clore::generate {
 

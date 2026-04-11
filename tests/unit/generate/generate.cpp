@@ -9,9 +9,9 @@
 #include <sstream>
 #include <string>
 
-import clore.config;
-import clore.extract;
-import clore.generate;
+import config;
+import extract;
+import generate;
 
 using namespace clore;
 using namespace clore::generate;

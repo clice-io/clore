@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <fstream>
 
-import clore.extract;
+import extract;
 
 using namespace clore::extract;
 

@@ -8,9 +8,9 @@
 
 #include "extract/compdb_test_utils.h"
 
-import clore.config;
-import clore.extract;
-import clore.generate;
+import config;
+import extract;
+import generate;
 
 using namespace clore;
 

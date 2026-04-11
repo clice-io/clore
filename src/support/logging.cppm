@@ -10,7 +10,7 @@ module;
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 
-export module clore.support;
+export module support;
 
 export namespace clore::logging {
 

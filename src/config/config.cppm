@@ -1,4 +1,4 @@
-export module clore.config;
+export module config;
 
 export import :schema;
 export import :load;

@@ -5,7 +5,7 @@ module;
 #include <string>
 #include <vector>
 
-export module clore.config:schema;
+export module config:schema;
 
 export namespace clore::config {
 

@@ -11,7 +11,7 @@ module;
 #include <unordered_map>
 #include <vector>
 
-export module clore.extract;
+export module extract;
 
 export import :symbol;
 export import :model;
@@ -20,8 +20,8 @@ export import :scan;
 export import :tooling;
 export import :ast;
 
-import clore.config;
-import clore.support;
+import config;
+import support;
 
 export namespace clore::extract {
 

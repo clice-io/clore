@@ -8,10 +8,10 @@
 #include "eventide/deco/deco.h"
 #include "spdlog/spdlog.h"
 
-import clore.config;
-import clore.extract;
-import clore.generate;
-import clore.support;
+import config;
+import extract;
+import generate;
+import support;
 
 namespace clore {
 

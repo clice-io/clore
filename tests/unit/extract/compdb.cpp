@@ -5,7 +5,7 @@
 
 #include "extract/compdb_test_utils.h"
 
-import clore.extract;
+import extract;
 
 using namespace clore::extract;
 

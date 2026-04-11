@@ -11,10 +11,10 @@ module;
 #include "eventide/serde/toml/toml.h"
 #include <toml++/toml.hpp>
 
-export module clore.config:load;
+export module config:load;
 
 import :schema;
-import clore.support;
+import support;
 
 export namespace clore::config {
 
