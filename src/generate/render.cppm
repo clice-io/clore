@@ -514,7 +514,8 @@ auto render_deterministic_block(std::string_view block_name,
 auto assemble_page(const std::string& page_template,
                    const std::string& title,
                    const std::unordered_map<std::string, std::string>& blocks,
-                   const std::unordered_map<std::string, std::string>& slots)
+                   const std::unordered_map<std::string, std::string>& slots,
+                   bool fail_on_empty_section = false)
     -> std::expected<std::string, RenderError> {
 
     std::string result;
@@ -561,7 +562,7 @@ auto assemble_page(const std::string& page_template,
         pos = marker_end + 2;
     }
 
-    // Post-process: strip empty sections (heading followed by only whitespace then another heading or EOF)
+    // Post-process empty sections: either fail or strip them, depending on configuration.
     std::string cleaned;
     cleaned.reserve(result.size());
     std::istringstream stream(result);
@@ -580,10 +581,15 @@ auto assemble_page(const std::string& page_template,
             while(j < lines.size() && lines[j].empty()) {
                 ++j;
             }
-            // If next non-blank line is another heading or we're at EOF, skip this section
+            // If next non-blank line is another heading or we're at EOF, this section is empty.
             if(j >= lines.size() ||
                lines[j].starts_with("# ") || lines[j].starts_with("## ") || lines[j].starts_with("### ")) {
-                i = j;  // skip the empty section heading + blank lines
+                if(fail_on_empty_section) {
+                    return std::unexpected(RenderError{
+                        std::format("empty section detected: {}", lines[i])
+                    });
+                }
+                i = j;  // strip the empty section heading + blank lines
                 continue;
             }
         }
