@@ -359,7 +359,6 @@ auto enumerate_file_pages(PlanBuilder& builder) -> std::expected<void, PlanError
     auto source_root = fs::path(builder.config.project_root).lexically_normal();
 
     for(auto& [file_path, file_info] : builder.model.files) {
-        if(file_info.symbols.empty()) continue;
         // Only files that have symbols or module declarations
         bool has_module = builder.model.modules.contains(file_path);
         if(file_info.symbols.empty() && !has_module) continue;
