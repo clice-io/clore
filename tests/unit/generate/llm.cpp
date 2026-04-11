@@ -4,7 +4,7 @@
 #include <optional>
 #include <string>
 
-#include "generate/llm.h"
+import clore.generate;
 
 using namespace clore::generate;
 

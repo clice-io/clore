@@ -1,4 +1,4 @@
-#include "extract/extract.h"
+module;
 
 #include <algorithm>
 #include <chrono>
@@ -6,27 +6,43 @@
 #include <filesystem>
 #include <format>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <unordered_map>
+#include <vector>
 
-#include "extract/ast.h"
-#include "extract/compdb.h"
-#include "extract/scan.h"
-#include "support/logging.h"
+export module clore.extract;
+
+export import :symbol;
+export import :model;
+export import :compdb;
+export import :scan;
+export import :tooling;
+export import :ast;
+
+import clore.config;
+import clore.support;
+
+export namespace clore::extract {
+
+struct ExtractError {
+    std::string message;
+};
+
+auto extract_project(const config::TaskConfig& config)
+    -> std::expected<ProjectModel, ExtractError>;
+
+}  // namespace clore::extract
+
+// ── implementation ──────────────────────────────────────────────────
 
 namespace clore::extract {
 
 namespace {
 
-/// Returns true if `relative` matches the configured pattern.
-///
-/// Patterns are interpreted as *workspace-relative path prefixes* (with forward
-/// slashes), not as arbitrary substrings. This prevents accidental matches like
-/// "src/" matching "build/_deps/.../src/...".
 bool path_prefix_matches(std::string_view relative, std::string_view pattern) {
     if(pattern.empty()) return false;
 
-    // If the pattern contains a path separator, treat it as an explicit prefix.
-    // Otherwise treat it as a top-level directory name.
     if(pattern.find('/') != std::string_view::npos) {
         return relative.starts_with(pattern);
     }
@@ -71,11 +87,6 @@ auto resolve_path_under_directory(const std::string& path,
     return p.lexically_normal();
 }
 
-/// Returns true if `file` should be processed according to `filter`.
-///
-/// Security: rejects any path whose fs::relative result contains a ".."
-/// component, which would mean `file` escapes `filter_root` and could be
-/// used to bypass the expected-path boundary.
 bool matches_filter(const std::string& file, const config::FilterRule& filter,
                     const std::filesystem::path& filter_root) {
     namespace fs = std::filesystem;
@@ -86,9 +97,8 @@ bool matches_filter(const std::string& file, const config::FilterRule& filter,
     auto rel_opt = project_relative_path(file_path, root_path);
     if(!rel_opt.has_value()) return false;
 
-    auto relative_str = rel_opt->generic_string();  // forward slashes
+    auto relative_str = rel_opt->generic_string();
 
-    // File must match at least one include pattern (if any are specified).
     if(!filter.include.empty()) {
         bool matched = false;
         for(auto& pattern : filter.include) {
@@ -100,7 +110,6 @@ bool matches_filter(const std::string& file, const config::FilterRule& filter,
         if(!matched) return false;
     }
 
-    // File must not match any exclude pattern.
     for(auto& pattern : filter.exclude) {
         if(path_prefix_matches(relative_str, pattern)) {
             return false;
@@ -276,6 +285,29 @@ auto rebuild_model_indexes(const config::TaskConfig& config, ProjectModel& model
     }
 }
 
+/// Populate module information from scan cache into the project model.
+auto build_module_info(ProjectModel& model, const ScanCache& scan_cache) -> void {
+    for(auto& [file_path, scan_result] : scan_cache) {
+        if(scan_result.module_name.empty()) continue;
+
+        model.uses_modules = true;
+
+        auto& mod_unit = model.modules[scan_result.module_name];
+        mod_unit.name = scan_result.module_name;
+        mod_unit.is_interface = scan_result.is_interface_unit;
+        mod_unit.source_file = file_path;
+        mod_unit.imports = scan_result.module_imports;
+
+        // Associate symbols from that file to this module unit
+        namespace fs = std::filesystem;
+        auto generic_path = fs::path(file_path).generic_string();
+        auto file_it = model.files.find(generic_path);
+        if(file_it != model.files.end()) {
+            mod_unit.symbols = file_it->second.symbols;
+        }
+    }
+}
+
 }  // namespace
 
 auto extract_project(const config::TaskConfig& config)
@@ -294,9 +326,7 @@ auto extract_project(const config::TaskConfig& config)
     auto dt_load = std::chrono::duration_cast<Ms>(Clock::now() - t0);
     logging::info("loaded {} compile entries ({}ms)", db.entries.size(), dt_load.count());
 
-    // 1b. Pre-filter entries so the dependency graph and symbol extraction
-    //     only process files that pass the user's include/exclude rules.
-    //     This avoids expensive preprocessor and AST work on irrelevant files.
+    // 1b. Pre-filter entries
     CompilationDatabase filtered_db;
     auto filter_root = filter_root_path(config);
     for(auto& entry : db.entries) {
@@ -305,7 +335,7 @@ auto extract_project(const config::TaskConfig& config)
         if(!abs_path.has_value()) {
             return std::unexpected(std::move(abs_path.error()));
         }
-        entry_copy.file = abs_path->string();  // keep OS-native separators for clang
+        entry_copy.file = abs_path->string();
 
         if(matches_filter(entry_copy.file, config.filter, filter_root)) {
             filtered_db.entries.push_back(std::move(entry_copy));
@@ -315,9 +345,7 @@ auto extract_project(const config::TaskConfig& config)
     logging::info("filter: {} entries pass, {} skipped",
                   filtered_db.entries.size(), skipped);
 
-    // 2. Build dependency graph and get topological order.
-    //    build_dependency_graph now also populates a ScanCache so we can reuse
-    //    the per-file scan results later without re-running the preprocessor.
+    // 2. Build dependency graph + ScanCache
     auto t1 = Clock::now();
     auto dep_result = build_dependency_graph(filtered_db);
     if(!dep_result.has_value()) {
@@ -338,7 +366,7 @@ auto extract_project(const config::TaskConfig& config)
     logging::info("dependency graph: {} files, {} edges ({}ms)",
                   dep_graph.files.size(), dep_graph.edges.size(), dt_graph.count());
 
-    // 3. Extract symbols for each file, reusing cached scan results.
+    // 3. Extract symbols for each file
     auto t2 = Clock::now();
     ProjectModel model;
     model.file_order = std::move(*order_result);
@@ -352,7 +380,6 @@ auto extract_project(const config::TaskConfig& config)
         logging::info("extracting {}/{}: {}", idx + 1, total_entries, normalized);
         auto t_file = Clock::now();
 
-        // Extract symbols and relations -- fail fast on any error
         auto t_ast = Clock::now();
         auto ast_result = extract_symbols(entry, *config.extract.max_snippet_bytes);
         if(!ast_result.has_value()) {
@@ -364,9 +391,6 @@ auto extract_project(const config::TaskConfig& config)
         logging::info("  ast: {} symbols, {} relations ({}ms)",
                       ast_result->symbols.size(), ast_result->relations.size(), dt_ast.count());
 
-        // Look up includes from the scan cache instead of re-running the
-        // preprocessor.  The key must use the OS-native normalized form that
-        // build_dependency_graph stored (lexically_normal().string()).
         auto cache_key = fs::path(entry.file).lexically_normal().string();
         auto cache_it = scan_cache.find(cache_key);
 
@@ -376,9 +400,6 @@ auto extract_project(const config::TaskConfig& config)
 
         if(cache_it != scan_cache.end()) {
             for(auto& inc : cache_it->second.includes) {
-                // Keep include edges only within the configured project filter;
-                // external headers (deps, system headers) should not affect the
-                // project page graph.
                 namespace fs = std::filesystem;
                 auto inc_path = fs::path(inc.path);
                 if(inc_path.is_relative()) {
@@ -391,8 +412,6 @@ auto extract_project(const config::TaskConfig& config)
                 }
             }
         } else {
-            // Fallback: scan if the file somehow wasn't in the cache (should
-            // not happen for entries from the compilation database).
             logging::warn("scan cache miss for {}, re-scanning", entry.file);
             auto scan_result = scan_file(entry);
             if(!scan_result.has_value()) {
@@ -414,12 +433,8 @@ auto extract_project(const config::TaskConfig& config)
             }
         }
 
-        // Process extracted symbols
         std::size_t symbols_kept = 0;
         for(auto& sym : ast_result->symbols) {
-            // Filter symbols by their declared source file so dependency code
-            // (e.g. FetchContent sources under build/_deps) does not end up in
-            // the project model or generated docs.
             namespace fs = std::filesystem;
             auto decl_file = fs::path(sym.declaration_location.file);
             if(decl_file.is_relative()) {
@@ -454,7 +469,6 @@ auto extract_project(const config::TaskConfig& config)
             }
         }
 
-        // Wire forward call/reference edges onto SymbolInfo.
         for(auto& rel : ast_result->relations) {
             auto from_it = model.symbols.find(rel.from);
             if(from_it == model.symbols.end()) continue;
@@ -472,9 +486,7 @@ auto extract_project(const config::TaskConfig& config)
 
     rebuild_model_indexes(config, model);
 
-    // 4. Build reverse edges (called_by / referenced_by).
-    //    Forward edges (calls / references) were written above; now iterate
-    //    all symbols and populate the reverse direction.
+    // 4. Build reverse edges
     auto t3 = Clock::now();
     logging::info("building reverse edges for {} symbols...", model.symbols.size());
     for(auto& [id, sym] : model.symbols) {
@@ -494,7 +506,16 @@ auto extract_project(const config::TaskConfig& config)
     auto dt_reverse = std::chrono::duration_cast<Ms>(Clock::now() - t3);
     logging::info("reverse edges done ({}ms)", dt_reverse.count());
 
-    // Count total relation edges for logging.
+    // 5. Build module information from scan results
+    build_module_info(model, scan_cache);
+    if(model.uses_modules) {
+        logging::info("detected {} module units", model.modules.size());
+        for(auto& [name, mod] : model.modules) {
+            logging::info("  module '{}' (interface={}) from {}",
+                          name, mod.is_interface, mod.source_file);
+        }
+    }
+
     std::size_t total_calls = 0, total_refs = 0;
     for(auto& [id, sym] : model.symbols) {
         total_calls += sym.calls.size();

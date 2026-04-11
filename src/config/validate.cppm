@@ -1,14 +1,31 @@
-#include "config/validate.h"
+module;
 
+#include <expected>
 #include <filesystem>
 #include <format>
+#include <string>
+
+export module clore.config:validate;
+
+import :schema;
+
+export namespace clore::config {
+
+struct ValidationError {
+    std::string message;
+};
+
+auto validate(const TaskConfig& config) -> std::expected<void, ValidationError>;
+
+}  // namespace clore::config
+
+// ── implementation ──────────────────────────────────────────────────
 
 namespace clore::config {
 
 auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> {
     namespace fs = std::filesystem;
 
-    // compile_commands_path: required, must exist, must be a regular file
     if(config.compile_commands_path.empty()) {
         return std::unexpected(ValidationError{
             .message = "compile_commands_path is required"});
@@ -24,7 +41,6 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
                                    config.compile_commands_path)});
     }
 
-    // project_root: required, must exist, must be a directory
     if(config.project_root.empty()) {
         return std::unexpected(ValidationError{
             .message = "project_root is required"});
@@ -38,8 +54,6 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
             .message = std::format("project_root is not a directory: {}", config.project_root)});
     }
 
-    // output_root: required. If it already exists it must be a directory; it is not
-    // created here — the caller is responsible for creating it before extraction.
     if(config.output_root.empty()) {
         return std::unexpected(ValidationError{
             .message = "output_root is required"});

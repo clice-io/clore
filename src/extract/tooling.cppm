@@ -1,13 +1,26 @@
-#include "extract/tooling.h"
+module;
 
 #include <memory>
 
 #include "clang/Basic/DiagnosticOptions.h"
+#include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Frontend/Utils.h"
 #include "llvm/Support/VirtualFileSystem.h"
 
-#include "extract/scan.h"
+export module clore.extract:tooling;
+
+import :compdb;
+
+export namespace clore::extract {
+
+auto create_compiler_instance(const CompileEntry& entry,
+                              bool suppress_diagnostics = true)
+    -> std::unique_ptr<clang::CompilerInstance>;
+
+}  // namespace clore::extract
+
+// ── implementation ──────────────────────────────────────────────────
 
 namespace clore::extract {
 

@@ -5,12 +5,11 @@
 #include <format>
 #include <fstream>
 
-#include "config/config.h"
-#include "extract/compdb.h"
-#include "extract/extract.h"
-#include "extract/scan.h"
 #include "extract/compdb_test_utils.h"
-#include "generate/generate.h"
+
+import clore.config;
+import clore.extract;
+import clore.generate;
 
 using namespace clore;
 

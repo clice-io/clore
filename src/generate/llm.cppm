@@ -1,21 +1,46 @@
-#include "generate/llm.h"
+module;
 
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 #include "llvm/Support/JSON.h"
-
-#include "support/logging.h"
 
 #ifdef _WIN32
 #define popen _popen
 #define pclose _pclose
 #endif
+
+export module clore.generate:llm;
+
+import clore.support;
+
+export namespace clore::generate {
+
+struct LLMError {
+    std::string message;
+};
+
+namespace detail {
+
+auto build_request_json(std::string_view model, std::string_view prompt) -> std::string;
+
+auto parse_response(std::string_view json) -> std::expected<std::string, LLMError>;
+
+}  // namespace detail
+
+auto call_llm(std::string_view model, std::string_view prompt)
+    -> std::expected<std::string, LLMError>;
+
+}  // namespace clore::generate
+
+// ── implementation ──────────────────────────────────────────────────
 
 namespace clore::generate {
 
@@ -66,6 +91,15 @@ auto escape_json_string(std::string_view s) -> std::string {
     return out;
 }
 
+auto read_pipe(FILE* pipe) -> std::string {
+    std::string result;
+    char buf[4096];
+    while(auto n = std::fread(buf, 1, sizeof(buf), pipe)) {
+        result.append(buf, n);
+    }
+    return result;
+}
+
 }  // namespace
 
 namespace detail {
@@ -96,7 +130,6 @@ auto parse_response(std::string_view json) -> std::expected<std::string, LLMErro
         return std::unexpected(LLMError{.message = "LLM response is not a JSON object"});
     }
 
-    // Check for API error
     if(auto* error = root->getObject("error")) {
         auto msg = error->getString("message").value_or("unknown error");
         return std::unexpected(LLMError{
@@ -128,19 +161,6 @@ auto parse_response(std::string_view json) -> std::expected<std::string, LLMErro
 
 }  // namespace detail
 
-namespace {
-
-auto read_pipe(FILE* pipe) -> std::string {
-    std::string result;
-    char buf[4096];
-    while(auto n = std::fread(buf, 1, sizeof(buf), pipe)) {
-        result.append(buf, n);
-    }
-    return result;
-}
-
-}  // namespace
-
 auto call_llm(std::string_view model, std::string_view prompt)
     -> std::expected<std::string, LLMError> {
     namespace fs = std::filesystem;
@@ -161,7 +181,6 @@ auto call_llm(std::string_view model, std::string_view prompt)
 
     auto url = build_chat_completions_url(*api_base_result);
 
-    // Write request body to temp file (avoids shell escaping issues)
     auto body_path = fs::temp_directory_path() / "clore_llm_request.json";
     {
         std::ofstream f(body_path);
@@ -173,7 +192,6 @@ auto call_llm(std::string_view model, std::string_view prompt)
         f << body;
     }
 
-    // Build curl command
     auto cmd = std::format(
         "curl -s -X POST \"{}\" "
         "-H \"Content-Type: application/json\" "
@@ -199,7 +217,7 @@ auto call_llm(std::string_view model, std::string_view prompt)
     }
 
     if(response.empty()) {
-        return std::unexpected(LLMError{.message = "empty response from LLM API"});
+        return std::unexpected(LLMError{.message = "empty response from LLM"});
     }
 
     return detail::parse_response(response);

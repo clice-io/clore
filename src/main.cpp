@@ -6,11 +6,12 @@
 #include <string>
 
 #include "eventide/deco/deco.h"
+#include "spdlog/spdlog.h"
 
-#include "config/config.h"
-#include "extract/extract.h"
-#include "generate/generate.h"
-#include "support/logging.h"
+import clore.config;
+import clore.extract;
+import clore.generate;
+import clore.support;
 
 namespace clore {
 

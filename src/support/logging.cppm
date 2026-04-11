@@ -1,14 +1,17 @@
-#pragma once
+module;
 
 #include <cstdint>
 #include <format>
 #include <optional>
+#include <string>
 #include <string_view>
 
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 
-namespace clore::logging {
+export module clore.support;
+
+export namespace clore::logging {
 
 struct Options {
     /// No built-in default — caller must set this explicitly before logging.
@@ -18,8 +21,6 @@ struct Options {
 inline Options options;
 
 inline void log(spdlog::level::level_enum lvl, std::string_view msg) {
-    // When no level filter is set, pass every message through to the underlying
-    // spdlog logger which applies its own level filter.
     if(options.level.has_value() && lvl < *options.level) {
         return;
     }
@@ -70,22 +71,3 @@ inline void stderr_logger(std::string_view name) {
 }
 
 }  // namespace clore::logging
-
-#define LOG_MESSAGE(name, fmt, ...)                                                                \
-    do {                                                                                           \
-        clore::logging::name(fmt __VA_OPT__(, ) __VA_ARGS__);                                      \
-    } while(0)
-
-#define LOG_TRACE(fmt, ...) LOG_MESSAGE(trace, fmt, __VA_ARGS__)
-#define LOG_DEBUG(fmt, ...) LOG_MESSAGE(debug, fmt, __VA_ARGS__)
-#define LOG_INFO(fmt, ...) LOG_MESSAGE(info, fmt, __VA_ARGS__)
-#define LOG_WARN(fmt, ...) LOG_MESSAGE(warn, fmt, __VA_ARGS__)
-#define LOG_ERROR(fmt, ...) LOG_MESSAGE(err, fmt, __VA_ARGS__)
-
-#define LOG_MESSAGE_RET(ret, name, fmt, ...)                                                       \
-    do {                                                                                           \
-        LOG_MESSAGE(name, fmt, __VA_ARGS__);                                                       \
-        return ret;                                                                                \
-    } while(0);
-
-#define LOG_ERROR_RET(ret, fmt, ...) LOG_MESSAGE_RET(ret, err, fmt, __VA_ARGS__)

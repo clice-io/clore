@@ -1,11 +1,13 @@
-#pragma once
+module;
 
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
-namespace clore::config {
+export module clore.config:schema;
+
+export namespace clore::config {
 
 struct FrontmatterField {
     std::string key;

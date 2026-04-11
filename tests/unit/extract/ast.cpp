@@ -3,8 +3,7 @@
 #include <filesystem>
 #include <fstream>
 
-#include "extract/ast.h"
-#include "extract/compdb.h"
+import clore.extract;
 
 using namespace clore::extract;
 

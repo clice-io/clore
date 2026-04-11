@@ -7,7 +7,9 @@
 #include <sstream>
 #include <string>
 
-#include "generate/generate.h"
+import clore.config;
+import clore.extract;
+import clore.generate;
 
 using namespace clore;
 using namespace clore::generate;

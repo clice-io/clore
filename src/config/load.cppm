@@ -1,12 +1,34 @@
-#include "config/load.h"
+module;
 
+#include <expected>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <sstream>
+#include <string>
+#include <string_view>
 
 #include "eventide/serde/toml/toml.h"
 #include <toml++/toml.hpp>
-#include "support/logging.h"
+
+export module clore.config:load;
+
+import :schema;
+import clore.support;
+
+export namespace clore::config {
+
+struct ConfigError {
+    std::string message;
+};
+
+auto load_config(std::string_view path) -> std::expected<TaskConfig, ConfigError>;
+
+auto load_config_from_string(std::string_view toml_content) -> std::expected<TaskConfig, ConfigError>;
+
+}  // namespace clore::config
+
+// ── implementation ──────────────────────────────────────────────────
 
 namespace clore::config {
 
