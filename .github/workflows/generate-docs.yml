@@ -8,7 +8,7 @@ on:
 
 jobs:
   generate:
-    runs-on: windows-2025
+    runs-on: windows-latest
     permissions:
       contents: write
 
@@ -32,11 +32,41 @@ jobs:
           restore-keys: |
             Windows-sccache-
 
+      - name: Restore configure artifacts cache
+        id: restore-configure-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            build/RelWithDebInfo/.llvm
+            build/RelWithDebInfo/include
+            build/RelWithDebInfo/_deps
+            build/RelWithDebInfo/*.tar.*
+          key: >-
+            Windows-configure-RelWithDebInfo-${{
+            hashFiles('pixi.lock', 'pixi.toml', '**/CMakeLists.txt', 'cmake/**/*.cmake')
+            }}-${{ github.sha }}
+          restore-keys: |
+            Windows-configure-RelWithDebInfo-${{ hashFiles('pixi.lock', 'pixi.toml', '**/CMakeLists.txt', 'cmake/**/*.cmake') }}-
+
       - name: Start sccache
         run: sccache --start-server
 
+      - name: Configure
+        run: pixi run cmake-config
+
+      - name: Save configure artifacts cache
+        if: success()
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            build/RelWithDebInfo/.llvm
+            build/RelWithDebInfo/include
+            build/RelWithDebInfo/_deps
+            build/RelWithDebInfo/*.tar.*
+          key: ${{ steps.restore-configure-cache.outputs.cache-primary-key }}
+
       - name: Build
-        run: pixi run build
+        run: pixi run cmake-build
 
       - name: Generate documentation
         run: |

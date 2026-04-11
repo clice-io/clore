@@ -61,7 +61,7 @@ cmake -B build/{{ type }} -G Ninja \
 
 [feature.build.tasks.cmake-build]
 args = [{ arg = "type", default = "RelWithDebInfo" }]
-cmd = "cmake --build build/{{ type }}"
+cmd = "cmake --build build/{{ type }} --parallel"
 
 [feature.build.tasks.build]
 args = [{ arg = "type", default = "RelWithDebInfo" }]
