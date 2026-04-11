@@ -368,6 +368,7 @@ TEST_SUITE(generate) {
 
         auto beta_file = (temp.path / "src" / "beta.cppm").generic_string();
         auto alpha_file = (temp.path / "src" / "alpha.cppm").generic_string();
+        auto gamma_file = (temp.path / "src" / "gamma.cppm").generic_string();
 
         model.modules.emplace(
             beta_file,
@@ -385,13 +386,22 @@ TEST_SUITE(generate) {
                 .source_file = alpha_file,
                 .imports = {"demo.beta"},
             });
+        model.modules.emplace(
+            gamma_file,
+            extract::ModuleUnit{
+                .name = "demo.gamma",
+                .is_interface = true,
+                .source_file = gamma_file,
+                .imports = {"demo.beta"},
+            });
 
         auto result = build_page_plan_set(config, model);
 
         ASSERT_TRUE(result.has_value());
-        ASSERT_EQ(result->generation_order.size(), 2u);
+        ASSERT_EQ(result->generation_order.size(), 3u);
         EXPECT_EQ(result->generation_order[0], "module:demo.alpha");
         EXPECT_EQ(result->generation_order[1], "module:demo.beta");
+        EXPECT_EQ(result->generation_order[2], "module:demo.gamma");
     }
 
     TEST_CASE(render_deterministic_block_relativizes_related_page_links) {
