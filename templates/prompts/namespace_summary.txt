@@ -1,0 +1,22 @@
+Write a Summary for the namespace `{{target_name}}`.
+
+Output:
+- Markdown fragment only
+- 1 to 2 short paragraphs
+- No heading
+- No YAML
+
+Must explain:
+- what this namespace groups together
+- the role it plays in the project architecture
+- its relationship to sibling and parent namespaces
+
+Must not repeat:
+- type lists
+- function lists
+- source locations
+
+Use only the EVIDENCE section below.
+If evidence is insufficient, explicitly explain what key evidence is missing.
+
+{{evidence}}

@@ -152,6 +152,59 @@ void deduplicate(std::vector<T>& values) {
     values.erase(std::unique(values.begin(), values.end()), values.end());
 }
 
+auto ensure_namespace_hierarchy(ProjectModel& model, std::string_view namespace_name)
+    -> std::string {
+    if(namespace_name.empty() ||
+       namespace_name.find("(anonymous namespace)") != std::string_view::npos) {
+        return {};
+    }
+
+    std::string parent_name;
+    std::size_t search_from = 0;
+    while(true) {
+        auto separator = namespace_name.find("::", search_from);
+        auto current_name = separator == std::string_view::npos
+                                ? std::string(namespace_name)
+                                : std::string(namespace_name.substr(0, separator));
+
+        auto& current_info = model.namespaces[current_name];
+        current_info.name = current_name;
+
+        if(!parent_name.empty()) {
+            auto& parent_info = model.namespaces[parent_name];
+            parent_info.name = parent_name;
+            append_unique(parent_info.children, current_name);
+        }
+
+        if(separator == std::string_view::npos) {
+            return current_name;
+        }
+
+        parent_name = std::move(current_name);
+        search_from = separator + 2;
+    }
+}
+
+auto find_enclosing_namespace(const ProjectModel& model, const SymbolInfo& sym) -> std::string {
+    auto parent_id = sym.parent;
+    while(parent_id.has_value()) {
+        auto parent_it = model.symbols.find(*parent_id);
+        if(parent_it == model.symbols.end()) {
+            break;
+        }
+        if(parent_it->second.kind == SymbolKind::Namespace) {
+            return parent_it->second.qualified_name;
+        }
+        parent_id = parent_it->second.parent;
+    }
+
+    auto ns_end = sym.qualified_name.rfind("::");
+    if(ns_end == std::string::npos) {
+        return {};
+    }
+    return sym.qualified_name.substr(0, ns_end);
+}
+
 auto merge_symbol_info(SymbolInfo& current, SymbolInfo&& incoming) -> void {
     const bool prefer_incoming_definition =
         incoming.definition_location.has_value() && !current.definition_location.has_value();
@@ -250,12 +303,16 @@ auto rebuild_model_indexes(const config::TaskConfig& config, ProjectModel& model
             append_unique(owner_file_info.symbols, symbol_id);
         }
 
-        auto ns_end = sym.qualified_name.rfind("::");
-        if(ns_end != std::string::npos) {
-            auto ns_name = sym.qualified_name.substr(0, ns_end);
-            auto& ns_info = model.namespaces[ns_name];
-            ns_info.name = ns_name;
-            append_unique(ns_info.symbols, symbol_id);
+        if(sym.kind == SymbolKind::Namespace) {
+            (void)ensure_namespace_hierarchy(model, sym.qualified_name);
+        } else {
+            auto ns_name = find_enclosing_namespace(model, sym);
+            auto canonical_ns_name = ensure_namespace_hierarchy(model, ns_name);
+            if(!canonical_ns_name.empty()) {
+                auto& ns_info = model.namespaces[canonical_ns_name];
+                ns_info.name = canonical_ns_name;
+                append_unique(ns_info.symbols, symbol_id);
+            }
         }
 
         if(sym.parent.has_value()) {
@@ -278,6 +335,7 @@ auto rebuild_model_indexes(const config::TaskConfig& config, ProjectModel& model
     }
     for(auto& [_, ns_info] : model.namespaces) {
         deduplicate(ns_info.symbols);
+        deduplicate(ns_info.children);
     }
     for(auto& [_, sym] : model.symbols) {
         deduplicate(sym.children);

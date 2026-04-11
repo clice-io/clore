@@ -1,0 +1,23 @@
+Write the Usage Notes section for the type page of {{target_kind}} `{{target_name}}`.
+
+Output:
+- Markdown fragment only
+- 1 to 3 short paragraphs
+- No heading
+- No YAML
+
+Must explain:
+- how this type is typically used by callers
+- common patterns or conventions observed in callers and references
+- any notable constraints, preconditions, or pitfalls inferred from evidence
+
+Must not repeat:
+- declaration text
+- member lists
+- source locations
+- code blocks unless the template explicitly allows
+
+Use only the EVIDENCE section below.
+If evidence is insufficient, explicitly explain what key evidence is missing.
+
+{{evidence}}

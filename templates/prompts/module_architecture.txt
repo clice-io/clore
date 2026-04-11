@@ -1,0 +1,22 @@
+Write an Internal Structure section for the C++20 module `{{target_name}}`.
+
+Output:
+- Markdown fragment only
+- 1 to 3 short paragraphs
+- No heading
+- No YAML
+
+Must explain:
+- how the module is organized internally (key types, partitions, layering)
+- the data flow or control flow among the module's primary components
+- design decisions or constraints that shape the module's architecture
+
+Must not repeat:
+- import lists
+- exported symbol lists
+- source locations
+
+Use only the EVIDENCE section below.
+If evidence is insufficient, explicitly explain what key evidence is missing.
+
+{{evidence}}

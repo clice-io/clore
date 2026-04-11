@@ -6,8 +6,10 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <ranges>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 
 import config;
 import extract;
@@ -48,7 +50,35 @@ auto make_config(const fs::path& project_root) -> config::TaskConfig {
     config.output_root = (project_root / "docs").generic_string();
     config.workspace_root = project_root.generic_string();
     config.extract.max_snippet_bytes = 1024;
-    config.language = "English";
+
+    config.page_types.index = false;
+    config.page_types.module_page = true;
+    config.page_types.namespace_page = true;
+    config.page_types.type_page = true;
+    config.page_types.file_page = true;
+
+    config.path_rules.index_path = "index.md";
+    config.path_rules.module_prefix = "modules";
+    config.path_rules.namespace_prefix = "namespaces";
+    config.path_rules.type_prefix = "types";
+    config.path_rules.file_prefix = "files";
+    config.path_rules.name_normalize = "lowercase";
+
+    config.evidence_rules.max_callers = 5;
+    config.evidence_rules.max_callees = 5;
+    config.evidence_rules.max_siblings = 8;
+    config.evidence_rules.max_source_bytes = 4096;
+    config.evidence_rules.max_related_summaries = 3;
+
+    config.llm.system_prompt = "You are a writer.";
+    config.llm.retry_count = 3;
+    config.llm.retry_initial_backoff_ms = 250;
+
+    config.validation.fail_on_empty_section = false;
+    config.validation.fail_on_h1_in_output = true;
+
+    config.navigation.consume_dependency_summaries = true;
+
     return config;
 }
 
@@ -99,136 +129,70 @@ auto make_symbol(std::uint64_t id, std::string_view name, std::string_view quali
     return symbol;
 }
 
+auto make_type_symbol(std::uint64_t id, std::string_view name,
+                      std::string_view qualified_name, const std::string& file,
+                      std::string_view doc_comment) -> extract::SymbolInfo {
+    extract::SymbolInfo symbol;
+    symbol.id = extract::SymbolID{.hash = id};
+    symbol.kind = extract::SymbolKind::Struct;
+    symbol.name = std::string(name);
+    symbol.qualified_name = std::string(qualified_name);
+    symbol.signature = std::format("struct {}", name);
+    symbol.doc_comment = std::string(doc_comment);
+    symbol.declaration_location = extract::SourceLocation{
+        .file = file,
+        .line = 1,
+        .column = 1,
+    };
+    return symbol;
+}
+
 }  // namespace
 
 TEST_SUITE(generate) {
-    TEST_CASE(build_prompts_builds_prompt_for_each_page) {
-        ScopedTempDir temp("build_prompts");
+    TEST_CASE(build_page_plan_set_creates_plans_for_files) {
+        ScopedTempDir temp("build_page_plan");
         fs::create_directories(temp.path / "src");
 
         auto config = make_config(temp.path);
         auto model = make_model(temp.path);
 
-        auto result = build_prompts(config, model);
+        auto result = build_page_plan_set(config, model);
 
         ASSERT_TRUE(result.has_value());
-        ASSERT_EQ(result->size(), 1u);
-        auto& prompt = result->front();
+        EXPECT_GE(result->plans.size(), 1u);
 
-        EXPECT_EQ(prompt.relative_path, "src/math.md");
-        EXPECT_EQ(prompt.title, "math");
-        EXPECT_NE(prompt.prompt.find("## File: `src/math.md`"), std::string::npos);
-        EXPECT_NE(prompt.prompt.find("#### function: `math::add`"), std::string::npos);
-        EXPECT_NE(prompt.prompt.find("int add(int lhs, int rhs)"), std::string::npos);
-        EXPECT_NE(prompt.prompt.find("Adds two integers."), std::string::npos);
+        auto file_plan = std::ranges::find_if(result->plans, [](const PagePlan& p) {
+            return p.page_type == PageType::File;
+        });
+        ASSERT_TRUE(file_plan != result->plans.end());
+        EXPECT_FALSE(file_plan->relative_path.empty());
     }
 
-    TEST_CASE(build_prompts_merges_header_and_source_with_same_stem) {
-        ScopedTempDir temp("build_prompts_merge");
+    TEST_CASE(build_page_plan_set_generates_single_index_page) {
+        ScopedTempDir temp("single_index_page");
         fs::create_directories(temp.path / "src");
 
         auto config = make_config(temp.path);
+        config.page_types.index = true;
+        auto model = make_model(temp.path);
 
-        extract::ProjectModel model;
-
-        auto header_path = (temp.path / "src" / "load.h").generic_string();
-        auto source_path = (temp.path / "src" / "load.cpp").generic_string();
-
-        extract::SymbolInfo declared;
-        declared.id = extract::SymbolID{.hash = 1};
-        declared.kind = extract::SymbolKind::Function;
-        declared.name = "load";
-        declared.qualified_name = "demo::load";
-        declared.signature = "int load()";
-        declared.source_snippet = "int load();";
-        declared.declaration_location = extract::SourceLocation{.file = header_path, .line = 1, .column = 1};
-
-        extract::SymbolInfo helper;
-        helper.id = extract::SymbolID{.hash = 2};
-        helper.kind = extract::SymbolKind::Function;
-        helper.name = "helper";
-        helper.qualified_name = "demo::helper";
-        helper.signature = "static int helper()";
-        helper.source_snippet = "static int helper() { return 0; }";
-        helper.declaration_location = extract::SourceLocation{.file = source_path, .line = 1, .column = 1};
-
-        model.symbols.emplace(declared.id, declared);
-        model.symbols.emplace(helper.id, helper);
-
-        model.files.emplace(header_path,
-                            extract::FileInfo{.path = header_path, .symbols = {declared.id}});
-        model.files.emplace(source_path,
-                            extract::FileInfo{.path = source_path, .symbols = {helper.id}});
-
-        auto result = build_prompts(config, model);
+        auto result = build_page_plan_set(config, model);
 
         ASSERT_TRUE(result.has_value());
-        ASSERT_EQ(result->size(), 1u);
-        EXPECT_EQ(result->front().relative_path, "src/load.md");
-        EXPECT_NE(result->front().prompt.find("demo::load"), std::string::npos);
-        EXPECT_NE(result->front().prompt.find("demo::helper"), std::string::npos);
-    }
 
-    TEST_CASE(build_prompts_trims_source_root_prefix_from_output_paths) {
-        ScopedTempDir temp("build_prompts_trim_source_root");
-        fs::create_directories(temp.path / "src");
-
-        auto config = make_config(temp.path / "src");
-        config.workspace_root = temp.path.generic_string();
-
-        extract::ProjectModel model;
-
-        auto source_path = (temp.path / "src" / "config" / "load.cpp").generic_string();
-        fs::create_directories(temp.path / "src" / "config");
-
-        extract::SymbolInfo load;
-        load.id = extract::SymbolID{.hash = 3};
-        load.kind = extract::SymbolKind::Function;
-        load.name = "load";
-        load.qualified_name = "demo::config::load";
-        load.signature = "int load()";
-        load.source_snippet = "int load() { return 0; }";
-        load.declaration_location = extract::SourceLocation{.file = source_path, .line = 1, .column = 1};
-
-        model.symbols.emplace(load.id, load);
-        model.files.emplace(source_path,
-                            extract::FileInfo{.path = source_path, .symbols = {load.id}});
-
-        auto result = build_prompts(config, model);
-
-        ASSERT_TRUE(result.has_value());
-        ASSERT_EQ(result->size(), 1u);
-        EXPECT_EQ(result->front().relative_path, "config/load.md");
-        EXPECT_NE(result->front().prompt.find("## File: `config/load.md`"), std::string::npos);
-    }
-
-    TEST_CASE(write_prompts_writes_relative_output_paths) {
-        ScopedTempDir temp("write_prompts");
-        auto output_root = temp.path / "prompts";
-
-        std::vector<PromptPage> prompts{
-            PromptPage{
-                .relative_path = "src/math.md",
-                .title = "math",
-                .prompt = "prompt one",
-            },
-            PromptPage{
-                .relative_path = "src/widget.md",
-                .title = "widget",
-                .prompt = "prompt two\n",
-            },
-        };
-
-        auto result = write_prompts(prompts, output_root.generic_string());
-
-        ASSERT_TRUE(result.has_value());
-        auto first = output_root / "src" / "math.md";
-        auto second = output_root / "src" / "widget.md";
-        ASSERT_TRUE(fs::exists(first));
-        ASSERT_TRUE(fs::exists(second));
-
-        EXPECT_EQ(read_text_file(first), "prompt one");
-        EXPECT_EQ(read_text_file(second), "prompt two\n");
+        auto index_plan = std::ranges::find_if(result->plans, [](const PagePlan& p) {
+            return p.page_type == PageType::Index;
+        });
+        ASSERT_TRUE(index_plan != result->plans.end());
+        EXPECT_TRUE(std::ranges::find(index_plan->deterministic_blocks, "all_modules")
+                    != index_plan->deterministic_blocks.end());
+        EXPECT_TRUE(std::ranges::find(index_plan->deterministic_blocks, "all_namespaces")
+                    != index_plan->deterministic_blocks.end());
+        EXPECT_TRUE(std::ranges::find(index_plan->deterministic_blocks, "all_types")
+                    != index_plan->deterministic_blocks.end());
+        EXPECT_TRUE(std::ranges::find(index_plan->deterministic_blocks, "all_files")
+                    != index_plan->deterministic_blocks.end());
     }
 
     TEST_CASE(write_pages_writes_relative_output_paths) {
@@ -251,8 +215,8 @@ TEST_SUITE(generate) {
         EXPECT_EQ(read_text_file(target), "# Math\n");
     }
 
-    TEST_CASE(build_module_graph_and_prompts_preserve_distinct_module_units) {
-        ScopedTempDir temp("build_module_prompts");
+    TEST_CASE(build_page_plan_set_creates_module_plans) {
+        ScopedTempDir temp("build_module_plans");
         fs::create_directories(temp.path / "src");
 
         auto config = make_config(temp.path);
@@ -262,18 +226,12 @@ TEST_SUITE(generate) {
 
         auto util_file = (temp.path / "src" / "util.cppm").generic_string();
         auto main_file = (temp.path / "src" / "math.cppm").generic_string();
-        auto partition_file = (temp.path / "src" / "math.detail.cppm").generic_string();
-        auto impl_file = (temp.path / "src" / "math_impl.cpp").generic_string();
 
         auto util_symbol = make_symbol(10, "helper", "demo::util::helper", "int helper()", util_file);
         auto api_symbol = make_symbol(11, "add", "demo::math::add", "int add(int lhs, int rhs)", main_file);
-        auto partition_symbol = make_symbol(12, "detail", "demo::math::detail", "int detail()", partition_file);
-        auto impl_symbol = make_symbol(13, "internal", "demo::math::internal", "int internal()", impl_file);
 
         model.symbols.emplace(util_symbol.id, util_symbol);
         model.symbols.emplace(api_symbol.id, api_symbol);
-        model.symbols.emplace(partition_symbol.id, partition_symbol);
-        model.symbols.emplace(impl_symbol.id, impl_symbol);
 
         model.modules.emplace(
             util_file,
@@ -290,139 +248,264 @@ TEST_SUITE(generate) {
                 .name = "demo.math",
                 .is_interface = true,
                 .source_file = main_file,
-                .imports = {"demo.util", "demo.util"},
+                .imports = {"demo.util"},
                 .symbols = {api_symbol.id},
             });
-        model.modules.emplace(
-            partition_file,
-            extract::ModuleUnit{
-                .name = "demo.math:detail",
-                .is_interface = true,
-                .source_file = partition_file,
-                .imports = {"demo.util"},
-                .symbols = {partition_symbol.id},
-            });
-        model.modules.emplace(
-            impl_file,
-            extract::ModuleUnit{
-                .name = "demo.math",
-                .is_interface = false,
-                .source_file = impl_file,
-                .imports = {"demo.util", "demo.util"},
-                .symbols = {impl_symbol.id},
-            });
 
-        auto graph = build_page_graph(config, model);
+        auto result = build_page_plan_set(config, model);
 
-        ASSERT_EQ(graph.nodes.size(), 3u);
-        ASSERT_TRUE(graph.nodes.contains("demo.util/index.md"));
-        ASSERT_TRUE(graph.nodes.contains("demo.math/index.md"));
-        ASSERT_TRUE(graph.nodes.contains("demo.math/detail.md"));
+        ASSERT_TRUE(result.has_value());
 
-        auto& main_node = graph.nodes.at("demo.math/index.md");
-        auto& partition_node = graph.nodes.at("demo.math/detail.md");
+        auto has_util = std::ranges::any_of(result->plans, [](const PagePlan& p) {
+            return p.page_type == PageType::Module && p.page_id.find("demo.util") != std::string::npos;
+        });
+        auto has_math = std::ranges::any_of(result->plans, [](const PagePlan& p) {
+            return p.page_type == PageType::Module && p.page_id.find("demo.math") != std::string::npos;
+        });
+        EXPECT_TRUE(has_util);
+        EXPECT_TRUE(has_math);
 
-        EXPECT_EQ(std::count(main_node.depends_on.begin(), main_node.depends_on.end(), "demo.util/index.md"),
-                  1);
-        EXPECT_EQ(std::count(partition_node.depends_on.begin(), partition_node.depends_on.end(),
-                             "demo.util/index.md"),
-                  1);
-        EXPECT_EQ(std::count(partition_node.depends_on.begin(), partition_node.depends_on.end(),
-                             "demo.math/index.md"),
-                  1);
-
-        auto pos_util = std::find(graph.generation_order.begin(), graph.generation_order.end(),
-                                  "demo.util/index.md");
-        auto pos_main = std::find(graph.generation_order.begin(), graph.generation_order.end(),
-                                  "demo.math/index.md");
-        auto pos_partition = std::find(graph.generation_order.begin(), graph.generation_order.end(),
-                                       "demo.math/detail.md");
-        ASSERT_TRUE(pos_util != graph.generation_order.end());
-        ASSERT_TRUE(pos_main != graph.generation_order.end());
-        ASSERT_TRUE(pos_partition != graph.generation_order.end());
-        EXPECT_LT(pos_util, pos_main);
-        EXPECT_LT(pos_main, pos_partition);
-
-        auto prompts_result = build_prompts(config, model);
-        ASSERT_TRUE(prompts_result.has_value());
-        ASSERT_EQ(prompts_result->size(), 3u);
-
-        auto main_prompt_it = std::find_if(prompts_result->begin(), prompts_result->end(),
-                                           [](const PromptPage& page) {
-                                               return page.relative_path == "demo.math/index.md";
-                                           });
-        ASSERT_TRUE(main_prompt_it != prompts_result->end());
-        EXPECT_NE(main_prompt_it->prompt.find("## Module: `demo.math`"), std::string::npos);
-        EXPECT_NE(main_prompt_it->prompt.find("#### function: `demo::math::internal`"),
-                  std::string::npos);
-
-        auto partition_prompt_it = std::find_if(prompts_result->begin(), prompts_result->end(),
-                                                [](const PromptPage& page) {
-                                                    return page.relative_path == "demo.math/detail.md";
-                                                });
-        ASSERT_TRUE(partition_prompt_it != prompts_result->end());
-        EXPECT_NE(partition_prompt_it->prompt.find("## Module: `demo.math:detail`"),
-                  std::string::npos);
+        // Verify generation order: util before math
+        auto pos_util = std::ranges::find_if(result->generation_order, [](const std::string& id) {
+            return id.find("demo.util") != std::string::npos;
+        });
+        auto pos_math = std::ranges::find_if(result->generation_order, [](const std::string& id) {
+            return id.find("demo.math") != std::string::npos;
+        });
+        ASSERT_TRUE(pos_util != result->generation_order.end());
+        ASSERT_TRUE(pos_math != result->generation_order.end());
+        EXPECT_LT(pos_util, pos_math);
     }
 
-    TEST_CASE(build_module_graph_does_not_create_partition_main_cycle) {
-        ScopedTempDir temp("build_module_cycle");
+    TEST_CASE(build_page_plan_set_keeps_parent_only_namespace_pages) {
+        ScopedTempDir temp("parent_only_namespace_pages");
         fs::create_directories(temp.path / "src");
 
         auto config = make_config(temp.path);
 
         extract::ProjectModel model;
+        auto file = (temp.path / "src" / "config.cppm").generic_string();
+        auto type_symbol = make_type_symbol(200, "Options", "demo::config::Options",
+                                            file, "Configuration options.");
+        model.symbols.emplace(type_symbol.id, type_symbol);
+
+        extract::NamespaceInfo root_ns;
+        root_ns.name = "demo";
+        root_ns.children.push_back("demo::config");
+
+        extract::NamespaceInfo child_ns;
+        child_ns.name = "demo::config";
+        child_ns.symbols.push_back(type_symbol.id);
+
+        model.namespaces.emplace(root_ns.name, root_ns);
+        model.namespaces.emplace(child_ns.name, child_ns);
+
+        auto result = build_page_plan_set(config, model);
+
+        ASSERT_TRUE(result.has_value());
+
+        auto root_plan = std::ranges::find_if(result->plans, [](const PagePlan& p) {
+            return p.page_id == "namespace:demo";
+        });
+        ASSERT_TRUE(root_plan != result->plans.end());
+        EXPECT_TRUE(std::ranges::find(root_plan->linked_pages, "namespace:demo::config") !=
+                    root_plan->linked_pages.end());
+    }
+
+    TEST_CASE(build_page_plan_set_orders_independent_modules_lexicographically) {
+        ScopedTempDir temp("module_generation_order");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_config(temp.path);
+        config.page_types.index = false;
+        config.page_types.file_page = false;
+        config.page_types.namespace_page = false;
+        config.page_types.type_page = false;
+        config.page_types.module_page = true;
+
+        extract::ProjectModel model;
         model.uses_modules = true;
 
-        auto main_file = (temp.path / "src" / "math.cppm").generic_string();
-        auto partition_file = (temp.path / "src" / "math.detail.cppm").generic_string();
-
-        auto api_symbol = make_symbol(21, "add", "demo::math::add", "int add(int lhs, int rhs)", main_file);
-        auto partition_symbol = make_symbol(22, "detail", "demo::math::detail", "int detail()", partition_file);
-
-        model.symbols.emplace(api_symbol.id, api_symbol);
-        model.symbols.emplace(partition_symbol.id, partition_symbol);
+        auto beta_file = (temp.path / "src" / "beta.cppm").generic_string();
+        auto alpha_file = (temp.path / "src" / "alpha.cppm").generic_string();
 
         model.modules.emplace(
-            main_file,
+            beta_file,
             extract::ModuleUnit{
-                .name = "demo.math",
+                .name = "demo.beta",
                 .is_interface = true,
-                .source_file = main_file,
-                .imports = {"demo.math:detail"},
-                .symbols = {api_symbol.id},
+                .source_file = beta_file,
             });
         model.modules.emplace(
-            partition_file,
+            alpha_file,
             extract::ModuleUnit{
-                .name = "demo.math:detail",
+                .name = "demo.alpha",
                 .is_interface = true,
-                .source_file = partition_file,
-                .imports = {},
-                .symbols = {partition_symbol.id},
+                .source_file = alpha_file,
             });
 
-        auto graph = build_page_graph(config, model);
+        auto result = build_page_plan_set(config, model);
 
-        ASSERT_TRUE(graph.nodes.contains("demo.math/index.md"));
-        ASSERT_TRUE(graph.nodes.contains("demo.math/detail.md"));
+        ASSERT_TRUE(result.has_value());
+        ASSERT_EQ(result->generation_order.size(), 2u);
+        EXPECT_EQ(result->generation_order[0], "module:demo.alpha");
+        EXPECT_EQ(result->generation_order[1], "module:demo.beta");
+    }
 
-        auto& main_node = graph.nodes.at("demo.math/index.md");
-        auto& partition_node = graph.nodes.at("demo.math/detail.md");
+    TEST_CASE(build_page_plan_set_orders_cycle_participants_lexicographically) {
+        ScopedTempDir temp("module_cycle_generation_order");
+        fs::create_directories(temp.path / "src");
 
-        EXPECT_EQ(std::count(main_node.depends_on.begin(), main_node.depends_on.end(),
-                             "demo.math/detail.md"),
-                  1);
-        EXPECT_EQ(std::count(partition_node.depends_on.begin(), partition_node.depends_on.end(),
-                             "demo.math/index.md"),
-                  0);
+        auto config = make_config(temp.path);
+        config.page_types.index = false;
+        config.page_types.file_page = false;
+        config.page_types.namespace_page = false;
+        config.page_types.type_page = false;
+        config.page_types.module_page = true;
 
-        auto pos_main = std::find(graph.generation_order.begin(), graph.generation_order.end(),
-                                  "demo.math/index.md");
-        auto pos_partition = std::find(graph.generation_order.begin(), graph.generation_order.end(),
-                                       "demo.math/detail.md");
-        ASSERT_TRUE(pos_main != graph.generation_order.end());
-        ASSERT_TRUE(pos_partition != graph.generation_order.end());
-        EXPECT_LT(pos_partition, pos_main);
+        extract::ProjectModel model;
+        model.uses_modules = true;
+
+        auto beta_file = (temp.path / "src" / "beta.cppm").generic_string();
+        auto alpha_file = (temp.path / "src" / "alpha.cppm").generic_string();
+        auto gamma_file = (temp.path / "src" / "gamma.cppm").generic_string();
+
+        model.modules.emplace(
+            beta_file,
+            extract::ModuleUnit{
+                .name = "demo.beta",
+                .is_interface = true,
+                .source_file = beta_file,
+                .imports = {"demo.alpha"},
+            });
+        model.modules.emplace(
+            alpha_file,
+            extract::ModuleUnit{
+                .name = "demo.alpha",
+                .is_interface = true,
+                .source_file = alpha_file,
+                .imports = {"demo.beta"},
+            });
+        model.modules.emplace(
+            gamma_file,
+            extract::ModuleUnit{
+                .name = "demo.gamma",
+                .is_interface = true,
+                .source_file = gamma_file,
+                .imports = {"demo.beta"},
+            });
+
+        auto result = build_page_plan_set(config, model);
+
+        ASSERT_TRUE(result.has_value());
+        ASSERT_EQ(result->generation_order.size(), 3u);
+        EXPECT_EQ(result->generation_order[0], "module:demo.alpha");
+        EXPECT_EQ(result->generation_order[1], "module:demo.beta");
+        EXPECT_EQ(result->generation_order[2], "module:demo.gamma");
+    }
+
+    TEST_CASE(render_deterministic_block_relativizes_related_page_links) {
+        ScopedTempDir temp("relative_links");
+
+        auto config = make_config(temp.path);
+        extract::ProjectModel model;
+
+        PagePlan current_plan{
+            .page_id = "namespace:demo",
+            .page_type = PageType::Namespace,
+            .title = "Namespace `demo`",
+            .relative_path = "namespaces/demo/index.md",
+            .linked_pages = {"type:demo::Widget"},
+        };
+        PagePlan target_plan{
+            .page_id = "type:demo::Widget",
+            .page_type = PageType::Type,
+            .title = "`demo::Widget`",
+            .relative_path = "types/demo/widget.md",
+            .owner_keys = {"demo::Widget"},
+        };
+
+        PagePlanSet plan_set{
+            .plans = {current_plan, target_plan},
+        };
+
+        auto links = build_link_resolver(plan_set);
+        auto block = render_deterministic_block("related_pages", current_plan, model, config, links);
+
+        EXPECT_NE(block.find("(../../types/demo/widget.md)"), std::string::npos);
+    }
+
+    TEST_CASE(render_deterministic_block_relativizes_all_files_links) {
+        ScopedTempDir temp("relative_file_links");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_config(temp.path);
+        extract::ProjectModel model;
+
+        auto file_path = (temp.path / "src" / "math.cpp").generic_string();
+        model.files.emplace(file_path, extract::FileInfo{.path = file_path});
+
+        PagePlan current_plan{
+            .page_id = "index",
+            .page_type = PageType::Index,
+            .title = "API Reference",
+            .relative_path = "guides/index.md",
+        };
+        PagePlan file_plan{
+            .page_id = "file:" + file_path,
+            .page_type = PageType::File,
+            .title = "File `src/math.cpp`",
+            .relative_path = "files/src/math.md",
+            .owner_keys = {file_path},
+        };
+
+        PagePlanSet plan_set{
+            .plans = {current_plan, file_plan},
+        };
+
+        auto links = build_link_resolver(plan_set);
+        auto block = render_deterministic_block("all_files", current_plan, model, config, links);
+
+        EXPECT_NE(block.find("(../files/src/math.md)"), std::string::npos);
+    }
+
+    TEST_CASE(namespace_summary_prompt_uses_namespace_subject) {
+        ScopedTempDir temp("namespace_summary_prompt");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_config(temp.path);
+
+        extract::ProjectModel model;
+        extract::NamespaceInfo ns;
+        ns.name = "demo::config";
+
+        auto file = (temp.path / "src" / "config.cppm").generic_string();
+        for(std::uint64_t i = 0; i < 8; ++i) {
+            auto name = std::format("Type{}", i);
+            auto qualified_name = std::format("demo::config::{}", name);
+            auto doc_comment = std::string(240, static_cast<char>('a' + static_cast<int>(i)));
+            auto symbol = make_type_symbol(100 + i, name, qualified_name, file, doc_comment);
+            ns.symbols.push_back(symbol.id);
+            model.symbols.emplace(symbol.id, std::move(symbol));
+        }
+        model.namespaces.emplace(ns.name, ns);
+
+        PageSummaryCache summaries;
+        summaries.emplace("demo::config::Type0", std::string(180, 'x'));
+        summaries.emplace("demo::config::Type1", std::string(180, 'y'));
+        summaries.emplace("demo::config::Type2", std::string(180, 'z'));
+
+        auto evidence = build_evidence_for_namespace_summary(
+            model.namespaces.at(ns.name), model, config.evidence_rules, summaries, config.project_root);
+        EXPECT_EQ(evidence.subject_name, "demo::config");
+        EXPECT_EQ(evidence.subject_kind, "namespace");
+
+        auto prompt = instantiate_prompt(
+            "Write a Summary for the namespace `{{target_name}}`.\n\n{{evidence}}",
+            evidence);
+
+        ASSERT_FALSE(prompt.empty());
+        EXPECT_NE(prompt.find("namespace `demo::config`"), std::string::npos);
+        EXPECT_EQ(prompt.find("namespace `demo::config::Type0`"), std::string::npos);
     }
 };

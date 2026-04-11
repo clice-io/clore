@@ -29,6 +29,7 @@ target_include_directories(clore-core PUBLIC
 target_link_libraries(clore-core PUBLIC
     clore_options
     llvm-libs
+    CURL::libcurl
     spdlog::spdlog
     eventide::serde::toml
     eventide::serde::json

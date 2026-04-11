@@ -238,6 +238,59 @@ export int detail() {
 
         fs::remove_all(root);
     }
+
+    TEST_CASE(populates_parent_only_namespace_entries_for_nested_namespaces) {
+        namespace fs = std::filesystem;
+
+        auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
+        auto root = fs::temp_directory_path() /
+                    std::format("clore_nested_namespace_extract_test_{}", ticks);
+        fs::create_directories(root / "src");
+
+        {
+            std::ofstream f(root / "src" / "config.cpp");
+            f << R"(
+namespace demo::config {
+
+struct Options {};
+
+}  // namespace demo::config
+)";
+        }
+
+        clore::testing::write_compile_commands(
+            root / "compile_commands.json",
+            {{
+                .directory = root / "src",
+                .file = root / "src" / "config.cpp",
+                .arguments = {
+                    "clang++",
+                    "-std=c++23",
+                    "-c",
+                    "config.cpp",
+                    "-o",
+                    "config.o",
+                },
+            }});
+
+        config::TaskConfig cfg;
+        cfg.compile_commands_path = (root / "compile_commands.json").string();
+        cfg.project_root = root.string();
+        cfg.output_root = (root / "out").string();
+        cfg.workspace_root = root.string();
+        cfg.extract.max_snippet_bytes = 1024;
+
+        auto result = extract::extract_project(cfg);
+        ASSERT_TRUE(result.has_value());
+
+        ASSERT_TRUE(result->namespaces.contains("demo"));
+        ASSERT_TRUE(result->namespaces.contains("demo::config"));
+        EXPECT_TRUE(result->namespaces.at("demo").symbols.empty());
+        EXPECT_EQ(result->namespaces.at("demo").children.size(), 1u);
+        EXPECT_EQ(result->namespaces.at("demo").children[0], "demo::config");
+
+        fs::remove_all(root);
+    }
 };
 
 TEST_SUITE(extract_filter_security) {
@@ -500,17 +553,6 @@ int other_value() {
                              parent_namespace_it->second.children.end(),
                              namespace_id),
                   1);
-
-        auto prompts_result = generate::build_prompts(cfg, model);
-        ASSERT_TRUE(prompts_result.has_value());
-        auto load_prompt_it = std::ranges::find_if(*prompts_result, [](const generate::PromptPage& page) {
-            return page.relative_path == "src/load.md";
-        });
-        ASSERT_TRUE(load_prompt_it != prompts_result->end());
-        EXPECT_EQ(load_prompt_it->prompt.find("#### struct: `demo::config::Shared`"),
-                  std::string::npos);
-        EXPECT_EQ(load_prompt_it->prompt.find("#### namespace: `demo::config`"),
-                  std::string::npos);
 
         fs::remove_all(root);
     }

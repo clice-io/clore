@@ -1,0 +1,22 @@
+Write a Summary for the C++20 module `{{target_name}}`.
+
+Output:
+- Markdown fragment only
+- 1 to 2 short paragraphs
+- No heading
+- No YAML
+
+Must explain:
+- what this module provides
+- its primary responsibility in the project
+- its relationship to other modules it imports
+
+Must not repeat:
+- import lists
+- symbol lists
+- source locations
+
+Use only the EVIDENCE section below.
+If evidence is insufficient, explicitly explain what key evidence is missing.
+
+{{evidence}}

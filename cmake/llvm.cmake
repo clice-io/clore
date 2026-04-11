@@ -67,6 +67,7 @@ function(setup_llvm LLVM_VERSION)
             clangBasic
             clangDriver
             clangFrontend
+            clangIndex
             clangLex
             clangSema
             clangSerialization

@@ -117,35 +117,6 @@ TEST_SUITE(config_normalize) {
         EXPECT_EQ(config.filter.exclude[0].find('\\'), std::string::npos);
     }
 
-    TEST_CASE(normalize_resolves_template_path_from_workspace_root) {
-        namespace fs = std::filesystem;
-
-        auto temp_dir = fs::temp_directory_path() / "clore_normalize_workspace_root";
-        fs::remove_all(temp_dir);
-        fs::create_directories(temp_dir / "templates");
-
-        auto template_path = temp_dir / "templates" / "frontmatter.toml";
-        {
-            std::ofstream f(template_path);
-            f << "title = \"demo\"\n";
-        }
-
-        TaskConfig config;
-        config.compile_commands_path = (temp_dir / "compile_commands.json").string();
-        config.project_root = (temp_dir / "src").string();
-        config.output_root = (temp_dir / "docs").string();
-        config.workspace_root = temp_dir.string();
-        config.frontmatter.template_path = "templates/frontmatter.toml";
-
-        auto result = normalize(config);
-        ASSERT_TRUE(result.has_value());
-        ASSERT_TRUE(config.frontmatter.template_path.has_value());
-        EXPECT_EQ(fs::path(*config.frontmatter.template_path).lexically_normal().generic_string(),
-                  template_path.lexically_normal().generic_string());
-
-        fs::remove_all(temp_dir);
-    }
-
     // CRITICAL: empty required paths must be rejected before fs::absolute,
     // which would silently resolve "" to cwd and bypass required-field validation.
     TEST_CASE(normalize_rejects_empty_compile_commands) {

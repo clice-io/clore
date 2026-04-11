@@ -1,0 +1,24 @@
+Write the Summary section for the type page of {{target_kind}} `{{target_name}}`.
+
+Output:
+- Markdown fragment only
+- 1 to 3 short paragraphs
+- No heading
+- No YAML
+- No bullet list unless evidence naturally requires enumeration
+
+Must explain:
+- what this type represents
+- why it exists in the codebase
+- what role it plays relative to nearby types
+
+Must not repeat:
+- declaration text
+- member lists
+- source locations
+- code blocks
+
+Use only the EVIDENCE section below.
+If evidence is insufficient, explicitly explain what key evidence is missing.
+
+{{evidence}}
