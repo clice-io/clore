@@ -7,6 +7,67 @@ import config;
 
 using namespace clore::config;
 
+namespace {
+
+// Minimal valid config with all required sections for tests that need a valid parse.
+constexpr auto kMinimalValidConfig = R"(
+[page_types]
+repository = true
+index = true
+module_page = true
+namespace_page = true
+type_page = true
+file_page = true
+
+[path_rules]
+repository_path = "repository.md"
+index_path = "index.md"
+module_prefix = "modules"
+namespace_prefix = "namespaces"
+type_prefix = "types"
+file_prefix = "files"
+name_normalize = "lowercase"
+
+[prompt_templates]
+type_overview = "prompts/type_overview.txt"
+type_usage_notes = "prompts/type_usage_notes.txt"
+namespace_summary = "prompts/namespace_summary.txt"
+module_summary = "prompts/module_summary.txt"
+module_architecture = "prompts/module_architecture.txt"
+repository_overview = "prompts/repository_overview.txt"
+reading_guide = "prompts/reading_guide.txt"
+
+[page_templates]
+repository = "pages/repository.md"
+index = "pages/index.md"
+module_page = "pages/module.md"
+namespace_page = "pages/namespace.md"
+type_page = "pages/type.md"
+file_page = "pages/file.md"
+
+[evidence_rules]
+max_callers = 5
+max_callees = 5
+max_siblings = 8
+max_source_bytes = 4096
+max_related_summaries = 3
+
+[llm]
+system_prompt = "You are a documentation writer."
+failure_marker = "[FAILED]"
+max_output_length = 4096
+max_prompt_length = 16384
+
+[validation]
+fail_on_empty_section = true
+fail_on_h1_in_output = true
+
+[navigation]
+consume_dependency_summaries = true
+)";
+
+}  // namespace
+
 TEST_SUITE(config_schema) {
     TEST_CASE(default_construction) {
         TaskConfig config;
@@ -16,44 +77,34 @@ TEST_SUITE(config_schema) {
         EXPECT_TRUE(config.workspace_root.empty());
         EXPECT_TRUE(config.filter.include.empty());
         EXPECT_TRUE(config.filter.exclude.empty());
-        EXPECT_TRUE(config.frontmatter.fields.empty());
-        EXPECT_FALSE(config.frontmatter.template_path.has_value());
-        EXPECT_TRUE(config.page_rules.empty());
         EXPECT_FALSE(config.log_level.has_value());
     }
 };
 
 TEST_SUITE(config_load) {
-    TEST_CASE(load_from_string_basic) {
-        auto result = load_config_from_string(R"(
-log_level = "debug"
-)");
-
+    TEST_CASE(load_minimal_valid) {
+        auto result = load_config_from_string(kMinimalValidConfig);
         ASSERT_TRUE(result.has_value());
         auto& config = *result;
-        ASSERT_TRUE(config.log_level.has_value());
-        EXPECT_EQ(*config.log_level, "debug");
+        EXPECT_TRUE(config.page_types.repository);
+        EXPECT_EQ(config.path_rules.name_normalize, "lowercase");
+        EXPECT_EQ(config.llm.failure_marker, "[FAILED]");
+        EXPECT_EQ(config.evidence_rules.max_callers, 5u);
     }
 
-    TEST_CASE(load_from_string_with_language) {
+    TEST_CASE(load_requires_page_types_section) {
         auto result = load_config_from_string(R"(
-[clore]
-language = "简体中文"
 )");
-
-        ASSERT_TRUE(result.has_value());
-        auto& config = *result;
-        ASSERT_TRUE(config.language.has_value());
-        EXPECT_EQ(*config.language, "简体中文");
+        EXPECT_FALSE(result.has_value());
     }
 
     TEST_CASE(load_from_string_with_filter) {
-        auto result = load_config_from_string(R"(
+        auto toml = std::string(kMinimalValidConfig) + R"(
 [filter]
 include = ["src/.*"]
 exclude = ["test/.*", "build/.*"]
-)");
-
+)";
+        auto result = load_config_from_string(toml);
         ASSERT_TRUE(result.has_value());
         auto& config = *result;
         ASSERT_EQ(config.filter.include.size(), 1u);
@@ -61,47 +112,6 @@ exclude = ["test/.*", "build/.*"]
         ASSERT_EQ(config.filter.exclude.size(), 2u);
         EXPECT_EQ(config.filter.exclude[0], "test/.*");
         EXPECT_EQ(config.filter.exclude[1], "build/.*");
-    }
-
-    TEST_CASE(load_from_string_with_frontmatter) {
-        auto result = load_config_from_string(R"(
-[frontmatter]
-template_path = "/tmp/templates/frontmatter.toml"
-
-[[frontmatter.fields]]
-key = "sidebar_position"
-value = "1"
-
-[[frontmatter.fields]]
-key = "sidebar_label"
-value = "API Reference"
-)");
-
-        ASSERT_TRUE(result.has_value());
-        auto& config = *result;
-        ASSERT_TRUE(config.frontmatter.template_path.has_value());
-        EXPECT_EQ(*config.frontmatter.template_path, "/tmp/templates/frontmatter.toml");
-        ASSERT_EQ(config.frontmatter.fields.size(), 2u);
-        EXPECT_EQ(config.frontmatter.fields[0].key, "sidebar_position");
-        EXPECT_EQ(config.frontmatter.fields[0].value, "1");
-    }
-
-    TEST_CASE(load_from_string_with_page_rules) {
-        auto result = load_config_from_string(R"(
-[[page_rules]]
-pattern = "class"
-layout = "class_page"
-
-[[page_rules]]
-pattern = "function"
-layout = "function_page"
-)");
-
-        ASSERT_TRUE(result.has_value());
-        auto& config = *result;
-        ASSERT_EQ(config.page_rules.size(), 2u);
-        EXPECT_EQ(config.page_rules[0].pattern, "class");
-        EXPECT_EQ(config.page_rules[0].layout, "class_page");
     }
 
     TEST_CASE(load_rejects_compile_commands_path) {
@@ -121,29 +131,6 @@ project_root = "/tmp/project"
     TEST_CASE(load_rejects_output_root) {
         auto result = load_config_from_string(R"(
 output_root = "/tmp/output"
-)");
-        EXPECT_FALSE(result.has_value());
-    }
-
-    TEST_CASE(load_rejects_max_snippet_bytes) {
-        auto result = load_config_from_string(R"(
-max_snippet_bytes = 8192
-)");
-        EXPECT_FALSE(result.has_value());
-    }
-
-    TEST_CASE(load_rejects_extract_table) {
-        auto result = load_config_from_string(R"(
-[extract]
-max_snippet_bytes = 8192
-)");
-        EXPECT_FALSE(result.has_value());
-    }
-
-    TEST_CASE(load_rejects_llm_table) {
-        auto result = load_config_from_string(R"(
-[llm]
-model = "gpt-5.2"
 )");
         EXPECT_FALSE(result.has_value());
     }
@@ -168,7 +155,7 @@ model = "gpt-5.2"
         auto config_path = temp_dir / "clore.toml";
         {
             std::ofstream f(config_path);
-            f << "log_level = \"info\"\n";
+            f << kMinimalValidConfig;
         }
 
         auto result = load_config(config_path.string());

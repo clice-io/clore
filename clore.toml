@@ -1,10 +1,60 @@
-[clore]
-language = "简体中文"
-
 [filter]
 include = ["src/"]
 exclude = []
 
-[[frontmatter.fields]]
-key = "sidebar_label"
-value = "Clore API"
+[extract]
+max_snippet_bytes = 8192
+
+[page_types]
+repository = true
+index = true
+module_page = true
+namespace_page = true
+type_page = true
+file_page = true
+
+[path_rules]
+repository_path = "repository.md"
+index_path = "index.md"
+module_prefix = "modules"
+namespace_prefix = "namespaces"
+type_prefix = "types"
+file_prefix = "files"
+name_normalize = "lowercase"
+
+[prompt_templates]
+type_overview = "templates/prompts/type_overview.txt"
+type_usage_notes = "templates/prompts/type_usage_notes.txt"
+namespace_summary = "templates/prompts/namespace_summary.txt"
+module_summary = "templates/prompts/module_summary.txt"
+module_architecture = "templates/prompts/module_architecture.txt"
+repository_overview = "templates/prompts/repository_overview.txt"
+reading_guide = "templates/prompts/reading_guide.txt"
+
+[page_templates]
+repository = "templates/pages/repository.md"
+index = "templates/pages/index.md"
+module_page = "templates/pages/module.md"
+namespace_page = "templates/pages/namespace.md"
+type_page = "templates/pages/type.md"
+file_page = "templates/pages/file.md"
+
+[evidence_rules]
+max_callers = 5
+max_callees = 5
+max_siblings = 8
+max_source_bytes = 4096
+max_related_summaries = 3
+
+[llm]
+system_prompt = "You are a C++ documentation writer. Generate concise, accurate documentation for C++ code elements. Focus on purpose, design intent, and role in the codebase. Output only Markdown text suitable for embedding in a documentation page."
+failure_marker = "[GENERATION_FAILED]"
+max_output_length = 4096
+max_prompt_length = 16384
+
+[validation]
+fail_on_empty_section = true
+fail_on_h1_in_output = true
+
+[navigation]
+consume_dependency_summaries = true

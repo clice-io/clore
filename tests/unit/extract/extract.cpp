@@ -501,17 +501,6 @@ int other_value() {
                              namespace_id),
                   1);
 
-        auto prompts_result = generate::build_prompts(cfg, model);
-        ASSERT_TRUE(prompts_result.has_value());
-        auto load_prompt_it = std::ranges::find_if(*prompts_result, [](const generate::PromptPage& page) {
-            return page.relative_path == "src/load.md";
-        });
-        ASSERT_TRUE(load_prompt_it != prompts_result->end());
-        EXPECT_EQ(load_prompt_it->prompt.find("#### struct: `demo::config::Shared`"),
-                  std::string::npos);
-        EXPECT_EQ(load_prompt_it->prompt.find("#### namespace: `demo::config`"),
-                  std::string::npos);
-
         fs::remove_all(root);
     }
 };

@@ -62,22 +62,30 @@ auto normalize(TaskConfig& config) -> std::expected<void, NormalizeError> {
         return r;
     }
 
-    auto make_absolute_opt = [&](std::optional<std::string>& opt,
-                                 std::string_view field,
-                                 const std::optional<fs::path>& base = std::nullopt)
+    // Normalize prompt template paths (relative to workspace_root)
+    auto make_absolute_if_nonempty = [&](std::string& path, std::string_view field)
         -> std::expected<void, NormalizeError> {
-        if(opt.has_value()) {
-            return make_absolute(*opt, field, base);
+        if(!path.empty()) {
+            return make_absolute(path, field, workspace_root);
         }
         return {};
     };
 
-    if(auto r = make_absolute_opt(config.frontmatter.template_path,
-                                  "frontmatter.template_path",
-                                  workspace_root);
-       !r.has_value()) {
-        return r;
-    }
+    if(auto r = make_absolute_if_nonempty(config.prompt_templates.type_overview, "prompt_templates.type_overview"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.prompt_templates.type_usage_notes, "prompt_templates.type_usage_notes"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.prompt_templates.namespace_summary, "prompt_templates.namespace_summary"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.prompt_templates.module_summary, "prompt_templates.module_summary"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.prompt_templates.module_architecture, "prompt_templates.module_architecture"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.prompt_templates.repository_overview, "prompt_templates.repository_overview"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.prompt_templates.reading_guide, "prompt_templates.reading_guide"); !r) return r;
+
+    // Normalize page template paths
+    if(auto r = make_absolute_if_nonempty(config.page_templates.repository, "page_templates.repository"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.page_templates.index, "page_templates.index"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.page_templates.module_page, "page_templates.module_page"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.page_templates.namespace_page, "page_templates.namespace_page"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.page_templates.type_page, "page_templates.type_page"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.page_templates.file_page, "page_templates.file_page"); !r) return r;
 
     auto normalize_separators = [](std::string& path) {
         for(auto& c : path) {
@@ -93,9 +101,19 @@ auto normalize(TaskConfig& config) -> std::expected<void, NormalizeError> {
     normalize_separators(config.workspace_root);
     for(auto& p : config.filter.include) normalize_separators(p);
     for(auto& p : config.filter.exclude) normalize_separators(p);
-    if(config.frontmatter.template_path.has_value()) {
-        normalize_separators(*config.frontmatter.template_path);
-    }
+    normalize_separators(config.prompt_templates.type_overview);
+    normalize_separators(config.prompt_templates.type_usage_notes);
+    normalize_separators(config.prompt_templates.namespace_summary);
+    normalize_separators(config.prompt_templates.module_summary);
+    normalize_separators(config.prompt_templates.module_architecture);
+    normalize_separators(config.prompt_templates.repository_overview);
+    normalize_separators(config.prompt_templates.reading_guide);
+    normalize_separators(config.page_templates.repository);
+    normalize_separators(config.page_templates.index);
+    normalize_separators(config.page_templates.module_page);
+    normalize_separators(config.page_templates.namespace_page);
+    normalize_separators(config.page_templates.type_page);
+    normalize_separators(config.page_templates.file_page);
 
     return {};
 }

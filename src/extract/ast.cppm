@@ -19,6 +19,7 @@ module;
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendAction.h"
 #include "clang/Index/USRGeneration.h"
+#include "clang/Lex/Lexer.h"
 #include "llvm/Support/Error.h"
 
 export module extract:ast;
@@ -115,7 +116,17 @@ auto get_source_snippet(const clang::ASTContext& ctx, const clang::Decl* decl,
     if(begin.isInvalid() || end.isInvalid()) return "";
 
     auto begin_offset = sm.getFileOffset(range.getBegin());
-    auto end_offset = sm.getFileOffset(range.getEnd());
+
+    // getSourceRange().getEnd() points to the start of the last token.
+    // Advance past the last token so we capture closing braces, semicolons, etc.
+    auto end_loc = clang::Lexer::getLocForEndOfToken(
+        range.getEnd(), 0, sm, ctx.getLangOpts());
+    auto end_offset = sm.getFileOffset(end_loc);
+
+    if(end_offset <= begin_offset) {
+        // Fallback: use original end
+        end_offset = sm.getFileOffset(range.getEnd());
+    }
 
     if(end_offset - begin_offset > max_bytes) {
         end_offset = begin_offset + max_bytes;
@@ -127,7 +138,19 @@ auto get_source_snippet(const clang::ASTContext& ctx, const clang::Decl* decl,
 
     if(end_offset > buffer.size()) return "";
 
-    return std::string(buffer.substr(begin_offset, end_offset - begin_offset));
+    std::string result(buffer.substr(begin_offset, end_offset - begin_offset));
+
+    // Normalize \r\n to \n to avoid double-spaced lines in markdown
+    std::string normalized;
+    normalized.reserve(result.size());
+    for(std::size_t i = 0; i < result.size(); ++i) {
+        if(result[i] == '\r' && i + 1 < result.size() && result[i + 1] == '\n') {
+            continue;  // skip \r before \n
+        }
+        normalized += result[i];
+    }
+
+    return normalized;
 }
 
 auto make_source_location(const clang::SourceManager& sm, clang::SourceLocation loc)

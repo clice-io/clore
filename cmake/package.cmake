@@ -37,3 +37,9 @@ set(ETD_ENABLE_EXCEPTIONS OFF CACHE BOOL "" FORCE)
 set(ETD_ENABLE_RTTI OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(eventide spdlog)
+
+find_package(CURL REQUIRED)
+
+if(NOT TARGET CURL::libcurl)
+    message(FATAL_ERROR "find_package(CURL) succeeded but CURL::libcurl target is missing")
+endif()

@@ -3,31 +3,21 @@ module;
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 export module config:schema;
 
 export namespace clore::config {
 
-struct FrontmatterField {
-    std::string key;
-    std::string value;
-};
-
-struct FrontmatterConfig {
-    std::vector<FrontmatterField> fields;
-    std::optional<std::string> template_path;
-};
-
-struct PageRule {
-    std::string pattern;
-    std::string layout;
-};
+// ── filter ──────────────────────────────────────────────────────────
 
 struct FilterRule {
     std::vector<std::string> include;
     std::vector<std::string> exclude;
 };
+
+// ── extract ─────────────────────────────────────────────────────────
 
 struct ExtractConfig {
     /// Maximum number of bytes captured per source snippet.
@@ -35,25 +25,116 @@ struct ExtractConfig {
     std::optional<std::uint32_t> max_snippet_bytes;
 };
 
+// ── page types ──────────────────────────────────────────────────────
+
+struct PageTypesConfig {
+    bool repository = false;
+    bool index = false;
+    bool module_page = false;
+    bool namespace_page = false;
+    bool type_page = false;
+    bool file_page = false;
+};
+
+// ── path rules ──────────────────────────────────────────────────────
+
+struct PathRulesConfig {
+    std::string repository_path;
+    std::string index_path;
+    std::string module_prefix;
+    std::string namespace_prefix;
+    std::string type_prefix;
+    std::string file_prefix;
+    std::string name_normalize;
+};
+
+// ── prompt templates ────────────────────────────────────────────────
+
+struct PromptTemplatesConfig {
+    std::string type_overview;
+    std::string type_usage_notes;
+    std::string namespace_summary;
+    std::string module_summary;
+    std::string module_architecture;
+    std::string repository_overview;
+    std::string reading_guide;
+};
+
+// ── page templates ──────────────────────────────────────────────────
+
+struct PageTemplatesConfig {
+    std::string repository;
+    std::string index;
+    std::string module_page;
+    std::string namespace_page;
+    std::string type_page;
+    std::string file_page;
+};
+
+// ── evidence rules ──────────────────────────────────────────────────
+
+struct EvidenceRulesConfig {
+    std::uint32_t max_callers = 0;
+    std::uint32_t max_callees = 0;
+    std::uint32_t max_siblings = 0;
+    std::uint32_t max_source_bytes = 0;
+    std::uint32_t max_related_summaries = 0;
+};
+
+// ── llm ─────────────────────────────────────────────────────────────
+
+struct LLMConfig {
+    std::string system_prompt;
+    std::string failure_marker;
+    std::uint32_t max_output_length = 0;
+    std::uint32_t max_prompt_length = 0;
+};
+
+// ── validation ──────────────────────────────────────────────────────
+
+struct ValidationConfig {
+    bool fail_on_empty_section = false;
+    bool fail_on_h1_in_output = false;
+};
+
+// ── navigation ──────────────────────────────────────────────────────
+
+struct NavigationConfig {
+    bool consume_dependency_summaries = false;
+};
+
+// ── section order ───────────────────────────────────────────────────
+
+struct SectionOrderConfig {
+    std::vector<std::string> type_page;
+    std::vector<std::string> namespace_page;
+    std::vector<std::string> module_page;
+    std::vector<std::string> repository_page;
+    std::vector<std::string> file_page;
+};
+
+// ── top-level config ────────────────────────────────────────────────
+
 struct TaskConfig {
     std::string compile_commands_path;
     std::string project_root;
     std::string output_root;
 
     /// Base directory for config-relative assets and filter patterns.
-    /// Defaults to the current working directory when no config file is loaded.
     std::string workspace_root;
 
     FilterRule filter;
     ExtractConfig extract;
 
-    FrontmatterConfig frontmatter;
-
-    std::vector<PageRule> page_rules;
-
-    /// Output language hint passed through to the LLM prompt verbatim.
-    /// Optional; defaults to English when omitted.
-    std::optional<std::string> language;
+    PageTypesConfig page_types;
+    PathRulesConfig path_rules;
+    PromptTemplatesConfig prompt_templates;
+    PageTemplatesConfig page_templates;
+    EvidenceRulesConfig evidence_rules;
+    LLMConfig llm;
+    ValidationConfig validation;
+    NavigationConfig navigation;
+    SectionOrderConfig section_order;
 
     std::optional<std::string> log_level;
 };

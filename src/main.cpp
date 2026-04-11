@@ -19,7 +19,7 @@ using deco::decl::KVStyle;
 
 struct Options {
     DecoKV(style = KVStyle::JoinedOrSeparate,
-            help = "Path to clore configuration file (defaults to ./clore.toml when present)",
+            help = "Path to clore configuration file (default: clore.toml)",
            required = false)
     <std::string> config;
 
@@ -56,6 +56,12 @@ struct Options {
             required = false)
         <std::string> model;
 
+    DecoKV(style = KVStyle::JoinedOrSeparate,
+           names = {"--rate-limit", "--rate-limit="},
+           help = "Maximum concurrent LLM requests when --model is used",
+           required = false)
+    <std::uint32_t> rate_limit;
+
         DecoFlag(names = {"--dry-run"},
               help = "Write assembled prompts to --output-dir and skip LLM requests",
               required = false)
@@ -69,20 +75,6 @@ struct Options {
 };
 
 }  // namespace clore
-
-namespace {
-
-auto discover_default_config_path() -> std::optional<std::string> {
-    namespace fs = std::filesystem;
-
-    auto candidate = (fs::current_path() / "clore.toml").lexically_normal();
-    if(fs::is_regular_file(candidate)) {
-        return candidate.string();
-    }
-    return std::nullopt;
-}
-
-}  // namespace
 
 int main(int argc, const char** argv) {
     auto args = deco::util::argvify(argc, argv);
@@ -121,25 +113,16 @@ int main(int argc, const char** argv) {
 
     namespace fs = std::filesystem;
 
-    // Load optional configuration
-    clore::config::TaskConfig task_config;
-    std::optional<std::string> config_path;
-    if(opts.config.has_value()) {
-        config_path = *opts.config;
+    const std::string config_path = opts.config.value_or("clore.toml");
+    auto cfg_result = clore::config::load_config(config_path);
+    if(!cfg_result.has_value()) {
+        clore::logging::err("failed to load config: {}", cfg_result.error().message);
+        return 1;
     }
-    if(!config_path.has_value()) {
-        config_path = discover_default_config_path();
-    }
+    auto task_config = std::move(*cfg_result);
 
-    if(config_path.has_value()) {
-        auto cfg_result = clore::config::load_config(*config_path);
-        if(!cfg_result.has_value()) {
-            clore::logging::err("failed to load config: {}", cfg_result.error().message);
-            return 1;
-        }
-        task_config = std::move(*cfg_result);
-    } else {
-        task_config.workspace_root = fs::current_path().string();
+    if(task_config.workspace_root.empty()) {
+        task_config.workspace_root = fs::path(config_path).parent_path().string();
     }
 
     if(!opts.compile_commands.has_value()) {
@@ -158,9 +141,9 @@ int main(int argc, const char** argv) {
     task_config.compile_commands_path = *opts.compile_commands;
     task_config.project_root = *opts.source_dir;
     task_config.output_root = *opts.output_dir;
-    task_config.extract.max_snippet_bytes =
-        opts.max_snippet_bytes.has_value() ? std::optional{*opts.max_snippet_bytes}
-                                           : std::optional<std::uint32_t>{8192};
+    if(opts.max_snippet_bytes.has_value()) {
+        task_config.extract.max_snippet_bytes = *opts.max_snippet_bytes;
+    }
     if(task_config.workspace_root.empty()) {
         task_config.workspace_root = fs::current_path().string();
     }
@@ -169,8 +152,20 @@ int main(int argc, const char** argv) {
     if(opts.model.has_value()) {
         llm_model = *opts.model;
     }
+    std::optional<std::uint32_t> rate_limit;
+    if(opts.rate_limit.has_value()) {
+        rate_limit = *opts.rate_limit;
+    }
     if(!prompt_dry_run && llm_model.empty()) {
         clore::logging::err("model must not be empty");
+        return 1;
+    }
+    if(!prompt_dry_run && !rate_limit.has_value()) {
+        clore::logging::err("--rate-limit is required when --model is set");
+        return 1;
+    }
+    if(rate_limit.has_value() && *rate_limit == 0) {
+        clore::logging::err("--rate-limit must be greater than 0");
         return 1;
     }
 
@@ -195,9 +190,12 @@ int main(int argc, const char** argv) {
     clore::logging::info("  source_dir: {}", task_config.project_root);
     clore::logging::info("  output_root: {}", task_config.output_root);
     clore::logging::info("  workspace_root: {}", task_config.workspace_root);
-    clore::logging::info("  max_snippet_bytes: {}", *task_config.extract.max_snippet_bytes);
+    if(task_config.extract.max_snippet_bytes.has_value()) {
+        clore::logging::info("  max_snippet_bytes: {}", *task_config.extract.max_snippet_bytes);
+    }
     if(!prompt_dry_run) {
         clore::logging::info("  model: {}", llm_model);
+        clore::logging::info("  rate_limit: {}", *rate_limit);
     }
 
     // Extract
@@ -214,40 +212,34 @@ int main(int argc, const char** argv) {
     clore::logging::info("  {} namespaces", model.namespaces.size());
 
     if(prompt_dry_run) {
-        auto prompt_result = clore::generate::build_prompts(task_config, model);
-        if(!prompt_result.has_value()) {
-            clore::logging::err("dry-run failed: {}", prompt_result.error().message);
+        auto dry_result = clore::generate::generate_dry_run(task_config, model);
+        if(!dry_result.has_value()) {
+            clore::logging::err("dry-run failed: {}", dry_result.error().message);
             return 1;
         }
 
-        auto write_prompt_result = clore::generate::write_prompts(*prompt_result,
-                                                                  task_config.output_root);
-        if(!write_prompt_result.has_value()) {
-            clore::logging::err("dry-run failed: {}", write_prompt_result.error().message);
+        auto write_result = clore::generate::write_pages(*dry_result,
+                                                         task_config.output_root);
+        if(!write_result.has_value()) {
+            clore::logging::err("dry-run write failed: {}", write_result.error().message);
             return 1;
         }
 
-        clore::logging::info("dry-run complete: prompts written to {}",
+        clore::logging::info("dry-run complete: API reference written to {}",
                              task_config.output_root);
         return 0;
     }
 
     // Generate
-    auto gen_result = clore::generate::generate_pages(task_config, model, llm_model);
+    auto gen_result = clore::generate::generate_pages(task_config, model, llm_model,
+                                                     *rate_limit,
+                                                     task_config.output_root);
     if(!gen_result.has_value()) {
         clore::logging::err("generation failed: {}", gen_result.error().message);
         return 1;
     }
 
-    auto& pages = *gen_result;
-    auto write_result = clore::generate::write_pages(pages, task_config.output_root);
-    if(!write_result.has_value()) {
-        clore::logging::err("failed to write generated pages: {}",
-                            write_result.error().message);
-        return 1;
-    }
-
-    clore::logging::info("generated {} pages", pages.size());
+    clore::logging::info("generated {} pages", *gen_result);
     clore::logging::info("documentation written to {}", task_config.output_root);
 
     return 0;

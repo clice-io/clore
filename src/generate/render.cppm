@@ -1,0 +1,672 @@
+module;
+
+#include <algorithm>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
+
+export module generate:render;
+
+import :model;
+import config;
+import extract;
+
+export namespace clore::generate {
+
+struct RenderError {
+    std::string message;
+};
+
+auto load_page_template(std::string_view path) -> std::expected<std::string, RenderError>;
+
+auto build_link_resolver(const PagePlanSet& plan_set) -> LinkResolver;
+
+auto render_deterministic_block(std::string_view block_name,
+                                const PagePlan& plan,
+                                const extract::ProjectModel& model,
+                                const config::TaskConfig& config,
+                                const LinkResolver& links) -> std::string;
+
+auto assemble_page(const std::string& page_template,
+                   const std::string& title,
+                   const std::unordered_map<std::string, std::string>& blocks,
+                   const std::unordered_map<std::string, std::string>& slots)
+    -> std::expected<std::string, RenderError>;
+
+auto validate_output(const std::string& content,
+                     const config::ValidationConfig& validation,
+                     const config::LLMConfig& llm_config) -> std::expected<void, RenderError>;
+
+auto write_page(const GeneratedPage& page, std::string_view output_root)
+    -> std::expected<void, RenderError>;
+
+}  // namespace clore::generate
+
+// ── implementation ──────────────────────────────────────────────────
+
+namespace clore::generate {
+
+auto load_page_template(std::string_view path) -> std::expected<std::string, RenderError> {
+    namespace fs = std::filesystem;
+
+    if(path.empty()) {
+        return std::unexpected(RenderError{.message = "page template path is empty"});
+    }
+
+    std::ifstream file{fs::path(path)};
+    if(!file.is_open()) {
+        return std::unexpected(RenderError{
+            .message = std::format("failed to open page template: {}", path)});
+    }
+
+    std::ostringstream ss;
+    ss << file.rdbuf();
+    auto content = ss.str();
+
+    if(content.empty()) {
+        return std::unexpected(RenderError{
+            .message = std::format("page template is empty: {}", path)});
+    }
+
+    return content;
+}
+
+namespace {
+
+auto lookup_sym(const extract::ProjectModel& model, extract::SymbolID id)
+    -> const extract::SymbolInfo* {
+    auto it = model.symbols.find(id);
+    return it != model.symbols.end() ? &it->second : nullptr;
+}
+
+auto make_source_relative(const std::string& path, const std::string& project_root) -> std::string {
+    namespace fs = std::filesystem;
+    if(path.empty() || project_root.empty()) return path;
+    auto abs = fs::path(path).lexically_normal();
+    auto root = fs::path(project_root).lexically_normal();
+    auto rel = abs.lexically_relative(root);
+    if(rel.empty() || rel.string().starts_with("..")) return path;
+    return rel.generic_string();
+}
+
+/// If the link resolver can resolve `name`, returns `[display](path)`.
+/// Otherwise returns `` `name` ``.
+auto make_link(const std::string& name, const LinkResolver& links) -> std::string {
+    if(auto* path = links.resolve(name)) {
+        // Extract short display name (last segment after ::)
+        auto pos = name.rfind("::");
+        auto display = (pos != std::string::npos) ? name.substr(pos + 2) : name;
+        return "[`" + display + "`](" + *path + ")";
+    }
+    return "`" + name + "`";
+}
+
+/// Like make_link but uses the full qualified name as display text.
+auto make_link_full(const std::string& name, const LinkResolver& links) -> std::string {
+    if(auto* path = links.resolve(name)) {
+        return "[`" + name + "`](" + *path + ")";
+    }
+    return "`" + name + "`";
+}
+
+auto render_declaration_block(const PagePlan& plan, const extract::ProjectModel& model) -> std::string {
+    std::string result;
+    for(auto& key : plan.owner_keys) {
+        for(auto& [id, sym] : model.symbols) {
+            if(sym.qualified_name == key) {
+                if(!sym.source_snippet.empty()) {
+                    result += "```cpp\n" + sym.source_snippet + "\n```\n\n";
+                } else if(!sym.signature.empty()) {
+                    result += "```cpp\n" + sym.signature + "\n```\n\n";
+                }
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+auto render_template_parameters_block(const PagePlan& plan, const extract::ProjectModel& model) -> std::string {
+    std::string result;
+    for(auto& key : plan.owner_keys) {
+        for(auto& [id, sym] : model.symbols) {
+            if(sym.qualified_name == key && sym.is_template && !sym.template_params.empty()) {
+                result += "| Parameter | Description |\n|---|---|\n";
+                result += "| `" + sym.template_params + "` | |\n\n";
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+auto render_base_types_block(const PagePlan& plan, const extract::ProjectModel& model,
+                             const LinkResolver& links) -> std::string {
+    std::string result;
+    for(auto& key : plan.owner_keys) {
+        for(auto& [id, sym] : model.symbols) {
+            if(sym.qualified_name == key && !sym.bases.empty()) {
+                for(auto& base_id : sym.bases) {
+                    if(auto* base = lookup_sym(model, base_id)) {
+                        result += "- " + make_link_full(base->qualified_name, links) + "\n";
+                    }
+                }
+                result += "\n";
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+auto render_derived_types_block(const PagePlan& plan, const extract::ProjectModel& model,
+                                const LinkResolver& links) -> std::string {
+    std::string result;
+    for(auto& key : plan.owner_keys) {
+        for(auto& [id, sym] : model.symbols) {
+            if(sym.qualified_name == key && !sym.derived.empty()) {
+                for(auto& derived_id : sym.derived) {
+                    if(auto* derived = lookup_sym(model, derived_id)) {
+                        result += "- " + make_link_full(derived->qualified_name, links) + "\n";
+                    }
+                }
+                result += "\n";
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+auto render_members_block(const PagePlan& plan, const extract::ProjectModel& model,
+                          std::string_view access_filter) -> std::string {
+    std::string result;
+    for(auto& key : plan.owner_keys) {
+        for(auto& [id, sym] : model.symbols) {
+            if(sym.qualified_name != key) continue;
+            for(auto& child_id : sym.children) {
+                auto* child = lookup_sym(model, child_id);
+                if(!child) continue;
+                bool match = access_filter.empty() ||
+                             child->access == access_filter ||
+                             (access_filter == "public" && child->access.empty());
+                if(!match) continue;
+                result += "- ";
+                result += std::string(extract::symbol_kind_name(child->kind));
+                result += " `" + child->name + "`";
+                if(!child->signature.empty()) {
+                    result += ": `" + child->signature + "`";
+                }
+                result += "\n";
+            }
+            break;
+        }
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+auto render_imports_block(const PagePlan& plan, const extract::ProjectModel& model,
+                          const LinkResolver& links) -> std::string {
+    std::string result;
+    for(auto& key : plan.owner_keys) {
+        for(auto& [source_file, mod_unit] : model.modules) {
+            if(mod_unit.name == key) {
+                for(auto& imp : mod_unit.imports) {
+                    result += "- " + make_link_full(imp, links) + "\n";
+                }
+                break;
+            }
+        }
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+auto render_subnamespaces_block(const PagePlan& plan, const extract::ProjectModel& model,
+                                const LinkResolver& links) -> std::string {
+    std::string result;
+    for(auto& key : plan.owner_keys) {
+        for(auto& [ns_name, ns_info] : model.namespaces) {
+            if(ns_name.find("(anonymous namespace)") != std::string::npos) continue;
+            if(ns_name.starts_with(key + "::") &&
+               ns_name.find("::", key.size() + 2) == std::string::npos) {
+                result += "- " + make_link_full(ns_name, links) + "\n";
+            }
+        }
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+auto render_types_index_block(const PagePlan& plan, const extract::ProjectModel& model,
+                              const LinkResolver& links) -> std::string {
+    std::string result;
+    for(auto& key : plan.owner_keys) {
+        auto ns_it = model.namespaces.find(key);
+        if(ns_it == model.namespaces.end()) continue;
+        for(auto& sym_id : ns_it->second.symbols) {
+            auto* sym = lookup_sym(model, sym_id);
+            if(!sym) continue;
+            if(sym->kind == extract::SymbolKind::Class ||
+               sym->kind == extract::SymbolKind::Struct ||
+               sym->kind == extract::SymbolKind::Enum ||
+               sym->kind == extract::SymbolKind::Union ||
+               sym->kind == extract::SymbolKind::Concept ||
+               sym->kind == extract::SymbolKind::Template ||
+               sym->kind == extract::SymbolKind::TypeAlias) {
+                result += "- ";
+                result += std::string(extract::symbol_kind_name(sym->kind));
+                result += " " + make_link_full(sym->qualified_name, links) + "\n";
+            }
+        }
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+auto render_functions_index_block(const PagePlan& plan, const extract::ProjectModel& model) -> std::string {
+    std::string result;
+    for(auto& key : plan.owner_keys) {
+        auto ns_it = model.namespaces.find(key);
+        if(ns_it == model.namespaces.end()) continue;
+        for(auto& sym_id : ns_it->second.symbols) {
+            auto* sym = lookup_sym(model, sym_id);
+            if(!sym) continue;
+            if(sym->kind == extract::SymbolKind::Function) {
+                result += "- `" + sym->qualified_name + "`";
+                if(!sym->signature.empty()) {
+                    result += ": `" + sym->signature + "`";
+                }
+                result += "\n";
+            }
+        }
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+auto render_related_pages_block(const PagePlan& plan, const LinkResolver& links) -> std::string {
+    std::string result;
+    for(auto& linked : plan.linked_pages) {
+        // linked is a page_id like "type:clore::Options" or "namespace:clore"
+        auto colon_pos = linked.find(':');
+        if(colon_pos != std::string::npos) {
+            auto entity_name = linked.substr(colon_pos + 1);
+            if(auto* path = links.resolve(entity_name)) {
+                result += "- [`" + entity_name + "`](" + *path + ")\n";
+                continue;
+            }
+        }
+        result += "- `" + linked + "`\n";
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+auto render_source_locations_block(const PagePlan& plan, const extract::ProjectModel& model,
+                                   const config::TaskConfig& config) -> std::string {
+    std::string result;
+    for(auto& key : plan.owner_keys) {
+        for(auto& [id, sym] : model.symbols) {
+            if(sym.qualified_name != key) continue;
+            if(sym.declaration_location.is_known()) {
+                auto rel = make_source_relative(sym.declaration_location.file, config.project_root);
+                result += "- Declared at: `" + rel + ":" +
+                          std::to_string(sym.declaration_location.line) + "`\n";
+            }
+            if(sym.definition_location.has_value() && sym.definition_location->is_known()) {
+                auto rel = make_source_relative(sym.definition_location->file, config.project_root);
+                result += "- Defined at: `" + rel + ":" +
+                          std::to_string(sym.definition_location->line) + "`\n";
+            }
+            break;
+        }
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+auto render_includes_block(const PagePlan& plan, const extract::ProjectModel& model,
+                           const config::TaskConfig& config) -> std::string {
+    std::string result;
+    for(auto& key : plan.owner_keys) {
+        auto file_it = model.files.find(key);
+        if(file_it == model.files.end()) continue;
+        for(auto& inc : file_it->second.includes) {
+            auto rel = make_source_relative(inc, config.project_root);
+            result += "- `" + rel + "`\n";
+        }
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+auto render_declared_symbols_block(const PagePlan& plan, const extract::ProjectModel& model) -> std::string {
+    std::string result;
+    for(auto& key : plan.owner_keys) {
+        auto file_it = model.files.find(key);
+        if(file_it == model.files.end()) continue;
+        for(auto& sym_id : file_it->second.symbols) {
+            auto* sym = lookup_sym(model, sym_id);
+            if(!sym) continue;
+            result += "- ";
+            result += std::string(extract::symbol_kind_name(sym->kind));
+            result += " `" + sym->qualified_name + "`\n";
+        }
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+auto render_module_info_block(const PagePlan& plan, const extract::ProjectModel& model) -> std::string {
+    std::string result;
+    for(auto& key : plan.owner_keys) {
+        // key is a file path for FilePage
+        auto mod_it = model.modules.find(key);
+        if(mod_it == model.modules.end()) continue;
+        result += "- Module: `" + mod_it->second.name + "`\n";
+        result += "- Interface: " + std::string(mod_it->second.is_interface ? "yes" : "no") + "\n";
+        for(auto& imp : mod_it->second.imports) {
+            result += "- Imports: `" + imp + "`\n";
+        }
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+// Index page: render all modules, namespaces, types, files
+auto render_all_modules_index(const extract::ProjectModel& model,
+                              const LinkResolver& links) -> std::string {
+    std::string result;
+    std::vector<std::string> module_names;
+    for(auto& [source_file, mod_unit] : model.modules) {
+        if(mod_unit.is_interface) {
+            module_names.push_back(mod_unit.name);
+        }
+    }
+    std::sort(module_names.begin(), module_names.end());
+    for(auto& name : module_names) {
+        result += "- " + make_link_full(name, links) + "\n";
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+auto render_all_namespaces_index(const extract::ProjectModel& model,
+                                 const LinkResolver& links) -> std::string {
+    std::string result;
+    std::vector<std::string> ns_names;
+    for(auto& [ns_name, _] : model.namespaces) {
+        if(ns_name.find("(anonymous namespace)") != std::string::npos) continue;
+        ns_names.push_back(ns_name);
+    }
+    std::sort(ns_names.begin(), ns_names.end());
+    for(auto& name : ns_names) {
+        result += "- " + make_link_full(name, links) + "\n";
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+auto render_all_types_index(const extract::ProjectModel& model,
+                            const LinkResolver& links) -> std::string {
+    std::string result;
+    std::vector<std::string> type_names;
+    for(auto& [id, sym] : model.symbols) {
+        if(sym.qualified_name.find("(anonymous namespace)") != std::string::npos) continue;
+        if(sym.kind == extract::SymbolKind::Class ||
+           sym.kind == extract::SymbolKind::Struct ||
+           sym.kind == extract::SymbolKind::Enum ||
+           sym.kind == extract::SymbolKind::Union ||
+           sym.kind == extract::SymbolKind::Concept ||
+           sym.kind == extract::SymbolKind::Template ||
+           sym.kind == extract::SymbolKind::TypeAlias) {
+            type_names.push_back(sym.qualified_name);
+        }
+    }
+    std::sort(type_names.begin(), type_names.end());
+    for(auto& name : type_names) {
+        result += "- " + make_link_full(name, links) + "\n";
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+auto render_all_files_index(const extract::ProjectModel& model,
+                            const config::TaskConfig& config,
+                            const LinkResolver& links) -> std::string {
+    std::string result;
+    std::vector<std::pair<std::string, std::string>> file_entries;
+    for(auto& [path, _] : model.files) {
+        auto rel = make_source_relative(path, config.project_root);
+        file_entries.emplace_back(rel, path);
+    }
+    std::sort(file_entries.begin(), file_entries.end());
+    for(auto& [rel, abs] : file_entries) {
+        // Try to link using the absolute path (key used in link resolver)
+        if(auto* page_path = links.resolve(abs)) {
+            result += "- [`" + rel + "`](" + *page_path + ")\n";
+        } else {
+            result += "- `" + rel + "`\n";
+        }
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+}  // namespace
+
+auto build_link_resolver(const PagePlanSet& plan_set) -> LinkResolver {
+    LinkResolver resolver;
+    for(auto& plan : plan_set.plans) {
+        // Map each owner_key to the page's relative_path
+        for(auto& key : plan.owner_keys) {
+            resolver.name_to_path[key] = plan.relative_path;
+        }
+        // Also map the page_id-derived name
+        // page_id format: "type:X", "namespace:X", "module:X", "file:X"
+        auto colon_pos = plan.page_id.find(':');
+        if(colon_pos != std::string::npos) {
+            auto entity_name = plan.page_id.substr(colon_pos + 1);
+            resolver.name_to_path[entity_name] = plan.relative_path;
+        }
+    }
+    return resolver;
+}
+
+auto render_deterministic_block(std::string_view block_name,
+                                const PagePlan& plan,
+                                const extract::ProjectModel& model,
+                                const config::TaskConfig& config,
+                                const LinkResolver& links) -> std::string {
+    if(block_name == "declaration") return render_declaration_block(plan, model);
+    if(block_name == "template_parameters") return render_template_parameters_block(plan, model);
+    if(block_name == "base_types") return render_base_types_block(plan, model, links);
+    if(block_name == "derived_types") return render_derived_types_block(plan, model, links);
+    if(block_name == "public_members") return render_members_block(plan, model, "public");
+    if(block_name == "protected_members") return render_members_block(plan, model, "protected");
+    if(block_name == "private_members") return render_members_block(plan, model, "private");
+    if(block_name == "imports") return render_imports_block(plan, model, links);
+    if(block_name == "subnamespaces") return render_subnamespaces_block(plan, model, links);
+    if(block_name == "types_index") return render_types_index_block(plan, model, links);
+    if(block_name == "functions_index") return render_functions_index_block(plan, model);
+    if(block_name == "related_pages") return render_related_pages_block(plan, links);
+    if(block_name == "source_locations") return render_source_locations_block(plan, model, config);
+    if(block_name == "source") return render_source_locations_block(plan, model, config);
+    if(block_name == "includes") return render_includes_block(plan, model, config);
+    if(block_name == "declared_symbols") return render_declared_symbols_block(plan, model);
+    if(block_name == "defined_symbols") return render_declared_symbols_block(plan, model);
+    if(block_name == "module_info") return render_module_info_block(plan, model);
+    if(block_name == "all_modules") return render_all_modules_index(model, links);
+    if(block_name == "all_namespaces") return render_all_namespaces_index(model, links);
+    if(block_name == "all_types") return render_all_types_index(model, links);
+    if(block_name == "all_files") return render_all_files_index(model, config, links);
+    return {};
+}
+
+auto assemble_page(const std::string& page_template,
+                   const std::string& title,
+                   const std::unordered_map<std::string, std::string>& blocks,
+                   const std::unordered_map<std::string, std::string>& slots)
+    -> std::expected<std::string, RenderError> {
+
+    std::string result;
+    result.reserve(page_template.size() + 4096);
+
+    std::size_t pos = 0;
+    while(pos < page_template.size()) {
+        auto marker_start = page_template.find("{{", pos);
+        if(marker_start == std::string::npos) {
+            result.append(page_template, pos, page_template.size() - pos);
+            break;
+        }
+        result.append(page_template, pos, marker_start - pos);
+
+        auto marker_end = page_template.find("}}", marker_start);
+        if(marker_end == std::string::npos) {
+            result.append(page_template, marker_start, page_template.size() - marker_start);
+            break;
+        }
+
+        auto key = page_template.substr(marker_start + 2, marker_end - marker_start - 2);
+
+        if(key == "title") {
+            result.append(title);
+        } else if(key.starts_with("block:")) {
+            auto block_name = key.substr(6);
+            auto it = blocks.find(block_name);
+            if(it != blocks.end()) {
+                result.append(it->second);
+            }
+        } else if(key.starts_with("slot:")) {
+            auto slot_name = key.substr(5);
+            auto it = slots.find(slot_name);
+            if(it != slots.end()) {
+                result.append(it->second);
+            }
+            // If slot not found, silently omit it (LLM may have failed)
+        } else {
+            result.append("{{");
+            result.append(key);
+            result.append("}}");
+        }
+
+        pos = marker_end + 2;
+    }
+
+    // Post-process: strip empty sections (heading followed by only whitespace then another heading or EOF)
+    std::string cleaned;
+    cleaned.reserve(result.size());
+    std::istringstream stream(result);
+    std::string line;
+    std::vector<std::string> lines;
+    while(std::getline(stream, line)) {
+        lines.push_back(line);
+    }
+
+    std::size_t i = 0;
+    while(i < lines.size()) {
+        // Check if this line is a heading (## or ###)
+        if(lines[i].starts_with("## ") || lines[i].starts_with("### ")) {
+            // Scan ahead: skip blank lines
+            std::size_t j = i + 1;
+            while(j < lines.size() && lines[j].empty()) {
+                ++j;
+            }
+            // If next non-blank line is another heading or we're at EOF, skip this section
+            if(j >= lines.size() ||
+               lines[j].starts_with("# ") || lines[j].starts_with("## ") || lines[j].starts_with("### ")) {
+                i = j;  // skip the empty section heading + blank lines
+                continue;
+            }
+        }
+        cleaned += lines[i] + "\n";
+        ++i;
+    }
+
+    return cleaned;
+}
+
+auto validate_output(const std::string& content,
+                     const config::ValidationConfig& validation,
+                     const config::LLMConfig& llm_config) -> std::expected<void, RenderError> {
+    if(content.empty()) {
+        return std::unexpected(RenderError{.message = "LLM output is empty"});
+    }
+
+    if(content == llm_config.failure_marker) {
+        return std::unexpected(RenderError{
+            .message = std::format("LLM returned failure marker: {}", llm_config.failure_marker)});
+    }
+
+    if(validation.fail_on_h1_in_output) {
+        // Check for H1 at beginning of line
+        if(content.starts_with("# ")) {
+            return std::unexpected(RenderError{
+                .message = "LLM output contains H1 heading '# '"});
+        }
+        if(content.find("\n# ") != std::string::npos) {
+            return std::unexpected(RenderError{
+                .message = "LLM output contains H1 heading '# '"});
+        }
+    }
+
+    if(content.size() > llm_config.max_output_length) {
+        return std::unexpected(RenderError{
+            .message = std::format("LLM output exceeds max length: {} > {}",
+                                   content.size(), llm_config.max_output_length)});
+    }
+
+    return {};
+}
+
+auto write_page(const GeneratedPage& page, std::string_view output_root)
+    -> std::expected<void, RenderError> {
+    namespace fs = std::filesystem;
+
+    auto root = fs::path(output_root);
+    auto rel = fs::path(page.relative_path);
+
+    if(rel.is_absolute()) {
+        return std::unexpected(RenderError{
+            .message = std::format("page output path must be relative: {}", page.relative_path)});
+    }
+    for(const auto& part : rel) {
+        if(part == "." || part == "..") {
+            return std::unexpected(RenderError{
+                .message = std::format("page output path must not contain '.' or '..': {}",
+                                       page.relative_path)});
+        }
+    }
+
+    auto target = (root / rel).lexically_normal();
+    auto parent = target.parent_path();
+
+    if(!fs::exists(parent)) {
+        std::error_code ec;
+        fs::create_directories(parent, ec);
+        if(ec) {
+            return std::unexpected(RenderError{
+                .message = std::format("failed to create directory {}: {}",
+                                       parent.generic_string(), ec.message())});
+        }
+    }
+
+    std::ofstream f(target);
+    if(!f.is_open()) {
+        return std::unexpected(RenderError{
+            .message = std::format("failed to write page: {}", target.generic_string())});
+    }
+    f << page.content;
+
+    return {};
+}
+
+}  // namespace clore::generate

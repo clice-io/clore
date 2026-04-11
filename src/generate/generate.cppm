@@ -1,23 +1,22 @@
 module;
 
-#include <algorithm>
 #include <cstdint>
 #include <expected>
-#include <filesystem>
 #include <format>
-#include <fstream>
 #include <optional>
-#include <queue>
-#include <ranges>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 export module generate;
 
+export import :model;
+export import :path;
+export import :evidence;
+export import :prompt;
+export import :render;
+export import :planner;
 export import :llm;
 
 import config;
@@ -26,79 +25,17 @@ import support;
 
 export namespace clore::generate {
 
-// ── page hierarchy ──────────────────────────────────────────────────
-
-enum class PageLevel : std::uint8_t {
-    Symbol,
-    ClassStruct,
-    File,
-    Module,      ///< A C++20 module unit.
-    Namespace,
-    Repository,
-};
-
-// ── structured page context ─────────────────────────────────────────
-
-struct SymbolContext {
-    extract::SymbolInfo self;
-    std::vector<extract::SymbolInfo> direct_callers;
-    std::vector<extract::SymbolInfo> direct_callees;
-    std::vector<extract::SymbolInfo> siblings;
-    std::optional<extract::SymbolInfo> parent_class;
-};
-
-struct StructuredPagePlan {
-    std::string relative_path;
-    std::string title;
-    PageLevel level = PageLevel::File;
-    std::vector<SymbolContext> contexts;
-    std::vector<std::string> linked_pages;
-};
-
-// ── page graph ──────────────────────────────────────────────────────
-
-struct PageNode {
-    StructuredPagePlan plan;
-    std::vector<std::string> depends_on;
-    std::vector<std::string> depended_by;
-};
-
-struct PageGraph {
-    std::unordered_map<std::string, PageNode> nodes;
-    std::vector<std::string> generation_order;
-};
-
-// ── output ──────────────────────────────────────────────────────────
-
-struct PromptPage {
-    std::string relative_path;
-    std::string title;
-    std::string prompt;
-};
-
-struct GeneratedPage {
-    std::string relative_path;
-    std::string content;
-};
-
-struct GenerateError {
-    std::string message;
-};
-
-// ── public API ──────────────────────────────────────────────────────
-
-auto build_page_graph(const config::TaskConfig& config, const extract::ProjectModel& model)
-    -> PageGraph;
-
-auto build_prompts(const config::TaskConfig& config, const extract::ProjectModel& model)
-    -> std::expected<std::vector<PromptPage>, GenerateError>;
-
-auto generate_pages(const config::TaskConfig& config, const extract::ProjectModel& model,
-                    std::string_view llm_model)
+auto generate_dry_run(const config::TaskConfig& config, const extract::ProjectModel& model)
     -> std::expected<std::vector<GeneratedPage>, GenerateError>;
 
-auto write_prompts(const std::vector<PromptPage>& prompts, std::string_view output_root)
-    -> std::expected<void, GenerateError>;
+/// Non-blocking page generation with structured concurrency.
+/// Pages are written to output_root immediately when all their LLM slots complete.
+/// Returns the number of pages written.
+auto generate_pages(const config::TaskConfig& config, const extract::ProjectModel& model,
+                    std::string_view llm_model,
+                    std::uint32_t rate_limit,
+                    std::string_view output_root)
+    -> std::expected<std::size_t, GenerateError>;
 
 auto write_pages(const std::vector<GeneratedPage>& pages, std::string_view output_root)
     -> std::expected<void, GenerateError>;
@@ -111,650 +48,477 @@ namespace clore::generate {
 
 namespace {
 
-// ── helpers ─────────────────────────────────────────────────────────
-
-auto write_page_to_root(const GeneratedPage& page, std::string_view output_root)
-    -> std::expected<void, GenerateError> {
-    namespace fs = std::filesystem;
-
-    auto root = fs::path(output_root);
-
-    auto rel = fs::path(page.relative_path);
-    if(rel.is_absolute()) {
-        return std::unexpected(GenerateError{
-            .message = std::format("page output path must be relative: {}", page.relative_path)});
+auto get_page_template_path(const config::TaskConfig& config, PageType type) -> std::string {
+    switch(type) {
+        case PageType::Repository: return config.page_templates.repository;
+        case PageType::Index:      return config.page_templates.index;
+        case PageType::Module:     return config.page_templates.module_page;
+        case PageType::Namespace:  return config.page_templates.namespace_page;
+        case PageType::Type:       return config.page_templates.type_page;
+        case PageType::File:       return config.page_templates.file_page;
     }
-    for(const auto& part : rel) {
-        if(part == "." || part == "..") {
-            return std::unexpected(GenerateError{
-                .message = std::format("page output path must not contain '.' or '..': {}",
-                                       page.relative_path)});
-        }
-    }
-
-    auto target = (root / rel).lexically_normal();
-
-    auto parent = target.parent_path();
-    if(!fs::exists(parent)) {
-        std::error_code ec;
-        fs::create_directories(parent, ec);
-        if(ec) {
-            return std::unexpected(GenerateError{
-                .message = std::format("failed to create directory {}: {}",
-                                       parent.generic_string(), ec.message())});
-        }
-    }
-
-    std::ofstream f(target);
-    if(!f.is_open()) {
-        return std::unexpected(GenerateError{
-            .message = std::format("failed to write page: {}", target.generic_string())});
-    }
-    f << page.content;
-
-    logging::info("  wrote {}", page.relative_path);
-
     return {};
 }
 
-auto symbol_kind_label(extract::SymbolKind kind) -> std::string_view {
-    return extract::symbol_kind_name(kind);
+auto build_blocks(const PagePlan& plan, const extract::ProjectModel& model,
+                  const config::TaskConfig& config,
+                  const LinkResolver& links) -> std::unordered_map<std::string, std::string> {
+    std::unordered_map<std::string, std::string> blocks;
+    for(auto& block_name : plan.deterministic_blocks) {
+        blocks[block_name] = render_deterministic_block(block_name, plan, model, config, links);
+    }
+    return blocks;
 }
 
-auto path_relative_to_root(const std::filesystem::path& path,
-                          const std::filesystem::path& root)
-    -> std::optional<std::string> {
-    auto rel = path.lexically_relative(root);
-    if(rel.empty()) return std::nullopt;
-    for(const auto& part : rel) {
-        if(part == "..") return std::nullopt;
-    }
-    return rel.generic_string();
-}
+auto build_evidence_for_slot(const SlotPlan& slot, const PagePlan& plan,
+                             const extract::ProjectModel& model,
+                             const config::TaskConfig& config,
+                             const PageSummaryCache& summaries) -> EvidencePack {
+    auto& slot_kind = slot.slot_kind;
+    auto& rules = config.evidence_rules;
 
-auto output_path_for_source_file(const std::filesystem::path& file_path,
-                                 const std::filesystem::path& source_root)
-    -> std::optional<std::string> {
-    auto rel = path_relative_to_root(file_path, source_root);
-    if(!rel.has_value()) return std::nullopt;
-
-    auto dot = rel->rfind('.');
-    if(dot != std::string::npos) {
-        return rel->substr(0, dot) + ".md";
-    }
-    return *rel + ".md";
-}
-
-// ── module-aware output path ────────────────────────────────────────
-
-/// Convert a module name to a documentation output path.
-/// Main modules: "foo.bar" → "foo.bar/index.md"
-/// Partitions:   "foo.bar:baz" → "foo.bar/baz.md"
-auto output_path_for_module(const std::string& module_name) -> std::string {
-    auto colon_pos = module_name.find(':');
-    if(colon_pos != std::string::npos) {
-        // Partition: "foo.bar:baz" → "foo.bar/baz.md"
-        auto main_name = module_name.substr(0, colon_pos);
-        auto partition_name = module_name.substr(colon_pos + 1);
-        return main_name + "/" + partition_name + ".md";
-    }
-    // Main module: "foo.bar" → "foo.bar/index.md"
-    return module_name + "/index.md";
-}
-
-auto append_unique_page_ref(std::vector<std::string>& refs, const std::string& ref) -> bool {
-    if(std::ranges::find(refs, ref) != refs.end()) {
-        return false;
-    }
-    refs.push_back(ref);
-    return true;
-}
-
-auto add_page_dependency(PageGraph& graph, const std::string& dependent_page,
-                         const std::string& dependency_page) -> void {
-    if(dependent_page == dependency_page) {
-        return;
-    }
-
-    auto dependent_it = graph.nodes.find(dependent_page);
-    auto dependency_it = graph.nodes.find(dependency_page);
-    if(dependent_it == graph.nodes.end() || dependency_it == graph.nodes.end()) {
-        return;
-    }
-
-    append_unique_page_ref(dependent_it->second.depends_on, dependency_page);
-    append_unique_page_ref(dependent_it->second.plan.linked_pages, dependency_page);
-    append_unique_page_ref(dependency_it->second.depended_by, dependent_page);
-}
-
-// ── symbol context assembly ─────────────────────────────────────────
-
-auto lookup_symbol(const extract::ProjectModel& model, extract::SymbolID id)
-    -> std::optional<extract::SymbolInfo> {
-    auto it = model.symbols.find(id);
-    if(it == model.symbols.end()) return std::nullopt;
-    return it->second;
-}
-
-auto build_symbol_context(const extract::SymbolInfo& sym,
-                          const extract::ProjectModel& model,
-                          const std::vector<extract::SymbolID>& sibling_ids) -> SymbolContext {
-    SymbolContext ctx;
-    ctx.self = sym;
-    std::unordered_set<extract::SymbolID> seen_callers;
-    std::unordered_set<extract::SymbolID> seen_callees;
-    std::unordered_set<extract::SymbolID> seen_siblings;
-
-    for(auto& caller_id : sym.called_by) {
-        if(!seen_callers.insert(caller_id).second) continue;
-        if(auto s = lookup_symbol(model, caller_id)) {
-            ctx.direct_callers.push_back(*s);
-            if(ctx.direct_callers.size() >= 5) break;
-        }
-    }
-
-    for(auto& callee_id : sym.calls) {
-        if(!seen_callees.insert(callee_id).second) continue;
-        if(auto s = lookup_symbol(model, callee_id)) {
-            ctx.direct_callees.push_back(*s);
-            if(ctx.direct_callees.size() >= 5) break;
-        }
-    }
-
-    for(auto& sib_id : sibling_ids) {
-        if(sib_id == sym.id) continue;
-        if(!seen_siblings.insert(sib_id).second) continue;
-        if(auto s = lookup_symbol(model, sib_id)) {
-            ctx.siblings.push_back(*s);
-            if(ctx.siblings.size() >= 8) break;
-        }
-    }
-
-    if(sym.parent.has_value()) {
-        if(auto p = lookup_symbol(model, *sym.parent)) {
-            if(p->kind == extract::SymbolKind::Class ||
-               p->kind == extract::SymbolKind::Struct) {
-                ctx.parent_class = *p;
-            }
-        }
-    }
-
-    return ctx;
-}
-
-auto build_symbol_context_from_file(const extract::SymbolInfo& sym,
-                                    const extract::ProjectModel& model,
-                                    const extract::FileInfo& file_info) -> SymbolContext {
-    return build_symbol_context(sym, model, file_info.symbols);
-}
-
-// ── file-based page graph (traditional) ─────────────────────────────
-
-auto build_file_page_graph(const config::TaskConfig& config,
-                           const extract::ProjectModel& model) -> PageGraph {
-    namespace fs = std::filesystem;
-    PageGraph graph;
-    auto source_root = fs::path(config.project_root).lexically_normal();
-
-    for(auto& [file_path, file_info] : model.files) {
-        if(file_info.symbols.empty()) continue;
-
-        auto out_path = output_path_for_source_file(fs::path(file_path), source_root);
-        if(!out_path.has_value()) continue;
-        auto stem = fs::path(file_path).stem().string();
-
-        auto [node_it, inserted] = graph.nodes.emplace(*out_path, PageNode{});
-        auto& node = node_it->second;
-        if(inserted) {
-            node.plan.relative_path = *out_path;
-            node.plan.title = stem;
-            node.plan.level = PageLevel::File;
-        }
-
-        for(auto& sym_id : file_info.symbols) {
-            auto sym_it = model.symbols.find(sym_id);
-            if(sym_it == model.symbols.end()) continue;
-            auto exists = std::ranges::any_of(node.plan.contexts, [&](const SymbolContext& ctx) {
-                return ctx.self.id == sym_id;
-            });
-            if(exists) continue;
-            node.plan.contexts.push_back(build_symbol_context_from_file(sym_it->second, model, file_info));
-        }
-    }
-
-    // Include graph edges
-    for(auto& [file_path, file_info] : model.files) {
-        auto page_a = output_path_for_source_file(fs::path(file_path), source_root);
-        if(!page_a.has_value()) continue;
-        if(graph.nodes.find(*page_a) == graph.nodes.end()) continue;
-
-        for(auto& inc_path : file_info.includes) {
-            auto page_b = output_path_for_source_file(fs::path(inc_path), source_root);
-            if(!page_b.has_value()) continue;
-            if(*page_b == *page_a) continue;
-            if(graph.nodes.find(*page_b) == graph.nodes.end()) continue;
-
-            add_page_dependency(graph, *page_a, *page_b);
-        }
-    }
-
-    // Call graph edges
-    std::unordered_map<extract::SymbolID, std::string> sym_to_page;
-    for(auto& [page_path, node] : graph.nodes) {
-        for(auto& ctx : node.plan.contexts) {
-            sym_to_page[ctx.self.id] = page_path;
-        }
-    }
-    for(auto& [page_path, node] : graph.nodes) {
-        for(auto& ctx : node.plan.contexts) {
-            for(auto& callee_id : ctx.self.calls) {
-                auto it = sym_to_page.find(callee_id);
-                if(it == sym_to_page.end()) continue;
-                if(it->second == page_path) continue;
-                add_page_dependency(graph, page_path, it->second);
-            }
-        }
-    }
-
-    return graph;
-}
-
-// ── module-based page graph ─────────────────────────────────────────
-
-auto build_module_page_graph(const config::TaskConfig& config,
-                             const extract::ProjectModel& model) -> PageGraph {
-    PageGraph graph;
-
-    std::unordered_map<std::string, std::vector<const extract::ModuleUnit*>> units_by_name;
-    for(auto& [source_file, mod_unit] : model.modules) {
-        (void)source_file;
-        units_by_name[mod_unit.name].push_back(&mod_unit);
-    }
-
-    std::unordered_map<std::string, std::string> mod_to_page;
-    for(auto& [mod_name, mod_units] : units_by_name) {
-        auto has_interface = std::ranges::any_of(mod_units, [](const extract::ModuleUnit* unit) {
-            return unit->is_interface;
-        });
-        if(!has_interface) continue;
-
-        auto out_path = output_path_for_module(mod_name);
-        auto& node = graph.nodes[out_path];
-        node.plan.relative_path = out_path;
-        node.plan.level = PageLevel::Module;
-        node.plan.title = mod_name;
-        mod_to_page.emplace(mod_name, out_path);
-
-        std::vector<extract::SymbolID> page_symbol_ids;
-        for(auto* mod_unit : mod_units) {
-            for(auto& sym_id : mod_unit->symbols) {
-                if(std::ranges::find(page_symbol_ids, sym_id) == page_symbol_ids.end()) {
-                    page_symbol_ids.push_back(sym_id);
+    if(slot_kind == "type_overview") {
+        if(!plan.owner_keys.empty()) {
+            for(auto& [id, sym] : model.symbols) {
+                if(sym.qualified_name == plan.owner_keys[0]) {
+                    return build_evidence_for_type_overview(sym, model, rules, summaries, config.project_root);
                 }
             }
         }
-
-        for(auto& sym_id : page_symbol_ids) {
-            auto sym_it = model.symbols.find(sym_id);
-            if(sym_it == model.symbols.end()) continue;
-            node.plan.contexts.push_back(build_symbol_context(sym_it->second, model, page_symbol_ids));
-        }
     }
 
-    for(auto& [mod_name, mod_units] : units_by_name) {
-        auto page_it = mod_to_page.find(mod_name);
-        if(page_it == mod_to_page.end()) continue;
-
-        auto& page_a = page_it->second;
-        for(auto* mod_unit : mod_units) {
-            for(auto& import_name : mod_unit->imports) {
-                auto it = mod_to_page.find(import_name);
-                if(it == mod_to_page.end()) continue;
-                add_page_dependency(graph, page_a, it->second);
-            }
-        }
-
-    }
-
-    // Call graph edges between module pages
-    std::unordered_map<extract::SymbolID, std::string> sym_to_page;
-    for(auto& [page_path, node] : graph.nodes) {
-        for(auto& ctx : node.plan.contexts) {
-            sym_to_page[ctx.self.id] = page_path;
-        }
-    }
-    for(auto& [page_path, node] : graph.nodes) {
-        for(auto& ctx : node.plan.contexts) {
-            for(auto& callee_id : ctx.self.calls) {
-                auto it = sym_to_page.find(callee_id);
-                if(it == sym_to_page.end()) continue;
-                if(it->second == page_path) continue;
-                add_page_dependency(graph, page_path, it->second);
-            }
-        }
-    }
-
-    return graph;
-}
-
-// ── topological sort for page graph ─────────────────────────────────
-
-auto sort_page_graph(PageGraph& graph) -> void {
-    std::unordered_map<std::string, int> in_degree;
-    for(auto& [path, _] : graph.nodes) in_degree[path] = 0;
-    for(auto& [path, node] : graph.nodes) {
-        in_degree[path] += static_cast<int>(node.depends_on.size());
-    }
-
-    std::queue<std::string> q;
-    for(auto& [path, degree] : in_degree) {
-        if(degree == 0) q.push(path);
-    }
-
-    while(!q.empty()) {
-        auto current = q.front();
-        q.pop();
-        graph.generation_order.push_back(current);
-
-        auto node_it = graph.nodes.find(current);
-        if(node_it == graph.nodes.end()) continue;
-        for(auto& dependent : node_it->second.depended_by) {
-            if(--in_degree[dependent] == 0) {
-                q.push(dependent);
-            }
-        }
-    }
-
-    if(graph.generation_order.size() < graph.nodes.size()) {
-        for(auto& [path, _] : graph.nodes) {
-            if(in_degree[path] > 0) {
-                graph.generation_order.push_back(path);
-            }
-        }
-    }
-
-    for(auto& [_, node] : graph.nodes) {
-        auto& lp = node.plan.linked_pages;
-        std::sort(lp.begin(), lp.end());
-        lp.erase(std::unique(lp.begin(), lp.end()), lp.end());
-    }
-}
-
-// ── prompt builder ──────────────────────────────────────────────────
-
-auto build_prompt_for_page(const StructuredPagePlan& plan,
-                           const config::TaskConfig& config) -> std::string {
-    std::ostringstream ss;
-
-    auto language = config.language.has_value() ? *config.language : std::string("English");
-
-    if(plan.level == PageLevel::Module) {
-        ss << "Generate Markdown documentation for the following C++20 module.\n\n";
-        ss << "## Module: `" << plan.title << "`\n\n";
-    } else {
-        ss << "Generate Markdown documentation for the following C++ source file.\n\n";
-        ss << "## File: `" << plan.relative_path << "`\n\n";
-    }
-
-    ss << "### Output language\n";
-    ss << "- " << language << "\n\n";
-
-    if(!plan.linked_pages.empty()) {
-        ss << "### Related pages\n";
-        for(auto& lp : plan.linked_pages) {
-            ss << "- [" << lp << "](" << lp << ")\n";
-        }
-        ss << "\n";
-    }
-
-    ss << "### Symbols\n\n";
-
-    for(auto& ctx : plan.contexts) {
-        auto& sym = ctx.self;
-        ss << "#### " << symbol_kind_label(sym.kind) << ": `"
-           << sym.qualified_name << "`\n\n";
-
-        if(!sym.signature.empty()) {
-            ss << "**Signature:**\n```cpp\n" << sym.signature << "\n```\n\n";
-        }
-
-        if(!sym.doc_comment.empty()) {
-            ss << "**Existing doc comment:**\n" << sym.doc_comment << "\n\n";
-        }
-
-        if(!sym.source_snippet.empty()) {
-            ss << "**Source:**\n```cpp\n" << sym.source_snippet << "\n```\n\n";
-        }
-
-        if(!ctx.direct_callers.empty()) {
-            ss << "**Called by:**\n";
-            for(auto& caller : ctx.direct_callers) {
-                ss << "- `" << caller.qualified_name << "`";
-                if(!caller.signature.empty()) ss << " — " << caller.signature;
-                ss << "\n";
-            }
-            ss << "\n";
-        }
-
-        if(!ctx.direct_callees.empty()) {
-            ss << "**Calls:**\n";
-            for(auto& callee : ctx.direct_callees) {
-                ss << "- `" << callee.qualified_name << "`\n";
-            }
-            ss << "\n";
-        }
-
-        if(!sym.bases.empty()) {
-            ss << "**Bases:** ";
-            bool first = true;
-            for(auto& sib : ctx.siblings) {
-                for(auto& base_id : sym.bases) {
-                    if(sib.id == base_id) {
-                        if(!first) ss << ", ";
-                        first = false;
-                        ss << "`" << sib.qualified_name << "`";
-                    }
+    if(slot_kind == "type_usage_notes") {
+        if(!plan.owner_keys.empty()) {
+            for(auto& [id, sym] : model.symbols) {
+                if(sym.qualified_name == plan.owner_keys[0]) {
+                    return build_evidence_for_type_usage_notes(sym, model, rules, config.project_root);
                 }
             }
-            if(ctx.parent_class.has_value() && first) {
-                ss << "`" << ctx.parent_class->qualified_name << "`";
-            }
-            ss << "\n\n";
         }
+    }
 
-        if(!sym.children.empty()) {
-            ss << "**Members:**\n";
-            for(auto& child_id : sym.children) {
-                for(auto& sib : ctx.siblings) {
-                    if(sib.id == child_id) {
-                        ss << "- " << symbol_kind_label(sib.kind)
-                           << " `" << sib.name << "`";
-                        if(!sib.signature.empty()) ss << ": " << sib.signature;
-                        ss << "\n";
-                        break;
-                    }
+    if(slot_kind == "namespace_summary") {
+        if(!plan.owner_keys.empty()) {
+            auto it = model.namespaces.find(plan.owner_keys[0]);
+            if(it != model.namespaces.end()) {
+                return build_evidence_for_namespace_summary(it->second, model, rules, summaries, config.project_root);
+            }
+        }
+    }
+
+    if(slot_kind == "module_summary") {
+        if(!plan.owner_keys.empty()) {
+            for(auto& [source_file, mod_unit] : model.modules) {
+                if(mod_unit.name == plan.owner_keys[0]) {
+                    return build_evidence_for_module_summary(mod_unit, model, rules, summaries, config.project_root);
                 }
             }
-            ss << "\n";
         }
     }
 
-    ss << "\n### Instructions\n\n";
-    if(plan.level == PageLevel::Module) {
-        ss << "1. Write a brief overview of this module's purpose and public interface.\n";
-        ss << "2. Document each exported class/struct with its purpose and members.\n";
-        ss << "3. Document each exported function: explain WHY it exists, parameters, and return value.\n";
-        ss << "4. Note module dependencies and partition relationships.\n";
-    } else {
-        ss << "1. Write a brief overview of the file's purpose.\n";
-        ss << "2. Document each class/struct with its purpose and members.\n";
-        ss << "3. Document each function: explain WHY it exists (using caller context), "
-              "parameters, and return value.\n";
-        ss << "4. Note any inheritance relationships.\n";
-    }
-    ss << "5. Include cross-references to related pages where appropriate.\n";
-    ss << "6. Use proper Markdown headings and code blocks.\n";
-    ss << "7. Do NOT wrap the output in a code fence.\n";
-
-    return ss.str();
-}
-
-auto render_frontmatter(std::string_view title,
-                        const config::FrontmatterConfig& fm_config) -> std::string {
-    std::ostringstream ss;
-    ss << "---\n";
-    ss << "title: \"" << title << "\"\n";
-
-    for(auto& field : fm_config.fields) {
-        ss << field.key << ": " << field.value << "\n";
+    if(slot_kind == "module_architecture") {
+        if(!plan.owner_keys.empty()) {
+            for(auto& [source_file, mod_unit] : model.modules) {
+                if(mod_unit.name == plan.owner_keys[0]) {
+                    return build_evidence_for_module_architecture(mod_unit, model, rules, summaries, config.project_root);
+                }
+            }
+        }
     }
 
-    ss << "---\n";
-    return ss.str();
+    if(slot_kind == "repository_overview" || slot_kind == "reading_guide") {
+        return build_evidence_for_repository_overview(model, rules, summaries);
+    }
+
+    return EvidencePack{.slot_kind = slot_kind};
 }
 
-auto assemble_page(std::string_view frontmatter,
-                   std::string_view llm_body) -> std::string {
-    std::string content;
-    content.reserve(frontmatter.size() + llm_body.size() + 64);
-    content += frontmatter;
-    content += "\n";
-    content += llm_body;
-    content += "\n";
-    return content;
+auto render_single_page(const PagePlan& plan,
+                        const config::TaskConfig& config,
+                        const extract::ProjectModel& model,
+                        const std::unordered_map<std::string, std::string>& slot_outputs,
+                        bool embed_prompts,
+                        const LinkResolver& links)
+    -> std::expected<GeneratedPage, GenerateError> {
+
+    auto tmpl_path = get_page_template_path(config, plan.page_type);
+    auto tmpl_result = load_page_template(tmpl_path);
+    if(!tmpl_result.has_value()) {
+        return std::unexpected(GenerateError{
+            .message = std::format("failed to load page template for '{}': {}",
+                                   plan.page_id, tmpl_result.error().message)});
+    }
+
+    auto blocks = build_blocks(plan, model, config, links);
+
+    auto assembly_result = assemble_page(*tmpl_result, plan.title, blocks, slot_outputs);
+    if(!assembly_result.has_value()) {
+        return std::unexpected(GenerateError{
+            .message = std::format("failed to assemble page '{}': {}",
+                                   plan.page_id, assembly_result.error().message)});
+    }
+
+    return GeneratedPage{
+        .relative_path = plan.relative_path,
+        .content = *assembly_result,
+    };
+}
+
+auto extract_summary_from_slot_output(const std::string& overview_output) -> std::string {
+    // Take first paragraph as summary
+    auto end = overview_output.find("\n\n");
+    if(end != std::string::npos) {
+        return overview_output.substr(0, end);
+    }
+    if(overview_output.size() > 300) {
+        return overview_output.substr(0, 300);
+    }
+    return overview_output;
 }
 
 }  // namespace
 
-// ── public API ──────────────────────────────────────────────────────
-
-auto build_page_graph(const config::TaskConfig& config, const extract::ProjectModel& model)
-    -> PageGraph {
-    PageGraph graph;
-
-    if(model.uses_modules) {
-        logging::info("building module-based page graph ({} module units)",
-                      model.modules.size());
-        graph = build_module_page_graph(config, model);
-    } else {
-        graph = build_file_page_graph(config, model);
-    }
-
-    sort_page_graph(graph);
-    return graph;
-}
-
-auto build_prompts(const config::TaskConfig& config, const extract::ProjectModel& model)
-    -> std::expected<std::vector<PromptPage>, GenerateError> {
-    auto graph = build_page_graph(config, model);
-
-    if(graph.nodes.empty()) {
-        return std::unexpected(GenerateError{
-            .message = "no pages to generate (no files with symbols)"});
-    }
-
-    logging::info("page graph: {} pages, generation order size {}",
-                  graph.nodes.size(), graph.generation_order.size());
-
-    std::vector<PromptPage> prompts;
-    prompts.reserve(graph.generation_order.size());
-
-    for(auto& page_path : graph.generation_order) {
-        auto node_it = graph.nodes.find(page_path);
-        if(node_it == graph.nodes.end()) continue;
-
-        auto& plan = node_it->second.plan;
-        prompts.push_back(PromptPage{
-            .relative_path = plan.relative_path,
-            .title = plan.title,
-            .prompt = build_prompt_for_page(plan, config),
-        });
-    }
-
-    if(prompts.empty()) {
-        return std::unexpected(GenerateError{
-            .message = "page graph did not yield any promptable pages"});
-    }
-
-    return prompts;
-}
-
-auto generate_pages(const config::TaskConfig& config, const extract::ProjectModel& model,
-                    std::string_view llm_model)
+auto generate_dry_run(const config::TaskConfig& config, const extract::ProjectModel& model)
     -> std::expected<std::vector<GeneratedPage>, GenerateError> {
-    auto prompts_result = build_prompts(config, model);
-    if(!prompts_result.has_value()) {
-        return std::unexpected(std::move(prompts_result.error()));
+
+    auto plan_result = build_page_plan_set(config, model);
+    if(!plan_result.has_value()) {
+        return std::unexpected(GenerateError{.message = plan_result.error().message});
     }
 
-    auto& prompts = *prompts_result;
+    auto& plan_set = *plan_result;
+    logging::info("page plan: {} pages, generation order size {}",
+                  plan_set.plans.size(), plan_set.generation_order.size());
 
+    // Build page_id -> plan index
+    std::unordered_map<std::string, std::size_t> id_to_index;
+    for(std::size_t i = 0; i < plan_set.plans.size(); ++i) {
+        id_to_index[plan_set.plans[i].page_id] = i;
+    }
+
+    PageSummaryCache summaries;
     std::vector<GeneratedPage> pages;
-    pages.reserve(prompts.size());
+    pages.reserve(plan_set.generation_order.size());
 
-    for(std::size_t i = 0; i < prompts.size(); ++i) {
-        auto& prompt = prompts[i];
-        logging::info("generating page {}/{}: {}",
-                      i + 1, prompts.size(), prompt.relative_path);
+    auto links = build_link_resolver(plan_set);
 
-        auto llm_result = call_llm(llm_model, prompt.prompt);
-        if(!llm_result.has_value()) {
-            logging::warn("LLM call failed for {}: {}", prompt.relative_path,
-                          llm_result.error().message);
-            continue;
+    for(auto& page_id : plan_set.generation_order) {
+        auto idx_it = id_to_index.find(page_id);
+        if(idx_it == id_to_index.end()) continue;
+        auto& plan = plan_set.plans[idx_it->second];
+
+        // Build prompts for dry-run display
+        std::unordered_map<std::string, std::string> slot_outputs;
+        for(auto& slot : plan.slot_plans) {
+            auto evidence = build_evidence_for_slot(slot, plan, model, config, summaries);
+
+            auto tmpl_result = load_prompt_template(slot.prompt_template_path);
+            if(!tmpl_result.has_value()) {
+                slot_outputs[slot.slot_kind] = "> [prompt template load failed: " + tmpl_result.error().message + "]\n";
+                continue;
+            }
+
+            auto prompt_result = instantiate_prompt_bounded(
+                *tmpl_result, evidence, config.llm.failure_marker, config.llm.max_prompt_length);
+            if(!prompt_result.has_value()) {
+                return std::unexpected(GenerateError{
+                    .message = std::format(
+                        "prompt rendering failed for slot '{}' in page '{}': {}",
+                        slot.slot_kind, page_id, prompt_result.error().message)});
+            }
+
+            auto& prompt = *prompt_result;
+            // In dry-run, embed the prompt as blockquote
+            std::string quoted;
+            std::istringstream iss(prompt);
+            std::string line;
+            while(std::getline(iss, line)) {
+                quoted += "> " + line + "\n";
+            }
+            slot_outputs[slot.slot_kind] = quoted;
         }
 
-        auto frontmatter = render_frontmatter(prompt.title, config.frontmatter);
-        auto content = assemble_page(frontmatter, *llm_result);
+        auto page_result = render_single_page(plan, config, model, slot_outputs, true, links);
+        if(!page_result.has_value()) {
+            return std::unexpected(std::move(page_result.error()));
+        }
 
-        auto page = GeneratedPage{
-            .relative_path = prompt.relative_path,
-            .content = std::move(content),
-        };
-
-        pages.push_back(std::move(page));
-    }
-
-    if(pages.empty()) {
-        return std::unexpected(GenerateError{
-            .message = "all page generations failed — check LLM configuration"});
+        pages.push_back(std::move(*page_result));
     }
 
     return pages;
 }
 
-auto write_prompts(const std::vector<PromptPage>& prompts, std::string_view output_root)
-    -> std::expected<void, GenerateError> {
-    if(output_root.empty()) {
-        return std::unexpected(GenerateError{
-            .message = "output root must not be empty for dry-run"});
-    }
-    if(prompts.empty()) {
-        return std::unexpected(GenerateError{
-            .message = "no prompts available for dry-run output"});
+auto generate_pages(const config::TaskConfig& config, const extract::ProjectModel& model,
+                    std::string_view llm_model,
+                    std::uint32_t rate_limit,
+                    std::string_view output_root)
+    -> std::expected<std::size_t, GenerateError> {
+
+    auto plan_result = build_page_plan_set(config, model);
+    if(!plan_result.has_value()) {
+        return std::unexpected(GenerateError{.message = plan_result.error().message});
     }
 
-    for(auto& prompt : prompts) {
-        auto page = GeneratedPage{
-            .relative_path = prompt.relative_path,
-            .content = prompt.prompt,
-        };
-        if(auto result = write_page_to_root(page, output_root); !result.has_value()) {
-            return result;
+    auto& plan_set = *plan_result;
+    logging::info("page plan: {} pages, generation order size {}",
+                  plan_set.plans.size(), plan_set.generation_order.size());
+
+    // Build page_id -> plan index
+    std::unordered_map<std::string, std::size_t> id_to_plan;
+    for(std::size_t i = 0; i < plan_set.plans.size(); ++i) {
+        id_to_plan[plan_set.plans[i].page_id] = i;
+    }
+
+    auto links = build_link_resolver(plan_set);
+
+    // ── dependency graph ────────────────────────────────────────────
+
+    struct PageState {
+        std::size_t plan_index;
+        std::size_t total_slots;
+        std::size_t completed_slots = 0;
+        std::size_t unsatisfied_deps = 0;
+        bool submitted = false;
+        bool written = false;
+        std::unordered_map<std::string, std::string> slot_outputs;
+    };
+
+    std::vector<PageState> states;
+    states.reserve(plan_set.generation_order.size());
+    std::unordered_map<std::string, std::size_t> id_to_state;
+
+    for(auto& page_id : plan_set.generation_order) {
+        auto plan_it = id_to_plan.find(page_id);
+        if(plan_it == id_to_plan.end()) continue;
+        auto state_idx = states.size();
+        id_to_state[page_id] = state_idx;
+        states.push_back(PageState{
+            .plan_index = plan_it->second,
+            .total_slots = plan_set.plans[plan_it->second].slot_plans.size(),
+        });
+    }
+
+    // Compute unsatisfied deps + build dependents adjacency list
+    std::unordered_map<std::string, std::vector<std::size_t>> dependents;
+    for(std::size_t i = 0; i < states.size(); ++i) {
+        auto& plan = plan_set.plans[states[i].plan_index];
+        for(auto& dep_id : plan.depends_on_pages) {
+            if(id_to_state.contains(dep_id)) {
+                states[i].unsatisfied_deps++;
+                dependents[dep_id].push_back(i);
+            }
         }
     }
 
-    return {};
+    // ── shared scheduler state ──────────────────────────────────────
+
+    std::unordered_map<std::string, std::string> prompt_tmpl_cache;
+    PageSummaryCache summaries;
+    std::size_t written_count = 0;
+
+    struct TagInfo {
+        std::size_t state_index;
+        std::string slot_kind;
+    };
+    std::unordered_map<std::uint64_t, TagInfo> tag_map;
+    std::uint64_t next_tag = 0;
+    std::optional<GenerateError> schedule_error;
+
+    LLMClient client(llm_model, config.llm.system_prompt, rate_limit);
+
+    // ── write a completed page immediately ──────────────────────────
+
+    auto write_completed_page = [&](std::size_t state_idx)
+        -> std::expected<void, GenerateError> {
+        auto& state = states[state_idx];
+        auto& plan = plan_set.plans[state.plan_index];
+
+        auto page_result = render_single_page(plan, config, model, state.slot_outputs, false, links);
+        if(!page_result.has_value()) {
+            return std::unexpected(std::move(page_result.error()));
+        }
+
+        auto write_r = write_page(*page_result, output_root);
+        if(!write_r.has_value()) {
+            return std::unexpected(GenerateError{.message = write_r.error().message});
+        }
+
+        state.written = true;
+        ++written_count;
+        logging::info("  written {}", page_result->relative_path);
+
+        // Extract summary for dependent pages
+        for(auto& [kind, content] : state.slot_outputs) {
+            if(kind == "type_overview" || kind == "module_summary" ||
+               kind == "namespace_summary") {
+                if(!plan.owner_keys.empty()) {
+                    summaries[plan.owner_keys[0]] = extract_summary_from_slot_output(content);
+                }
+            }
+        }
+
+        // Unlock dependents
+        auto dep_it = dependents.find(plan.page_id);
+        if(dep_it != dependents.end()) {
+            for(auto dep_state_idx : dep_it->second) {
+                if(states[dep_state_idx].unsatisfied_deps > 0) {
+                    states[dep_state_idx].unsatisfied_deps--;
+                }
+            }
+        }
+
+        return {};
+    };
+
+    // ── submit ready pages (deterministic pages written inline) ─────
+
+    auto submit_ready_pages = [&]() -> bool {
+        bool submitted_any_llm = false;
+        bool changed = true;
+
+        while(changed) {
+            changed = false;
+            for(std::size_t i = 0; i < states.size(); ++i) {
+                auto& state = states[i];
+                if(state.submitted || state.unsatisfied_deps > 0) continue;
+                state.submitted = true;
+
+                auto& plan = plan_set.plans[state.plan_index];
+
+                if(state.total_slots == 0) {
+                    // Deterministic page: render + write immediately
+                    auto r = write_completed_page(i);
+                    if(!r.has_value()) {
+                        schedule_error = std::move(r.error());
+                        return submitted_any_llm;
+                    }
+                    changed = true;  // might unlock more pages
+                    continue;
+                }
+
+                // LLM page: build evidence + prompts, submit to client
+                for(auto& slot : plan.slot_plans) {
+                    auto evidence = build_evidence_for_slot(
+                        slot, plan, model, config, summaries);
+
+                    auto tmpl_it = prompt_tmpl_cache.find(slot.prompt_template_path);
+                    if(tmpl_it == prompt_tmpl_cache.end()) {
+                        auto tmpl_r = load_prompt_template(slot.prompt_template_path);
+                        if(!tmpl_r.has_value()) {
+                            schedule_error = GenerateError{
+                                .message = std::format(
+                                    "failed to load prompt template '{}': {}",
+                                    slot.prompt_template_path, tmpl_r.error().message)};
+                            return submitted_any_llm;
+                        }
+                        tmpl_it = prompt_tmpl_cache.emplace(
+                            slot.prompt_template_path, std::move(*tmpl_r)).first;
+                    }
+
+                    auto prompt_result = instantiate_prompt_bounded(
+                        tmpl_it->second, evidence,
+                        config.llm.failure_marker, config.llm.max_prompt_length);
+                    if(!prompt_result.has_value()) {
+                        schedule_error = GenerateError{
+                            .message = std::format(
+                                "prompt rendering failed for slot '{}' in '{}': {}",
+                                slot.slot_kind, plan.page_id,
+                                prompt_result.error().message)};
+                        return submitted_any_llm;
+                    }
+
+                    auto tag = next_tag++;
+                    tag_map[tag] = TagInfo{.state_index = i, .slot_kind = slot.slot_kind};
+                    auto submit_r = client.submit(tag, std::move(*prompt_result));
+                    if(!submit_r.has_value()) {
+                        schedule_error = GenerateError{.message = submit_r.error().message};
+                        return submitted_any_llm;
+                    }
+                    submitted_any_llm = true;
+                }
+
+                logging::info("submitted LLM for '{}': {} slots",
+                              plan.page_id, plan.slot_plans.size());
+            }
+        }
+
+        return submitted_any_llm;
+    };
+
+    // ── drive the event loop ────────────────────────────────────────
+
+    bool has_llm_work = submit_ready_pages();
+    if(schedule_error.has_value()) {
+        return std::unexpected(std::move(*schedule_error));
+    }
+
+    if(has_llm_work) {
+        auto run_result = client.run(
+            [&](std::uint64_t tag, std::expected<std::string, LLMError> result) {
+                if(schedule_error.has_value()) return;
+
+                auto tag_it = tag_map.find(tag);
+                if(tag_it == tag_map.end()) return;
+
+                auto state_idx = tag_it->second.state_index;
+                auto& slot_kind = tag_it->second.slot_kind;
+                auto& state = states[state_idx];
+                auto& plan = plan_set.plans[state.plan_index];
+
+                if(result.has_value()) {
+                    auto output_check = validate_output(
+                        *result, config.validation, config.llm);
+                    if(output_check.has_value()) {
+                        state.slot_outputs[slot_kind] = std::move(*result);
+                    } else {
+                        logging::warn("output validation failed for slot '{}' in '{}': {}",
+                                      slot_kind, plan.page_id,
+                                      output_check.error().message);
+                    }
+                } else {
+                    logging::warn("LLM failed for slot '{}' in '{}': {}",
+                                  slot_kind, plan.page_id, result.error().message);
+                }
+
+                state.completed_slots++;
+
+                if(state.completed_slots == state.total_slots) {
+                    auto r = write_completed_page(state_idx);
+                    if(!r.has_value()) {
+                        schedule_error = std::move(r.error());
+                        return;
+                    }
+                    submit_ready_pages();
+                }
+            });
+
+        if(!run_result.has_value()) {
+            return std::unexpected(GenerateError{
+                .message = std::format("LLM event loop error: {}",
+                                       run_result.error().message)});
+        }
+    }
+
+    if(schedule_error.has_value()) {
+        return std::unexpected(std::move(*schedule_error));
+    }
+
+    if(written_count == 0) {
+        return std::unexpected(GenerateError{.message = "no pages were generated"});
+    }
+
+    return written_count;
 }
 
 auto write_pages(const std::vector<GeneratedPage>& pages, std::string_view output_root)
     -> std::expected<void, GenerateError> {
     for(auto& page : pages) {
-        if(auto r = write_page_to_root(page, output_root); !r.has_value()) {
-            return r;
+        auto r = write_page(page, output_root);
+        if(!r.has_value()) {
+            return std::unexpected(GenerateError{.message = r.error().message});
         }
     }
-
     return {};
 }
 

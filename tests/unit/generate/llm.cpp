@@ -1,8 +1,12 @@
 #include "eventide/zest/zest.h"
 
+#include <cstdint>
 #include <cstdlib>
+#include <expected>
+#include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 import generate;
 
@@ -51,7 +55,7 @@ struct ScopedEnvVar {
 
 TEST_SUITE(llm) {
     TEST_CASE(build_request_json_uses_requested_model) {
-        auto json = detail::build_request_json("gpt-5.2", "Document this function.");
+        auto json = detail::build_request_json("gpt-5.2", "You are a writer.", "Document this function.");
 
         EXPECT_NE(json.find(R"("model":"gpt-5.2")"), std::string::npos);
         EXPECT_NE(json.find("Document this function."), std::string::npos);
@@ -79,7 +83,7 @@ TEST_SUITE(llm) {
         base_url.unset();
         api_key.set("test-key");
 
-        auto result = call_llm("gpt-5.2", "ping");
+        auto result = call_llm("gpt-5.2", "system", "ping");
 
         EXPECT_FALSE(result.has_value());
         EXPECT_EQ(result.error().message,
@@ -93,10 +97,54 @@ TEST_SUITE(llm) {
         base_url.set("https://example.invalid/v1");
         api_key.unset();
 
-        auto result = call_llm("gpt-5.2", "ping");
+        auto result = call_llm("gpt-5.2", "system", "ping");
 
         EXPECT_FALSE(result.has_value());
         EXPECT_EQ(result.error().message,
                   "required environment variable OPENAI_API_KEY is not set");
+    }
+
+    TEST_CASE(llm_client_requires_openai_base_url_env) {
+        ScopedEnvVar base_url("OPENAI_BASE_URL");
+        ScopedEnvVar api_key("OPENAI_API_KEY");
+
+        base_url.unset();
+        api_key.set("test-key");
+
+        LLMClient client("gpt-5.2", "system", 4);
+        (void)client.submit(0, "ping");
+
+        auto result = client.run([](std::uint64_t, auto) {});
+
+        EXPECT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().message,
+                  "required environment variable OPENAI_BASE_URL is not set");
+    }
+
+    TEST_CASE(llm_client_requires_openai_api_key_env) {
+        ScopedEnvVar base_url("OPENAI_BASE_URL");
+        ScopedEnvVar api_key("OPENAI_API_KEY");
+
+        base_url.set("https://example.invalid/v1");
+        api_key.unset();
+
+        LLMClient client("gpt-5.2", "system", 4);
+        (void)client.submit(0, "ping");
+
+        auto result = client.run([](std::uint64_t, auto) {});
+
+        EXPECT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().message,
+                  "required environment variable OPENAI_API_KEY is not set");
+    }
+
+    TEST_CASE(llm_client_run_with_no_work_succeeds) {
+        LLMClient client("gpt-5.2", "system", 4);
+
+        // run() with nothing submitted should return immediately
+        auto result = client.run([](std::uint64_t, auto) {});
+
+        // No pending work → no env required, early exit
+        EXPECT_TRUE(result.has_value());
     }
 };

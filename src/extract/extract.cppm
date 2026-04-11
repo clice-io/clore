@@ -253,9 +253,13 @@ auto rebuild_model_indexes(const config::TaskConfig& config, ProjectModel& model
         auto ns_end = sym.qualified_name.rfind("::");
         if(ns_end != std::string::npos) {
             auto ns_name = sym.qualified_name.substr(0, ns_end);
-            auto& ns_info = model.namespaces[ns_name];
-            ns_info.name = ns_name;
-            append_unique(ns_info.symbols, symbol_id);
+            // Skip anonymous namespaces — they produce invalid directory names
+            // and are implementation details not useful in documentation.
+            if(ns_name.find("(anonymous namespace)") == std::string::npos) {
+                auto& ns_info = model.namespaces[ns_name];
+                ns_info.name = ns_name;
+                append_unique(ns_info.symbols, symbol_id);
+            }
         }
 
         if(sym.parent.has_value()) {
