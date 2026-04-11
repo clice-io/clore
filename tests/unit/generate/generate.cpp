@@ -352,6 +352,113 @@ TEST_SUITE(generate) {
         EXPECT_EQ(result->generation_order[1], "module:demo.beta");
     }
 
+    TEST_CASE(build_page_plan_set_orders_cycle_participants_lexicographically) {
+        ScopedTempDir temp("module_cycle_generation_order");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_config(temp.path);
+        config.page_types.index = false;
+        config.page_types.file_page = false;
+        config.page_types.namespace_page = false;
+        config.page_types.type_page = false;
+        config.page_types.module_page = true;
+
+        extract::ProjectModel model;
+        model.uses_modules = true;
+
+        auto beta_file = (temp.path / "src" / "beta.cppm").generic_string();
+        auto alpha_file = (temp.path / "src" / "alpha.cppm").generic_string();
+
+        model.modules.emplace(
+            beta_file,
+            extract::ModuleUnit{
+                .name = "demo.beta",
+                .is_interface = true,
+                .source_file = beta_file,
+                .imports = {"demo.alpha"},
+            });
+        model.modules.emplace(
+            alpha_file,
+            extract::ModuleUnit{
+                .name = "demo.alpha",
+                .is_interface = true,
+                .source_file = alpha_file,
+                .imports = {"demo.beta"},
+            });
+
+        auto result = build_page_plan_set(config, model);
+
+        ASSERT_TRUE(result.has_value());
+        ASSERT_EQ(result->generation_order.size(), 2u);
+        EXPECT_EQ(result->generation_order[0], "module:demo.alpha");
+        EXPECT_EQ(result->generation_order[1], "module:demo.beta");
+    }
+
+    TEST_CASE(render_deterministic_block_relativizes_related_page_links) {
+        ScopedTempDir temp("relative_links");
+
+        auto config = make_config(temp.path);
+        extract::ProjectModel model;
+
+        PagePlan current_plan{
+            .page_id = "namespace:demo",
+            .page_type = PageType::Namespace,
+            .title = "Namespace `demo`",
+            .relative_path = "namespaces/demo/index.md",
+            .linked_pages = {"type:demo::Widget"},
+        };
+        PagePlan target_plan{
+            .page_id = "type:demo::Widget",
+            .page_type = PageType::Type,
+            .title = "`demo::Widget`",
+            .relative_path = "types/demo/widget.md",
+            .owner_keys = {"demo::Widget"},
+        };
+
+        PagePlanSet plan_set{
+            .plans = {current_plan, target_plan},
+        };
+
+        auto links = build_link_resolver(plan_set);
+        auto block = render_deterministic_block("related_pages", current_plan, model, config, links);
+
+        EXPECT_NE(block.find("(../../types/demo/widget.md)"), std::string::npos);
+    }
+
+    TEST_CASE(render_deterministic_block_relativizes_all_files_links) {
+        ScopedTempDir temp("relative_file_links");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_config(temp.path);
+        extract::ProjectModel model;
+
+        auto file_path = (temp.path / "src" / "math.cpp").generic_string();
+        model.files.emplace(file_path, extract::FileInfo{.path = file_path});
+
+        PagePlan current_plan{
+            .page_id = "index",
+            .page_type = PageType::Index,
+            .title = "API Reference",
+            .relative_path = "guides/index.md",
+        };
+        PagePlan file_plan{
+            .page_id = "file:" + file_path,
+            .page_type = PageType::File,
+            .title = "File `src/math.cpp`",
+            .relative_path = "files/src/math.md",
+            .owner_keys = {file_path},
+        };
+
+        PagePlanSet plan_set{
+            .plans = {current_plan, file_plan},
+        };
+
+        auto links = build_link_resolver(plan_set);
+        auto block = render_deterministic_block("all_files", current_plan, model, config, links);
+
+        EXPECT_NE(block.find("(../files/src/math.md)"), std::string::npos);
+    }
+
     TEST_CASE(namespace_summary_prompt_uses_namespace_subject) {
         ScopedTempDir temp("namespace_summary_prompt");
         fs::create_directories(temp.path / "src");

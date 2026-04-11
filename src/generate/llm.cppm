@@ -109,6 +109,7 @@ private:
     auto next_pending_delay() const -> std::optional<std::chrono::milliseconds>;
     auto process_completed(Callback& on_complete) -> void;
     auto cleanup_request(CURL* easy) -> void;
+    auto reset_active_state() noexcept -> void;
 
     CURLM* multi_ = nullptr;
     std::string url_;
@@ -121,6 +122,7 @@ private:
     std::uint32_t in_flight_ = 0;
     std::multimap<std::chrono::steady_clock::time_point, PendingRequest> pending_;
     std::unordered_map<CURL*, InFlightRequest> requests_;
+    std::optional<LLMError> configuration_error_;
 };
 
 }  // namespace clore::generate
@@ -133,6 +135,8 @@ namespace {
 
 constexpr std::string_view kOpenAIBaseUrlEnv = "OPENAI_BASE_URL";
 constexpr std::string_view kOpenAIApiKeyEnv = "OPENAI_API_KEY";
+constexpr long kCurlConnectTimeoutMs = 5'000;
+constexpr long kCurlRequestTimeoutMs = 120'000;
 
 auto read_required_env(std::string_view name) -> std::expected<std::string, LLMError> {
     auto* value = std::getenv(std::string{name}.c_str());
@@ -306,6 +310,8 @@ auto call_llm(std::string_view model, std::string_view system_prompt,
                      static_cast<curl_off_t>(request_json.size()));
     curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, &write_response_body);
     curl_easy_setopt(easy, CURLOPT_WRITEDATA, &response_body);
+    curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT_MS, kCurlConnectTimeoutMs);
+    curl_easy_setopt(easy, CURLOPT_TIMEOUT_MS, kCurlRequestTimeoutMs);
     curl_easy_setopt(easy, CURLOPT_NOSIGNAL, 1L);
 
     logging::info("calling LLM: {} model={}", url, model);
@@ -343,34 +349,27 @@ LLMClient::LLMClient(std::string_view model, std::string_view system_prompt,
                      std::uint32_t max_concurrent,
                      std::uint32_t retry_count,
                      std::uint32_t retry_initial_backoff_ms)
-    // Intentionally no explicit validation for max_concurrent. A value of 0 is
-    // treated as "do not launch new requests" by the event loop.
     : model_(model),
       system_prompt_(system_prompt),
       max_concurrent_(max_concurrent),
       retry_count_(retry_count),
-      retry_initial_backoff_ms_(retry_initial_backoff_ms) {}
+      retry_initial_backoff_ms_(retry_initial_backoff_ms) {
+    if(max_concurrent_ == 0) {
+        configuration_error_ = LLMError{
+            .message = "max_concurrent must be greater than 0"};
+    }
+}
 
 LLMClient::~LLMClient() {
-    // Cleanup any remaining in-flight requests
-    for(auto& [easy, req] : requests_) {
-        if(multi_) {
-            curl_multi_remove_handle(multi_, easy);
-        }
-        if(req.headers) {
-            curl_slist_free_all(req.headers);
-        }
-        curl_easy_cleanup(easy);
-    }
-    requests_.clear();
-
-    if(multi_) {
-        curl_multi_cleanup(multi_);
-    }
+    reset_active_state();
 }
 
 auto LLMClient::submit(std::uint64_t tag, std::string prompt)
     -> std::expected<void, LLMError> {
+    if(configuration_error_.has_value()) {
+        return std::unexpected(*configuration_error_);
+    }
+
     return enqueue_pending(PendingRequest{
         .tag = tag,
         .prompt = std::move(prompt),
@@ -379,6 +378,10 @@ auto LLMClient::submit(std::uint64_t tag, std::string prompt)
 }
 
 auto LLMClient::run(Callback on_complete) -> std::expected<void, LLMError> {
+    if(configuration_error_.has_value()) {
+        return std::unexpected(*configuration_error_);
+    }
+
     // Nothing to do
     if(pending_.empty() && in_flight_ == 0) {
         return {};
@@ -406,18 +409,19 @@ auto LLMClient::run(Callback on_complete) -> std::expected<void, LLMError> {
         return std::unexpected(LLMError{.message = "curl_multi_init failed"});
     }
 
+    auto fail_run = [this](LLMError error) -> std::expected<void, LLMError> {
+        reset_active_state();
+        return std::unexpected(std::move(error));
+    };
+
     // Event loop: launch pending, poll, process completed, repeat
     while(in_flight_ > 0 || !pending_.empty()) {
         // Launch as many pending requests as concurrency allows
         if(auto r = try_launch_pending(); !r.has_value()) {
-            return std::unexpected(std::move(r.error()));
+            return fail_run(std::move(r.error()));
         }
 
         if(in_flight_ == 0) {
-            // With max_concurrent_ == 0, nothing can be launched, so exit cleanly.
-            if(max_concurrent_ == 0) {
-                break;
-            }
             auto delay = next_pending_delay();
             if(!delay.has_value()) {
                 break;
@@ -434,7 +438,7 @@ auto LLMClient::run(Callback on_complete) -> std::expected<void, LLMError> {
         if(mcode != CURLM_OK) {
             logging::err("curl_multi_perform failed: CURLMcode={} error={}",
                          static_cast<int>(mcode), curl_multi_strerror(mcode));
-            return std::unexpected(LLMError{
+            return fail_run(LLMError{
                 .message = std::format("curl_multi_perform failed (CURLMcode {}): {}",
                                        static_cast<int>(mcode),
                                        curl_multi_strerror(mcode))});
@@ -459,7 +463,7 @@ auto LLMClient::run(Callback on_complete) -> std::expected<void, LLMError> {
                 logging::err("curl_multi_poll failed: CURLMcode={} timeout_ms={} error={}",
                              static_cast<int>(poll_code), timeout_ms,
                              curl_multi_strerror(poll_code));
-                return std::unexpected(LLMError{
+                return fail_run(LLMError{
                     .message = std::format("curl_multi_poll failed (CURLMcode {}): {}",
                                            static_cast<int>(poll_code),
                                            curl_multi_strerror(poll_code))});
@@ -467,8 +471,7 @@ auto LLMClient::run(Callback on_complete) -> std::expected<void, LLMError> {
         }
     }
 
-    curl_multi_cleanup(multi_);
-    multi_ = nullptr;
+    reset_active_state();
 
     return {};
 }
@@ -545,6 +548,8 @@ auto LLMClient::launch_one(PendingRequest request)
                      static_cast<curl_off_t>(stored_req.request_body.size()));
     curl_easy_setopt(stored_req.easy, CURLOPT_WRITEFUNCTION, &write_response_body);
     curl_easy_setopt(stored_req.easy, CURLOPT_WRITEDATA, &stored_req.response_body);
+    curl_easy_setopt(stored_req.easy, CURLOPT_CONNECTTIMEOUT_MS, kCurlConnectTimeoutMs);
+    curl_easy_setopt(stored_req.easy, CURLOPT_TIMEOUT_MS, kCurlRequestTimeoutMs);
     curl_easy_setopt(stored_req.easy, CURLOPT_NOSIGNAL, 1L);
 
     auto mcode = curl_multi_add_handle(multi_, easy);
@@ -689,6 +694,26 @@ auto LLMClient::cleanup_request(CURL* easy) -> void {
     }
     curl_easy_cleanup(easy);
     requests_.erase(it);
+}
+
+auto LLMClient::reset_active_state() noexcept -> void {
+    for(auto& [easy, req] : requests_) {
+        if(multi_) {
+            curl_multi_remove_handle(multi_, easy);
+        }
+        if(req.headers) {
+            curl_slist_free_all(req.headers);
+        }
+        curl_easy_cleanup(easy);
+    }
+
+    requests_.clear();
+    in_flight_ = 0;
+
+    if(multi_) {
+        curl_multi_cleanup(multi_);
+        multi_ = nullptr;
+    }
 }
 
 }  // namespace clore::generate

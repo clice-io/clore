@@ -481,11 +481,14 @@ auto topological_sort(const std::vector<PagePlan>& plans,
 
     // Append any remaining (cycle participants)
     if(order.size() < plans.size()) {
+        std::vector<std::string> cycle_participants;
         for(auto& plan : plans) {
             if(in_degree[plan.page_id] > 0) {
-                order.push_back(plan.page_id);
+                cycle_participants.push_back(plan.page_id);
             }
         }
+        std::sort(cycle_participants.begin(), cycle_participants.end());
+        order.insert(order.end(), cycle_participants.begin(), cycle_participants.end());
     }
 
     return order;

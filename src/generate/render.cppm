@@ -98,22 +98,40 @@ auto make_source_relative(const std::string& path, const std::string& project_ro
     return rel.generic_string();
 }
 
+auto make_relative_link_target(std::string_view current_page_path,
+                               std::string_view target_page_path) -> std::string {
+    namespace fs = std::filesystem;
+
+    auto current = fs::path(current_page_path).lexically_normal();
+    auto target = fs::path(target_page_path).lexically_normal();
+    auto base = current.has_parent_path() ? current.parent_path() : fs::path{"."};
+    auto rel = target.lexically_relative(base);
+    if(rel.empty()) {
+        return target.generic_string();
+    }
+    return rel.generic_string();
+}
+
 /// If the link resolver can resolve `name`, returns `[display](path)`.
 /// Otherwise returns `` `name` ``.
-auto make_link(const std::string& name, const LinkResolver& links) -> std::string {
+auto make_link(const std::string& name, std::string_view current_page_path,
+               const LinkResolver& links) -> std::string {
     if(auto* path = links.resolve(name)) {
         // Extract short display name (last segment after ::)
         auto pos = name.rfind("::");
         auto display = (pos != std::string::npos) ? name.substr(pos + 2) : name;
-        return "[`" + display + "`](" + *path + ")";
+        return "[`" + display + "`](" +
+               make_relative_link_target(current_page_path, *path) + ")";
     }
     return "`" + name + "`";
 }
 
 /// Like make_link but uses the full qualified name as display text.
-auto make_link_full(const std::string& name, const LinkResolver& links) -> std::string {
+auto make_link_full(const std::string& name, std::string_view current_page_path,
+                    const LinkResolver& links) -> std::string {
     if(auto* path = links.resolve(name)) {
-        return "[`" + name + "`](" + *path + ")";
+        return "[`" + name + "`](" +
+               make_relative_link_target(current_page_path, *path) + ")";
     }
     return "`" + name + "`";
 }
@@ -157,7 +175,9 @@ auto render_base_types_block(const PagePlan& plan, const extract::ProjectModel& 
             if(sym.qualified_name == key && !sym.bases.empty()) {
                 for(auto& base_id : sym.bases) {
                     if(auto* base = lookup_sym(model, base_id)) {
-                        result += "- " + make_link_full(base->qualified_name, links) + "\n";
+                        result += "- " +
+                                  make_link_full(base->qualified_name, plan.relative_path, links) +
+                                  "\n";
                     }
                 }
                 result += "\n";
@@ -176,7 +196,9 @@ auto render_derived_types_block(const PagePlan& plan, const extract::ProjectMode
             if(sym.qualified_name == key && !sym.derived.empty()) {
                 for(auto& derived_id : sym.derived) {
                     if(auto* derived = lookup_sym(model, derived_id)) {
-                        result += "- " + make_link_full(derived->qualified_name, links) + "\n";
+                        result += "- " +
+                                  make_link_full(derived->qualified_name, plan.relative_path, links) +
+                                  "\n";
                     }
                 }
                 result += "\n";
@@ -222,7 +244,7 @@ auto render_imports_block(const PagePlan& plan, const extract::ProjectModel& mod
         for(auto& [source_file, mod_unit] : model.modules) {
             if(mod_unit.name == key) {
                 for(auto& imp : mod_unit.imports) {
-                    result += "- " + make_link_full(imp, links) + "\n";
+                    result += "- " + make_link_full(imp, plan.relative_path, links) + "\n";
                 }
                 break;
             }
@@ -240,7 +262,7 @@ auto render_subnamespaces_block(const PagePlan& plan, const extract::ProjectMode
             if(ns_name.find("(anonymous namespace)") != std::string::npos) continue;
             if(ns_name.starts_with(key + "::") &&
                ns_name.find("::", key.size() + 2) == std::string::npos) {
-                result += "- " + make_link_full(ns_name, links) + "\n";
+                result += "- " + make_link_full(ns_name, plan.relative_path, links) + "\n";
             }
         }
     }
@@ -266,7 +288,8 @@ auto render_types_index_block(const PagePlan& plan, const extract::ProjectModel&
                sym->kind == extract::SymbolKind::TypeAlias) {
                 result += "- ";
                 result += std::string(extract::symbol_kind_name(sym->kind));
-                result += " " + make_link_full(sym->qualified_name, links) + "\n";
+                result += " " + make_link_full(sym->qualified_name, plan.relative_path, links) +
+                          "\n";
             }
         }
     }
@@ -303,7 +326,8 @@ auto render_related_pages_block(const PagePlan& plan, const LinkResolver& links)
         if(colon_pos != std::string::npos) {
             auto entity_name = linked.substr(colon_pos + 1);
             if(auto* path = links.resolve(entity_name)) {
-                result += "- [`" + entity_name + "`](" + *path + ")\n";
+                result += "- [`" + entity_name + "`](" +
+                          make_relative_link_target(plan.relative_path, *path) + ")\n";
                 continue;
             }
         }
@@ -438,7 +462,8 @@ auto render_module_info_block(const PagePlan& plan, const extract::ProjectModel&
 
 // Index page: render all modules, namespaces, types, files
 auto render_all_modules_index(const extract::ProjectModel& model,
-                              const LinkResolver& links) -> std::string {
+                              const LinkResolver& links,
+                              std::string_view current_page_path) -> std::string {
     std::string result;
     std::vector<std::string> module_names;
     for(auto& [source_file, mod_unit] : model.modules) {
@@ -448,14 +473,15 @@ auto render_all_modules_index(const extract::ProjectModel& model,
     }
     std::sort(module_names.begin(), module_names.end());
     for(auto& name : module_names) {
-        result += "- " + make_link_full(name, links) + "\n";
+        result += "- " + make_link_full(name, current_page_path, links) + "\n";
     }
     if(!result.empty()) result += "\n";
     return result;
 }
 
 auto render_all_namespaces_index(const extract::ProjectModel& model,
-                                 const LinkResolver& links) -> std::string {
+                                 const LinkResolver& links,
+                                 std::string_view current_page_path) -> std::string {
     std::string result;
     std::vector<std::string> ns_names;
     for(auto& [ns_name, _] : model.namespaces) {
@@ -464,14 +490,15 @@ auto render_all_namespaces_index(const extract::ProjectModel& model,
     }
     std::sort(ns_names.begin(), ns_names.end());
     for(auto& name : ns_names) {
-        result += "- " + make_link_full(name, links) + "\n";
+        result += "- " + make_link_full(name, current_page_path, links) + "\n";
     }
     if(!result.empty()) result += "\n";
     return result;
 }
 
 auto render_all_types_index(const extract::ProjectModel& model,
-                            const LinkResolver& links) -> std::string {
+                            const LinkResolver& links,
+                            std::string_view current_page_path) -> std::string {
     std::string result;
     std::vector<std::string> type_names;
     for(auto& [id, sym] : model.symbols) {
@@ -488,7 +515,7 @@ auto render_all_types_index(const extract::ProjectModel& model,
     }
     std::sort(type_names.begin(), type_names.end());
     for(auto& name : type_names) {
-        result += "- " + make_link_full(name, links) + "\n";
+        result += "- " + make_link_full(name, current_page_path, links) + "\n";
     }
     if(!result.empty()) result += "\n";
     return result;
@@ -496,7 +523,8 @@ auto render_all_types_index(const extract::ProjectModel& model,
 
 auto render_all_files_index(const extract::ProjectModel& model,
                             const config::TaskConfig& config,
-                            const LinkResolver& links) -> std::string {
+                            const LinkResolver& links,
+                            std::string_view current_page_path) -> std::string {
     std::string result;
     std::vector<std::pair<std::string, std::string>> file_entries;
     for(auto& [path, _] : model.files) {
@@ -507,7 +535,8 @@ auto render_all_files_index(const extract::ProjectModel& model,
     for(auto& [rel, abs] : file_entries) {
         // Try to link using the absolute path (key used in link resolver)
         if(auto* page_path = links.resolve(abs)) {
-            result += "- [`" + rel + "`](" + *page_path + ")\n";
+            result += "- [`" + rel + "`](" +
+                      make_relative_link_target(current_page_path, *page_path) + ")\n";
         } else {
             result += "- `" + rel + "`\n";
         }
@@ -559,10 +588,10 @@ auto render_deterministic_block(std::string_view block_name,
     if(block_name == "declared_symbols") return render_declared_symbols_block(plan, model);
     if(block_name == "defined_symbols") return render_defined_symbols_block(plan, model);
     if(block_name == "module_info") return render_module_info_block(plan, model);
-    if(block_name == "all_modules") return render_all_modules_index(model, links);
-    if(block_name == "all_namespaces") return render_all_namespaces_index(model, links);
-    if(block_name == "all_types") return render_all_types_index(model, links);
-    if(block_name == "all_files") return render_all_files_index(model, config, links);
+    if(block_name == "all_modules") return render_all_modules_index(model, links, plan.relative_path);
+    if(block_name == "all_namespaces") return render_all_namespaces_index(model, links, plan.relative_path);
+    if(block_name == "all_types") return render_all_types_index(model, links, plan.relative_path);
+    if(block_name == "all_files") return render_all_files_index(model, config, links, plan.relative_path);
     return {};
 }
 
@@ -715,6 +744,12 @@ auto write_page(const GeneratedPage& page, std::string_view output_root)
             .message = std::format("failed to write page: {}", target.generic_string())});
     }
     f << page.content;
+    f.flush();
+
+    if(!f) {
+        return std::unexpected(RenderError{
+            .message = std::format("failed to write page: {}", target.generic_string())});
+    }
 
     return {};
 }

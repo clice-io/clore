@@ -147,4 +147,19 @@ TEST_SUITE(llm) {
         // No pending work → no env required, early exit
         EXPECT_TRUE(result.has_value());
     }
+
+    TEST_CASE(llm_client_rejects_zero_max_concurrent) {
+        LLMClient client("gpt-5.2", "system", 0, 3, 250);
+
+        auto submit_result = client.submit(0, "ping");
+        EXPECT_FALSE(submit_result.has_value());
+        EXPECT_EQ(submit_result.error().message,
+                  "max_concurrent must be greater than 0");
+
+        auto run_result = client.run([](std::uint64_t, auto) {});
+
+        EXPECT_FALSE(run_result.has_value());
+        EXPECT_EQ(run_result.error().message,
+                  "max_concurrent must be greater than 0");
+    }
 };
