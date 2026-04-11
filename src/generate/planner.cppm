@@ -464,7 +464,23 @@ auto topological_sort(const std::vector<PagePlan>& plans,
     std::vector<std::string> order;
     order.reserve(plans.size());
 
-    while(!ready.empty()) {
+    while(order.size() < plans.size()) {
+        if(ready.empty()) {
+            std::optional<std::string> injected;
+            for(auto& plan : plans) {
+                if(in_degree[plan.page_id] > 0 &&
+                   (!injected.has_value() || plan.page_id < *injected)) {
+                    injected = plan.page_id;
+                }
+            }
+            if(!injected.has_value()) break;
+
+            // Break cycles incrementally and let the existing topo loop
+            // continue to release newly satisfiable dependents.
+            in_degree[*injected] = 0;
+            ready.insert(*injected);
+        }
+
         auto current = *ready.begin();
         ready.erase(ready.begin());
         order.push_back(current);
@@ -472,23 +488,12 @@ auto topological_sort(const std::vector<PagePlan>& plans,
         auto it = reverse_edges.find(current);
         if(it != reverse_edges.end()) {
             for(auto& dependent : it->second) {
-                if(--in_degree[dependent] == 0) {
+                auto& degree = in_degree[dependent];
+                if(degree > 0 && --degree == 0) {
                     ready.insert(dependent);
                 }
             }
         }
-    }
-
-    // Append any remaining (cycle participants)
-    if(order.size() < plans.size()) {
-        std::vector<std::string> cycle_participants;
-        for(auto& plan : plans) {
-            if(in_degree[plan.page_id] > 0) {
-                cycle_participants.push_back(plan.page_id);
-            }
-        }
-        std::sort(cycle_participants.begin(), cycle_participants.end());
-        order.insert(order.end(), cycle_participants.begin(), cycle_participants.end());
     }
 
     return order;
