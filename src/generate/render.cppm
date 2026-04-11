@@ -38,7 +38,8 @@ auto render_deterministic_block(std::string_view block_name,
 auto assemble_page(const std::string& page_template,
                    const std::string& title,
                    const std::unordered_map<std::string, std::string>& blocks,
-                   const std::unordered_map<std::string, std::string>& slots)
+                   const std::unordered_map<std::string, std::string>& slots,
+                   bool fail_on_empty_section = false)
     -> std::expected<std::string, RenderError>;
 
 auto validate_output(const std::string& content,
@@ -569,7 +570,7 @@ auto assemble_page(const std::string& page_template,
                    const std::string& title,
                    const std::unordered_map<std::string, std::string>& blocks,
                    const std::unordered_map<std::string, std::string>& slots,
-                   bool fail_on_empty_section = false)
+                   bool fail_on_empty_section)
     -> std::expected<std::string, RenderError> {
 
     std::string result;

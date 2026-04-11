@@ -432,8 +432,11 @@ auto LLMClient::run(Callback on_complete) -> std::expected<void, LLMError> {
         int still_running = 0;
         auto mcode = curl_multi_perform(multi_, &still_running);
         if(mcode != CURLM_OK) {
+            logging::err("curl_multi_perform failed: CURLMcode={} error={}",
+                         static_cast<int>(mcode), curl_multi_strerror(mcode));
             return std::unexpected(LLMError{
-                .message = std::format("curl_multi_perform failed: {}",
+                .message = std::format("curl_multi_perform failed (CURLMcode {}): {}",
+                                       static_cast<int>(mcode),
                                        curl_multi_strerror(mcode))});
         }
 
@@ -451,7 +454,16 @@ auto LLMClient::run(Callback on_complete) -> std::expected<void, LLMError> {
                     timeout_ms = static_cast<int>(delay_ms);
                 }
             }
-            curl_multi_poll(multi_, nullptr, 0, timeout_ms, nullptr);
+            auto poll_code = curl_multi_poll(multi_, nullptr, 0, timeout_ms, nullptr);
+            if(poll_code != CURLM_OK) {
+                logging::err("curl_multi_poll failed: CURLMcode={} timeout_ms={} error={}",
+                             static_cast<int>(poll_code), timeout_ms,
+                             curl_multi_strerror(poll_code));
+                return std::unexpected(LLMError{
+                    .message = std::format("curl_multi_poll failed (CURLMcode {}): {}",
+                                           static_cast<int>(poll_code),
+                                           curl_multi_strerror(poll_code))});
+            }
         }
     }
 

@@ -277,6 +277,81 @@ TEST_SUITE(generate) {
         EXPECT_LT(pos_util, pos_math);
     }
 
+    TEST_CASE(build_page_plan_set_keeps_parent_only_namespace_pages) {
+        ScopedTempDir temp("parent_only_namespace_pages");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_config(temp.path);
+
+        extract::ProjectModel model;
+        auto file = (temp.path / "src" / "config.cppm").generic_string();
+        auto type_symbol = make_type_symbol(200, "Options", "demo::config::Options",
+                                            file, "Configuration options.");
+        model.symbols.emplace(type_symbol.id, type_symbol);
+
+        extract::NamespaceInfo root_ns;
+        root_ns.name = "demo";
+        root_ns.children.push_back("demo::config");
+
+        extract::NamespaceInfo child_ns;
+        child_ns.name = "demo::config";
+        child_ns.symbols.push_back(type_symbol.id);
+
+        model.namespaces.emplace(root_ns.name, root_ns);
+        model.namespaces.emplace(child_ns.name, child_ns);
+
+        auto result = build_page_plan_set(config, model);
+
+        ASSERT_TRUE(result.has_value());
+
+        auto root_plan = std::ranges::find_if(result->plans, [](const PagePlan& p) {
+            return p.page_id == "namespace:demo";
+        });
+        ASSERT_TRUE(root_plan != result->plans.end());
+        EXPECT_TRUE(std::ranges::find(root_plan->linked_pages, "namespace:demo::config") !=
+                    root_plan->linked_pages.end());
+    }
+
+    TEST_CASE(build_page_plan_set_orders_independent_modules_lexicographically) {
+        ScopedTempDir temp("module_generation_order");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_config(temp.path);
+        config.page_types.index = false;
+        config.page_types.file_page = false;
+        config.page_types.namespace_page = false;
+        config.page_types.type_page = false;
+        config.page_types.module_page = true;
+
+        extract::ProjectModel model;
+        model.uses_modules = true;
+
+        auto beta_file = (temp.path / "src" / "beta.cppm").generic_string();
+        auto alpha_file = (temp.path / "src" / "alpha.cppm").generic_string();
+
+        model.modules.emplace(
+            beta_file,
+            extract::ModuleUnit{
+                .name = "demo.beta",
+                .is_interface = true,
+                .source_file = beta_file,
+            });
+        model.modules.emplace(
+            alpha_file,
+            extract::ModuleUnit{
+                .name = "demo.alpha",
+                .is_interface = true,
+                .source_file = alpha_file,
+            });
+
+        auto result = build_page_plan_set(config, model);
+
+        ASSERT_TRUE(result.has_value());
+        ASSERT_EQ(result->generation_order.size(), 2u);
+        EXPECT_EQ(result->generation_order[0], "module:demo.alpha");
+        EXPECT_EQ(result->generation_order[1], "module:demo.beta");
+    }
+
     TEST_CASE(namespace_summary_prompt_uses_namespace_subject) {
         ScopedTempDir temp("namespace_summary_prompt");
         fs::create_directories(temp.path / "src");

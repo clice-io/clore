@@ -66,6 +66,7 @@ struct FileInfo {
 struct NamespaceInfo {
     std::string name;
     std::vector<SymbolID> symbols;
+    std::vector<std::string> children;
 };
 
 // ── module information ──────────────────────────────────────────────

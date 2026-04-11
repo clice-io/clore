@@ -7,6 +7,7 @@ module;
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 export module generate:prompt;
 
@@ -103,7 +104,14 @@ auto load_prompt_template(std::string_view path) -> std::expected<std::string, P
     }
 
     auto file_path = fs::path(path);
-    if(!fs::exists(file_path)) {
+    std::error_code ec;
+    auto exists = fs::exists(file_path, ec);
+    if(ec) {
+        return std::unexpected(PromptError{
+            .message = std::format("prompt template check failed: {}: {}",
+                                   path, ec.message())});
+    }
+    if(!exists) {
         return std::unexpected(PromptError{
             .message = std::format("prompt template not found: {}", path)});
     }
@@ -117,6 +125,11 @@ auto load_prompt_template(std::string_view path) -> std::expected<std::string, P
     std::ostringstream ss;
     ss << file.rdbuf();
     auto content = ss.str();
+
+    if(file.bad() || (file.fail() && !file.eof()) || ss.bad()) {
+        return std::unexpected(PromptError{
+            .message = std::format("failed to read prompt template: {}", path)});
+    }
 
     if(content.empty()) {
         return std::unexpected(PromptError{

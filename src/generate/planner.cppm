@@ -6,7 +6,7 @@ module;
 #include <filesystem>
 #include <format>
 #include <optional>
-#include <queue>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -218,7 +218,7 @@ auto enumerate_namespace_pages(PlanBuilder& builder) -> std::expected<void, Plan
     if(!builder.config.page_types.namespace_page) return {};
 
     for(auto& [ns_name, ns_info] : builder.model.namespaces) {
-        if(ns_info.symbols.empty()) continue;
+        if(ns_info.symbols.empty() && ns_info.children.empty()) continue;
         // Skip anonymous namespaces
         if(ns_name.find("(anonymous namespace)") != std::string::npos) continue;
 
@@ -278,12 +278,9 @@ auto enumerate_namespace_pages(PlanBuilder& builder) -> std::expected<void, Plan
         }
 
         // Link to child namespaces
-        for(auto& [child_ns, _] : builder.model.namespaces) {
+        for(auto& child_ns : ns_info.children) {
             if(child_ns.find("(anonymous namespace)") != std::string::npos) continue;
-            if(child_ns.starts_with(ns_name + "::") &&
-               child_ns.find("::", ns_name.size() + 2) == std::string::npos) {
-                plan.linked_pages.push_back("namespace:" + child_ns);
-            }
+            plan.linked_pages.push_back("namespace:" + child_ns);
         }
 
         if(auto r = builder.add_plan(std::move(plan)); !r) return r;
@@ -459,24 +456,24 @@ auto topological_sort(const std::vector<PagePlan>& plans,
         }
     }
 
-    std::queue<std::string> q;
+    std::set<std::string> ready;
     for(auto& [id, degree] : in_degree) {
-        if(degree == 0) q.push(id);
+        if(degree == 0) ready.insert(id);
     }
 
     std::vector<std::string> order;
     order.reserve(plans.size());
 
-    while(!q.empty()) {
-        auto current = q.front();
-        q.pop();
+    while(!ready.empty()) {
+        auto current = *ready.begin();
+        ready.erase(ready.begin());
         order.push_back(current);
 
         auto it = reverse_edges.find(current);
         if(it != reverse_edges.end()) {
             for(auto& dependent : it->second) {
                 if(--in_degree[dependent] == 0) {
-                    q.push(dependent);
+                    ready.insert(dependent);
                 }
             }
         }
