@@ -6,15 +6,13 @@ exclude = []
 max_snippet_bytes = 8192
 
 [page_types]
-repository = true
 index = true
 module_page = true
 namespace_page = true
 type_page = true
-file_page = true
+file_page = false
 
 [path_rules]
-repository_path = "repository.md"
 index_path = "index.md"
 module_prefix = "modules"
 namespace_prefix = "namespaces"
@@ -32,7 +30,6 @@ repository_overview = "templates/prompts/repository_overview.txt"
 reading_guide = "templates/prompts/reading_guide.txt"
 
 [page_templates]
-repository = "templates/pages/repository.md"
 index = "templates/pages/index.md"
 module_page = "templates/pages/module.md"
 namespace_page = "templates/pages/namespace.md"
@@ -48,9 +45,8 @@ max_related_summaries = 3
 
 [llm]
 system_prompt = "You are a C++ documentation writer. Generate concise, accurate documentation for C++ code elements. Focus on purpose, design intent, and role in the codebase. Output only Markdown text suitable for embedding in a documentation page."
-failure_marker = "[GENERATION_FAILED]"
-max_output_length = 4096
-max_prompt_length = 16384
+retry_count = 3
+retry_initial_backoff_ms = 250
 
 [validation]
 fail_on_empty_section = true

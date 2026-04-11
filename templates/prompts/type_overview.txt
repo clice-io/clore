@@ -19,7 +19,6 @@ Must not repeat:
 - code blocks
 
 Use only the EVIDENCE section below.
-If evidence is insufficient, output exactly:
-{{failure_marker}}
+If evidence is insufficient, explicitly explain what key evidence is missing.
 
 {{evidence}}

@@ -28,7 +28,6 @@ struct ExtractConfig {
 // ── page types ──────────────────────────────────────────────────────
 
 struct PageTypesConfig {
-    bool repository = false;
     bool index = false;
     bool module_page = false;
     bool namespace_page = false;
@@ -39,7 +38,6 @@ struct PageTypesConfig {
 // ── path rules ──────────────────────────────────────────────────────
 
 struct PathRulesConfig {
-    std::string repository_path;
     std::string index_path;
     std::string module_prefix;
     std::string namespace_prefix;
@@ -63,7 +61,6 @@ struct PromptTemplatesConfig {
 // ── page templates ──────────────────────────────────────────────────
 
 struct PageTemplatesConfig {
-    std::string repository;
     std::string index;
     std::string module_page;
     std::string namespace_page;
@@ -85,9 +82,8 @@ struct EvidenceRulesConfig {
 
 struct LLMConfig {
     std::string system_prompt;
-    std::string failure_marker;
-    std::uint32_t max_output_length = 0;
-    std::uint32_t max_prompt_length = 0;
+    std::uint32_t retry_count = 0;
+    std::uint32_t retry_initial_backoff_ms = 0;
 };
 
 // ── validation ──────────────────────────────────────────────────────

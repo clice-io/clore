@@ -426,46 +426,13 @@ auto enumerate_index_page(PlanBuilder& builder) -> std::expected<void, PlanError
         .deterministic_blocks = {"all_modules", "all_namespaces", "all_types", "all_files"},
     };
 
-    // Index depends on all other pages
-    for(auto& existing : builder.plans) {
-        plan.depends_on_pages.push_back(existing.page_id);
-    }
-
-    if(auto r = builder.add_plan(std::move(plan)); !r) return r;
-    return {};
-}
-
-auto enumerate_repository_page(PlanBuilder& builder) -> std::expected<void, PlanError> {
-    if(!builder.config.page_types.repository) return {};
-
-    PageIdentity identity{
-        .page_type = PageType::Repository,
-        .normalized_owner_key = "repository",
-        .qualified_name = "repository",
-    };
-
-    auto path_result = compute_page_path(identity, builder.config.path_rules);
-    if(!path_result.has_value()) {
-        return std::unexpected(PlanError{.message = path_result.error().message});
-    }
-
-    auto page_id = std::string("repository");
-    PagePlan plan{
-        .page_id = page_id,
-        .page_type = PageType::Repository,
-        .title = "Repository Overview",
-        .relative_path = *path_result,
-        .deterministic_blocks = {"all_modules", "all_namespaces"},
-    };
-
     plan.slot_plans.push_back(builder.make_slot(page_id, "repository_overview"));
     plan.slot_plans.push_back(builder.make_slot(page_id, "reading_guide"));
 
-    // Repository depends on module + namespace pages
+    // Index depends on all content pages so overview + reading guide can use
+    // dependency summaries and links with complete context.
     for(auto& existing : builder.plans) {
-        if(existing.page_type == PageType::Module || existing.page_type == PageType::Namespace) {
-            plan.depends_on_pages.push_back(existing.page_id);
-        }
+        plan.depends_on_pages.push_back(existing.page_id);
     }
 
     if(auto r = builder.add_plan(std::move(plan)); !r) return r;
@@ -535,7 +502,7 @@ auto build_page_plan_set(const config::TaskConfig& config,
 
     PlanBuilder builder{.config = config, .model = model};
 
-    // 1. Enumerate pages in dependency order: types first, then files, namespaces, modules, index, repository
+    // 1. Enumerate pages in dependency order: types first, then files, namespaces, modules, index
     if(auto r = enumerate_type_pages(builder); !r) {
         return std::unexpected(PlanError{.message = r.error().message});
     }
@@ -559,11 +526,8 @@ auto build_page_plan_set(const config::TaskConfig& config,
     }
     logging::info("planner: {} module pages", builder.plans.size() - ns_count);
 
-    // 2. Index and repository (after all content pages)
+    // 2. Index page (after all content pages)
     if(auto r = enumerate_index_page(builder); !r) {
-        return std::unexpected(PlanError{.message = r.error().message});
-    }
-    if(auto r = enumerate_repository_page(builder); !r) {
         return std::unexpected(PlanError{.message = r.error().message});
     }
 

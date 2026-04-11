@@ -1,6 +1,5 @@
 module;
 
-#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -24,17 +23,7 @@ struct PromptError {
 auto load_prompt_template(std::string_view path) -> std::expected<std::string, PromptError>;
 
 auto instantiate_prompt(const std::string& tmpl,
-                        const EvidencePack& evidence,
-                        std::string_view failure_marker) -> std::string;
-
-auto instantiate_prompt_bounded(const std::string& tmpl,
-                                const EvidencePack& evidence,
-                                std::string_view failure_marker,
-                                std::uint32_t max_length)
-    -> std::expected<std::string, PromptError>;
-
-auto validate_prompt(const std::string& prompt, std::uint32_t max_length)
-    -> std::expected<void, PromptError>;
+                        const EvidencePack& evidence) -> std::string;
 
 }  // namespace clore::generate
 
@@ -64,32 +53,8 @@ auto target_kind_of(const EvidencePack& evidence) -> std::string_view {
     return {};
 }
 
-auto count_evidence_markers(const std::string& tmpl) -> std::size_t {
-    std::size_t count = 0;
-    std::size_t pos = 0;
-    while(pos < tmpl.size()) {
-        auto marker_start = tmpl.find("{{", pos);
-        if(marker_start == std::string::npos) {
-            break;
-        }
-
-        auto marker_end = tmpl.find("}}", marker_start);
-        if(marker_end == std::string::npos) {
-            break;
-        }
-
-        auto var_name = tmpl.substr(marker_start + 2, marker_end - marker_start - 2);
-        if(var_name == "evidence") {
-            ++count;
-        }
-        pos = marker_end + 2;
-    }
-    return count;
-}
-
 auto instantiate_prompt_with_evidence(const std::string& tmpl,
                                       const EvidencePack& evidence,
-                                      std::string_view failure_marker,
                                       std::string_view evidence_text) -> std::string {
     std::string result;
     result.reserve(tmpl.size() + 4096);
@@ -110,9 +75,7 @@ auto instantiate_prompt_with_evidence(const std::string& tmpl,
         }
 
         auto var_name = tmpl.substr(marker_start + 2, marker_end - marker_start - 2);
-        if(var_name == "failure_marker") {
-            result.append(failure_marker);
-        } else if(var_name == "evidence") {
+        if(var_name == "evidence") {
             result.append(evidence_text);
         } else if(var_name == "target_name") {
             result.append(target_name_of(evidence));
@@ -164,62 +127,9 @@ auto load_prompt_template(std::string_view path) -> std::expected<std::string, P
 }
 
 auto instantiate_prompt(const std::string& tmpl,
-                        const EvidencePack& evidence,
-                        std::string_view failure_marker) -> std::string {
+                        const EvidencePack& evidence) -> std::string {
     return instantiate_prompt_with_evidence(
-        tmpl, evidence, failure_marker, format_evidence_text(evidence));
-}
-
-auto instantiate_prompt_bounded(const std::string& tmpl,
-                                const EvidencePack& evidence,
-                                std::string_view failure_marker,
-                                std::uint32_t max_length)
-    -> std::expected<std::string, PromptError> {
-    auto prompt_without_evidence = instantiate_prompt_with_evidence(
-        tmpl, evidence, failure_marker, "");
-
-    const auto evidence_marker_count = count_evidence_markers(tmpl);
-    if(prompt_without_evidence.size() > max_length) {
-        return std::unexpected(PromptError{
-            .message = std::format(
-                "prompt template content exceeds max length before evidence: {} > {}",
-                prompt_without_evidence.size(), max_length)});
-    }
-
-    std::string evidence_text;
-    if(evidence_marker_count > 0) {
-        const auto evidence_budget =
-            (static_cast<std::size_t>(max_length) - prompt_without_evidence.size()) /
-            evidence_marker_count;
-        evidence_text = format_evidence_text_bounded(evidence, evidence_budget);
-        if(evidence_text.empty()) {
-            return std::unexpected(PromptError{
-                .message = std::format(
-                    "prompt template leaves no room for evidence within max length {}",
-                    max_length)});
-        }
-    }
-
-    auto prompt = instantiate_prompt_with_evidence(
-        tmpl, evidence, failure_marker, evidence_text);
-    auto validation = validate_prompt(prompt, max_length);
-    if(!validation.has_value()) {
-        return std::unexpected(std::move(validation.error()));
-    }
-    return prompt;
-}
-
-auto validate_prompt(const std::string& prompt, std::uint32_t max_length)
-    -> std::expected<void, PromptError> {
-    if(prompt.empty()) {
-        return std::unexpected(PromptError{.message = "rendered prompt is empty"});
-    }
-    if(prompt.size() > max_length) {
-        return std::unexpected(PromptError{
-            .message = std::format("rendered prompt exceeds max length: {} > {}",
-                                   prompt.size(), max_length)});
-    }
-    return {};
+        tmpl, evidence, format_evidence_text(evidence));
 }
 
 }  // namespace clore::generate

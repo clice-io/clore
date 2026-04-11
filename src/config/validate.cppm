@@ -107,7 +107,6 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
     }
 
     // Validate path_rules
-    if(auto r = validate_nonempty(config.path_rules.repository_path, "path_rules.repository_path"); !r) return r;
     if(auto r = validate_nonempty(config.path_rules.index_path, "path_rules.index_path"); !r) return r;
     if(auto r = validate_nonempty(config.path_rules.module_prefix, "path_rules.module_prefix"); !r) return r;
     if(auto r = validate_nonempty(config.path_rules.namespace_prefix, "path_rules.namespace_prefix"); !r) return r;
@@ -127,15 +126,12 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
         if(auto r = validate_file_exists(config.prompt_templates.module_summary, "prompt_templates.module_summary"); !r) return r;
         if(auto r = validate_file_exists(config.prompt_templates.module_architecture, "prompt_templates.module_architecture"); !r) return r;
     }
-    if(config.page_types.repository) {
+    if(config.page_types.index) {
         if(auto r = validate_file_exists(config.prompt_templates.repository_overview, "prompt_templates.repository_overview"); !r) return r;
         if(auto r = validate_file_exists(config.prompt_templates.reading_guide, "prompt_templates.reading_guide"); !r) return r;
     }
 
     // Validate page templates exist when their page types are enabled
-    if(config.page_types.repository) {
-        if(auto r = validate_file_exists(config.page_templates.repository, "page_templates.repository"); !r) return r;
-    }
     if(config.page_types.index) {
         if(auto r = validate_file_exists(config.page_templates.index, "page_templates.index"); !r) return r;
     }
@@ -161,9 +157,8 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
 
     // Validate LLM config
     if(auto r = validate_nonempty(config.llm.system_prompt, "llm.system_prompt"); !r) return r;
-    if(auto r = validate_nonempty(config.llm.failure_marker, "llm.failure_marker"); !r) return r;
-    if(auto r = validate_nonzero(config.llm.max_output_length, "llm.max_output_length"); !r) return r;
-    if(auto r = validate_nonzero(config.llm.max_prompt_length, "llm.max_prompt_length"); !r) return r;
+    if(auto r = validate_nonzero(config.llm.retry_count, "llm.retry_count"); !r) return r;
+    if(auto r = validate_nonzero(config.llm.retry_initial_backoff_ms, "llm.retry_initial_backoff_ms"); !r) return r;
 
     // Validate name_normalize is a known strategy
     auto& norm = config.path_rules.name_normalize;

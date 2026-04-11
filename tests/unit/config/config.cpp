@@ -12,7 +12,6 @@ namespace {
 // Minimal valid config with all required sections for tests that need a valid parse.
 constexpr auto kMinimalValidConfig = R"(
 [page_types]
-repository = true
 index = true
 module_page = true
 namespace_page = true
@@ -20,7 +19,6 @@ type_page = true
 file_page = true
 
 [path_rules]
-repository_path = "repository.md"
 index_path = "index.md"
 module_prefix = "modules"
 namespace_prefix = "namespaces"
@@ -38,7 +36,6 @@ repository_overview = "prompts/repository_overview.txt"
 reading_guide = "prompts/reading_guide.txt"
 
 [page_templates]
-repository = "pages/repository.md"
 index = "pages/index.md"
 module_page = "pages/module.md"
 namespace_page = "pages/namespace.md"
@@ -54,9 +51,8 @@ max_related_summaries = 3
 
 [llm]
 system_prompt = "You are a documentation writer."
-failure_marker = "[FAILED]"
-max_output_length = 4096
-max_prompt_length = 16384
+retry_count = 3
+retry_initial_backoff_ms = 250
 
 [validation]
 fail_on_empty_section = true
@@ -86,9 +82,10 @@ TEST_SUITE(config_load) {
         auto result = load_config_from_string(kMinimalValidConfig);
         ASSERT_TRUE(result.has_value());
         auto& config = *result;
-        EXPECT_TRUE(config.page_types.repository);
+        EXPECT_TRUE(config.page_types.index);
         EXPECT_EQ(config.path_rules.name_normalize, "lowercase");
-        EXPECT_EQ(config.llm.failure_marker, "[FAILED]");
+        EXPECT_EQ(config.llm.retry_count, 3u);
+        EXPECT_EQ(config.llm.retry_initial_backoff_ms, 250u);
         EXPECT_EQ(config.evidence_rules.max_callers, 5u);
     }
 

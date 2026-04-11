@@ -4,17 +4,20 @@ module;
 #define NOMINMAX
 #endif
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <expected>
 #include <format>
 #include <functional>
+#include <limits>
+#include <map>
 #include <mutex>
 #include <optional>
-#include <queue>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -49,7 +52,8 @@ auto call_llm(std::string_view model, std::string_view system_prompt,
 /// Fully non-blocking LLM client using curl_multi.
 ///
 /// Usage:
-///   LLMClient client(model, system_prompt, max_concurrent);
+///   LLMClient client(model, system_prompt, max_concurrent,
+///                    retry_count, retry_initial_backoff_ms);
 ///   client.submit(tag, prompt);
 ///   client.submit(tag, prompt);
 ///   client.run([](uint64_t tag, auto result) { ... });
@@ -62,7 +66,9 @@ public:
                                         std::expected<std::string, LLMError> result)>;
 
     LLMClient(std::string_view model, std::string_view system_prompt,
-              std::uint32_t max_concurrent);
+              std::uint32_t max_concurrent,
+              std::uint32_t retry_count,
+              std::uint32_t retry_initial_backoff_ms);
 
     ~LLMClient();
 
@@ -80,16 +86,27 @@ public:
     auto run(Callback on_complete) -> std::expected<void, LLMError>;
 
 private:
+    struct PendingRequest {
+        std::uint64_t tag = 0;
+        std::string prompt;
+        std::uint32_t attempt = 0;
+    };
+
     struct InFlightRequest {
         CURL* easy = nullptr;
         curl_slist* headers = nullptr;
+        std::string prompt;
         std::string request_body;
         std::string response_body;
         std::uint64_t tag = 0;
+        std::uint32_t attempt = 0;
     };
 
+    auto enqueue_pending(PendingRequest request, std::chrono::milliseconds delay) -> std::expected<void, LLMError>;
     auto try_launch_pending() -> std::expected<void, LLMError>;
-    auto launch_one(std::uint64_t tag, std::string prompt) -> std::expected<void, LLMError>;
+    auto launch_one(PendingRequest request) -> std::expected<void, LLMError>;
+    auto compute_retry_delay(std::uint32_t next_attempt) const -> std::expected<std::chrono::milliseconds, LLMError>;
+    auto next_pending_delay() const -> std::optional<std::chrono::milliseconds>;
     auto process_completed(Callback& on_complete) -> void;
     auto cleanup_request(CURL* easy) -> void;
 
@@ -99,8 +116,10 @@ private:
     std::string model_;
     std::string system_prompt_;
     std::uint32_t max_concurrent_;
+    std::uint32_t retry_count_;
+    std::uint32_t retry_initial_backoff_ms_;
     std::uint32_t in_flight_ = 0;
-    std::queue<std::pair<std::uint64_t, std::string>> pending_;
+    std::multimap<std::chrono::steady_clock::time_point, PendingRequest> pending_;
     std::unordered_map<CURL*, InFlightRequest> requests_;
 };
 
@@ -246,6 +265,9 @@ auto parse_response(std::string_view json) -> std::expected<std::string, LLMErro
 auto call_llm(std::string_view model, std::string_view system_prompt,
               std::string_view prompt)
     -> std::expected<std::string, LLMError> {
+    // Intentionally no explicit non-empty argument validation here.
+    // This transport layer forwards inputs as-is so single-call and multi-call
+    // paths share the same API-side error semantics.
     auto api_base_result = read_required_env(kOpenAIBaseUrlEnv);
     if(!api_base_result.has_value()) {
         return std::unexpected(std::move(api_base_result.error()));
@@ -318,8 +340,16 @@ auto call_llm(std::string_view model, std::string_view system_prompt,
 // ── LLMClient (non-blocking curl_multi) ─────────────────────────────
 
 LLMClient::LLMClient(std::string_view model, std::string_view system_prompt,
-                      std::uint32_t max_concurrent)
-    : model_(model), system_prompt_(system_prompt), max_concurrent_(max_concurrent) {}
+                     std::uint32_t max_concurrent,
+                     std::uint32_t retry_count,
+                     std::uint32_t retry_initial_backoff_ms)
+    // Intentionally no explicit validation for max_concurrent. A value of 0 is
+    // treated as "do not launch new requests" by the event loop.
+    : model_(model),
+      system_prompt_(system_prompt),
+      max_concurrent_(max_concurrent),
+      retry_count_(retry_count),
+      retry_initial_backoff_ms_(retry_initial_backoff_ms) {}
 
 LLMClient::~LLMClient() {
     // Cleanup any remaining in-flight requests
@@ -341,8 +371,11 @@ LLMClient::~LLMClient() {
 
 auto LLMClient::submit(std::uint64_t tag, std::string prompt)
     -> std::expected<void, LLMError> {
-    pending_.push({tag, std::move(prompt)});
-    return {};
+    return enqueue_pending(PendingRequest{
+        .tag = tag,
+        .prompt = std::move(prompt),
+        .attempt = 0,
+    }, std::chrono::milliseconds{0});
 }
 
 auto LLMClient::run(Callback on_complete) -> std::expected<void, LLMError> {
@@ -380,7 +413,20 @@ auto LLMClient::run(Callback on_complete) -> std::expected<void, LLMError> {
             return std::unexpected(std::move(r.error()));
         }
 
-        if(in_flight_ == 0) break;
+        if(in_flight_ == 0) {
+            // With max_concurrent_ == 0, nothing can be launched, so exit cleanly.
+            if(max_concurrent_ == 0) {
+                break;
+            }
+            auto delay = next_pending_delay();
+            if(!delay.has_value()) {
+                break;
+            }
+            if(delay->count() > 0) {
+                std::this_thread::sleep_for(*delay);
+            }
+            continue;
+        }
 
         // Drive transfers
         int still_running = 0;
@@ -394,9 +440,18 @@ auto LLMClient::run(Callback on_complete) -> std::expected<void, LLMError> {
         // Process completed transfers
         process_completed(on_complete);
 
-        // Wait for activity (up to 1 second)
-        if(in_flight_ > 0) {
-            curl_multi_poll(multi_, nullptr, 0, 1000, nullptr);
+        // Wait for activity or for the next delayed retry to become ready.
+        if(in_flight_ > 0 || !pending_.empty()) {
+            int timeout_ms = 1000;
+            if(auto delay = next_pending_delay(); delay.has_value()) {
+                auto delay_ms = delay->count();
+                if(delay_ms <= 0) {
+                    timeout_ms = 0;
+                } else if(delay_ms < static_cast<std::int64_t>(timeout_ms)) {
+                    timeout_ms = static_cast<int>(delay_ms);
+                }
+            }
+            curl_multi_poll(multi_, nullptr, 0, timeout_ms, nullptr);
         }
     }
 
@@ -406,26 +461,47 @@ auto LLMClient::run(Callback on_complete) -> std::expected<void, LLMError> {
     return {};
 }
 
+auto LLMClient::enqueue_pending(PendingRequest request, std::chrono::milliseconds delay)
+    -> std::expected<void, LLMError> {
+    auto now = std::chrono::steady_clock::now();
+    if(delay.count() < 0) {
+        return std::unexpected(LLMError{
+            .message = std::format("negative retry delay is not allowed: {}ms", delay.count())});
+    }
+    if(delay > (std::chrono::steady_clock::time_point::max() - now)) {
+        return std::unexpected(LLMError{
+            .message = std::format("retry delay is too large: {}ms", delay.count())});
+    }
+    pending_.emplace(now + delay, std::move(request));
+    return {};
+}
+
 auto LLMClient::try_launch_pending() -> std::expected<void, LLMError> {
+    auto now = std::chrono::steady_clock::now();
     while(!pending_.empty() && in_flight_ < max_concurrent_) {
-        auto [tag, prompt] = std::move(pending_.front());
-        pending_.pop();
-        if(auto r = launch_one(tag, std::move(prompt)); !r.has_value()) {
+        auto it = pending_.begin();
+        if(it->first > now) {
+            break;
+        }
+
+        auto request = std::move(it->second);
+        pending_.erase(it);
+
+        if(auto r = launch_one(std::move(request)); !r.has_value()) {
             return std::unexpected(std::move(r.error()));
         }
     }
     return {};
 }
 
-auto LLMClient::launch_one(std::uint64_t tag, std::string prompt)
+auto LLMClient::launch_one(PendingRequest request)
     -> std::expected<void, LLMError> {
     InFlightRequest req;
-    req.tag = tag;
-    req.request_body = std::move(prompt);
+    req.tag = request.tag;
+    req.prompt = std::move(request.prompt);
+    req.attempt = request.attempt;
 
-    // Build the actual JSON body (request_body currently holds the raw prompt)
-    auto raw_prompt = std::move(req.request_body);
-    req.request_body = detail::build_request_json(model_, system_prompt_, raw_prompt);
+    req.request_body = detail::build_request_json(model_, system_prompt_, req.prompt);
 
     req.easy = curl_easy_init();
     if(!req.easy) {
@@ -443,7 +519,7 @@ auto LLMClient::launch_one(std::uint64_t tag, std::string prompt)
     if(!inserted) {
         curl_easy_cleanup(easy);
         return std::unexpected(LLMError{
-            .message = std::format("duplicate LLM request handle for tag {}", tag)});
+            .message = std::format("duplicate LLM request handle for tag {}", request.tag)});
     }
     auto& stored_req = it->second;
 
@@ -467,10 +543,53 @@ auto LLMClient::launch_one(std::uint64_t tag, std::string prompt)
                                    curl_multi_strerror(mcode))});
     }
 
-    logging::info("submitted LLM request: tag={} url={} body_bytes={}",
-                  tag, url_, stored_req.request_body.size());
+    logging::info("submitted LLM request: tag={} attempt={} url={} body_bytes={}",
+                  stored_req.tag, stored_req.attempt + 1, url_, stored_req.request_body.size());
     ++in_flight_;
     return {};
+}
+
+auto LLMClient::compute_retry_delay(std::uint32_t next_attempt) const
+    -> std::expected<std::chrono::milliseconds, LLMError> {
+    if(next_attempt == 0) {
+        return std::unexpected(LLMError{
+            .message = "next_attempt must be greater than 0"});
+    }
+
+    std::uint64_t multiplier = 1;
+    for(std::uint32_t i = 1; i < next_attempt; ++i) {
+        if(multiplier > (std::numeric_limits<std::uint64_t>::max() / 2)) {
+            return std::unexpected(LLMError{
+                .message = std::format("retry delay overflow at attempt {}", next_attempt)});
+        }
+        multiplier *= 2;
+    }
+
+    if(static_cast<std::uint64_t>(retry_initial_backoff_ms_) >
+       (std::numeric_limits<std::uint64_t>::max() / multiplier)) {
+        return std::unexpected(LLMError{
+            .message = std::format("retry delay overflow at attempt {}", next_attempt)});
+    }
+
+    auto delay_ms = static_cast<std::uint64_t>(retry_initial_backoff_ms_) * multiplier;
+    if(delay_ms > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+        return std::unexpected(LLMError{
+            .message = std::format("retry delay exceeds supported range: {}ms", delay_ms)});
+    }
+
+    return std::chrono::milliseconds{static_cast<std::int64_t>(delay_ms)};
+}
+
+auto LLMClient::next_pending_delay() const -> std::optional<std::chrono::milliseconds> {
+    if(pending_.empty()) {
+        return std::nullopt;
+    }
+    auto now = std::chrono::steady_clock::now();
+    auto ready_at = pending_.begin()->first;
+    if(ready_at <= now) {
+        return std::chrono::milliseconds{0};
+    }
+    return std::chrono::duration_cast<std::chrono::milliseconds>(ready_at - now);
 }
 
 auto LLMClient::process_completed(Callback& on_complete) -> void {
@@ -485,6 +604,7 @@ auto LLMClient::process_completed(Callback& on_complete) -> void {
 
         auto& req = it->second;
         auto tag = req.tag;
+        auto attempt = req.attempt;
 
         std::expected<std::string, LLMError> result;
 
@@ -495,8 +615,8 @@ auto LLMClient::process_completed(Callback& on_complete) -> void {
         } else {
             long http_status = 0;
             curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &http_status);
-            logging::info("completed LLM request: tag={} http_status={} response_bytes={}",
-                          tag, http_status, req.response_body.size());
+            logging::info("completed LLM request: tag={} attempt={} http_status={} response_bytes={}",
+                          tag, attempt + 1, http_status, req.response_body.size());
 
             if(req.response_body.empty()) {
                 result = std::unexpected(LLMError{.message = "empty response from LLM"});
@@ -510,10 +630,39 @@ auto LLMClient::process_completed(Callback& on_complete) -> void {
             }
         }
 
+        std::optional<PendingRequest> retry_request;
+        std::optional<std::chrono::milliseconds> retry_delay;
+        if(!result.has_value() && attempt < retry_count_) {
+            auto next_attempt = attempt + 1;
+            auto delay = compute_retry_delay(next_attempt);
+            if(delay.has_value()) {
+                retry_request = PendingRequest{
+                    .tag = tag,
+                    .prompt = req.prompt,
+                    .attempt = next_attempt,
+                };
+                retry_delay = *delay;
+                logging::warn(
+                    "LLM request failed: tag={} attempt={}/{} retry_in_ms={} reason={}",
+                    tag, attempt + 1, retry_count_ + 1, retry_delay->count(),
+                    result.error().message);
+            } else {
+                result = std::unexpected(std::move(delay.error()));
+            }
+        }
+
         // Remove from multi before cleanup
         curl_multi_remove_handle(multi_, easy);
         cleanup_request(easy);
         --in_flight_;
+
+        if(retry_request.has_value() && retry_delay.has_value()) {
+            auto enqueue_result = enqueue_pending(std::move(*retry_request), *retry_delay);
+            if(enqueue_result.has_value()) {
+                continue;
+            }
+            result = std::unexpected(std::move(enqueue_result.error()));
+        }
 
         on_complete(tag, std::move(result));
     }

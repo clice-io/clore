@@ -43,7 +43,6 @@ struct RawFilterRule {
 };
 
 struct RawPageTypesConfig {
-    bool repository = false;
     bool index = false;
     bool module_page = false;
     bool namespace_page = false;
@@ -52,7 +51,6 @@ struct RawPageTypesConfig {
 };
 
 struct RawPathRulesConfig {
-    std::string repository_path;
     std::string index_path;
     std::string module_prefix;
     std::string namespace_prefix;
@@ -72,7 +70,6 @@ struct RawPromptTemplatesConfig {
 };
 
 struct RawPageTemplatesConfig {
-    std::string repository;
     std::string index;
     std::string module_page;
     std::string namespace_page;
@@ -90,9 +87,8 @@ struct RawEvidenceRulesConfig {
 
 struct RawLLMConfig {
     std::string system_prompt;
-    std::string failure_marker;
-    std::uint32_t max_output_length = 0;
-    std::uint32_t max_prompt_length = 0;
+    std::uint32_t retry_count = 0;
+    std::uint32_t retry_initial_backoff_ms = 0;
 };
 
 struct RawValidationConfig {
@@ -146,7 +142,6 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
     if(!raw.page_types.has_value()) {
         return std::unexpected(ConfigError{.message = "missing required section [page_types]"}); 
     }
-    cfg.page_types.repository = raw.page_types->repository;
     cfg.page_types.index = raw.page_types->index;
     cfg.page_types.module_page = raw.page_types->module_page;
     cfg.page_types.namespace_page = raw.page_types->namespace_page;
@@ -156,7 +151,6 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
     if(!raw.path_rules.has_value()) {
         return std::unexpected(ConfigError{.message = "missing required section [path_rules]"});
     }
-    cfg.path_rules.repository_path = std::move(raw.path_rules->repository_path);
     cfg.path_rules.index_path = std::move(raw.path_rules->index_path);
     cfg.path_rules.module_prefix = std::move(raw.path_rules->module_prefix);
     cfg.path_rules.namespace_prefix = std::move(raw.path_rules->namespace_prefix);
@@ -178,7 +172,6 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
     if(!raw.page_templates.has_value()) {
         return std::unexpected(ConfigError{.message = "missing required section [page_templates]"});
     }
-    cfg.page_templates.repository = std::move(raw.page_templates->repository);
     cfg.page_templates.index = std::move(raw.page_templates->index);
     cfg.page_templates.module_page = std::move(raw.page_templates->module_page);
     cfg.page_templates.namespace_page = std::move(raw.page_templates->namespace_page);
@@ -198,9 +191,8 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
         return std::unexpected(ConfigError{.message = "missing required section [llm]"});
     }
     cfg.llm.system_prompt = std::move(raw.llm->system_prompt);
-    cfg.llm.failure_marker = std::move(raw.llm->failure_marker);
-    cfg.llm.max_output_length = raw.llm->max_output_length;
-    cfg.llm.max_prompt_length = raw.llm->max_prompt_length;
+    cfg.llm.retry_count = raw.llm->retry_count;
+    cfg.llm.retry_initial_backoff_ms = raw.llm->retry_initial_backoff_ms;
 
     if(!raw.validation.has_value()) {
         return std::unexpected(ConfigError{.message = "missing required section [validation]"}); 

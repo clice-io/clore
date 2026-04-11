@@ -114,10 +114,6 @@ auto compute_page_path(const PageIdentity& identity, const config::PathRulesConf
     auto& norm = rules.name_normalize;
 
     switch(identity.page_type) {
-        case PageType::Repository: {
-            result = rules.repository_path;
-            break;
-        }
         case PageType::Index: {
             result = rules.index_path;
             break;

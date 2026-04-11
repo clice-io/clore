@@ -14,7 +14,6 @@ export namespace clore::generate {
 // ── page types ──────────────────────────────────────────────────────
 
 enum class PageType : std::uint8_t {
-    Repository,
     Index,
     Module,
     Namespace,
@@ -134,7 +133,6 @@ namespace clore::generate {
 
 auto page_type_name(PageType type) -> std::string_view {
     switch(type) {
-        case PageType::Repository: return "repository";
         case PageType::Index:      return "index";
         case PageType::Module:     return "module";
         case PageType::Namespace:  return "namespace";

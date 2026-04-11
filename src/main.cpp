@@ -16,6 +16,7 @@ import support;
 namespace clore {
 
 using deco::decl::KVStyle;
+constexpr std::uint32_t defaultRateLimit = 16;
 
 struct Options {
     DecoKV(style = KVStyle::JoinedOrSeparate,
@@ -58,7 +59,7 @@ struct Options {
 
     DecoKV(style = KVStyle::JoinedOrSeparate,
            names = {"--rate-limit", "--rate-limit="},
-           help = "Maximum concurrent LLM requests when --model is used",
+           help = "Maximum concurrent LLM requests when --model is used (default: 16)",
            required = false)
     <std::uint32_t> rate_limit;
 
@@ -152,20 +153,9 @@ int main(int argc, const char** argv) {
     if(opts.model.has_value()) {
         llm_model = *opts.model;
     }
-    std::optional<std::uint32_t> rate_limit;
-    if(opts.rate_limit.has_value()) {
-        rate_limit = *opts.rate_limit;
-    }
+    auto rate_limit = opts.rate_limit.value_or(clore::defaultRateLimit);
     if(!prompt_dry_run && llm_model.empty()) {
         clore::logging::err("model must not be empty");
-        return 1;
-    }
-    if(!prompt_dry_run && !rate_limit.has_value()) {
-        clore::logging::err("--rate-limit is required when --model is set");
-        return 1;
-    }
-    if(rate_limit.has_value() && *rate_limit == 0) {
-        clore::logging::err("--rate-limit must be greater than 0");
         return 1;
     }
 
@@ -195,7 +185,7 @@ int main(int argc, const char** argv) {
     }
     if(!prompt_dry_run) {
         clore::logging::info("  model: {}", llm_model);
-        clore::logging::info("  rate_limit: {}", *rate_limit);
+        clore::logging::info("  rate_limit: {}", rate_limit);
     }
 
     // Extract
@@ -232,7 +222,7 @@ int main(int argc, const char** argv) {
 
     // Generate
     auto gen_result = clore::generate::generate_pages(task_config, model, llm_model,
-                                                     *rate_limit,
+                                                     rate_limit,
                                                      task_config.output_root);
     if(!gen_result.has_value()) {
         clore::logging::err("generation failed: {}", gen_result.error().message);

@@ -51,14 +51,12 @@ auto make_config(const fs::path& project_root) -> config::TaskConfig {
     config.workspace_root = project_root.generic_string();
     config.extract.max_snippet_bytes = 1024;
 
-    config.page_types.repository = false;
     config.page_types.index = false;
     config.page_types.module_page = true;
     config.page_types.namespace_page = true;
     config.page_types.type_page = true;
     config.page_types.file_page = true;
 
-    config.path_rules.repository_path = "repository.md";
     config.path_rules.index_path = "index.md";
     config.path_rules.module_prefix = "modules";
     config.path_rules.namespace_prefix = "namespaces";
@@ -73,9 +71,8 @@ auto make_config(const fs::path& project_root) -> config::TaskConfig {
     config.evidence_rules.max_related_summaries = 3;
 
     config.llm.system_prompt = "You are a writer.";
-    config.llm.failure_marker = "[FAILED]";
-    config.llm.max_output_length = 4096;
-    config.llm.max_prompt_length = 16384;
+    config.llm.retry_count = 3;
+    config.llm.retry_initial_backoff_ms = 250;
 
     config.validation.fail_on_empty_section = false;
     config.validation.fail_on_h1_in_output = true;
@@ -172,6 +169,32 @@ TEST_SUITE(generate) {
         EXPECT_FALSE(file_plan->relative_path.empty());
     }
 
+    TEST_CASE(build_page_plan_set_generates_single_index_page) {
+        ScopedTempDir temp("single_index_page");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_config(temp.path);
+        config.page_types.index = true;
+        auto model = make_model(temp.path);
+
+        auto result = build_page_plan_set(config, model);
+
+        ASSERT_TRUE(result.has_value());
+
+        auto index_plan = std::ranges::find_if(result->plans, [](const PagePlan& p) {
+            return p.page_type == PageType::Index;
+        });
+        ASSERT_TRUE(index_plan != result->plans.end());
+        EXPECT_TRUE(std::ranges::find(index_plan->deterministic_blocks, "all_modules")
+                    != index_plan->deterministic_blocks.end());
+        EXPECT_TRUE(std::ranges::find(index_plan->deterministic_blocks, "all_namespaces")
+                    != index_plan->deterministic_blocks.end());
+        EXPECT_TRUE(std::ranges::find(index_plan->deterministic_blocks, "all_types")
+                    != index_plan->deterministic_blocks.end());
+        EXPECT_TRUE(std::ranges::find(index_plan->deterministic_blocks, "all_files")
+                    != index_plan->deterministic_blocks.end());
+    }
+
     TEST_CASE(write_pages_writes_relative_output_paths) {
         ScopedTempDir temp("write_pages");
         auto output_root = temp.path / "docs";
@@ -254,12 +277,11 @@ TEST_SUITE(generate) {
         EXPECT_LT(pos_util, pos_math);
     }
 
-    TEST_CASE(namespace_summary_prompt_uses_namespace_subject_and_fits_limit) {
+    TEST_CASE(namespace_summary_prompt_uses_namespace_subject) {
         ScopedTempDir temp("namespace_summary_prompt");
         fs::create_directories(temp.path / "src");
 
         auto config = make_config(temp.path);
-        config.llm.max_prompt_length = 1024;
 
         extract::ProjectModel model;
         extract::NamespaceInfo ns;
@@ -286,15 +308,12 @@ TEST_SUITE(generate) {
         EXPECT_EQ(evidence.subject_name, "demo::config");
         EXPECT_EQ(evidence.subject_kind, "namespace");
 
-        auto prompt_result = instantiate_prompt_bounded(
+        auto prompt = instantiate_prompt(
             "Write a Summary for the namespace `{{target_name}}`.\n\n{{evidence}}",
-            evidence,
-            config.llm.failure_marker,
-            config.llm.max_prompt_length);
+            evidence);
 
-        ASSERT_TRUE(prompt_result.has_value());
-        EXPECT_LE(prompt_result->size(), static_cast<std::size_t>(config.llm.max_prompt_length));
-        EXPECT_NE(prompt_result->find("namespace `demo::config`"), std::string::npos);
-        EXPECT_EQ(prompt_result->find("namespace `demo::config::Type0`"), std::string::npos);
+        ASSERT_FALSE(prompt.empty());
+        EXPECT_NE(prompt.find("namespace `demo::config`"), std::string::npos);
+        EXPECT_EQ(prompt.find("namespace `demo::config::Type0`"), std::string::npos);
     }
 };

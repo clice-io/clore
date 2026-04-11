@@ -12,6 +12,14 @@
 
 {{block:all_namespaces}}
 
+## Types
+
+{{block:all_types}}
+
+## Files
+
+{{block:all_files}}
+
 ## Reading Guide
 
 {{slot:reading_guide}}

@@ -80,7 +80,6 @@ auto normalize(TaskConfig& config) -> std::expected<void, NormalizeError> {
     if(auto r = make_absolute_if_nonempty(config.prompt_templates.reading_guide, "prompt_templates.reading_guide"); !r) return r;
 
     // Normalize page template paths
-    if(auto r = make_absolute_if_nonempty(config.page_templates.repository, "page_templates.repository"); !r) return r;
     if(auto r = make_absolute_if_nonempty(config.page_templates.index, "page_templates.index"); !r) return r;
     if(auto r = make_absolute_if_nonempty(config.page_templates.module_page, "page_templates.module_page"); !r) return r;
     if(auto r = make_absolute_if_nonempty(config.page_templates.namespace_page, "page_templates.namespace_page"); !r) return r;
@@ -108,7 +107,6 @@ auto normalize(TaskConfig& config) -> std::expected<void, NormalizeError> {
     normalize_separators(config.prompt_templates.module_architecture);
     normalize_separators(config.prompt_templates.repository_overview);
     normalize_separators(config.prompt_templates.reading_guide);
-    normalize_separators(config.page_templates.repository);
     normalize_separators(config.page_templates.index);
     normalize_separators(config.page_templates.module_page);
     normalize_separators(config.page_templates.namespace_page);

@@ -1,6 +1,7 @@
 module;
 
 #include <algorithm>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -9,6 +10,7 @@ module;
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 export module generate:render;
@@ -40,8 +42,8 @@ auto assemble_page(const std::string& page_template,
     -> std::expected<std::string, RenderError>;
 
 auto validate_output(const std::string& content,
-                     const config::ValidationConfig& validation,
-                     const config::LLMConfig& llm_config) -> std::expected<void, RenderError>;
+                     const config::ValidationConfig& validation)
+    -> std::expected<void, RenderError>;
 
 auto write_page(const GeneratedPage& page, std::string_view output_root)
     -> std::expected<void, RenderError>;
@@ -348,21 +350,73 @@ auto render_includes_block(const PagePlan& plan, const extract::ProjectModel& mo
     return result;
 }
 
-auto render_declared_symbols_block(const PagePlan& plan, const extract::ProjectModel& model) -> std::string {
-    std::string result;
+enum class FileSymbolRenderMode : std::uint8_t {
+    Declared,
+    Defined,
+};
+
+auto normalize_file_key(std::string_view file_path) -> std::string {
+    return std::filesystem::path(file_path).lexically_normal().generic_string();
+}
+
+auto symbol_matches_file_mode(const extract::SymbolInfo& sym,
+                              std::string_view owner_file_key,
+                              FileSymbolRenderMode mode) -> bool {
+    if(mode == FileSymbolRenderMode::Declared) {
+        return !sym.declaration_location.file.empty() &&
+               normalize_file_key(sym.declaration_location.file) == owner_file_key;
+    }
+    if(!sym.definition_location.has_value()) {
+        return false;
+    }
+    return !sym.definition_location->file.empty() &&
+           normalize_file_key(sym.definition_location->file) == owner_file_key;
+}
+
+auto render_file_symbols_block(const PagePlan& plan, const extract::ProjectModel& model,
+                               FileSymbolRenderMode mode) -> std::string {
+    std::vector<const extract::SymbolInfo*> matched_symbols;
+    matched_symbols.reserve(model.symbols.size());
+    std::unordered_set<extract::SymbolID> seen;
+    seen.reserve(model.symbols.size());
+
     for(auto& key : plan.owner_keys) {
-        auto file_it = model.files.find(key);
-        if(file_it == model.files.end()) continue;
-        for(auto& sym_id : file_it->second.symbols) {
-            auto* sym = lookup_sym(model, sym_id);
-            if(!sym) continue;
-            result += "- ";
-            result += std::string(extract::symbol_kind_name(sym->kind));
-            result += " `" + sym->qualified_name + "`\n";
+        auto owner_file_key = normalize_file_key(key);
+        for(auto& [symbol_id, sym] : model.symbols) {
+            if(seen.contains(symbol_id)) continue;
+            if(!symbol_matches_file_mode(sym, owner_file_key, mode)) continue;
+            matched_symbols.push_back(&sym);
+            seen.insert(symbol_id);
         }
+    }
+
+    std::sort(matched_symbols.begin(), matched_symbols.end(),
+              [](const extract::SymbolInfo* lhs, const extract::SymbolInfo* rhs) {
+                  if(lhs->qualified_name != rhs->qualified_name) {
+                      return lhs->qualified_name < rhs->qualified_name;
+                  }
+                  if(lhs->kind != rhs->kind) {
+                      return static_cast<int>(lhs->kind) < static_cast<int>(rhs->kind);
+                  }
+                  return lhs->name < rhs->name;
+              });
+
+    std::string result;
+    for(auto* sym : matched_symbols) {
+        result += "- ";
+        result += std::string(extract::symbol_kind_name(sym->kind));
+        result += " `" + sym->qualified_name + "`\n";
     }
     if(!result.empty()) result += "\n";
     return result;
+}
+
+auto render_declared_symbols_block(const PagePlan& plan, const extract::ProjectModel& model) -> std::string {
+    return render_file_symbols_block(plan, model, FileSymbolRenderMode::Declared);
+}
+
+auto render_defined_symbols_block(const PagePlan& plan, const extract::ProjectModel& model) -> std::string {
+    return render_file_symbols_block(plan, model, FileSymbolRenderMode::Defined);
 }
 
 auto render_module_info_block(const PagePlan& plan, const extract::ProjectModel& model) -> std::string {
@@ -502,7 +556,7 @@ auto render_deterministic_block(std::string_view block_name,
     if(block_name == "source") return render_source_locations_block(plan, model, config);
     if(block_name == "includes") return render_includes_block(plan, model, config);
     if(block_name == "declared_symbols") return render_declared_symbols_block(plan, model);
-    if(block_name == "defined_symbols") return render_declared_symbols_block(plan, model);
+    if(block_name == "defined_symbols") return render_defined_symbols_block(plan, model);
     if(block_name == "module_info") return render_module_info_block(plan, model);
     if(block_name == "all_modules") return render_all_modules_index(model, links);
     if(block_name == "all_namespaces") return render_all_namespaces_index(model, links);
@@ -601,15 +655,10 @@ auto assemble_page(const std::string& page_template,
 }
 
 auto validate_output(const std::string& content,
-                     const config::ValidationConfig& validation,
-                     const config::LLMConfig& llm_config) -> std::expected<void, RenderError> {
+                     const config::ValidationConfig& validation)
+    -> std::expected<void, RenderError> {
     if(content.empty()) {
         return std::unexpected(RenderError{.message = "LLM output is empty"});
-    }
-
-    if(content == llm_config.failure_marker) {
-        return std::unexpected(RenderError{
-            .message = std::format("LLM returned failure marker: {}", llm_config.failure_marker)});
     }
 
     if(validation.fail_on_h1_in_output) {
@@ -622,12 +671,6 @@ auto validate_output(const std::string& content,
             return std::unexpected(RenderError{
                 .message = "LLM output contains H1 heading '# '"});
         }
-    }
-
-    if(content.size() > llm_config.max_output_length) {
-        return std::unexpected(RenderError{
-            .message = std::format("LLM output exceeds max length: {} > {}",
-                                   content.size(), llm_config.max_output_length)});
     }
 
     return {};

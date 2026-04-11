@@ -1,5 +1,9 @@
 # {{title}}
 
+## What This Repository Contains
+
+{{slot:repository_overview}}
+
 ## Modules
 
 {{block:all_modules}}
@@ -15,3 +19,7 @@
 ## Files
 
 {{block:all_files}}
+
+## Reading Guide
+
+{{slot:reading_guide}}

@@ -4,6 +4,7 @@ module;
 #include <expected>
 #include <format>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -50,7 +51,6 @@ namespace {
 
 auto get_page_template_path(const config::TaskConfig& config, PageType type) -> std::string {
     switch(type) {
-        case PageType::Repository: return config.page_templates.repository;
         case PageType::Index:      return config.page_templates.index;
         case PageType::Module:     return config.page_templates.module_page;
         case PageType::Namespace:  return config.page_templates.namespace_page;
@@ -133,6 +133,31 @@ auto build_evidence_for_slot(const SlotPlan& slot, const PagePlan& plan,
     return EvidencePack{.slot_kind = slot_kind};
 }
 
+auto wrap_prompt_output_for_embed(std::string_view slot_kind, std::string_view prompt)
+    -> std::string {
+    std::string wrapped;
+    wrapped.reserve(slot_kind.size() + prompt.size() + 32);
+    wrapped += "> Prompt (`";
+    wrapped += slot_kind;
+    wrapped += "`)\n";
+
+    std::istringstream stream{std::string(prompt)};
+    std::string line;
+    bool has_line = false;
+    while(std::getline(stream, line)) {
+        wrapped += "> ";
+        wrapped += line;
+        wrapped += "\n";
+        has_line = true;
+    }
+
+    if(!has_line) {
+        wrapped += "> \n";
+    }
+
+    return wrapped;
+}
+
 auto render_single_page(const PagePlan& plan,
                         const config::TaskConfig& config,
                         const extract::ProjectModel& model,
@@ -151,7 +176,17 @@ auto render_single_page(const PagePlan& plan,
 
     auto blocks = build_blocks(plan, model, config, links);
 
-    auto assembly_result = assemble_page(*tmpl_result, plan.title, blocks, slot_outputs);
+    std::unordered_map<std::string, std::string> embedded_slot_outputs;
+    auto* slots_for_render = &slot_outputs;
+    if(embed_prompts) {
+        embedded_slot_outputs.reserve(slot_outputs.size());
+        for(auto& [slot_kind, output] : slot_outputs) {
+            embedded_slot_outputs[slot_kind] = wrap_prompt_output_for_embed(slot_kind, output);
+        }
+        slots_for_render = &embedded_slot_outputs;
+    }
+
+    auto assembly_result = assemble_page(*tmpl_result, plan.title, blocks, *slots_for_render, false);
     if(!assembly_result.has_value()) {
         return std::unexpected(GenerateError{
             .message = std::format("failed to assemble page '{}': {}",
@@ -218,24 +253,15 @@ auto generate_dry_run(const config::TaskConfig& config, const extract::ProjectMo
                 continue;
             }
 
-            auto prompt_result = instantiate_prompt_bounded(
-                *tmpl_result, evidence, config.llm.failure_marker, config.llm.max_prompt_length);
-            if(!prompt_result.has_value()) {
+            auto prompt = instantiate_prompt(*tmpl_result, evidence);
+            if(prompt.empty()) {
                 return std::unexpected(GenerateError{
                     .message = std::format(
-                        "prompt rendering failed for slot '{}' in page '{}': {}",
-                        slot.slot_kind, page_id, prompt_result.error().message)});
+                        "prompt rendering produced empty output for slot '{}' in page '{}'",
+                        slot.slot_kind, page_id)});
             }
 
-            auto& prompt = *prompt_result;
-            // In dry-run, embed the prompt as blockquote
-            std::string quoted;
-            std::istringstream iss(prompt);
-            std::string line;
-            while(std::getline(iss, line)) {
-                quoted += "> " + line + "\n";
-            }
-            slot_outputs[slot.slot_kind] = quoted;
+            slot_outputs[slot.slot_kind] = std::move(prompt);
         }
 
         auto page_result = render_single_page(plan, config, model, slot_outputs, true, links);
@@ -325,7 +351,8 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
     std::uint64_t next_tag = 0;
     std::optional<GenerateError> schedule_error;
 
-    LLMClient client(llm_model, config.llm.system_prompt, rate_limit);
+    LLMClient client(llm_model, config.llm.system_prompt, rate_limit,
+                     config.llm.retry_count, config.llm.retry_initial_backoff_ms);
 
     // ── write a completed page immediately ──────────────────────────
 
@@ -416,21 +443,18 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
                             slot.prompt_template_path, std::move(*tmpl_r)).first;
                     }
 
-                    auto prompt_result = instantiate_prompt_bounded(
-                        tmpl_it->second, evidence,
-                        config.llm.failure_marker, config.llm.max_prompt_length);
-                    if(!prompt_result.has_value()) {
+                    auto prompt = instantiate_prompt(tmpl_it->second, evidence);
+                    if(prompt.empty()) {
                         schedule_error = GenerateError{
                             .message = std::format(
-                                "prompt rendering failed for slot '{}' in '{}': {}",
-                                slot.slot_kind, plan.page_id,
-                                prompt_result.error().message)};
+                                "prompt rendering produced empty output for slot '{}' in '{}'",
+                                slot.slot_kind, plan.page_id)};
                         return submitted_any_llm;
                     }
 
                     auto tag = next_tag++;
                     tag_map[tag] = TagInfo{.state_index = i, .slot_kind = slot.slot_kind};
-                    auto submit_r = client.submit(tag, std::move(*prompt_result));
+                    auto submit_r = client.submit(tag, std::move(prompt));
                     if(!submit_r.has_value()) {
                         schedule_error = GenerateError{.message = submit_r.error().message};
                         return submitted_any_llm;
@@ -468,7 +492,7 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
 
                 if(result.has_value()) {
                     auto output_check = validate_output(
-                        *result, config.validation, config.llm);
+                        *result, config.validation);
                     if(output_check.has_value()) {
                         state.slot_outputs[slot_kind] = std::move(*result);
                     } else {

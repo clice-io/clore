@@ -111,7 +111,7 @@ TEST_SUITE(llm) {
         base_url.unset();
         api_key.set("test-key");
 
-        LLMClient client("gpt-5.2", "system", 4);
+        LLMClient client("gpt-5.2", "system", 4, 3, 250);
         (void)client.submit(0, "ping");
 
         auto result = client.run([](std::uint64_t, auto) {});
@@ -128,7 +128,7 @@ TEST_SUITE(llm) {
         base_url.set("https://example.invalid/v1");
         api_key.unset();
 
-        LLMClient client("gpt-5.2", "system", 4);
+        LLMClient client("gpt-5.2", "system", 4, 3, 250);
         (void)client.submit(0, "ping");
 
         auto result = client.run([](std::uint64_t, auto) {});
@@ -139,7 +139,7 @@ TEST_SUITE(llm) {
     }
 
     TEST_CASE(llm_client_run_with_no_work_succeeds) {
-        LLMClient client("gpt-5.2", "system", 4);
+        LLMClient client("gpt-5.2", "system", 4, 3, 250);
 
         // run() with nothing submitted should return immediately
         auto result = client.run([](std::uint64_t, auto) {});
