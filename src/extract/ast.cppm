@@ -430,6 +430,12 @@ auto extract_symbols(const CompileEntry& entry, std::uint32_t max_snippet_bytes)
                                    entry.file)});
     }
 
+    // Force extraction-only mode so compile commands that normally emit objects/PCMs
+    // are treated as pure semantic analysis.
+    auto& frontend_opts = instance->getInvocation().getFrontendOpts();
+    frontend_opts.ProgramAction = clang::frontend::ParseSyntaxOnly;
+    frontend_opts.OutputFile.clear();
+
     SymbolExtractorAction action(result.symbols, raw_relations, max_snippet_bytes);
     if(!action.BeginSourceFile(*instance, instance->getFrontendOpts().Inputs[0])) {
         return std::unexpected(ASTError{
