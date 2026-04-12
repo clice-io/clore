@@ -3,8 +3,6 @@ module;
 #include <expected>
 #include <filesystem>
 #include <format>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -14,6 +12,7 @@ export module generate:prompt;
 import :model;
 import :evidence;
 import config;
+import support;
 
 export namespace clore::generate {
 
@@ -116,27 +115,19 @@ auto load_prompt_template(std::string_view path) -> std::expected<std::string, P
             .message = std::format("prompt template not found: {}", path)});
     }
 
-    std::ifstream file(file_path);
-    if(!file.is_open()) {
+    auto content = clore::support::read_utf8_text_file(file_path);
+    if(!content.has_value()) {
         return std::unexpected(PromptError{
-            .message = std::format("failed to open prompt template: {}", path)});
+            .message = std::format("failed to read prompt template: {}",
+                                   content.error())});
     }
 
-    std::ostringstream ss;
-    ss << file.rdbuf();
-    auto content = ss.str();
-
-    if(file.bad() || (file.fail() && !file.eof()) || ss.bad()) {
-        return std::unexpected(PromptError{
-            .message = std::format("failed to read prompt template: {}", path)});
-    }
-
-    if(content.empty()) {
+    if(content->empty()) {
         return std::unexpected(PromptError{
             .message = std::format("prompt template is empty: {}", path)});
     }
 
-    return content;
+    return std::move(*content);
 }
 
 auto instantiate_prompt(const std::string& tmpl,

@@ -5,8 +5,6 @@ module;
 #include <expected>
 #include <filesystem>
 #include <format>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -18,6 +16,7 @@ export module generate:render;
 import :model;
 import config;
 import extract;
+import support;
 
 export namespace clore::generate {
 
@@ -62,22 +61,19 @@ auto load_page_template(std::string_view path) -> std::expected<std::string, Ren
         return std::unexpected(RenderError{.message = "page template path is empty"});
     }
 
-    std::ifstream file{fs::path(path)};
-    if(!file.is_open()) {
+    auto content = clore::support::read_utf8_text_file(fs::path(path));
+    if(!content.has_value()) {
         return std::unexpected(RenderError{
-            .message = std::format("failed to open page template: {}", path)});
+            .message = std::format("failed to read page template: {}",
+                                   content.error())});
     }
 
-    std::ostringstream ss;
-    ss << file.rdbuf();
-    auto content = ss.str();
-
-    if(content.empty()) {
+    if(content->empty()) {
         return std::unexpected(RenderError{
             .message = std::format("page template is empty: {}", path)});
     }
 
-    return content;
+    return std::move(*content);
 }
 
 namespace {
@@ -738,17 +734,10 @@ auto write_page(const GeneratedPage& page, std::string_view output_root)
         }
     }
 
-    std::ofstream f(target);
-    if(!f.is_open()) {
+    auto write_result = clore::support::write_utf8_text_file(target, page.content);
+    if(!write_result.has_value()) {
         return std::unexpected(RenderError{
-            .message = std::format("failed to write page: {}", target.generic_string())});
-    }
-    f << page.content;
-    f.flush();
-
-    if(!f) {
-        return std::unexpected(RenderError{
-            .message = std::format("failed to write page: {}", target.generic_string())});
+            .message = std::move(write_result.error())});
     }
 
     return {};

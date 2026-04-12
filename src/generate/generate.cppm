@@ -203,12 +203,12 @@ auto extract_summary_from_slot_output(const std::string& overview_output) -> std
     // Take first paragraph as summary
     auto end = overview_output.find("\n\n");
     if(end != std::string::npos) {
-        return overview_output.substr(0, end);
+        return clore::support::ensure_utf8(overview_output.substr(0, end));
     }
     if(overview_output.size() > 300) {
-        return overview_output.substr(0, 300);
+        return clore::support::truncate_utf8(overview_output, 300);
     }
-    return overview_output;
+    return clore::support::ensure_utf8(overview_output);
 }
 
 }  // namespace

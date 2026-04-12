@@ -4,9 +4,7 @@ module;
 #include <expected>
 #include <filesystem>
 #include <format>
-#include <fstream>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -259,16 +257,14 @@ auto load_config(std::string_view path) -> std::expected<TaskConfig, ConfigError
             .message = std::format("configuration file not found: {}", path)});
     }
 
-    std::ifstream file(config_path);
-    if(!file.is_open()) {
-        return std::unexpected(ConfigError{
-            .message = std::format("failed to open configuration file: {}", path)});
+    auto content = clore::support::read_utf8_text_file(config_path);
+    if(!content.has_value()) {
+        return std::unexpected(ConfigError{.message = std::format(
+                                   "failed to read configuration file: {}",
+                                   content.error())});
     }
 
-    std::ostringstream ss;
-    ss << file.rdbuf();
-
-    auto config = load_config_from_string(ss.str());
+    auto config = load_config_from_string(*content);
     if(!config.has_value()) {
         return config;
     }
@@ -280,12 +276,14 @@ auto load_config(std::string_view path) -> std::expected<TaskConfig, ConfigError
 auto load_config_from_string(std::string_view toml_content) -> std::expected<TaskConfig, ConfigError> {
     namespace toml = eventide::serde::toml;
 
-    if(auto forbidden = reject_forbidden_keys(toml_content); !forbidden.has_value()) {
+    auto normalized_toml = clore::support::strip_utf8_bom(toml_content);
+
+    if(auto forbidden = reject_forbidden_keys(normalized_toml); !forbidden.has_value()) {
         return std::unexpected(std::move(forbidden.error()));
     }
 
     RawTaskConfig raw{};
-    auto result = toml::parse(toml_content, raw);
+    auto result = toml::parse(normalized_toml, raw);
     if(!result.has_value()) {
         return std::unexpected(ConfigError{
             .message = std::format("TOML parse error: {}", result.error().message())});

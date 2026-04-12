@@ -100,6 +100,8 @@ int main(int argc, const char** argv) {
         return 0;
     }
 
+    clore::support::enable_utf8_console();
+
     // Configure logging
     if(opts.log_level.has_value()) {
         auto level = spdlog::level::from_str(*opts.log_level);

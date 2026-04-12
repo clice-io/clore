@@ -156,28 +156,42 @@ auto build_chat_completions_url(std::string_view api_base) -> std::string {
     return url;
 }
 
-auto escape_json_string(std::string_view s) -> std::string {
-    std::string out;
-    out.reserve(s.size() + 16);
-    for(char c : s) {
+auto escape_json_string(std::string_view text) -> std::string {
+    std::string escaped;
+    escaped.reserve(text.size() + 16);
+    for(char c : text) {
         switch(c) {
-            case '"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
+            case '"': escaped += "\\\""; break;
+            case '\\': escaped += "\\\\"; break;
+            case '\b': escaped += "\\b"; break;
+            case '\f': escaped += "\\f"; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
             default:
                 if(static_cast<unsigned char>(c) < 0x20) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned>(c));
-                    out += buf;
+                    char buffer[8];
+                    std::snprintf(buffer, sizeof(buffer), "\\u%04x",
+                                  static_cast<unsigned>(static_cast<unsigned char>(c)));
+                    escaped += buffer;
                 } else {
-                    out += c;
+                    escaped += c;
                 }
                 break;
         }
     }
-    return out;
+    return escaped;
+}
+
+auto prepare_json_string(std::string_view text, std::string_view field_name)
+    -> std::string {
+    auto normalized = clore::support::ensure_utf8(text);
+    if(normalized != text) {
+        logging::warn(
+            "LLM {} contains invalid UTF-8; replaced invalid byte sequences before JSON serialization",
+            field_name);
+    }
+    return normalized;
 }
 
 auto ensure_curl_global_init() -> std::expected<void, LLMError> {
@@ -214,10 +228,54 @@ namespace detail {
 
 auto build_request_json(std::string_view model, std::string_view system_prompt,
                         std::string_view prompt) -> std::string {
+    auto json_model = prepare_json_string(model, "model");
+    auto json_system_prompt = prepare_json_string(system_prompt, "system_prompt");
+    auto json_prompt = prepare_json_string(prompt, "prompt");
+
     return std::format(
         R"({{"model":"{}","messages":[{{"role":"system","content":"{}"}},{{"role":"user","content":"{}"}}]}})",
-        escape_json_string(model), escape_json_string(system_prompt),
-        escape_json_string(prompt));
+        escape_json_string(json_model),
+        escape_json_string(json_system_prompt),
+        escape_json_string(json_prompt));
+}
+
+auto parse_content_parts(const llvm::json::Array& content_parts)
+    -> std::expected<std::string, LLMError> {
+    std::string text;
+    for(const auto& part_value : content_parts) {
+        auto* part = part_value.getAsObject();
+        if(!part) {
+            return std::unexpected(
+                LLMError{.message = "LLM response content part is not a JSON object"});
+        }
+
+        auto type = part->getString("type");
+        if(type.has_value() && *type != "text" && *type != "output_text") {
+            continue;
+        }
+
+        if(auto part_text = part->getString("text")) {
+            text += *part_text;
+            continue;
+        }
+
+        if(auto* text_object = part->getObject("text")) {
+            if(auto value = text_object->getString("value")) {
+                text += *value;
+                continue;
+            }
+        }
+
+        return std::unexpected(
+            LLMError{.message = "LLM response content part has no text payload"});
+    }
+
+    if(text.empty()) {
+        return std::unexpected(
+            LLMError{.message = "LLM response content array has no text parts"});
+    }
+
+    return text;
 }
 
 auto parse_response(std::string_view json) -> std::expected<std::string, LLMError> {
@@ -254,12 +312,15 @@ auto parse_response(std::string_view json) -> std::expected<std::string, LLMErro
         return std::unexpected(LLMError{.message = "LLM response choice has no message"});
     }
 
-    auto content = message->getString("content");
-    if(!content) {
-        return std::unexpected(LLMError{.message = "LLM response message has no content"});
+    if(auto content = message->getString("content")) {
+        return std::string(*content);
     }
 
-    return std::string(*content);
+    if(auto* content_parts = message->getArray("content")) {
+        return parse_content_parts(*content_parts);
+    }
+
+    return std::unexpected(LLMError{.message = "LLM response message has no content"});
 }
 
 }  // namespace detail
@@ -298,7 +359,7 @@ auto call_llm(std::string_view model, std::string_view system_prompt,
     std::string response_body;
 
     curl_slist* headers = nullptr;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
+    headers = curl_slist_append(headers, "Content-Type: application/json; charset=utf-8");
     auto auth = std::format("Authorization: Bearer {}", *api_key_result);
     headers = curl_slist_append(headers, auth.c_str());
 
@@ -525,7 +586,7 @@ auto LLMClient::launch_one(PendingRequest request)
 
     // Headers
     req.headers = nullptr;
-    req.headers = curl_slist_append(req.headers, "Content-Type: application/json");
+    req.headers = curl_slist_append(req.headers, "Content-Type: application/json; charset=utf-8");
     auto auth = std::format("Authorization: Bearer {}", api_key_);
     req.headers = curl_slist_append(req.headers, auth.c_str());
 

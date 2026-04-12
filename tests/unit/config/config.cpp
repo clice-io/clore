@@ -2,6 +2,8 @@
 
 #include <filesystem>
 #include <fstream>
+#include <string>
+#include <string_view>
 
 import config;
 
@@ -61,6 +63,17 @@ fail_on_h1_in_output = true
 [navigation]
 consume_dependency_summaries = true
 )";
+
+constexpr auto kDefaultSystemPrompt = "You are a documentation writer.";
+
+auto make_valid_config(std::string_view system_prompt) -> std::string {
+    auto config = std::string(kMinimalValidConfig);
+    auto pos = config.find(kDefaultSystemPrompt);
+    if(pos != std::string::npos) {
+        config.replace(pos, std::char_traits<char>::length(kDefaultSystemPrompt), system_prompt);
+    }
+    return config;
+}
 
 }  // namespace
 
@@ -161,5 +174,14 @@ output_root = "/tmp/output"
                   temp_dir.lexically_normal().generic_string());
 
         fs::remove_all(temp_dir);
+    }
+
+    TEST_CASE(load_from_string_supports_utf8_bom_and_unicode_system_prompt) {
+        auto toml = std::string("\xEF\xBB\xBF") + make_valid_config("你是一名中文文档作者。");
+
+        auto result = load_config_from_string(toml);
+
+        ASSERT_TRUE(result.has_value());
+        EXPECT_EQ(result->llm.system_prompt, "你是一名中文文档作者。");
     }
 };

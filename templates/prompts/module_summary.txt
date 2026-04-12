@@ -5,6 +5,7 @@ Output:
 - 1 to 2 short paragraphs
 - No heading
 - No YAML
+- Follow the output language requested by the system prompt
 
 Must explain:
 - what this module provides

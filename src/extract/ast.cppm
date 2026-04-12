@@ -102,7 +102,8 @@ auto get_access_string(clang::AccessSpecifier access) -> std::string {
 auto get_doc_comment(const clang::ASTContext& ctx, const clang::Decl* decl) -> std::string {
     auto* comment = ctx.getRawCommentForDeclNoCache(decl);
     if(!comment) return "";
-    return comment->getRawText(ctx.getSourceManager()).str();
+    return clore::support::ensure_utf8(
+        comment->getRawText(ctx.getSourceManager()).str());
 }
 
 auto get_source_snippet(const clang::ASTContext& ctx, const clang::Decl* decl,
@@ -128,15 +129,20 @@ auto get_source_snippet(const clang::ASTContext& ctx, const clang::Decl* decl,
         end_offset = sm.getFileOffset(range.getEnd());
     }
 
-    if(end_offset - begin_offset > max_bytes) {
-        end_offset = begin_offset + max_bytes;
+    constexpr std::size_t utf8_slack_bytes = 4;
+    const auto max_excerpt_bytes = static_cast<std::size_t>(max_bytes) + utf8_slack_bytes;
+    if(static_cast<std::size_t>(end_offset - begin_offset) > max_excerpt_bytes) {
+        end_offset = begin_offset + static_cast<decltype(end_offset)>(max_excerpt_bytes);
     }
 
     auto file_id = sm.getFileID(range.getBegin());
     auto buffer = sm.getBufferData(file_id);
     if(buffer.empty()) return "";
 
-    if(end_offset > buffer.size()) return "";
+    if(begin_offset >= buffer.size()) return "";
+    if(end_offset > buffer.size()) {
+        end_offset = buffer.size();
+    }
 
     std::string result(buffer.substr(begin_offset, end_offset - begin_offset));
 
@@ -150,7 +156,7 @@ auto get_source_snippet(const clang::ASTContext& ctx, const clang::Decl* decl,
         normalized += result[i];
     }
 
-    return normalized;
+    return clore::support::truncate_utf8(normalized, max_bytes);
 }
 
 auto make_source_location(const clang::SourceManager& sm, clang::SourceLocation loc)

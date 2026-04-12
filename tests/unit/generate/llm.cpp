@@ -8,7 +8,10 @@
 #include <string>
 #include <vector>
 
+#include "llvm/Support/JSON.h"
+
 import generate;
+import support;
 
 using namespace clore::generate;
 
@@ -61,6 +64,52 @@ TEST_SUITE(llm) {
         EXPECT_NE(json.find("Document this function."), std::string::npos);
     }
 
+    TEST_CASE(build_request_json_preserves_utf8_content) {
+        auto json = detail::build_request_json(
+            "deepseek-chat",
+            "你是一名中文文档作者。",
+            "请说明 `LLMClient` 的职责。"
+        );
+
+        auto parsed = llvm::json::parse(json);
+        ASSERT_TRUE(static_cast<bool>(parsed));
+
+        auto* root = parsed->getAsObject();
+        ASSERT_TRUE(root != nullptr);
+        EXPECT_EQ(root->getString("model").value_or(""), "deepseek-chat");
+
+        auto* messages = root->getArray("messages");
+        ASSERT_TRUE(messages != nullptr);
+        ASSERT_EQ(messages->size(), 2u);
+
+        auto* system_message = (*messages)[0].getAsObject();
+        auto* user_message = (*messages)[1].getAsObject();
+        ASSERT_TRUE(system_message != nullptr);
+        ASSERT_TRUE(user_message != nullptr);
+        EXPECT_EQ(system_message->getString("content").value_or(""), "你是一名中文文档作者。");
+        EXPECT_EQ(user_message->getString("content").value_or(""), "请说明 `LLMClient` 的职责。");
+    }
+
+    TEST_CASE(build_request_json_repairs_invalid_utf8_content) {
+        std::string invalid_prompt = "bad";
+        invalid_prompt.push_back(static_cast<char>(0xFF));
+        invalid_prompt += "prompt";
+
+        auto json = detail::build_request_json("deepseek-chat", "系统提示", invalid_prompt);
+
+        auto parsed = llvm::json::parse(json);
+        ASSERT_TRUE(static_cast<bool>(parsed));
+
+        auto* root = parsed->getAsObject();
+        ASSERT_TRUE(root != nullptr);
+        auto* messages = root->getArray("messages");
+        ASSERT_TRUE(messages != nullptr);
+        auto* user_message = (*messages)[1].getAsObject();
+        ASSERT_TRUE(user_message != nullptr);
+        EXPECT_EQ(user_message->getString("content").value_or(""),
+                  clore::support::ensure_utf8(invalid_prompt));
+    }
+
     TEST_CASE(parse_response_success) {
         auto result = detail::parse_response(
             R"({"choices":[{"message":{"content":"# Title\nGenerated docs"}}]})");
@@ -74,6 +123,22 @@ TEST_SUITE(llm) {
             R"({"error":{"message":"bad request"}})");
 
         EXPECT_FALSE(result.has_value());
+    }
+
+    TEST_CASE(parse_response_supports_utf8_content) {
+        auto result = detail::parse_response(
+            R"({"choices":[{"message":{"content":"中文摘要：负责生成文档。"}}]})");
+
+        ASSERT_TRUE(result.has_value());
+        EXPECT_EQ(*result, "中文摘要：负责生成文档。");
+    }
+
+    TEST_CASE(parse_response_supports_content_parts) {
+        auto result = detail::parse_response(
+            R"({"choices":[{"message":{"content":[{"type":"text","text":"第一段。"},{"type":"output_text","text":"第二段。"}]}}]})");
+
+        ASSERT_TRUE(result.has_value());
+        EXPECT_EQ(*result, "第一段。第二段。");
     }
 
     TEST_CASE(call_llm_requires_openai_base_url_env) {

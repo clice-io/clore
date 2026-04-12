@@ -13,6 +13,7 @@ export module generate:evidence;
 import :model;
 import config;
 import extract;
+import support;
 
 export namespace clore::generate {
 
@@ -130,8 +131,9 @@ auto collect_summaries(const PageSummaryCache& cache,
 }
 
 auto truncate_snippet(const std::string& snippet, std::uint32_t max_bytes) -> std::string {
-    if(snippet.size() <= max_bytes) return snippet;
-    return snippet.substr(0, max_bytes) + "\n// ... truncated";
+    auto normalized = clore::support::ensure_utf8(snippet);
+    if(normalized.size() <= max_bytes) return normalized;
+    return clore::support::truncate_utf8(normalized, max_bytes) + "\n// ... truncated";
 }
 
 auto render_detailed_fact(const SymbolFact& fact) -> std::string {
