@@ -13,7 +13,6 @@ module;
 export module generate:path;
 
 import :model;
-import config;
 
 export namespace clore::generate {
 
@@ -25,12 +24,10 @@ struct PageIdentity {
     PageType page_type = PageType::File;
     std::string normalized_owner_key;
     std::string qualified_name;
-    std::vector<std::string> namespace_segments;
-    std::vector<std::string> module_segments;
     std::string source_relative_path;
 };
 
-auto compute_page_path(const PageIdentity& identity, const config::PathRulesConfig& rules)
+auto compute_page_path(const PageIdentity& identity)
     -> std::expected<std::string, PathError>;
 
 auto validate_no_path_conflicts(const std::vector<std::pair<std::string, std::string>>& path_to_id)
@@ -44,12 +41,16 @@ namespace clore::generate {
 
 namespace {
 
-auto normalize_name(std::string_view name, std::string_view strategy) -> std::string {
+constexpr std::string_view kIndexPath = "index.md";
+constexpr std::string_view kModulePrefix = "modules";
+constexpr std::string_view kNamespacePrefix = "namespaces";
+constexpr std::string_view kFilePrefix = "files";
+constexpr std::string_view kWorkflowPrefix = "workflows";
+
+auto normalize_name(std::string_view name) -> std::string {
     std::string result(name);
-    if(strategy == "lowercase") {
-        std::transform(result.begin(), result.end(), result.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    }
+    std::transform(result.begin(), result.end(), result.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return result;
 }
 
@@ -107,11 +108,10 @@ auto sanitize_path_chars(std::string& path) -> void {
 
 }  // namespace
 
-auto compute_page_path(const PageIdentity& identity, const config::PathRulesConfig& rules)
+auto compute_page_path(const PageIdentity& identity)
     -> std::expected<std::string, PathError> {
 
     std::string result;
-    auto& norm = rules.name_normalize;
 
     auto trim_ascii = [](std::string_view text) -> std::string_view {
         while(!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) {
@@ -152,7 +152,7 @@ auto compute_page_path(const PageIdentity& identity, const config::PathRulesConf
 
     switch(identity.page_type) {
         case PageType::Index: {
-            result = rules.index_path;
+            result = std::string(kIndexPath);
             break;
         }
         case PageType::Module: {
@@ -168,14 +168,14 @@ auto compute_page_path(const PageIdentity& identity, const config::PathRulesConf
                 }
             }
             std::vector<std::string> norm_parts;
-            norm_parts.push_back(rules.module_prefix);
+            norm_parts.push_back(std::string(kModulePrefix));
             for(auto& p : parts) {
-                norm_parts.push_back(normalize_name(p, norm));
+                norm_parts.push_back(normalize_name(p));
             }
             if(partition.empty()) {
                 norm_parts.push_back("index.md");
             } else {
-                norm_parts.push_back(normalize_name(partition, norm) + ".md");
+                norm_parts.push_back(normalize_name(partition) + ".md");
             }
             result = join_path(norm_parts);
             break;
@@ -183,23 +183,11 @@ auto compute_page_path(const PageIdentity& identity, const config::PathRulesConf
         case PageType::Namespace: {
             auto parts = split_qualified(identity.qualified_name, "::");
             std::vector<std::string> norm_parts;
-            norm_parts.push_back(rules.namespace_prefix);
+            norm_parts.push_back(std::string(kNamespacePrefix));
             for(auto& p : parts) {
-                norm_parts.push_back(normalize_name(p, norm));
+                norm_parts.push_back(normalize_name(p));
             }
             norm_parts.push_back("index.md");
-            result = join_path(norm_parts);
-            break;
-        }
-        case PageType::Type: {
-            auto ns_parts = identity.namespace_segments;
-            auto type_name = normalize_name(identity.normalized_owner_key, norm);
-            std::vector<std::string> norm_parts;
-            norm_parts.push_back(rules.type_prefix);
-            for(auto& p : ns_parts) {
-                norm_parts.push_back(normalize_name(p, norm));
-            }
-            norm_parts.push_back(type_name + ".md");
             result = join_path(norm_parts);
             break;
         }
@@ -213,16 +201,15 @@ auto compute_page_path(const PageIdentity& identity, const config::PathRulesConf
             } else {
                 stem = source_rel;
             }
-            result = rules.file_prefix + "/" + stem + ".md";
+            result = std::string(kFilePrefix) + "/" + stem + ".md";
             break;
         }
         case PageType::Workflow: {
             auto slug = sanitize_workflow_slug(
-                normalize_name(identity.normalized_owner_key, norm));
+                normalize_name(identity.normalized_owner_key));
             std::vector<std::string> norm_parts;
-            norm_parts.push_back(rules.workflow_prefix);
-            norm_parts.push_back(slug);
-            norm_parts.push_back("index.md");
+            norm_parts.push_back(std::string(kWorkflowPrefix));
+            norm_parts.push_back(slug + ".md");
             result = join_path(norm_parts);
             break;
         }

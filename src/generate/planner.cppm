@@ -94,64 +94,10 @@ auto is_renderable_namespace_name(std::string_view ns_name) -> bool {
     return true;
 }
 
-auto is_nested_type_page_candidate(const extract::ProjectModel& model,
-                                   const extract::SymbolInfo& sym) -> bool {
-    if(is_type_kind(sym.lexical_parent_kind)) {
-        return true;
-    }
-
-    if(sym.parent.has_value()) {
-        if(auto* parent = lookup_sym(model, *sym.parent)) {
-            if(is_type_kind(parent->kind)) {
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
-
-auto should_generate_type_page(const extract::ProjectModel& model,
-                               const extract::SymbolInfo& sym) -> bool {
-    if(!is_type_kind(sym.kind)) {
-        return false;
-    }
-    if(sym.qualified_name.find("(anonymous namespace)") != std::string::npos) {
-        return false;
-    }
-
-    auto short_name = short_name_of(sym.qualified_name);
-    if(short_name.empty() || has_reserved_identifier_prefix(short_name)) {
-        return false;
-    }
-    if(sym.lexical_parent_kind != extract::SymbolKind::Unknown &&
-       sym.lexical_parent_kind != extract::SymbolKind::Namespace) {
-        return false;
-    }
-    if(sym.parent.has_value()) {
-        if(auto* parent = lookup_sym(model, *sym.parent)) {
-            if(parent->kind == extract::SymbolKind::Function ||
-               parent->kind == extract::SymbolKind::Method) {
-                return false;
-            }
-        }
-    }
-    if(is_nested_type_page_candidate(model, sym)) {
-        return false;
-    }
-
-    auto ns = namespace_of(sym);
-    if(!ns.empty() && !is_renderable_namespace_name(ns)) {
-        return false;
-    }
-
-    return true;
-}
-
 auto find_module_for_file(const extract::ProjectModel& model, const std::string& file_path)
     -> std::optional<std::string> {
-    for(auto& [source, mod_unit] : model.modules) {
-        if(source == file_path) return mod_unit.name;
+    if(auto* mod = extract::find_module_by_source(model, file_path)) {
+        return mod->name;
     }
     return std::nullopt;
 }
@@ -178,99 +124,20 @@ struct PlanBuilder {
         return {};
     }
 
-    auto get_prompt_template_path(std::string_view slot_kind) const -> std::string {
-        if(slot_kind == "type_overview") return config.prompt_templates.type_overview;
-        if(slot_kind == "type_usage_notes") return config.prompt_templates.type_usage_notes;
-        if(slot_kind == "namespace_summary") return config.prompt_templates.namespace_summary;
-        if(slot_kind == "module_summary") return config.prompt_templates.module_summary;
-        if(slot_kind == "module_architecture") return config.prompt_templates.module_architecture;
-        if(slot_kind == "index_overview") return config.prompt_templates.index_overview;
-        if(slot_kind == "index_reading_guide") return config.prompt_templates.index_reading_guide;
-        if(slot_kind == "workflow") return config.prompt_templates.workflow;
-        return {};
+    auto make_page_prompt(PromptKind kind) const -> PromptRequest {
+        return PromptRequest{.kind = kind};
     }
 
-    auto make_slot(const std::string& page_id, std::string_view slot_kind) -> SlotPlan {
-        return SlotPlan{
-            .slot_id = page_id + "/" + std::string(slot_kind),
-            .page_id = page_id,
-            .slot_kind = std::string(slot_kind),
-            .prompt_template_path = get_prompt_template_path(slot_kind),
-            .insertion_marker = "{{slot:" + std::string(slot_kind) + "}}",
+    auto make_symbol_prompt(PromptKind kind, const std::string& symbol_key) const
+        -> PromptRequest {
+        return PromptRequest{
+            .kind = kind,
+            .target_key = symbol_key,
         };
     }
 };
 
-auto enumerate_type_pages(PlanBuilder& builder) -> std::expected<void, PlanError> {
-    if(!builder.config.page_types.type_page) return {};
-
-    for(auto& [id, sym] : builder.model.symbols) {
-        if(!should_generate_type_page(builder.model, sym)) continue;
-
-        auto ns = namespace_of(sym);
-        auto short_name = short_name_of(sym.qualified_name);
-        auto ns_parts = extract::split_top_level_qualified_name(ns);
-
-        PageIdentity identity{
-            .page_type = PageType::Type,
-            .normalized_owner_key = short_name,
-            .qualified_name = sym.qualified_name,
-            .namespace_segments = ns_parts,
-        };
-
-        auto path_result = compute_page_path(identity, builder.config.path_rules);
-        if(!path_result.has_value()) {
-            return std::unexpected(PlanError{
-                .message = std::format("failed to compute path for type '{}': {}",
-                                       sym.qualified_name, path_result.error().message)});
-        }
-
-        auto page_id = "type:" + sym.qualified_name;
-        PagePlan plan{
-            .page_id = page_id,
-            .page_type = PageType::Type,
-            .title = "`" + sym.qualified_name + "`",
-            .relative_path = *path_result,
-            .owner_keys = {sym.qualified_name},
-            .deterministic_blocks = {"declaration", "template_parameters", "base_types",
-                                      "derived_types", "public_members", "protected_members",
-                                      "private_members", "source", "related_pages", "type_diagram"},
-        };
-
-        plan.slot_plans.push_back(builder.make_slot(page_id, "type_overview"));
-        plan.slot_plans.push_back(builder.make_slot(page_id, "type_usage_notes"));
-
-        // Dependencies: base types
-        for(auto& base_id : sym.bases) {
-            if(auto* base = lookup_sym(builder.model, base_id)) {
-                if(should_generate_type_page(builder.model, *base)) {
-                    plan.depends_on_pages.push_back("type:" + base->qualified_name);
-                    plan.linked_pages.push_back("type:" + base->qualified_name);
-                }
-            }
-        }
-        // Links to derived types
-        for(auto& derived_id : sym.derived) {
-            if(auto* derived = lookup_sym(builder.model, derived_id)) {
-                if(should_generate_type_page(builder.model, *derived)) {
-                    plan.linked_pages.push_back("type:" + derived->qualified_name);
-                }
-            }
-        }
-        // Link to enclosing namespace
-        if(!ns.empty() && is_renderable_namespace_name(ns)) {
-            plan.linked_pages.push_back("namespace:" + ns);
-        }
-
-        if(auto r = builder.add_plan(std::move(plan)); !r) return r;
-    }
-
-    return {};
-}
-
 auto enumerate_namespace_pages(PlanBuilder& builder) -> std::expected<void, PlanError> {
-    if(!builder.config.page_types.namespace_page) return {};
-
     for(auto& [ns_name, ns_info] : builder.model.namespaces) {
         if(ns_info.symbols.empty() && ns_info.children.empty()) continue;
         if(!is_renderable_namespace_name(ns_name)) continue;
@@ -281,10 +148,9 @@ auto enumerate_namespace_pages(PlanBuilder& builder) -> std::expected<void, Plan
             .page_type = PageType::Namespace,
             .normalized_owner_key = ns_name,
             .qualified_name = ns_name,
-            .namespace_segments = parts,
         };
 
-        auto path_result = compute_page_path(identity, builder.config.path_rules);
+        auto path_result = compute_page_path(identity);
         if(!path_result.has_value()) {
             return std::unexpected(PlanError{
                 .message = std::format("failed to compute path for namespace '{}': {}",
@@ -298,17 +164,24 @@ auto enumerate_namespace_pages(PlanBuilder& builder) -> std::expected<void, Plan
             .title = "Namespace `" + ns_name + "`",
             .relative_path = *path_result,
             .owner_keys = {ns_name},
-            .deterministic_blocks = {"subnamespaces", "types_index", "functions_index", "related_pages", "namespace_diagram"},
         };
 
-        plan.slot_plans.push_back(builder.make_slot(page_id, "namespace_summary"));
+        plan.prompt_requests.push_back(builder.make_page_prompt(PromptKind::NamespaceSummary));
 
-        // Depends on type pages in this namespace
+        // Per-symbol declaration prompts for types and functions
         for(auto& sym_id : ns_info.symbols) {
             if(auto* sym = lookup_sym(builder.model, sym_id)) {
-                if(should_generate_type_page(builder.model, *sym)) {
-                    plan.depends_on_pages.push_back("type:" + sym->qualified_name);
-                    plan.linked_pages.push_back("type:" + sym->qualified_name);
+                if(!is_page_level_symbol(builder.model, *sym)) {
+                    continue;
+                }
+                if(is_type_kind(sym->kind)) {
+                    plan.prompt_requests.push_back(
+                        builder.make_symbol_prompt(PromptKind::TypeDeclarationSummary,
+                                                   sym->qualified_name));
+                } else if(is_function_kind(sym->kind)) {
+                    plan.prompt_requests.push_back(
+                        builder.make_symbol_prompt(PromptKind::FunctionDeclarationSummary,
+                                                   sym->qualified_name));
                 }
             }
         }
@@ -332,7 +205,6 @@ auto enumerate_namespace_pages(PlanBuilder& builder) -> std::expected<void, Plan
 }
 
 auto enumerate_module_pages(PlanBuilder& builder) -> std::expected<void, PlanError> {
-    if(!builder.config.page_types.module_page) return {};
     if(!builder.model.uses_modules) return {};
 
     // Collect interface module names
@@ -347,10 +219,9 @@ auto enumerate_module_pages(PlanBuilder& builder) -> std::expected<void, PlanErr
             .page_type = PageType::Module,
             .normalized_owner_key = mod_unit.name,
             .qualified_name = mod_unit.name,
-            .module_segments = parts,
         };
 
-        auto path_result = compute_page_path(identity, builder.config.path_rules);
+        auto path_result = compute_page_path(identity);
         if(!path_result.has_value()) {
             return std::unexpected(PlanError{
                 .message = std::format("failed to compute path for module '{}': {}",
@@ -364,28 +235,34 @@ auto enumerate_module_pages(PlanBuilder& builder) -> std::expected<void, PlanErr
             .title = "Module `" + mod_unit.name + "`",
             .relative_path = *path_result,
             .owner_keys = {mod_unit.name},
-            .deterministic_blocks = {"imports", "types_index", "related_pages", "import_diagram"},
         };
 
-        plan.slot_plans.push_back(builder.make_slot(page_id, "module_summary"));
-        plan.slot_plans.push_back(builder.make_slot(page_id, "module_architecture"));
+        plan.prompt_requests.push_back(builder.make_page_prompt(PromptKind::ModuleSummary));
+        plan.prompt_requests.push_back(builder.make_page_prompt(PromptKind::ModuleArchitecture));
+
+        // Per-symbol implementation prompts for types and functions in this module
+        for(auto& sym_id : mod_unit.symbols) {
+            if(auto* sym = lookup_sym(builder.model, sym_id)) {
+                if(!is_page_level_symbol(builder.model, *sym)) {
+                    continue;
+                }
+                if(is_type_kind(sym->kind)) {
+                    plan.prompt_requests.push_back(
+                        builder.make_symbol_prompt(PromptKind::TypeImplementationSummary,
+                                                   sym->qualified_name));
+                } else if(is_function_kind(sym->kind)) {
+                    plan.prompt_requests.push_back(
+                        builder.make_symbol_prompt(PromptKind::FunctionImplementationSummary,
+                                                   sym->qualified_name));
+                }
+            }
+        }
 
         // Dependencies: imported modules
         for(auto& import_name : mod_unit.imports) {
             plan.depends_on_pages.push_back("module:" + import_name);
             plan.linked_pages.push_back("module:" + import_name);
         }
-
-        // Dependencies: contained type pages
-        for(auto& sym_id : mod_unit.symbols) {
-            if(auto* sym = lookup_sym(builder.model, sym_id)) {
-                if(should_generate_type_page(builder.model, *sym)) {
-                    plan.depends_on_pages.push_back("type:" + sym->qualified_name);
-                    plan.linked_pages.push_back("type:" + sym->qualified_name);
-                }
-            }
-        }
-
         if(auto r = builder.add_plan(std::move(plan)); !r) return r;
     }
 
@@ -393,7 +270,7 @@ auto enumerate_module_pages(PlanBuilder& builder) -> std::expected<void, PlanErr
 }
 
 auto enumerate_file_pages(PlanBuilder& builder) -> std::expected<void, PlanError> {
-    if(!builder.config.page_types.file_page) return {};
+    if(builder.model.uses_modules) return {};
     namespace fs = std::filesystem;
 
     auto source_root = fs::path(builder.config.project_root).lexically_normal();
@@ -419,7 +296,7 @@ auto enumerate_file_pages(PlanBuilder& builder) -> std::expected<void, PlanError
             .source_relative_path = rel_str,
         };
 
-        auto path_result = compute_page_path(identity, builder.config.path_rules);
+        auto path_result = compute_page_path(identity);
         if(!path_result.has_value()) {
             return std::unexpected(PlanError{
                 .message = std::format("failed to compute path for file '{}': {}",
@@ -433,8 +310,25 @@ auto enumerate_file_pages(PlanBuilder& builder) -> std::expected<void, PlanError
             .title = "File `" + rel_str + "`",
             .relative_path = *path_result,
             .owner_keys = {file_path},
-            .deterministic_blocks = {"includes", "declared_symbols", "defined_symbols", "module_info"},
         };
+
+        // Per-symbol implementation prompts
+        for(auto& sym_id : file_info.symbols) {
+            if(auto* sym = lookup_sym(builder.model, sym_id)) {
+                if(!is_page_level_symbol(builder.model, *sym)) {
+                    continue;
+                }
+                if(is_type_kind(sym->kind)) {
+                    plan.prompt_requests.push_back(
+                        builder.make_symbol_prompt(PromptKind::TypeImplementationSummary,
+                                                   sym->qualified_name));
+                } else if(is_function_kind(sym->kind)) {
+                    plan.prompt_requests.push_back(
+                        builder.make_symbol_prompt(PromptKind::FunctionImplementationSummary,
+                                                   sym->qualified_name));
+                }
+            }
+        }
 
         if(auto r = builder.add_plan(std::move(plan)); !r) return r;
     }
@@ -443,8 +337,6 @@ auto enumerate_file_pages(PlanBuilder& builder) -> std::expected<void, PlanError
 }
 
 auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanError> {
-    if(!builder.config.page_types.workflow_page) return {};
-
     auto& model = builder.model;
 
     // Workflow pages are extracted from a callable-level call graph. Even when
@@ -968,7 +860,7 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
             .normalized_owner_key = slug,
         };
 
-        auto path_result = compute_page_path(identity, builder.config.path_rules);
+        auto path_result = compute_page_path(identity);
         if(!path_result.has_value()) {
             return std::unexpected(PlanError{
                 .message = std::format("failed to compute path for workflow '{}': {}",
@@ -993,10 +885,9 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
             .page_type = PageType::Workflow,
             .title = "Workflow: " + title_chain,
             .relative_path = *path_result,
-            .deterministic_blocks = {"call_chain", "participants", "related_pages"},
         };
 
-        plan.slot_plans.push_back(builder.make_slot(page_id, "workflow"));
+        plan.prompt_requests.push_back(builder.make_page_prompt(PromptKind::Workflow));
 
         std::unordered_set<std::string> linked_seen;
         std::unordered_set<std::string> dependency_seen;
@@ -1023,14 +914,6 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
             if(is_renderable_namespace_name(ns_name)) {
                 add_linked_page("namespace:" + ns_name);
             }
-
-            if(sym->parent.has_value()) {
-                if(auto* parent = lookup_sym(model, *sym->parent)) {
-                    if(should_generate_type_page(model, *parent)) {
-                        add_linked_page("type:" + parent->qualified_name);
-                    }
-                }
-            }
         }
 
         plan.owner_keys = std::move(owner_keys);
@@ -1050,15 +933,13 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
 }
 
 auto enumerate_index_page(PlanBuilder& builder) -> std::expected<void, PlanError> {
-    if(!builder.config.page_types.index) return {};
-
     PageIdentity identity{
         .page_type = PageType::Index,
         .normalized_owner_key = "index",
         .qualified_name = "index",
     };
 
-    auto path_result = compute_page_path(identity, builder.config.path_rules);
+    auto path_result = compute_page_path(identity);
     if(!path_result.has_value()) {
         return std::unexpected(PlanError{
             .message =
@@ -1071,11 +952,10 @@ auto enumerate_index_page(PlanBuilder& builder) -> std::expected<void, PlanError
         .page_type = PageType::Index,
         .title = "API Reference",
         .relative_path = *path_result,
-        .deterministic_blocks = {"all_modules", "all_namespaces", "all_types", "all_files", "all_workflows", "module_dependency_diagram"},
     };
 
-    plan.slot_plans.push_back(builder.make_slot(page_id, "index_overview"));
-    plan.slot_plans.push_back(builder.make_slot(page_id, "index_reading_guide"));
+    plan.prompt_requests.push_back(builder.make_page_prompt(PromptKind::IndexOverview));
+    plan.prompt_requests.push_back(builder.make_page_prompt(PromptKind::IndexReadingGuide));
 
     // Index depends on all content pages so overview + reading guide can use
     // dependency summaries and links with complete context.
@@ -1161,17 +1041,11 @@ auto build_page_plan_set(const config::TaskConfig& config,
 
     PlanBuilder builder{.config = config, .model = model};
 
-    // 1. Enumerate pages in dependency order: types first, then files, namespaces, modules, index
-    if(auto r = enumerate_type_pages(builder); !r) {
-        return std::unexpected(PlanError{.message = r.error().message});
-    }
-    logging::info("planner: {} type pages", builder.plans.size());
-
-    auto type_count = builder.plans.size();
+    // 1. Enumerate declaration and implementation pages before derived views.
     if(auto r = enumerate_file_pages(builder); !r) {
         return std::unexpected(PlanError{.message = r.error().message});
     }
-    logging::info("planner: {} file pages", builder.plans.size() - type_count);
+    logging::info("planner: {} file pages", builder.plans.size());
 
     auto file_count = builder.plans.size();
     if(auto r = enumerate_namespace_pages(builder); !r) {

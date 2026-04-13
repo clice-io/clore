@@ -2,10 +2,11 @@
 
 #include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <format>
 #include <ranges>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 import config;
 import extract;
@@ -36,19 +37,49 @@ struct ScopedTempDir {
 auto make_symbol(std::uint64_t id,
                  std::string_view name,
                  std::string_view qualified_name,
-                 const std::string& file) -> extract::SymbolInfo {
+                 const std::string& file,
+                 std::string_view ns_name = {}) -> extract::SymbolInfo {
     extract::SymbolInfo symbol;
     symbol.id = extract::SymbolID{.hash = id};
     symbol.kind = extract::SymbolKind::Function;
     symbol.name = std::string(name);
     symbol.qualified_name = std::string(qualified_name);
+    symbol.enclosing_namespace = std::string(ns_name);
     symbol.signature = std::format("void {}()", name);
+    symbol.source_snippet = std::format("void {}() {{}}", name);
     symbol.declaration_location = extract::SourceLocation{
         .file = file,
         .line = 1,
         .column = 1,
     };
+    symbol.definition_location = extract::SourceLocation{
+        .file = file,
+        .line = 2,
+        .column = 1,
+    };
     return symbol;
+}
+
+auto add_symbol(extract::ProjectModel& model, extract::SymbolInfo symbol) -> void {
+    auto file = symbol.declaration_location.file;
+    auto id = symbol.id;
+    auto qname = symbol.qualified_name;
+
+    auto& file_info = model.files[file];
+    file_info.path = file;
+    file_info.symbols.push_back(id);
+    if(std::ranges::find(model.file_order, file) == model.file_order.end()) {
+        model.file_order.push_back(file);
+    }
+
+    model.symbol_ids_by_qualified_name[qname] = id;
+    model.symbols.emplace(id, std::move(symbol));
+}
+
+auto add_module(extract::ProjectModel& model, extract::ModuleUnit module) -> void {
+    model.uses_modules = true;
+    model.module_name_to_source[module.name] = module.source_file;
+    model.modules.emplace(module.source_file, std::move(module));
 }
 
 auto make_base_config(const fs::path& root) -> config::TaskConfig {
@@ -57,14 +88,6 @@ auto make_base_config(const fs::path& root) -> config::TaskConfig {
     cfg.output_root = (root / "docs").generic_string();
     cfg.workspace_root = root.generic_string();
     cfg.extract.max_snippet_bytes = 512;
-
-    cfg.path_rules.index_path = "index.md";
-    cfg.path_rules.module_prefix = "modules";
-    cfg.path_rules.namespace_prefix = "namespaces";
-    cfg.path_rules.type_prefix = "types";
-    cfg.path_rules.file_prefix = "files";
-    cfg.path_rules.workflow_prefix = "workflows";
-    cfg.path_rules.name_normalize = "lowercase";
 
     cfg.evidence_rules.max_callers = 3;
     cfg.evidence_rules.max_callees = 3;
@@ -94,76 +117,81 @@ TEST_SUITE(workflow) {
         fs::create_directories(temp.path / "src");
 
         auto config = make_base_config(temp.path);
-        config.page_types.index = true;
-        config.page_types.module_page = true;
-        config.page_types.workflow_page = true;
 
         extract::ProjectModel model;
-        model.uses_modules = true;
-
         auto ui_file = (temp.path / "src" / "ui.cppm").generic_string();
         auto service_file = (temp.path / "src" / "service.cppm").generic_string();
         auto repo_file = (temp.path / "src" / "repo.cppm").generic_string();
         auto admin_ui_file = (temp.path / "src" / "admin_ui.cppm").generic_string();
         auto admin_logic_file = (temp.path / "src" / "admin_logic.cppm").generic_string();
 
-        auto ui_run = make_symbol(1, "run", "app::ui::run", ui_file);
-        auto service_handle = make_symbol(2, "handle", "app::service::handle", service_file);
-        auto repo_save = make_symbol(3, "save", "app::repo::save", repo_file);
-        auto admin_entry = make_symbol(4, "entry", "app::admin::entry", admin_ui_file);
-        auto admin_run = make_symbol(5, "run", "app::admin::run", admin_logic_file);
+        auto ui_run = make_symbol(1, "run", "app::ui::run", ui_file, "app::ui");
+        auto service_handle = make_symbol(2, "handle", "app::service::handle", service_file,
+                                          "app::service");
+        auto repo_save = make_symbol(3, "save", "app::repo::save", repo_file, "app::repo");
+        auto admin_entry = make_symbol(4, "entry", "app::admin::entry", admin_ui_file,
+                                       "app::admin");
+        auto admin_run = make_symbol(5, "run", "app::admin::run", admin_logic_file,
+                                     "app::admin");
 
         ui_run.calls = {service_handle.id};
         service_handle.calls = {repo_save.id};
         admin_entry.calls = {admin_run.id};
 
-        model.symbols.emplace(ui_run.id, ui_run);
-        model.symbols.emplace(service_handle.id, service_handle);
-        model.symbols.emplace(repo_save.id, repo_save);
-        model.symbols.emplace(admin_entry.id, admin_entry);
-        model.symbols.emplace(admin_run.id, admin_run);
+        auto ui_id = ui_run.id;
+        auto service_id = service_handle.id;
+        auto repo_id = repo_save.id;
+        auto admin_entry_id = admin_entry.id;
+        auto admin_run_id = admin_run.id;
+        add_symbol(model, std::move(ui_run));
+        add_symbol(model, std::move(service_handle));
+        add_symbol(model, std::move(repo_save));
+        add_symbol(model, std::move(admin_entry));
+        add_symbol(model, std::move(admin_run));
 
-        model.modules.emplace(ui_file, extract::ModuleUnit{
+        add_module(model, extract::ModuleUnit{
             .name = "app.ui",
             .is_interface = true,
             .source_file = ui_file,
-            .symbols = {ui_run.id},
+            .symbols = {ui_id},
         });
-        model.modules.emplace(service_file, extract::ModuleUnit{
+        add_module(model, extract::ModuleUnit{
             .name = "app.service",
             .is_interface = true,
             .source_file = service_file,
-            .symbols = {service_handle.id},
+            .symbols = {service_id},
         });
-        model.modules.emplace(repo_file, extract::ModuleUnit{
+        add_module(model, extract::ModuleUnit{
             .name = "app.repo",
             .is_interface = true,
             .source_file = repo_file,
-            .symbols = {repo_save.id},
+            .symbols = {repo_id},
         });
-        model.modules.emplace(admin_ui_file, extract::ModuleUnit{
+        add_module(model, extract::ModuleUnit{
             .name = "app.admin_ui",
             .is_interface = true,
             .source_file = admin_ui_file,
-            .symbols = {admin_entry.id},
+            .symbols = {admin_entry_id},
         });
-        model.modules.emplace(admin_logic_file, extract::ModuleUnit{
+        add_module(model, extract::ModuleUnit{
             .name = "app.admin_logic",
             .is_interface = true,
             .source_file = admin_logic_file,
-            .symbols = {admin_run.id},
+            .symbols = {admin_run_id},
         });
 
         auto result = build_page_plan_set(config, model);
         ASSERT_TRUE(result.has_value());
 
-        auto feature_count = std::ranges::count_if(result->plans, [](const PagePlan& plan) {
+        auto workflow_count = std::ranges::count_if(result->plans, [](const PagePlan& plan) {
             return plan.page_type == PageType::Workflow;
         });
-        EXPECT_EQ(feature_count, 2u);
+        EXPECT_EQ(workflow_count, 2u);
 
         auto has_main_chain = std::ranges::any_of(result->plans, [](const PagePlan& plan) {
-            if(plan.page_type != PageType::Workflow) return false;
+            if(plan.page_type != PageType::Workflow) {
+                return false;
+            }
             return std::ranges::find(plan.owner_keys, "app::ui::run") != plan.owner_keys.end() &&
                    std::ranges::find(plan.owner_keys, "app::service::handle") != plan.owner_keys.end() &&
                    std::ranges::find(plan.owner_keys, "app::repo::save") != plan.owner_keys.end();
@@ -171,7 +199,9 @@ TEST_SUITE(workflow) {
         EXPECT_TRUE(has_main_chain);
 
         auto has_admin_chain = std::ranges::any_of(result->plans, [](const PagePlan& plan) {
-            if(plan.page_type != PageType::Workflow) return false;
+            if(plan.page_type != PageType::Workflow) {
+                return false;
+            }
             return std::ranges::find(plan.owner_keys, "app::admin::entry") != plan.owner_keys.end() &&
                    std::ranges::find(plan.owner_keys, "app::admin::run") != plan.owner_keys.end();
         });
@@ -183,51 +213,38 @@ TEST_SUITE(workflow) {
         fs::create_directories(temp.path / "include");
 
         auto config = make_base_config(temp.path);
-        config.page_types.index = true;
-        config.page_types.module_page = false;
-        config.page_types.workflow_page = true;
 
         extract::ProjectModel model;
-        model.uses_modules = false;
-
         auto header_file = (temp.path / "include" / "workflow.hpp").generic_string();
 
-        auto entry = make_symbol(101, "entry", "demo::workflow::entry", header_file);
-        auto execute = make_symbol(102, "execute", "demo::workflow::execute", header_file);
-        auto persist = make_symbol(103, "persist", "demo::workflow::persist", header_file);
+        auto entry = make_symbol(101, "entry", "demo::workflow::entry", header_file,
+                                 "demo::workflow");
+        auto execute = make_symbol(102, "execute", "demo::workflow::execute", header_file,
+                                   "demo::workflow");
+        auto persist = make_symbol(103, "persist", "demo::workflow::persist", header_file,
+                                   "demo::workflow");
 
         entry.calls = {execute.id};
         execute.calls = {persist.id};
 
-        model.symbols.emplace(entry.id, entry);
-        model.symbols.emplace(execute.id, execute);
-        model.symbols.emplace(persist.id, persist);
+        add_symbol(model, std::move(entry));
+        add_symbol(model, std::move(execute));
+        add_symbol(model, std::move(persist));
 
         auto result = build_page_plan_set(config, model);
         ASSERT_TRUE(result.has_value());
 
-        auto feature_count = std::ranges::count_if(result->plans, [](const PagePlan& plan) {
+        auto workflow_count = std::ranges::count_if(result->plans, [](const PagePlan& plan) {
             return plan.page_type == PageType::Workflow;
         });
-        EXPECT_EQ(feature_count, 1u);
+        EXPECT_EQ(workflow_count, 1u);
 
         auto workflow_plan = std::ranges::find_if(result->plans, [](const PagePlan& plan) {
             return plan.page_type == PageType::Workflow;
         });
         ASSERT_TRUE(workflow_plan != result->plans.end());
         EXPECT_EQ(workflow_plan->page_id, "workflow:entry-to-persist");
-        EXPECT_EQ(workflow_plan->relative_path, "workflows/entry-to-persist/index.md");
-
-        auto has_chain = std::ranges::any_of(result->plans, [](const PagePlan& plan) {
-            if(plan.page_type != PageType::Workflow) return false;
-            return std::ranges::find(plan.owner_keys, "demo::workflow::entry") !=
-                       plan.owner_keys.end() &&
-                   std::ranges::find(plan.owner_keys, "demo::workflow::execute") !=
-                       plan.owner_keys.end() &&
-                   std::ranges::find(plan.owner_keys, "demo::workflow::persist") !=
-                       plan.owner_keys.end();
-        });
-        EXPECT_TRUE(has_chain);
+        EXPECT_EQ(workflow_plan->relative_path, "workflows/entry-to-persist.md");
     }
 
     TEST_CASE(build_page_plan_set_disambiguates_duplicate_workflow_slugs_without_hash_suffix) {
@@ -235,54 +252,46 @@ TEST_SUITE(workflow) {
         fs::create_directories(temp.path / "src");
 
         auto config = make_base_config(temp.path);
-        config.page_types.index = true;
-        config.page_types.module_page = false;
-        config.page_types.workflow_page = true;
 
         extract::ProjectModel model;
-        model.uses_modules = false;
-
         auto src_file = (temp.path / "src" / "workflow.cpp").generic_string();
 
-        auto a_start = make_symbol(201, "start", "demo::a::start", src_file);
-        auto a_mid = make_symbol(202, "process", "demo::a::process", src_file);
-        auto a_end = make_symbol(203, "end", "demo::a::end", src_file);
-        auto b_start = make_symbol(204, "start", "demo::b::start", src_file);
-        auto b_mid = make_symbol(205, "process", "demo::b::process", src_file);
-        auto b_end = make_symbol(206, "end", "demo::b::end", src_file);
+        auto a_start = make_symbol(201, "start", "demo::a::start", src_file, "demo::a");
+        auto a_mid = make_symbol(202, "process", "demo::a::process", src_file, "demo::a");
+        auto a_end = make_symbol(203, "end", "demo::a::end", src_file, "demo::a");
+        auto b_start = make_symbol(204, "start", "demo::b::start", src_file, "demo::b");
+        auto b_mid = make_symbol(205, "process", "demo::b::process", src_file, "demo::b");
+        auto b_end = make_symbol(206, "end", "demo::b::end", src_file, "demo::b");
 
         a_start.calls = {a_mid.id};
         a_mid.calls = {a_end.id};
         b_start.calls = {b_mid.id};
         b_mid.calls = {b_end.id};
 
-        model.symbols.emplace(a_start.id, a_start);
-        model.symbols.emplace(a_mid.id, a_mid);
-        model.symbols.emplace(a_end.id, a_end);
-        model.symbols.emplace(b_start.id, b_start);
-        model.symbols.emplace(b_mid.id, b_mid);
-        model.symbols.emplace(b_end.id, b_end);
+        add_symbol(model, std::move(a_start));
+        add_symbol(model, std::move(a_mid));
+        add_symbol(model, std::move(a_end));
+        add_symbol(model, std::move(b_start));
+        add_symbol(model, std::move(b_mid));
+        add_symbol(model, std::move(b_end));
 
         auto result = build_page_plan_set(config, model);
         ASSERT_TRUE(result.has_value());
 
-        auto has_first_slug = std::ranges::any_of(result->plans, [](const PagePlan& plan) {
+        EXPECT_TRUE(std::ranges::any_of(result->plans, [](const PagePlan& plan) {
             return plan.page_type == PageType::Workflow &&
                    plan.page_id == "workflow:start-to-end" &&
-                   plan.relative_path == "workflows/start-to-end/index.md";
-        });
-        auto has_second_slug = std::ranges::any_of(result->plans, [](const PagePlan& plan) {
+                   plan.relative_path == "workflows/start-to-end.md";
+        }));
+        EXPECT_TRUE(std::ranges::any_of(result->plans, [](const PagePlan& plan) {
             return plan.page_type == PageType::Workflow &&
                    plan.page_id == "workflow:start-to-end-2" &&
-                   plan.relative_path == "workflows/start-to-end-2/index.md";
-        });
-
-        EXPECT_TRUE(has_first_slug);
-        EXPECT_TRUE(has_second_slug);
+                   plan.relative_path == "workflows/start-to-end-2.md";
+        }));
     }
 
-    TEST_CASE(render_all_workflows_index_sorts_workflow_links) {
-        config::TaskConfig cfg;
+    TEST_CASE(render_page_markdown_sorts_workflow_links_in_index) {
+        auto cfg = make_base_config(fs::temp_directory_path());
         extract::ProjectModel model;
 
         PagePlan index_plan{
@@ -296,24 +305,28 @@ TEST_SUITE(workflow) {
             .page_id = "workflow:alpha-flow",
             .page_type = PageType::Workflow,
             .title = "Alpha",
-            .relative_path = "workflows/alpha-flow/index.md",
+            .relative_path = "workflows/alpha-flow.md",
             .owner_keys = {"alpha::entry", "alpha::exit"},
         };
         PagePlan beta_plan{
             .page_id = "workflow:beta-flow",
             .page_type = PageType::Workflow,
             .title = "Beta",
-            .relative_path = "workflows/beta-flow/index.md",
+            .relative_path = "workflows/beta-flow.md",
             .owner_keys = {"beta::entry", "beta::exit"},
         };
 
-        auto links = build_link_resolver(PagePlanSet{
-            .plans = {index_plan, alpha_plan, beta_plan},
-        });
-        auto block = render_deterministic_block("all_workflows", index_plan, model, cfg, links);
-        auto alpha_pos = block.find("Alpha");
-        auto beta_pos = block.find("Beta");
+        auto links = build_link_resolver(PagePlanSet{.plans = {index_plan, alpha_plan, beta_plan}});
+        auto outputs = std::unordered_map<std::string, std::string>{
+            {prompt_request_key(PromptRequest{.kind = PromptKind::IndexOverview}), "Overview"},
+            {prompt_request_key(PromptRequest{.kind = PromptKind::IndexReadingGuide}), "Guide"},
+        };
 
+        auto markdown = render_page_markdown(index_plan, cfg, model, outputs, links);
+
+        ASSERT_TRUE(markdown.has_value());
+        auto alpha_pos = markdown->find("Alpha");
+        auto beta_pos = markdown->find("Beta");
         ASSERT_TRUE(alpha_pos != std::string::npos);
         ASSERT_TRUE(beta_pos != std::string::npos);
         EXPECT_LT(alpha_pos, beta_pos);
@@ -324,19 +337,15 @@ TEST_SUITE(workflow) {
         fs::create_directories(temp.path / "src");
 
         auto config = make_base_config(temp.path);
-        config.page_types.index = false;
-        config.page_types.type_page = true;
-        config.page_types.file_page = true;
-        config.page_types.workflow_page = true;
 
         extract::ProjectModel model;
-        model.uses_modules = false;
-
         auto flow_file = (temp.path / "src" / "flow.cpp").generic_string();
         auto extra_file = (temp.path / "src" / "extra.cpp").generic_string();
 
-        auto entry = make_symbol(301, "entry", "demo::workflow::entry", flow_file);
-        auto step = make_symbol(302, "step", "demo::workflow::step", flow_file);
+        auto entry = make_symbol(301, "entry", "demo::workflow::entry", flow_file,
+                                 "demo::workflow");
+        auto step = make_symbol(302, "step", "demo::workflow::step", flow_file,
+                                "demo::workflow");
         entry.calls = {step.id};
 
         extract::SymbolInfo unrelated_type;
@@ -345,24 +354,16 @@ TEST_SUITE(workflow) {
         unrelated_type.name = "Unrelated";
         unrelated_type.qualified_name = "demo::Unrelated";
         unrelated_type.signature = "struct Unrelated";
+        unrelated_type.enclosing_namespace = "demo";
         unrelated_type.declaration_location = extract::SourceLocation{
             .file = extra_file,
             .line = 1,
             .column = 1,
         };
 
-        model.symbols.emplace(entry.id, entry);
-        model.symbols.emplace(step.id, step);
-        model.symbols.emplace(unrelated_type.id, unrelated_type);
-
-        model.files.emplace(flow_file, extract::FileInfo{
-            .path = flow_file,
-            .symbols = {entry.id, step.id},
-        });
-        model.files.emplace(extra_file, extract::FileInfo{
-            .path = extra_file,
-            .symbols = {unrelated_type.id},
-        });
+        add_symbol(model, std::move(entry));
+        add_symbol(model, std::move(step));
+        add_symbol(model, std::move(unrelated_type));
 
         auto result = build_page_plan_set(config, model);
         ASSERT_TRUE(result.has_value());
@@ -375,52 +376,37 @@ TEST_SUITE(workflow) {
         auto unrelated_file_page = std::string("file:") + extra_file;
         auto workflow_file_page = std::string("file:") + flow_file;
 
-        EXPECT_EQ(std::ranges::find(workflow_plan->depends_on_pages, "type:demo::Unrelated"),
-                  workflow_plan->depends_on_pages.end());
+        EXPECT_TRUE(std::ranges::none_of(workflow_plan->depends_on_pages,
+                                         [](const std::string& page_id) {
+                                             return page_id.starts_with("type:");
+                                         }));
         EXPECT_EQ(std::ranges::find(workflow_plan->depends_on_pages, unrelated_file_page),
                   workflow_plan->depends_on_pages.end());
         EXPECT_NE(std::ranges::find(workflow_plan->depends_on_pages, workflow_file_page),
                   workflow_plan->depends_on_pages.end());
     }
 
-    TEST_CASE(generate_dry_run_prepends_vitepress_frontmatter) {
-        ScopedTempDir temp("vitepress_frontmatter");
+    TEST_CASE(generate_dry_run_emits_minimal_frontmatter) {
+        ScopedTempDir temp("minimal_frontmatter");
         fs::create_directories(temp.path / "src");
-        fs::create_directories(temp.path / "templates");
-
-        auto file_template = temp.path / "templates" / "file.md";
-        {
-            std::ofstream out(file_template);
-            out << "# {{title}}\n\n{{block:declared_symbols}}\n";
-        }
 
         auto config = make_base_config(temp.path);
-        config.page_types.file_page = true;
-        config.page_templates.file_page = file_template.generic_string();
-        config.builtin.vitepress = true;
 
         extract::ProjectModel model;
         auto source_file = (temp.path / "src" / "demo.cpp").generic_string();
-        auto symbol = make_symbol(11, "demo", "app::demo", source_file);
-        model.symbols.emplace(symbol.id, symbol);
-        model.files.emplace(source_file, extract::FileInfo{
-            .path = source_file,
-            .symbols = {symbol.id},
-        });
+        auto symbol = make_symbol(11, "demo", "app::demo", source_file, "app");
+        add_symbol(model, std::move(symbol));
 
         auto generated = generate_dry_run(config, model);
         ASSERT_TRUE(generated.has_value());
-        ASSERT_FALSE(generated->empty());
-        auto& page = generated->front().content;
-        EXPECT_TRUE(page.starts_with("---\nlayout: doc\n"));
-        EXPECT_NE(page.find("title:"), std::string::npos);
-        EXPECT_NE(page.find("titleTemplate: false"), std::string::npos);
-        EXPECT_NE(page.find("description:"), std::string::npos);
-        EXPECT_NE(page.find("navbar: true"), std::string::npos);
-        EXPECT_NE(page.find("sidebar: true"), std::string::npos);
-        EXPECT_NE(page.find("aside: false"), std::string::npos);
-        EXPECT_NE(page.find("outline: false"), std::string::npos);
-        EXPECT_NE(page.find("footer: true"), std::string::npos);
-        EXPECT_NE(page.find("pageClass:"), std::string::npos);
+        EXPECT_TRUE(std::ranges::any_of(*generated, [](const GeneratedPage& page) {
+            return page.content.starts_with("---\ntitle:") &&
+                   page.content.find("title:") != std::string::npos &&
+                   page.content.find("description:") != std::string::npos &&
+                   page.content.find("layout: doc") != std::string::npos &&
+                   page.content.find("template: doc") != std::string::npos &&
+                   page.content.find("pageClass:") == std::string::npos &&
+                   page.content.find("outline:") == std::string::npos;
+        }));
     }
 };

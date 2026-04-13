@@ -3,6 +3,7 @@ module;
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -12,27 +13,34 @@ import extract;
 
 export namespace clore::generate {
 
-// ── page types ──────────────────────────────────────────────────────
-
 enum class PageType : std::uint8_t {
     Index,
     Module,
     Namespace,
-    Type,
     File,
     Workflow,
 };
 
 auto page_type_name(PageType type) -> std::string_view;
 
-// ── page plan ───────────────────────────────────────────────────────
+enum class PromptKind : std::uint8_t {
+    NamespaceSummary,
+    ModuleSummary,
+    ModuleArchitecture,
+    IndexOverview,
+    IndexReadingGuide,
+    Workflow,
+    FunctionDeclarationSummary,
+    FunctionImplementationSummary,
+    TypeDeclarationSummary,
+    TypeImplementationSummary,
+};
 
-struct SlotPlan {
-    std::string slot_id;
-    std::string page_id;
-    std::string slot_kind;
-    std::string prompt_template_path;
-    std::string insertion_marker;
+auto prompt_kind_name(PromptKind kind) -> std::string_view;
+
+struct PromptRequest {
+    PromptKind kind = PromptKind::NamespaceSummary;
+    std::string target_key;
 };
 
 struct PagePlan {
@@ -43,8 +51,7 @@ struct PagePlan {
     std::vector<std::string> owner_keys;
     std::vector<std::string> depends_on_pages;
     std::vector<std::string> linked_pages;
-    std::vector<std::string> deterministic_blocks;
-    std::vector<SlotPlan> slot_plans;
+    std::vector<PromptRequest> prompt_requests;
 };
 
 struct PagePlanSet {
@@ -69,7 +76,7 @@ struct SymbolFact {
 
 struct EvidencePack {
     std::string page_id;
-    std::string slot_kind;
+    std::string prompt_kind;
     std::string subject_name;
     std::string subject_kind;
     std::vector<SymbolFact> target_facts;
@@ -78,22 +85,6 @@ struct EvidencePack {
     std::vector<SymbolFact> reverse_usage_context;
     std::vector<std::string> related_page_summaries;
     std::vector<std::string> source_snippets;
-};
-
-// ── rendered page ───────────────────────────────────────────────────
-
-struct SlotOutput {
-    std::string slot_id;
-    std::string content;
-    bool is_failure = false;
-};
-
-struct RenderedPage {
-    std::string page_id;
-    std::string relative_path;
-    std::string deterministic_markdown;
-    std::vector<SlotOutput> slot_outputs;
-    std::string final_markdown;
 };
 
 // ── generated page ──────────────────────────────────────────────────
@@ -140,7 +131,19 @@ struct LinkResolver {
 auto lookup_sym(const extract::ProjectModel& model, extract::SymbolID id)
     -> const extract::SymbolInfo*;
 
+auto find_sym(const extract::ProjectModel& model, std::string_view qualified_name)
+    -> const extract::SymbolInfo*;
+
 auto is_type_kind(extract::SymbolKind kind) -> bool;
+
+auto is_function_kind(extract::SymbolKind kind) -> bool;
+
+auto is_page_level_symbol(const extract::ProjectModel& model,
+                          const extract::SymbolInfo& sym) -> bool;
+
+auto prompt_request_key(const PromptRequest& request) -> std::string;
+
+auto is_page_summary_prompt(PromptKind kind) -> bool;
 
 auto make_source_relative(const std::string& path, const std::string& project_root)
     -> std::string;
@@ -156,17 +159,36 @@ auto page_type_name(PageType type) -> std::string_view {
         case PageType::Index:      return "index";
         case PageType::Module:     return "module";
         case PageType::Namespace:  return "namespace";
-        case PageType::Type:       return "type";
         case PageType::File:       return "file";
         case PageType::Workflow:   return "workflow";
     }
     return "unknown";
 }
 
+auto prompt_kind_name(PromptKind kind) -> std::string_view {
+    switch(kind) {
+        case PromptKind::NamespaceSummary: return "namespace_summary";
+        case PromptKind::ModuleSummary: return "module_summary";
+        case PromptKind::ModuleArchitecture: return "module_architecture";
+        case PromptKind::IndexOverview: return "index_overview";
+        case PromptKind::IndexReadingGuide: return "index_reading_guide";
+        case PromptKind::Workflow: return "workflow";
+        case PromptKind::FunctionDeclarationSummary: return "function_declaration_summary";
+        case PromptKind::FunctionImplementationSummary: return "function_implementation_summary";
+        case PromptKind::TypeDeclarationSummary: return "type_declaration_summary";
+        case PromptKind::TypeImplementationSummary: return "type_implementation_summary";
+    }
+    return "unknown_prompt";
+}
+
 auto lookup_sym(const extract::ProjectModel& model, extract::SymbolID id)
     -> const extract::SymbolInfo* {
-    auto it = model.symbols.find(id);
-    return it != model.symbols.end() ? &it->second : nullptr;
+    return extract::lookup_symbol(model, id);
+}
+
+auto find_sym(const extract::ProjectModel& model, std::string_view qualified_name)
+    -> const extract::SymbolInfo* {
+    return extract::find_symbol(model, qualified_name);
 }
 
 auto is_type_kind(extract::SymbolKind kind) -> bool {
@@ -182,6 +204,45 @@ auto is_type_kind(extract::SymbolKind kind) -> bool {
         default:
             return false;
     }
+}
+
+auto is_function_kind(extract::SymbolKind kind) -> bool {
+    switch(kind) {
+        case extract::SymbolKind::Function:
+        case extract::SymbolKind::Method:
+            return true;
+        default:
+            return false;
+    }
+}
+
+auto is_page_level_symbol(const extract::ProjectModel& model,
+                          const extract::SymbolInfo& sym) -> bool {
+    if(sym.lexical_parent_kind != extract::SymbolKind::Unknown &&
+       sym.lexical_parent_kind != extract::SymbolKind::Namespace) {
+        return false;
+    }
+
+    if(sym.parent.has_value()) {
+        if(auto* parent = lookup_sym(model, *sym.parent)) {
+            if(is_type_kind(parent->kind) || is_function_kind(parent->kind)) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+auto prompt_request_key(const PromptRequest& request) -> std::string {
+    if(request.target_key.empty()) {
+        return std::string(prompt_kind_name(request.kind));
+    }
+    return std::string(prompt_kind_name(request.kind)) + ":" + request.target_key;
+}
+
+auto is_page_summary_prompt(PromptKind kind) -> bool {
+    return kind == PromptKind::NamespaceSummary || kind == PromptKind::ModuleSummary;
 }
 
 auto make_source_relative(const std::string& path, const std::string& project_root)

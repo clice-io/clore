@@ -1,0 +1,26 @@
+Write an implementation summary for the {{target_kind}} `{{target_name}}`.
+
+Context: This summary appears on a module/file (implementation) page and should describe
+how this type is implemented — its internal structure, member implementations, and design choices.
+
+Output:
+- Markdown fragment only
+- 1 to 2 short paragraphs
+- No heading
+- No YAML
+- Follow the output language requested by the system prompt
+
+Must explain:
+- how the type is implemented internally (key data members, invariants)
+- notable method implementations and their algorithms
+- design choices (inheritance hierarchy, template specializations, operator overloads)
+
+Must not:
+- describe the public API contract (that belongs on the declaration page)
+- repeat the full source code
+- include source locations
+
+Use only the EVIDENCE section below.
+If evidence is insufficient, explicitly explain what key evidence is missing.
+
+{{evidence}}

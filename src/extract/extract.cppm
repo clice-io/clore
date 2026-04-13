@@ -162,6 +162,23 @@ void deduplicate(std::vector<T>& values) {
     values.erase(std::unique(values.begin(), values.end()), values.end());
 }
 
+auto rebuild_lookup_maps(ProjectModel& model) -> void {
+    model.symbol_ids_by_qualified_name.clear();
+    model.module_name_to_source.clear();
+
+    for(auto& [symbol_id, sym] : model.symbols) {
+        if(!sym.qualified_name.empty()) {
+            model.symbol_ids_by_qualified_name.insert_or_assign(sym.qualified_name, symbol_id);
+        }
+    }
+
+    for(auto& [source_file, mod_unit] : model.modules) {
+        if(!mod_unit.name.empty()) {
+            model.module_name_to_source.insert_or_assign(mod_unit.name, source_file);
+        }
+    }
+}
+
 auto ensure_namespace_hierarchy(ProjectModel& model, std::string_view namespace_name)
     -> std::string {
     if(namespace_name.empty() ||
@@ -676,6 +693,7 @@ auto extract_project(const config::TaskConfig& config)
 
     // 5. Build module information from scan results
     build_module_info(model, scan_cache);
+    rebuild_lookup_maps(model);
     if(model.uses_modules) {
         logging::info("detected {} module units", model.modules.size());
         for(auto& [source_file, mod] : model.modules) {

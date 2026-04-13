@@ -7,6 +7,33 @@ import config;
 
 using namespace clore::config;
 
+namespace {
+
+namespace fs = std::filesystem;
+
+auto fill_required_generation_fields(TaskConfig& config) -> void {
+    config.extract.max_snippet_bytes = 512;
+
+    config.evidence_rules.max_callers = 2;
+    config.evidence_rules.max_callees = 2;
+    config.evidence_rules.max_siblings = 2;
+    config.evidence_rules.max_source_bytes = 1024;
+    config.evidence_rules.max_related_summaries = 2;
+
+    config.workflow_rules.min_chain_symbols = 2;
+    config.workflow_rules.min_new_symbols = 1;
+    config.workflow_rules.max_symbol_overlap_ratio_percent = 50;
+    config.workflow_rules.max_workflow_pages = 4;
+    config.workflow_rules.llm_review_top_k = 4;
+    config.workflow_rules.llm_selected_count = 2;
+
+    config.llm.system_prompt = "system";
+    config.llm.retry_count = 1;
+    config.llm.retry_initial_backoff_ms = 1;
+}
+
+}  // namespace
+
 TEST_SUITE(config_validate) {
     TEST_CASE(missing_compile_commands_path) {
         TaskConfig config;
@@ -46,9 +73,6 @@ TEST_SUITE(config_validate) {
     }
 
     TEST_CASE(project_root_not_directory) {
-        namespace fs = std::filesystem;
-
-        // Create a temp file to test against
         auto temp = fs::temp_directory_path() / "clore_test_file.txt";
         {
             std::ofstream f(temp);
@@ -77,8 +101,6 @@ TEST_SUITE(config_normalize) {
         auto result = normalize(config);
         ASSERT_TRUE(result.has_value());
 
-        namespace fs = std::filesystem;
-        // After normalization, paths should be absolute
         EXPECT_TRUE(fs::path(config.compile_commands_path).is_absolute());
         EXPECT_TRUE(fs::path(config.project_root).is_absolute());
         EXPECT_TRUE(fs::path(config.output_root).is_absolute());
@@ -94,7 +116,6 @@ TEST_SUITE(config_normalize) {
         auto result = normalize(config);
         ASSERT_TRUE(result.has_value());
 
-        // Backslashes should be converted to forward slashes
         EXPECT_EQ(config.compile_commands_path.find('\\'), std::string::npos);
         EXPECT_EQ(config.project_root.find('\\'), std::string::npos);
         EXPECT_EQ(config.output_root.find('\\'), std::string::npos);
@@ -117,27 +138,9 @@ TEST_SUITE(config_normalize) {
         EXPECT_EQ(config.filter.exclude[0].find('\\'), std::string::npos);
     }
 
-    TEST_CASE(normalize_feature_template_paths) {
-        TaskConfig config;
-        config.workspace_root = "workspace\\clore";
-        config.compile_commands_path = "workspace\\build\\compile_commands.json";
-        config.project_root = "workspace\\project";
-        config.output_root = "workspace\\output";
-        config.prompt_templates.workflow = "templates\\prompts\\workflow.txt";
-        config.page_templates.workflow_page = "templates\\pages\\workflow.md";
-
-        auto result = normalize(config);
-        ASSERT_TRUE(result.has_value());
-
-        EXPECT_EQ(config.prompt_templates.workflow.find('\\'), std::string::npos);
-        EXPECT_EQ(config.page_templates.workflow_page.find('\\'), std::string::npos);
-    }
-
-    // CRITICAL: empty required paths must be rejected before fs::absolute,
-    // which would silently resolve "" to cwd and bypass required-field validation.
     TEST_CASE(normalize_rejects_empty_compile_commands) {
         TaskConfig config;
-        config.compile_commands_path = "";  // empty
+        config.compile_commands_path = "";
         config.project_root = "/some/path";
         config.output_root = "/some/out";
 
@@ -148,7 +151,7 @@ TEST_SUITE(config_normalize) {
     TEST_CASE(normalize_rejects_empty_project_root) {
         TaskConfig config;
         config.compile_commands_path = "/some/compile_commands.json";
-        config.project_root = "";  // empty
+        config.project_root = "";
         config.output_root = "/some/out";
 
         auto result = normalize(config);
@@ -159,7 +162,7 @@ TEST_SUITE(config_normalize) {
         TaskConfig config;
         config.compile_commands_path = "/some/compile_commands.json";
         config.project_root = "/some/path";
-        config.output_root = "";  // empty
+        config.output_root = "";
 
         auto result = normalize(config);
         EXPECT_FALSE(result.has_value());
@@ -168,9 +171,6 @@ TEST_SUITE(config_normalize) {
 
 TEST_SUITE(config_validate_extra) {
     TEST_CASE(compile_commands_must_be_regular_file) {
-        namespace fs = std::filesystem;
-
-        // A directory is not a regular file
         auto temp_dir = fs::temp_directory_path() / "clore_test_dir_ccdb";
         fs::create_directories(temp_dir);
 
@@ -178,7 +178,7 @@ TEST_SUITE(config_validate_extra) {
         config.compile_commands_path = temp_dir.string();
         config.project_root = temp_dir.string();
         config.output_root = "/tmp/out";
-        config.extract.max_snippet_bytes = 2048;
+        fill_required_generation_fields(config);
 
         auto result = validate(config);
         EXPECT_FALSE(result.has_value());
@@ -187,78 +187,84 @@ TEST_SUITE(config_validate_extra) {
     }
 
     TEST_CASE(output_root_must_be_directory_if_exists) {
-        namespace fs = std::filesystem;
+        auto temp_root = fs::temp_directory_path() / "clore_validate_output_root";
+        fs::remove_all(temp_root);
+        fs::create_directories(temp_root);
 
-        auto temp = fs::temp_directory_path() / "clore_test_output_file";
+        auto compile_commands = temp_root / "compile_commands.json";
         {
-            std::ofstream f(temp);
+            std::ofstream f(compile_commands);
+            f << "[]";
+        }
+
+        auto output_file = temp_root / "output.txt";
+        {
+            std::ofstream f(output_file);
             f << "not a directory";
         }
 
         TaskConfig config;
-        config.compile_commands_path = temp.string();  // doesn't matter for this check
-        config.project_root = "/some/path";
-        config.output_root = temp.string();  // exists but is a file
-        config.extract.max_snippet_bytes = 2048;
+        config.compile_commands_path = compile_commands.string();
+        config.project_root = temp_root.string();
+        config.output_root = output_file.string();
+        fill_required_generation_fields(config);
 
         auto result = validate(config);
         EXPECT_FALSE(result.has_value());
 
-        fs::remove(temp);
+        fs::remove_all(temp_root);
     }
 
     TEST_CASE(max_snippet_bytes_required) {
-        namespace fs = std::filesystem;
+        auto temp_root = fs::temp_directory_path() / "clore_validate_missing_snippet_bytes";
+        fs::remove_all(temp_root);
+        fs::create_directories(temp_root);
 
-        auto temp_file = fs::temp_directory_path() / "clore_cc.json";
+        auto compile_commands = temp_root / "compile_commands.json";
         {
-            std::ofstream f(temp_file);
+            std::ofstream f(compile_commands);
             f << "[]";
         }
-        auto temp_dir = fs::temp_directory_path() / "clore_proj";
-        fs::create_directories(temp_dir);
 
         TaskConfig config;
-        config.compile_commands_path = temp_file.string();
-        config.project_root = temp_dir.string();
-        config.output_root = temp_dir.string();
-        // max_snippet_bytes intentionally not set
+        config.compile_commands_path = compile_commands.string();
+        config.project_root = temp_root.string();
+        config.output_root = temp_root.string();
+        fill_required_generation_fields(config);
+        config.extract.max_snippet_bytes.reset();
 
         auto result = validate(config);
         EXPECT_FALSE(result.has_value());
 
-        fs::remove(temp_file);
-        fs::remove_all(temp_dir);
+        fs::remove_all(temp_root);
     }
 
     TEST_CASE(max_snippet_bytes_must_be_positive) {
-        namespace fs = std::filesystem;
+        auto temp_root = fs::temp_directory_path() / "clore_validate_positive_snippet_bytes";
+        fs::remove_all(temp_root);
+        fs::create_directories(temp_root);
 
-        auto temp_file = fs::temp_directory_path() / "clore_cc_positive.json";
+        auto compile_commands = temp_root / "compile_commands.json";
         {
-            std::ofstream f(temp_file);
+            std::ofstream f(compile_commands);
             f << "[]";
         }
-        auto temp_dir = fs::temp_directory_path() / "clore_proj_positive";
-        fs::create_directories(temp_dir);
 
         TaskConfig config;
-        config.compile_commands_path = temp_file.string();
-        config.project_root = temp_dir.string();
-        config.output_root = temp_dir.string();
+        config.compile_commands_path = compile_commands.string();
+        config.project_root = temp_root.string();
+        config.output_root = temp_root.string();
+        fill_required_generation_fields(config);
         config.extract.max_snippet_bytes = 0;
 
         auto result = validate(config);
         EXPECT_FALSE(result.has_value());
 
-        fs::remove(temp_file);
-        fs::remove_all(temp_dir);
+        fs::remove_all(temp_root);
     }
 
-    TEST_CASE(workflow_page_requires_workflow_prompt_template_file) {
-        namespace fs = std::filesystem;
-
-        auto temp_root = fs::temp_directory_path() / "clore_validate_feature_prompt";
+    TEST_CASE(validate_accepts_builtin_generation_config_without_templates) {
+        auto temp_root = fs::temp_directory_path() / "clore_validate_builtin_config";
         fs::remove_all(temp_root);
         fs::create_directories(temp_root);
 
@@ -268,50 +274,20 @@ TEST_SUITE(config_validate_extra) {
             f << "[]";
         }
 
-        auto workflow_page = temp_root / "workflow.md";
-        {
-            std::ofstream f(workflow_page);
-            f << "# Workflow";
-        }
-
         TaskConfig config;
         config.compile_commands_path = compile_commands.string();
         config.project_root = temp_root.string();
         config.output_root = temp_root.string();
-        config.extract.max_snippet_bytes = 512;
-
-        config.page_types.workflow_page = true;
-        config.path_rules.index_path = "index.md";
-        config.path_rules.module_prefix = "modules";
-        config.path_rules.namespace_prefix = "namespaces";
-        config.path_rules.type_prefix = "types";
-        config.path_rules.file_prefix = "files";
-        config.path_rules.workflow_prefix = "workflows";
-        config.path_rules.name_normalize = "lowercase";
-
-        config.prompt_templates.workflow = (temp_root / "missing_workflow_prompt.txt").string();
-        config.page_templates.workflow_page = workflow_page.string();
-
-        config.evidence_rules.max_callers = 1;
-        config.evidence_rules.max_callees = 1;
-        config.evidence_rules.max_siblings = 1;
-        config.evidence_rules.max_source_bytes = 1;
-        config.evidence_rules.max_related_summaries = 1;
-
-        config.llm.system_prompt = "system";
-        config.llm.retry_count = 1;
-        config.llm.retry_initial_backoff_ms = 1;
+        fill_required_generation_fields(config);
 
         auto result = validate(config);
-        EXPECT_FALSE(result.has_value());
+        EXPECT_TRUE(result.has_value());
 
         fs::remove_all(temp_root);
     }
 
-    TEST_CASE(workflow_page_requires_workflow_page_template_file) {
-        namespace fs = std::filesystem;
-
-        auto temp_root = fs::temp_directory_path() / "clore_validate_workflow_page";
+    TEST_CASE(validate_rejects_selected_count_above_review_top_k) {
+        auto temp_root = fs::temp_directory_path() / "clore_validate_workflow_limits";
         fs::remove_all(temp_root);
         fs::create_directories(temp_root);
 
@@ -321,39 +297,13 @@ TEST_SUITE(config_validate_extra) {
             f << "[]";
         }
 
-        auto workflow_prompt = temp_root / "workflow.txt";
-        {
-            std::ofstream f(workflow_prompt);
-            f << "Prompt {{evidence}}";
-        }
-
         TaskConfig config;
         config.compile_commands_path = compile_commands.string();
         config.project_root = temp_root.string();
         config.output_root = temp_root.string();
-        config.extract.max_snippet_bytes = 512;
-
-        config.page_types.workflow_page = true;
-        config.path_rules.index_path = "index.md";
-        config.path_rules.module_prefix = "modules";
-        config.path_rules.namespace_prefix = "namespaces";
-        config.path_rules.type_prefix = "types";
-        config.path_rules.file_prefix = "files";
-        config.path_rules.workflow_prefix = "workflows";
-        config.path_rules.name_normalize = "lowercase";
-
-        config.prompt_templates.workflow = workflow_prompt.string();
-        config.page_templates.workflow_page = (temp_root / "missing_workflow_page.md").string();
-
-        config.evidence_rules.max_callers = 1;
-        config.evidence_rules.max_callees = 1;
-        config.evidence_rules.max_siblings = 1;
-        config.evidence_rules.max_source_bytes = 1;
-        config.evidence_rules.max_related_summaries = 1;
-
-        config.llm.system_prompt = "system";
-        config.llm.retry_count = 1;
-        config.llm.retry_initial_backoff_ms = 1;
+        fill_required_generation_fields(config);
+        config.workflow_rules.llm_review_top_k = 2;
+        config.workflow_rules.llm_selected_count = 3;
 
         auto result = validate(config);
         EXPECT_FALSE(result.has_value());

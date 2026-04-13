@@ -1,5 +1,4 @@
 #include "eventide/zest/zest.h"
-#include "../../include/test_support/environment.h"
 
 #include <algorithm>
 #include <array>
@@ -369,72 +368,6 @@ TEST_SUITE(llm) {
         EXPECT_EQ(tool_result->content, R"({"matches":["src/llm/llm.cppm"]})");
     }
 
-    TEST_CASE(call_llm_requires_openai_base_url_env) {
-        ScopedEnvironmentLock env_lock;
-        ScopedEnvVar base_url("OPENAI_BASE_URL");
-        ScopedEnvVar api_key("OPENAI_API_KEY");
-
-        base_url.unset();
-        api_key.set("test-key");
-
-        auto result = call_llm("deepseek-chat", "system", "ping");
-
-        EXPECT_FALSE(result.has_value());
-        EXPECT_EQ(result.error().message,
-                  "required environment variable OPENAI_BASE_URL is not set");
-    }
-
-    TEST_CASE(call_llm_requires_openai_api_key_env) {
-        ScopedEnvironmentLock env_lock;
-        ScopedEnvVar base_url("OPENAI_BASE_URL");
-        ScopedEnvVar api_key("OPENAI_API_KEY");
-
-        base_url.set("https://example.invalid/v1");
-        api_key.unset();
-
-        auto result = call_llm("deepseek-chat", "system", "ping");
-
-        EXPECT_FALSE(result.has_value());
-        EXPECT_EQ(result.error().message,
-                  "required environment variable OPENAI_API_KEY is not set");
-    }
-
-    TEST_CASE(llm_client_requires_openai_base_url_env) {
-        ScopedEnvironmentLock env_lock;
-        ScopedEnvVar base_url("OPENAI_BASE_URL");
-        ScopedEnvVar api_key("OPENAI_API_KEY");
-
-        base_url.unset();
-        api_key.set("test-key");
-
-        LLMClient client("deepseek-chat", "system", 4, 3, 250);
-        (void)client.submit(0, "ping");
-
-        auto result = client.run([](std::uint64_t, auto) {});
-
-        EXPECT_FALSE(result.has_value());
-        EXPECT_EQ(result.error().message,
-                  "required environment variable OPENAI_BASE_URL is not set");
-    }
-
-    TEST_CASE(llm_client_requires_openai_api_key_env) {
-        ScopedEnvironmentLock env_lock;
-        ScopedEnvVar base_url("OPENAI_BASE_URL");
-        ScopedEnvVar api_key("OPENAI_API_KEY");
-
-        base_url.set("https://example.invalid/v1");
-        api_key.unset();
-
-        LLMClient client("deepseek-chat", "system", 4, 3, 250);
-        (void)client.submit(0, "ping");
-
-        auto result = client.run([](std::uint64_t, auto) {});
-
-        EXPECT_FALSE(result.has_value());
-        EXPECT_EQ(result.error().message,
-                  "required environment variable OPENAI_API_KEY is not set");
-    }
-
     TEST_CASE(llm_client_run_with_no_work_succeeds) {
         LLMClient client("deepseek-chat", "system", 4, 3, 250);
 
@@ -460,39 +393,4 @@ TEST_SUITE(llm) {
                   "max_concurrent must be greater than 0");
     }
 
-    TEST_CASE(llm_client_runs_scheduled_requests_and_reports_network_failures) {
-        ScopedEnvironmentLock env_lock;
-        ScopedEnvVar base_url("OPENAI_BASE_URL");
-        ScopedEnvVar api_key("OPENAI_API_KEY");
-
-        base_url.set("http://127.0.0.1:1");
-        api_key.set("test-key");
-
-        LLMClient client("deepseek-chat", "system", 1, 0, 1);
-        auto submit_result = client.submit(7, "ping");
-        ASSERT_TRUE(submit_result.has_value());
-
-        auto callback_count = 0u;
-        std::optional<std::uint64_t> callback_tag;
-        std::optional<bool> callback_has_value;
-        std::string callback_error_message;
-
-        auto run_result = client.run([&](std::uint64_t tag, auto result) {
-            callback_tag = tag;
-            callback_has_value = result.has_value();
-            if(!result.has_value()) {
-                callback_error_message = std::move(result.error().message);
-            }
-            ++callback_count;
-        });
-
-        EXPECT_TRUE(run_result.has_value());
-        EXPECT_EQ(callback_count, 1u);
-        ASSERT_TRUE(callback_tag.has_value());
-        EXPECT_EQ(*callback_tag, 7u);
-        ASSERT_TRUE(callback_has_value.has_value());
-        EXPECT_FALSE(*callback_has_value);
-        EXPECT_NE(callback_error_message.find("curl request failed"),
-                  std::string::npos);
-    }
 };

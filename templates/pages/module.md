@@ -12,9 +12,13 @@
 
 {{block:import_diagram}}
 
-## Public Types
+## Types
 
-{{block:types_index}}
+{{block:types_implementations}}
+
+## Functions
+
+{{block:functions_implementations}}
 
 ## Internal Structure
 

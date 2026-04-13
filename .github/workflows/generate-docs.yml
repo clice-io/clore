@@ -21,8 +21,7 @@ jobs:
         with:
           pixi-version: v0.67.0
           activate-environment: true
-          cache: false
-          locked: true
+          cache: true
 
       - name: Restore .clice cache
         uses: actions/cache/restore@v5
@@ -68,7 +67,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: .clice/
-          key: ${{ steps.restore-clice-cache.outputs.cache-primary-key }}
+          key: ${{ runner.os }}-clice
 
       - name: Package documentation
         if: github.event_name == 'push'

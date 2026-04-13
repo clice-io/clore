@@ -1,6 +1,7 @@
 module;
 
 #include <cstdint>
+#include <string_view>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -93,8 +94,58 @@ struct ProjectModel {
     /// Module units indexed by normalized source file path.
     std::unordered_map<std::string, ModuleUnit> modules;
 
+    /// Exact qualified-name lookup for generation and evidence building.
+    std::unordered_map<std::string, SymbolID> symbol_ids_by_qualified_name;
+
+    /// Exact module-name lookup for generation and cross-linking.
+    std::unordered_map<std::string, std::string> module_name_to_source;
+
     /// True if the project uses C++20 modules (at least one module declaration found).
     bool uses_modules = false;
 };
+
+auto lookup_symbol(const ProjectModel& model, SymbolID id) -> const SymbolInfo*;
+
+auto find_symbol(const ProjectModel& model, std::string_view qualified_name)
+    -> const SymbolInfo*;
+
+auto find_module_by_name(const ProjectModel& model, std::string_view module_name)
+    -> const ModuleUnit*;
+
+auto find_module_by_source(const ProjectModel& model, std::string_view source_file)
+    -> const ModuleUnit*;
+
+}  // namespace clore::extract
+
+namespace clore::extract {
+
+auto lookup_symbol(const ProjectModel& model, SymbolID id) -> const SymbolInfo* {
+    auto it = model.symbols.find(id);
+    return it != model.symbols.end() ? &it->second : nullptr;
+}
+
+auto find_symbol(const ProjectModel& model, std::string_view qualified_name)
+    -> const SymbolInfo* {
+    auto it = model.symbol_ids_by_qualified_name.find(std::string(qualified_name));
+    if(it == model.symbol_ids_by_qualified_name.end()) {
+        return nullptr;
+    }
+    return lookup_symbol(model, it->second);
+}
+
+auto find_module_by_name(const ProjectModel& model, std::string_view module_name)
+    -> const ModuleUnit* {
+    auto it = model.module_name_to_source.find(std::string(module_name));
+    if(it == model.module_name_to_source.end()) {
+        return nullptr;
+    }
+    return find_module_by_source(model, it->second);
+}
+
+auto find_module_by_source(const ProjectModel& model, std::string_view source_file)
+    -> const ModuleUnit* {
+    auto it = model.modules.find(std::string(source_file));
+    return it != model.modules.end() ? &it->second : nullptr;
+}
 
 }  // namespace clore::extract

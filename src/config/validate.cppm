@@ -110,55 +110,6 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
             .message = "extract.max_snippet_bytes must be greater than 0"});
     }
 
-    // Validate path_rules
-    if(auto r = validate_nonempty(config.path_rules.index_path, "path_rules.index_path"); !r) return r;
-    if(auto r = validate_nonempty(config.path_rules.module_prefix, "path_rules.module_prefix"); !r) return r;
-    if(auto r = validate_nonempty(config.path_rules.namespace_prefix, "path_rules.namespace_prefix"); !r) return r;
-    if(auto r = validate_nonempty(config.path_rules.type_prefix, "path_rules.type_prefix"); !r) return r;
-    if(auto r = validate_nonempty(config.path_rules.file_prefix, "path_rules.file_prefix"); !r) return r;
-    if(auto r = validate_nonempty(config.path_rules.workflow_prefix, "path_rules.workflow_prefix"); !r) return r;
-    if(auto r = validate_nonempty(config.path_rules.name_normalize, "path_rules.name_normalize"); !r) return r;
-
-    // Validate prompt templates exist when their page types are enabled
-    if(config.page_types.type_page) {
-        if(auto r = validate_file_exists(config.prompt_templates.type_overview, "prompt_templates.type_overview"); !r) return r;
-        if(auto r = validate_file_exists(config.prompt_templates.type_usage_notes, "prompt_templates.type_usage_notes"); !r) return r;
-    }
-    if(config.page_types.namespace_page) {
-        if(auto r = validate_file_exists(config.prompt_templates.namespace_summary, "prompt_templates.namespace_summary"); !r) return r;
-    }
-    if(config.page_types.module_page) {
-        if(auto r = validate_file_exists(config.prompt_templates.module_summary, "prompt_templates.module_summary"); !r) return r;
-        if(auto r = validate_file_exists(config.prompt_templates.module_architecture, "prompt_templates.module_architecture"); !r) return r;
-    }
-    if(config.page_types.index) {
-        if(auto r = validate_file_exists(config.prompt_templates.index_overview, "prompt_templates.index_overview"); !r) return r;
-        if(auto r = validate_file_exists(config.prompt_templates.index_reading_guide, "prompt_templates.index_reading_guide"); !r) return r;
-    }
-    if(config.page_types.workflow_page) {
-        if(auto r = validate_file_exists(config.prompt_templates.workflow, "prompt_templates.workflow"); !r) return r;
-    }
-
-    // Validate page templates exist when their page types are enabled
-    if(config.page_types.index) {
-        if(auto r = validate_file_exists(config.page_templates.index, "page_templates.index"); !r) return r;
-    }
-    if(config.page_types.module_page) {
-        if(auto r = validate_file_exists(config.page_templates.module_page, "page_templates.module_page"); !r) return r;
-    }
-    if(config.page_types.namespace_page) {
-        if(auto r = validate_file_exists(config.page_templates.namespace_page, "page_templates.namespace_page"); !r) return r;
-    }
-    if(config.page_types.type_page) {
-        if(auto r = validate_file_exists(config.page_templates.type_page, "page_templates.type_page"); !r) return r;
-    }
-    if(config.page_types.file_page) {
-        if(auto r = validate_file_exists(config.page_templates.file_page, "page_templates.file_page"); !r) return r;
-    }
-    if(config.page_types.workflow_page) {
-        if(auto r = validate_file_exists(config.page_templates.workflow_page, "page_templates.workflow_page"); !r) return r;
-    }
-
     // Validate evidence rules
     if(auto r = validate_nonzero(config.evidence_rules.max_callers, "evidence_rules.max_callers"); !r) return r;
     if(auto r = validate_nonzero(config.evidence_rules.max_callees, "evidence_rules.max_callees"); !r) return r;
@@ -202,13 +153,6 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
     if(auto r = validate_nonempty(config.llm.system_prompt, "llm.system_prompt"); !r) return r;
     if(auto r = validate_nonzero(config.llm.retry_count, "llm.retry_count"); !r) return r;
     if(auto r = validate_nonzero(config.llm.retry_initial_backoff_ms, "llm.retry_initial_backoff_ms"); !r) return r;
-
-    // Validate name_normalize is a known strategy
-    auto& norm = config.path_rules.name_normalize;
-    if(norm != "lowercase" && norm != "identity") {
-        return std::unexpected(ValidationError{
-            .message = std::format("path_rules.name_normalize must be 'lowercase' or 'identity', got '{}'", norm)});
-    }
 
     return {};
 }

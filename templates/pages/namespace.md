@@ -14,11 +14,11 @@
 
 ## Types
 
-{{block:types_index}}
+{{block:types_declarations}}
 
 ## Functions
 
-{{block:functions_index}}
+{{block:functions_declarations}}
 
 ## Related Pages
 

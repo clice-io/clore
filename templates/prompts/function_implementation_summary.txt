@@ -1,0 +1,26 @@
+Write an implementation summary for the {{target_kind}} `{{target_name}}`.
+
+Context: This summary appears on a module/file (implementation) page and should describe
+how this function is implemented — its algorithm, data flow, and internal logic.
+
+Output:
+- Markdown fragment only
+- 1 to 2 short paragraphs
+- No heading
+- No YAML
+- Follow the output language requested by the system prompt
+
+Must explain:
+- how the function is implemented (algorithm, key steps)
+- what internal helpers or callees it delegates to
+- notable implementation details (error handling, performance, edge cases)
+
+Must not:
+- describe the public contract (that belongs on the declaration page)
+- repeat the full source code
+- include source locations
+
+Use only the EVIDENCE section below.
+If evidence is insufficient, explicitly explain what key evidence is missing.
+
+{{evidence}}
