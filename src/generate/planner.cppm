@@ -2,9 +2,12 @@ module;
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <format>
+#include <functional>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string>
@@ -104,30 +107,13 @@ auto short_name_of(std::string_view qualified_name) -> std::string {
     return parts.back();
 }
 
-auto is_type_kind(extract::SymbolKind kind) -> bool {
-    switch(kind) {
-        case extract::SymbolKind::Class:
-        case extract::SymbolKind::Struct:
-        case extract::SymbolKind::Enum:
-        case extract::SymbolKind::Union:
-        case extract::SymbolKind::Concept:
-        case extract::SymbolKind::Template:
-        case extract::SymbolKind::TypeAlias:
-            return true;
-        default:
-            return false;
-    }
-}
-
 auto has_reserved_identifier_prefix(std::string_view identifier) -> bool {
     return identifier.starts_with("_") && identifier.size() > 1 &&
            (std::isupper(static_cast<unsigned char>(identifier[1])) || identifier[1] == '_');
 }
 
-auto lookup_sym(const extract::ProjectModel& model, extract::SymbolID id)
-    -> const extract::SymbolInfo* {
-    auto it = model.symbols.find(id);
-    return it != model.symbols.end() ? &it->second : nullptr;
+auto is_callable_kind(extract::SymbolKind kind) -> bool {
+    return kind == extract::SymbolKind::Function || kind == extract::SymbolKind::Method;
 }
 
 auto namespace_of(const extract::SymbolInfo& sym) -> std::string {
@@ -251,8 +237,9 @@ struct PlanBuilder {
         if(slot_kind == "namespace_summary") return config.prompt_templates.namespace_summary;
         if(slot_kind == "module_summary") return config.prompt_templates.module_summary;
         if(slot_kind == "module_architecture") return config.prompt_templates.module_architecture;
-        if(slot_kind == "repository_overview") return config.prompt_templates.repository_overview;
-        if(slot_kind == "reading_guide") return config.prompt_templates.reading_guide;
+        if(slot_kind == "index_overview") return config.prompt_templates.index_overview;
+        if(slot_kind == "index_reading_guide") return config.prompt_templates.index_reading_guide;
+        if(slot_kind == "workflow") return config.prompt_templates.workflow;
         return {};
     }
 
@@ -300,7 +287,7 @@ auto enumerate_type_pages(PlanBuilder& builder) -> std::expected<void, PlanError
             .owner_keys = {sym.qualified_name},
             .deterministic_blocks = {"declaration", "template_parameters", "base_types",
                                       "derived_types", "public_members", "protected_members",
-                                      "private_members", "source", "related_pages"},
+                                      "private_members", "source", "related_pages", "type_diagram"},
         };
 
         plan.slot_plans.push_back(builder.make_slot(page_id, "type_overview"));
@@ -364,7 +351,7 @@ auto enumerate_namespace_pages(PlanBuilder& builder) -> std::expected<void, Plan
             .title = "Namespace `" + ns_name + "`",
             .relative_path = *path_result,
             .owner_keys = {ns_name},
-            .deterministic_blocks = {"subnamespaces", "types_index", "functions_index", "related_pages"},
+            .deterministic_blocks = {"subnamespaces", "types_index", "functions_index", "related_pages", "namespace_diagram"},
         };
 
         plan.slot_plans.push_back(builder.make_slot(page_id, "namespace_summary"));
@@ -430,7 +417,7 @@ auto enumerate_module_pages(PlanBuilder& builder) -> std::expected<void, PlanErr
             .title = "Module `" + mod_unit.name + "`",
             .relative_path = *path_result,
             .owner_keys = {mod_unit.name},
-            .deterministic_blocks = {"imports", "types_index", "related_pages"},
+            .deterministic_blocks = {"imports", "types_index", "related_pages", "import_diagram"},
         };
 
         plan.slot_plans.push_back(builder.make_slot(page_id, "module_summary"));
@@ -508,6 +495,601 @@ auto enumerate_file_pages(PlanBuilder& builder) -> std::expected<void, PlanError
     return {};
 }
 
+auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanError> {
+    if(!builder.config.page_types.workflow_page) return {};
+
+    auto& model = builder.model;
+
+    struct ModuleEdgeRep {
+        std::string from_module;
+        std::string to_module;
+        std::string caller_qname;
+        std::string callee_qname;
+        std::size_t score = 0;
+    };
+
+    auto should_replace_edge = [](const ModuleEdgeRep& existing,
+                                  const ModuleEdgeRep& candidate) -> bool {
+        if(existing.caller_qname.empty()) return true;
+        if(candidate.score != existing.score) return candidate.score > existing.score;
+        if(candidate.caller_qname != existing.caller_qname) {
+            return candidate.caller_qname < existing.caller_qname;
+        }
+        return candidate.callee_qname < existing.callee_qname;
+    };
+
+    auto edge_score = [](const extract::SymbolInfo& caller, const extract::SymbolInfo& callee)
+        -> std::size_t {
+        return caller.calls.size() + callee.called_by.size();
+    };
+
+    std::unordered_map<extract::SymbolID, std::string> symbol_to_module;
+    symbol_to_module.reserve(model.symbols.size());
+    for(auto& [sym_id, sym] : model.symbols) {
+        if(!is_callable_kind(sym.kind)) continue;
+        if(sym.qualified_name.empty()) continue;
+        symbol_to_module.emplace(sym_id, sym.qualified_name);
+    }
+    if(symbol_to_module.size() < 2) return {};
+
+    std::unordered_map<std::string, std::size_t> module_callable_weights;
+    for(auto& [sym_id, mod_name] : symbol_to_module) {
+        auto* sym = lookup_sym(model, sym_id);
+        if(sym && is_callable_kind(sym->kind)) {
+            module_callable_weights[mod_name]++;
+        }
+    }
+
+    std::unordered_map<std::string, std::unordered_map<std::string, ModuleEdgeRep>> module_edges;
+    std::unordered_set<std::string> active_modules;
+
+    for(auto& [caller_id, caller] : model.symbols) {
+        if(!is_callable_kind(caller.kind)) continue;
+        auto caller_mod_it = symbol_to_module.find(caller_id);
+        if(caller_mod_it == symbol_to_module.end()) continue;
+
+        for(auto& callee_id : caller.calls) {
+            auto* callee = lookup_sym(model, callee_id);
+            if(!callee || !is_callable_kind(callee->kind)) continue;
+
+            auto callee_mod_it = symbol_to_module.find(callee_id);
+            if(callee_mod_it == symbol_to_module.end()) continue;
+            if(caller_mod_it->second == callee_mod_it->second) continue;
+
+            active_modules.insert(caller_mod_it->second);
+            active_modules.insert(callee_mod_it->second);
+
+            ModuleEdgeRep candidate{
+                .from_module = caller_mod_it->second,
+                .to_module = callee_mod_it->second,
+                .caller_qname = caller.qualified_name,
+                .callee_qname = callee->qualified_name,
+                .score = edge_score(caller, *callee),
+            };
+
+            auto& current = module_edges[caller_mod_it->second][callee_mod_it->second];
+            if(should_replace_edge(current, candidate)) {
+                current.from_module = candidate.from_module;
+                current.to_module = candidate.to_module;
+                current.caller_qname = candidate.caller_qname;
+                current.callee_qname = candidate.callee_qname;
+                current.score = candidate.score;
+            }
+        }
+    }
+
+    if(active_modules.size() < 2) return {};
+
+    std::vector<std::string> modules(active_modules.begin(), active_modules.end());
+    std::sort(modules.begin(), modules.end());
+
+    std::unordered_map<std::string, std::size_t> module_to_index;
+    module_to_index.reserve(modules.size());
+    for(std::size_t i = 0; i < modules.size(); ++i) {
+        module_to_index.emplace(modules[i], i);
+    }
+
+    std::vector<std::vector<std::size_t>> graph(modules.size());
+    std::unordered_map<std::size_t, std::unordered_map<std::size_t, ModuleEdgeRep>> edge_by_idx;
+
+    for(auto& from_mod : modules) {
+        auto from_it = module_edges.find(from_mod);
+        if(from_it == module_edges.end()) continue;
+
+        std::vector<std::string> targets;
+        targets.reserve(from_it->second.size());
+        for(auto& [to_mod, rep] : from_it->second) {
+            if(module_to_index.contains(to_mod)) {
+                targets.push_back(to_mod);
+            }
+        }
+        std::sort(targets.begin(), targets.end());
+
+        auto from_idx = module_to_index.at(from_mod);
+        for(auto& to_mod : targets) {
+            auto to_idx = module_to_index.at(to_mod);
+            graph[from_idx].push_back(to_idx);
+            edge_by_idx[from_idx][to_idx] = from_it->second.at(to_mod);
+        }
+    }
+
+    std::vector<int> tarjan_index(modules.size(), -1);
+    std::vector<int> tarjan_low(modules.size(), 0);
+    std::vector<bool> on_stack(modules.size(), false);
+    std::vector<std::size_t> stack_nodes;
+    std::vector<std::size_t> comp_of(modules.size(), std::numeric_limits<std::size_t>::max());
+    std::vector<std::vector<std::size_t>> components;
+    int next_index = 0;
+
+    std::function<void(std::size_t)> strong_connect = [&](std::size_t v) {
+        tarjan_index[v] = next_index;
+        tarjan_low[v] = next_index;
+        next_index++;
+        stack_nodes.push_back(v);
+        on_stack[v] = true;
+
+        for(auto to : graph[v]) {
+            if(tarjan_index[to] == -1) {
+                strong_connect(to);
+                tarjan_low[v] = std::min(tarjan_low[v], tarjan_low[to]);
+            } else if(on_stack[to]) {
+                tarjan_low[v] = std::min(tarjan_low[v], tarjan_index[to]);
+            }
+        }
+
+        if(tarjan_low[v] != tarjan_index[v]) return;
+
+        components.emplace_back();
+        auto comp_idx = components.size() - 1;
+
+        while(true) {
+            auto w = stack_nodes.back();
+            stack_nodes.pop_back();
+            on_stack[w] = false;
+            comp_of[w] = comp_idx;
+            components.back().push_back(w);
+            if(w == v) break;
+        }
+
+        std::sort(components.back().begin(), components.back().end(),
+                  [&](std::size_t lhs, std::size_t rhs) {
+                      return modules[lhs] < modules[rhs];
+                  });
+    };
+
+    for(std::size_t v = 0; v < modules.size(); ++v) {
+        if(tarjan_index[v] == -1) {
+            strong_connect(v);
+        }
+    }
+
+    if(components.size() < 2) return {};
+
+    std::vector<std::vector<std::size_t>> comp_graph(components.size());
+    std::vector<std::unordered_set<std::size_t>> comp_seen(components.size());
+    std::unordered_map<std::size_t, std::unordered_map<std::size_t, ModuleEdgeRep>> comp_edges;
+    std::vector<std::string> comp_key(components.size());
+    std::vector<std::size_t> comp_weight(components.size(), 0);
+
+    for(std::size_t comp_idx = 0; comp_idx < components.size(); ++comp_idx) {
+        comp_key[comp_idx] = modules[components[comp_idx].front()];
+        for(auto mod_idx : components[comp_idx]) {
+            auto mod_name = modules[mod_idx];
+            auto w_it = module_callable_weights.find(mod_name);
+            comp_weight[comp_idx] += w_it != module_callable_weights.end()
+                ? std::max<std::size_t>(1, w_it->second)
+                : 1;
+        }
+    }
+
+    for(std::size_t from_idx = 0; from_idx < graph.size(); ++from_idx) {
+        auto from_comp = comp_of[from_idx];
+        for(auto to_idx : graph[from_idx]) {
+            auto to_comp = comp_of[to_idx];
+            if(from_comp == to_comp) continue;
+
+            if(comp_seen[from_comp].insert(to_comp).second) {
+                comp_graph[from_comp].push_back(to_comp);
+            }
+
+            auto rep_it = edge_by_idx.find(from_idx);
+            if(rep_it == edge_by_idx.end()) continue;
+            auto edge_it = rep_it->second.find(to_idx);
+            if(edge_it == rep_it->second.end()) continue;
+            auto& current = comp_edges[from_comp][to_comp];
+            if(should_replace_edge(current, edge_it->second)) {
+                current = edge_it->second;
+            }
+        }
+    }
+
+    for(std::size_t comp_idx = 0; comp_idx < comp_graph.size(); ++comp_idx) {
+        std::sort(comp_graph[comp_idx].begin(), comp_graph[comp_idx].end(),
+                  [&](std::size_t lhs, std::size_t rhs) {
+                      return comp_key[lhs] < comp_key[rhs];
+                  });
+    }
+
+    std::vector<std::size_t> indegree(components.size(), 0);
+    for(auto& targets : comp_graph) {
+        for(auto to : targets) {
+            indegree[to]++;
+        }
+    }
+
+    std::unordered_set<std::size_t> source_components;
+    std::unordered_set<std::size_t> sink_components;
+    for(std::size_t i = 0; i < components.size(); ++i) {
+        if(indegree[i] == 0) source_components.insert(i);
+        if(comp_graph[i].empty()) sink_components.insert(i);
+    }
+
+    if(source_components.empty() || sink_components.empty()) return {};
+
+    std::unordered_set<std::size_t> covered_components;
+
+    auto find_longest_path = [&]() -> std::vector<std::size_t> {
+        std::vector<bool> available(components.size(), false);
+        std::size_t available_count = 0;
+        for(std::size_t comp_idx = 0; comp_idx < components.size(); ++comp_idx) {
+            auto keep_boundary = source_components.contains(comp_idx) ||
+                                 sink_components.contains(comp_idx);
+            if(!covered_components.contains(comp_idx) || keep_boundary) {
+                available[comp_idx] = true;
+                available_count++;
+            }
+        }
+        if(available_count < 2) return {};
+
+        std::vector<std::size_t> in_deg(components.size(), 0);
+        for(std::size_t from = 0; from < comp_graph.size(); ++from) {
+            if(!available[from]) continue;
+            for(auto to : comp_graph[from]) {
+                if(available[to]) {
+                    in_deg[to]++;
+                }
+            }
+        }
+
+        std::set<std::pair<std::string, std::size_t>> ready;
+        for(std::size_t comp_idx = 0; comp_idx < components.size(); ++comp_idx) {
+            if(available[comp_idx] && in_deg[comp_idx] == 0) {
+                ready.emplace(comp_key[comp_idx], comp_idx);
+            }
+        }
+
+        std::vector<std::size_t> topo;
+        topo.reserve(available_count);
+        while(!ready.empty()) {
+            auto [key, current] = *ready.begin();
+            ready.erase(ready.begin());
+            topo.push_back(current);
+            for(auto to : comp_graph[current]) {
+                if(available[to] && --in_deg[to] == 0) {
+                    ready.emplace(comp_key[to], to);
+                }
+            }
+        }
+
+        if(topo.size() < 2) return {};
+
+        auto no_pred = std::numeric_limits<std::size_t>::max();
+        std::vector<std::size_t> dist(components.size(), 0);
+        std::vector<std::size_t> pred(components.size(), no_pred);
+        for(auto comp_idx : topo) {
+            dist[comp_idx] = comp_weight[comp_idx];
+        }
+
+        for(auto from : topo) {
+            for(auto to : comp_graph[from]) {
+                if(!available[to]) continue;
+                auto candidate = dist[from] + comp_weight[to];
+                if(candidate > dist[to]) {
+                    dist[to] = candidate;
+                    pred[to] = from;
+                    continue;
+                }
+                if(candidate == dist[to] &&
+                   (pred[to] == no_pred || comp_key[from] < comp_key[pred[to]])) {
+                    pred[to] = from;
+                }
+            }
+        }
+
+        std::size_t best = no_pred;
+        std::size_t best_dist = 0;
+        for(auto comp_idx : topo) {
+            if(dist[comp_idx] > best_dist) {
+                best = comp_idx;
+                best_dist = dist[comp_idx];
+                continue;
+            }
+            if(dist[comp_idx] == best_dist && best != no_pred &&
+               comp_key[comp_idx] < comp_key[best]) {
+                best = comp_idx;
+            }
+        }
+
+        if(best == no_pred) return {};
+
+        std::vector<std::size_t> path;
+        for(auto current = best; current != no_pred; current = pred[current]) {
+            path.push_back(current);
+        }
+        std::reverse(path.begin(), path.end());
+        if(path.size() < 2) return {};
+        return path;
+    };
+
+    std::vector<std::vector<std::size_t>> workflow_paths;
+    while(true) {
+        auto path = find_longest_path();
+        if(path.size() < 2) break;
+
+        std::size_t new_coverage = 0;
+        if(path.size() == 2) {
+            for(auto node : path) {
+                if(!covered_components.contains(node)) {
+                    new_coverage++;
+                }
+            }
+        } else {
+            for(std::size_t i = 1; i + 1 < path.size(); ++i) {
+                if(!covered_components.contains(path[i])) {
+                    new_coverage++;
+                }
+            }
+        }
+
+        if(new_coverage == 0) {
+            if(workflow_paths.empty()) {
+                workflow_paths.push_back(std::move(path));
+            }
+            break;
+        }
+
+        if(path.size() == 2) {
+            covered_components.insert(path[0]);
+            covered_components.insert(path[1]);
+        } else {
+            for(std::size_t i = 1; i + 1 < path.size(); ++i) {
+                covered_components.insert(path[i]);
+            }
+        }
+        workflow_paths.push_back(std::move(path));
+    }
+
+    if(workflow_paths.empty()) return {};
+
+    auto lookup_symbol_by_qname = [&](std::string_view qname) -> const extract::SymbolInfo* {
+        for(auto& [sym_id, sym] : model.symbols) {
+            if(sym.qualified_name == qname) return &sym;
+        }
+        return nullptr;
+    };
+
+    auto slugify = [](std::string_view text) -> std::string {
+        std::string out;
+        out.reserve(text.size());
+        bool prev_dash = false;
+        for(auto ch : text) {
+            auto uc = static_cast<unsigned char>(ch);
+            if(std::isalnum(uc)) {
+                out.push_back(static_cast<char>(std::tolower(uc)));
+                prev_dash = false;
+            } else if(!prev_dash) {
+                out.push_back('-');
+                prev_dash = true;
+            }
+        }
+        while(!out.empty() && out.front() == '-') out.erase(out.begin());
+        while(!out.empty() && out.back() == '-') out.pop_back();
+        return out;
+    };
+
+    auto stable_hash_text = [](std::string_view text) -> std::uint64_t {
+        std::uint64_t hash = 1469598103934665603ULL;
+        for(auto ch : text) {
+            hash ^= static_cast<unsigned char>(ch);
+            hash *= 1099511628211ULL;
+        }
+        return hash;
+    };
+
+    auto& rules = builder.config.workflow_rules;
+
+    auto overlap_ratio_percent =
+        [](const std::unordered_set<std::string>& lhs,
+           const std::unordered_set<std::string>& rhs) -> std::uint32_t {
+        if(lhs.empty() || rhs.empty()) return 0;
+
+        const auto* smaller = &lhs;
+        const auto* larger = &rhs;
+        if(lhs.size() > rhs.size()) {
+            smaller = &rhs;
+            larger = &lhs;
+        }
+
+        std::size_t intersection = 0;
+        for(auto& key : *smaller) {
+            if(larger->contains(key)) {
+                ++intersection;
+            }
+        }
+
+        auto base = std::min(lhs.size(), rhs.size());
+        if(base == 0) return 0;
+        auto ratio = (intersection * 100) / base;
+        return static_cast<std::uint32_t>(ratio);
+    };
+
+    std::vector<std::unordered_set<std::string>> accepted_symbol_sets;
+    std::unordered_set<std::string> accepted_symbols_union;
+
+    for(auto& comp_path : workflow_paths) {
+        std::vector<ModuleEdgeRep> chain_edges;
+        chain_edges.reserve(comp_path.size() > 1 ? comp_path.size() - 1 : 0);
+        bool valid_chain = true;
+        for(std::size_t i = 0; i + 1 < comp_path.size(); ++i) {
+            auto from_comp = comp_path[i];
+            auto to_comp = comp_path[i + 1];
+            auto from_it = comp_edges.find(from_comp);
+            if(from_it == comp_edges.end()) {
+                valid_chain = false;
+                break;
+            }
+            auto edge_it = from_it->second.find(to_comp);
+            if(edge_it == from_it->second.end() || edge_it->second.caller_qname.empty() ||
+               edge_it->second.callee_qname.empty()) {
+                valid_chain = false;
+                break;
+            }
+            chain_edges.push_back(edge_it->second);
+        }
+        if(!valid_chain || chain_edges.empty()) continue;
+
+        std::vector<std::string> owner_keys;
+        owner_keys.reserve(chain_edges.size() + 1);
+        owner_keys.push_back(chain_edges.front().caller_qname);
+        owner_keys.push_back(chain_edges.front().callee_qname);
+        for(std::size_t i = 1; i < chain_edges.size(); ++i) {
+            auto& edge = chain_edges[i];
+            if(owner_keys.back() != edge.caller_qname) {
+                owner_keys.push_back(edge.caller_qname);
+            }
+            if(owner_keys.back() != edge.callee_qname) {
+                owner_keys.push_back(edge.callee_qname);
+            }
+        }
+        if(owner_keys.size() < rules.min_chain_symbols) continue;
+
+        std::unordered_set<std::string> current_symbol_set;
+        current_symbol_set.reserve(owner_keys.size());
+        for(auto& key : owner_keys) {
+            current_symbol_set.insert(key);
+        }
+        if(current_symbol_set.size() < rules.min_chain_symbols) continue;
+
+        std::size_t new_symbol_count = 0;
+        for(auto& key : current_symbol_set) {
+            if(!accepted_symbols_union.contains(key)) {
+                ++new_symbol_count;
+            }
+        }
+        if(new_symbol_count < rules.min_new_symbols) continue;
+
+        bool overlap_rejected = false;
+        for(auto& accepted : accepted_symbol_sets) {
+            if(overlap_ratio_percent(current_symbol_set, accepted) >
+               rules.max_symbol_overlap_ratio_percent) {
+                overlap_rejected = true;
+                break;
+            }
+        }
+        if(overlap_rejected) continue;
+
+        std::string slug_seed;
+        for(std::size_t i = 0; i < owner_keys.size(); ++i) {
+            if(i > 0) slug_seed += "->";
+            slug_seed += owner_keys[i];
+        }
+        if(slug_seed.empty()) continue;
+
+        auto first_short = short_name_of(owner_keys.front());
+        auto last_short = short_name_of(owner_keys.back());
+        if(first_short.empty() || last_short.empty()) continue;
+
+        auto slug = slugify(first_short + "-to-" + last_short);
+        if(slug.empty()) continue;
+        slug += std::format("-{:016x}", stable_hash_text(slug_seed));
+
+        auto page_id = "workflow:" + slug;
+        if(builder.id_to_index.contains(page_id)) continue;
+
+        PageIdentity identity{
+            .page_type = PageType::Workflow,
+            .normalized_owner_key = slug,
+        };
+
+        auto path_result = compute_page_path(identity, builder.config.path_rules);
+        if(!path_result.has_value()) {
+            return std::unexpected(PlanError{
+                .message = std::format("failed to compute path for workflow '{}': {}",
+                                       slug, path_result.error().message)});
+        }
+
+        std::string title_chain;
+        bool valid_title_chain = true;
+        for(std::size_t i = 0; i < owner_keys.size(); ++i) {
+            if(i > 0) title_chain += " → ";
+            auto short_name = short_name_of(owner_keys[i]);
+            if(short_name.empty()) {
+                valid_title_chain = false;
+                break;
+            }
+            title_chain += short_name;
+        }
+        if(!valid_title_chain || title_chain.empty()) continue;
+
+        PagePlan plan{
+            .page_id = page_id,
+            .page_type = PageType::Workflow,
+            .title = "Workflow: " + title_chain,
+            .relative_path = *path_result,
+            .owner_keys = std::move(owner_keys),
+            .deterministic_blocks = {"call_chain", "participants", "related_pages"},
+        };
+
+        plan.slot_plans.push_back(builder.make_slot(page_id, "workflow"));
+
+        for(auto& existing : builder.plans) {
+            plan.depends_on_pages.push_back(existing.page_id);
+        }
+
+        std::unordered_set<std::string> linked_seen;
+        auto add_linked_page = [&](std::string candidate_page_id) {
+            if(candidate_page_id.empty()) return;
+            if(linked_seen.insert(candidate_page_id).second) {
+                plan.linked_pages.push_back(std::move(candidate_page_id));
+            }
+        };
+
+        for(auto& qname : owner_keys) {
+            auto* sym = lookup_symbol_by_qname(qname);
+            if(!sym) continue;
+
+            if(!sym->declaration_location.file.empty()) {
+                add_linked_page("file:" + sym->declaration_location.file);
+            }
+
+            auto ns_name = namespace_of(*sym);
+            if(is_renderable_namespace_name(ns_name)) {
+                add_linked_page("namespace:" + ns_name);
+            }
+
+            if(sym->parent.has_value()) {
+                if(auto* parent = lookup_sym(model, *sym->parent)) {
+                    if(should_generate_type_page(model, *parent)) {
+                        add_linked_page("type:" + parent->qualified_name);
+                    }
+                }
+            }
+        }
+
+        if(auto r = builder.add_plan(std::move(plan)); !r) return r;
+
+        accepted_symbol_sets.push_back(std::move(current_symbol_set));
+        for(auto& key : accepted_symbol_sets.back()) {
+            accepted_symbols_union.insert(key);
+        }
+        if(accepted_symbol_sets.size() >= rules.max_workflow_pages) {
+            break;
+        }
+    }
+
+    return {};
+}
+
 auto enumerate_index_page(PlanBuilder& builder) -> std::expected<void, PlanError> {
     if(!builder.config.page_types.index) return {};
 
@@ -530,16 +1112,19 @@ auto enumerate_index_page(PlanBuilder& builder) -> std::expected<void, PlanError
         .page_type = PageType::Index,
         .title = "API Reference",
         .relative_path = *path_result,
-        .deterministic_blocks = {"all_modules", "all_namespaces", "all_types", "all_files"},
+        .deterministic_blocks = {"all_modules", "all_namespaces", "all_types", "all_files", "all_workflows", "module_dependency_diagram"},
     };
 
-    plan.slot_plans.push_back(builder.make_slot(page_id, "repository_overview"));
-    plan.slot_plans.push_back(builder.make_slot(page_id, "reading_guide"));
+    plan.slot_plans.push_back(builder.make_slot(page_id, "index_overview"));
+    plan.slot_plans.push_back(builder.make_slot(page_id, "index_reading_guide"));
 
     // Index depends on all content pages so overview + reading guide can use
     // dependency summaries and links with complete context.
     for(auto& existing : builder.plans) {
         plan.depends_on_pages.push_back(existing.page_id);
+        if(existing.page_type == PageType::Workflow) {
+            plan.linked_pages.push_back(existing.page_id);
+        }
     }
 
     if(auto r = builder.add_plan(std::move(plan)); !r) return r;
@@ -640,6 +1225,12 @@ auto build_page_plan_set(const config::TaskConfig& config,
         return std::unexpected(PlanError{.message = r.error().message});
     }
     logging::info("planner: {} module pages", builder.plans.size() - ns_count);
+
+    auto workflow_base = builder.plans.size();
+    if(auto r = enumerate_workflow_pages(builder); !r) {
+        return std::unexpected(PlanError{.message = r.error().message});
+    }
+    logging::info("planner: {} workflow pages", builder.plans.size() - workflow_base);
 
     // 2. Index page (after all content pages)
     if(auto r = enumerate_index_page(builder); !r) {

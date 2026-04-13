@@ -19,6 +19,7 @@ module_page = true
 namespace_page = true
 type_page = true
 file_page = true
+workflow_page = false
 
 [path_rules]
 index_path = "index.md"
@@ -26,6 +27,7 @@ module_prefix = "modules"
 namespace_prefix = "namespaces"
 type_prefix = "types"
 file_prefix = "files"
+workflow_prefix = "workflows"
 name_normalize = "lowercase"
 
 [prompt_templates]
@@ -34,8 +36,9 @@ type_usage_notes = "prompts/type_usage_notes.txt"
 namespace_summary = "prompts/namespace_summary.txt"
 module_summary = "prompts/module_summary.txt"
 module_architecture = "prompts/module_architecture.txt"
-repository_overview = "prompts/repository_overview.txt"
-reading_guide = "prompts/reading_guide.txt"
+index_overview = "prompts/index_overview.txt"
+index_reading_guide = "prompts/index_reading_guide.txt"
+workflow = "prompts/workflow.txt"
 
 [page_templates]
 index = "pages/index.md"
@@ -43,6 +46,7 @@ module_page = "pages/module.md"
 namespace_page = "pages/namespace.md"
 type_page = "pages/type.md"
 file_page = "pages/file.md"
+workflow_page = "pages/workflow.md"
 
 [evidence_rules]
 max_callers = 5
@@ -50,6 +54,14 @@ max_callees = 5
 max_siblings = 8
 max_source_bytes = 4096
 max_related_summaries = 3
+
+[workflow_rules]
+min_chain_symbols = 2
+min_new_symbols = 1
+max_symbol_overlap_ratio_percent = 50
+max_workflow_pages = 8
+llm_review_top_k = 6
+llm_selected_count = 4
 
 [llm]
 system_prompt = "You are a documentation writer."
@@ -62,6 +74,9 @@ fail_on_h1_in_output = true
 
 [navigation]
 consume_dependency_summaries = true
+
+[builtin]
+vitepress = false
 )";
 
 constexpr auto kDefaultSystemPrompt = "You are a documentation writer.";
@@ -100,6 +115,13 @@ TEST_SUITE(config_load) {
         EXPECT_EQ(config.llm.retry_count, 3u);
         EXPECT_EQ(config.llm.retry_initial_backoff_ms, 250u);
         EXPECT_EQ(config.evidence_rules.max_callers, 5u);
+        EXPECT_EQ(config.workflow_rules.min_chain_symbols, 2u);
+        EXPECT_EQ(config.workflow_rules.max_symbol_overlap_ratio_percent, 50u);
+        EXPECT_EQ(config.workflow_rules.llm_selected_count, 4u);
+        EXPECT_EQ(config.path_rules.workflow_prefix, "workflows");
+        EXPECT_EQ(config.prompt_templates.workflow, "prompts/workflow.txt");
+        EXPECT_EQ(config.page_templates.workflow_page, "pages/workflow.md");
+        EXPECT_FALSE(config.builtin.vitepress);
     }
 
     TEST_CASE(load_requires_page_types_section) {
@@ -183,5 +205,17 @@ output_root = "/tmp/output"
 
         ASSERT_TRUE(result.has_value());
         EXPECT_EQ(result->llm.system_prompt, "你是一名中文文档作者。");
+    }
+
+    TEST_CASE(load_builtin_vitepress_flag) {
+        auto toml = std::string(kMinimalValidConfig);
+        auto pos = toml.find("vitepress = false");
+        ASSERT_TRUE(pos != std::string::npos);
+        toml.replace(pos, std::char_traits<char>::length("vitepress = false"),
+                     "vitepress = true");
+
+        auto result = load_config_from_string(toml);
+        ASSERT_TRUE(result.has_value());
+        EXPECT_TRUE(result->builtin.vitepress);
     }
 };

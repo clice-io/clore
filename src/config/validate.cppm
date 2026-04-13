@@ -105,6 +105,10 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
         return std::unexpected(ValidationError{
             .message = "extract.max_snippet_bytes is required"});
     }
+    if(*config.extract.max_snippet_bytes == 0) {
+        return std::unexpected(ValidationError{
+            .message = "extract.max_snippet_bytes must be greater than 0"});
+    }
 
     // Validate path_rules
     if(auto r = validate_nonempty(config.path_rules.index_path, "path_rules.index_path"); !r) return r;
@@ -112,6 +116,7 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
     if(auto r = validate_nonempty(config.path_rules.namespace_prefix, "path_rules.namespace_prefix"); !r) return r;
     if(auto r = validate_nonempty(config.path_rules.type_prefix, "path_rules.type_prefix"); !r) return r;
     if(auto r = validate_nonempty(config.path_rules.file_prefix, "path_rules.file_prefix"); !r) return r;
+    if(auto r = validate_nonempty(config.path_rules.workflow_prefix, "path_rules.workflow_prefix"); !r) return r;
     if(auto r = validate_nonempty(config.path_rules.name_normalize, "path_rules.name_normalize"); !r) return r;
 
     // Validate prompt templates exist when their page types are enabled
@@ -127,8 +132,11 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
         if(auto r = validate_file_exists(config.prompt_templates.module_architecture, "prompt_templates.module_architecture"); !r) return r;
     }
     if(config.page_types.index) {
-        if(auto r = validate_file_exists(config.prompt_templates.repository_overview, "prompt_templates.repository_overview"); !r) return r;
-        if(auto r = validate_file_exists(config.prompt_templates.reading_guide, "prompt_templates.reading_guide"); !r) return r;
+        if(auto r = validate_file_exists(config.prompt_templates.index_overview, "prompt_templates.index_overview"); !r) return r;
+        if(auto r = validate_file_exists(config.prompt_templates.index_reading_guide, "prompt_templates.index_reading_guide"); !r) return r;
+    }
+    if(config.page_types.workflow_page) {
+        if(auto r = validate_file_exists(config.prompt_templates.workflow, "prompt_templates.workflow"); !r) return r;
     }
 
     // Validate page templates exist when their page types are enabled
@@ -147,6 +155,9 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
     if(config.page_types.file_page) {
         if(auto r = validate_file_exists(config.page_templates.file_page, "page_templates.file_page"); !r) return r;
     }
+    if(config.page_types.workflow_page) {
+        if(auto r = validate_file_exists(config.page_templates.workflow_page, "page_templates.workflow_page"); !r) return r;
+    }
 
     // Validate evidence rules
     if(auto r = validate_nonzero(config.evidence_rules.max_callers, "evidence_rules.max_callers"); !r) return r;
@@ -154,6 +165,41 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
     if(auto r = validate_nonzero(config.evidence_rules.max_siblings, "evidence_rules.max_siblings"); !r) return r;
     if(auto r = validate_nonzero(config.evidence_rules.max_source_bytes, "evidence_rules.max_source_bytes"); !r) return r;
     if(auto r = validate_nonzero(config.evidence_rules.max_related_summaries, "evidence_rules.max_related_summaries"); !r) return r;
+
+    // Validate workflow rules
+    if(auto r = validate_nonzero(config.workflow_rules.min_chain_symbols,
+                                 "workflow_rules.min_chain_symbols");
+       !r) return r;
+    if(config.workflow_rules.min_chain_symbols < 2) {
+        return std::unexpected(ValidationError{
+            .message =
+                "workflow_rules.min_chain_symbols must be greater than or equal to 2"});
+    }
+    if(auto r = validate_nonzero(config.workflow_rules.min_new_symbols,
+                                 "workflow_rules.min_new_symbols");
+       !r) return r;
+    if(auto r = validate_nonzero(config.workflow_rules.max_workflow_pages,
+                                 "workflow_rules.max_workflow_pages");
+       !r) return r;
+    if(auto r = validate_nonzero(
+            config.workflow_rules.llm_review_top_k,
+            "workflow_rules.llm_review_top_k");
+       !r) return r;
+    if(auto r = validate_nonzero(
+            config.workflow_rules.llm_selected_count,
+            "workflow_rules.llm_selected_count");
+       !r) return r;
+    if(config.workflow_rules.max_symbol_overlap_ratio_percent > 100) {
+        return std::unexpected(ValidationError{
+            .message =
+                "workflow_rules.max_symbol_overlap_ratio_percent must be less than or equal to 100"});
+    }
+    if(config.workflow_rules.llm_selected_count >
+       config.workflow_rules.llm_review_top_k) {
+        return std::unexpected(ValidationError{
+            .message =
+                "workflow_rules.llm_selected_count must be less than or equal to workflow_rules.llm_review_top_k"});
+    }
 
     // Validate LLM config
     if(auto r = validate_nonempty(config.llm.system_prompt, "llm.system_prompt"); !r) return r;

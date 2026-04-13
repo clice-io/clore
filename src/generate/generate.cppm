@@ -1,5 +1,7 @@
 module;
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <expected>
 #include <format>
@@ -8,7 +10,10 @@ module;
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
+
+#include "eventide/serde/json/json.h"
 
 export module generate;
 
@@ -56,6 +61,7 @@ auto get_page_template_path(const config::TaskConfig& config, PageType type) -> 
         case PageType::Namespace:  return config.page_templates.namespace_page;
         case PageType::Type:       return config.page_templates.type_page;
         case PageType::File:       return config.page_templates.file_page;
+        case PageType::Workflow:   return config.page_templates.workflow_page;
     }
     return {};
 }
@@ -126,8 +132,21 @@ auto build_evidence_for_slot(const SlotPlan& slot, const PagePlan& plan,
         }
     }
 
-    if(slot_kind == "repository_overview" || slot_kind == "reading_guide") {
-        return build_evidence_for_repository_overview(model, rules, summaries);
+    if(slot_kind == "index_overview" || slot_kind == "index_reading_guide") {
+        return build_evidence_for_index_overview(model, rules, summaries);
+    }
+
+    if(slot_kind == "workflow") {
+        auto pack = build_evidence_for_workflow(
+            plan.owner_keys, model, rules, summaries, config.project_root);
+        // Use module chain as target_name so the LLM sees the full workflow scope
+        auto title_view = std::string_view(plan.title);
+        constexpr std::string_view workflow_prefix = "Workflow: ";
+        if(title_view.starts_with(workflow_prefix)) {
+            title_view.remove_prefix(workflow_prefix.size());
+        }
+        pack.subject_name = std::string(title_view);
+        return pack;
     }
 
     return EvidencePack{.slot_kind = slot_kind};
@@ -158,6 +177,238 @@ auto wrap_prompt_output_for_embed(std::string_view slot_kind, std::string_view p
     return wrapped;
 }
 
+// Try to extract a "Title: ..." line from the LLM workflow output.
+// Returns {extracted_title, remaining_content} or nullopt on failure.
+auto extract_workflow_title(const std::string& output)
+    -> std::optional<std::pair<std::string, std::string>> {
+    constexpr std::string_view prefix = "Title: ";
+    if(!output.starts_with(prefix)) return std::nullopt;
+
+    auto nl = output.find('\n');
+    if(nl == std::string::npos) return std::nullopt;
+
+    auto title = output.substr(prefix.size(), nl - prefix.size());
+    // Trim trailing whitespace / CR
+    while(!title.empty() && (title.back() == ' ' || title.back() == '\r')) {
+        title.pop_back();
+    }
+    if(title.empty()) return std::nullopt;
+
+    // Skip blank lines after the title
+    auto rest_start = nl + 1;
+    while(rest_start < output.size() && (output[rest_start] == '\n' || output[rest_start] == '\r')) {
+        ++rest_start;
+    }
+
+    return std::pair{std::move(title), output.substr(rest_start)};
+}
+
+auto trim_ascii(std::string_view text) -> std::string_view {
+    while(!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) {
+        text.remove_prefix(1);
+    }
+    while(!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) {
+        text.remove_suffix(1);
+    }
+    return text;
+}
+
+auto collapse_whitespace(std::string_view text) -> std::string {
+    std::string out;
+    out.reserve(text.size());
+    bool in_space = false;
+    for(auto ch : text) {
+        if(std::isspace(static_cast<unsigned char>(ch)) != 0) {
+            if(!in_space) {
+                out.push_back(' ');
+                in_space = true;
+            }
+            continue;
+        }
+        out.push_back(ch);
+        in_space = false;
+    }
+    auto view = trim_ascii(out);
+    return std::string(view);
+}
+
+auto strip_inline_markdown(std::string_view text) -> std::string {
+    std::string out;
+    out.reserve(text.size());
+    for(auto ch : text) {
+        if(ch == '`' || ch == '*' || ch == '_' || ch == '[' || ch == ']' || ch == '#') {
+            continue;
+        }
+        out.push_back(ch);
+    }
+    return collapse_whitespace(out);
+}
+
+auto extract_first_plain_paragraph(std::string_view markdown) -> std::string {
+    std::istringstream stream{std::string(markdown)};
+    std::string line;
+    bool in_code_block = false;
+    std::string paragraph;
+
+    while(std::getline(stream, line)) {
+        auto trimmed = trim_ascii(line);
+        if(trimmed.starts_with("```")) {
+            in_code_block = !in_code_block;
+            continue;
+        }
+        if(in_code_block) continue;
+
+        if(trimmed.empty()) {
+            if(!paragraph.empty()) break;
+            continue;
+        }
+
+        if(trimmed.starts_with("#") || trimmed.starts_with(">") || trimmed.starts_with("|") ||
+           trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("{{")) {
+            if(!paragraph.empty()) break;
+            continue;
+        }
+
+        if(!paragraph.empty()) paragraph.push_back(' ');
+        paragraph += trimmed;
+    }
+
+    return strip_inline_markdown(paragraph);
+}
+
+auto normalize_frontmatter_title(std::string_view page_title) -> std::string {
+    auto plain = strip_inline_markdown(page_title);
+    if(!plain.empty()) return plain;
+    return collapse_whitespace(page_title);
+}
+
+auto select_primary_description_source(const PagePlan& plan,
+                                       const std::unordered_map<std::string, std::string>& slot_outputs)
+    -> std::string {
+    auto from_slot = [&](std::string_view key) -> std::string {
+        auto it = slot_outputs.find(std::string(key));
+        if(it == slot_outputs.end()) return {};
+        return extract_first_plain_paragraph(it->second);
+    };
+
+    switch(plan.page_type) {
+        case PageType::Type:
+            if(auto s = from_slot("type_overview"); !s.empty()) return s;
+            if(auto s = from_slot("type_usage_notes"); !s.empty()) return s;
+            break;
+        case PageType::Namespace:
+            if(auto s = from_slot("namespace_summary"); !s.empty()) return s;
+            break;
+        case PageType::Module:
+            if(auto s = from_slot("module_summary"); !s.empty()) return s;
+            if(auto s = from_slot("module_architecture"); !s.empty()) return s;
+            break;
+        case PageType::Workflow:
+            if(auto s = from_slot("workflow"); !s.empty()) return s;
+            break;
+        case PageType::Index:
+            if(auto s = from_slot("index_overview"); !s.empty()) return s;
+            if(auto s = from_slot("index_reading_guide"); !s.empty()) return s;
+            break;
+        case PageType::File:
+            break;
+    }
+
+    for(auto& [key, value] : slot_outputs) {
+        if(auto s = extract_first_plain_paragraph(value); !s.empty()) {
+            return s;
+        }
+    }
+
+    return {};
+}
+
+auto compute_outline_value(std::string_view content) -> std::string {
+    std::istringstream stream{std::string(content)};
+    std::string line;
+    bool in_code_block = false;
+    int min_level = 7;
+    int max_level = 0;
+
+    while(std::getline(stream, line)) {
+        auto trimmed = trim_ascii(line);
+        if(trimmed.starts_with("```")) {
+            in_code_block = !in_code_block;
+            continue;
+        }
+        if(in_code_block) continue;
+
+        int level = 0;
+        while(level < static_cast<int>(trimmed.size()) && level < 6 && trimmed[level] == '#') {
+            ++level;
+        }
+        if(level < 2 || level > 6) continue;
+        if(level >= static_cast<int>(trimmed.size()) || trimmed[level] != ' ') continue;
+
+        min_level = std::min(min_level, level);
+        max_level = std::max(max_level, level);
+    }
+
+    if(max_level == 0) return "false";
+    if(min_level == max_level) return std::to_string(min_level);
+    return std::format("[{}, {}]", min_level, max_level);
+}
+
+auto yaml_quote(std::string_view value) -> std::string {
+    std::string out;
+    out.reserve(value.size() + 2);
+    out.push_back('\'');
+    for(auto ch : value) {
+        if(ch == '\'') {
+            out += "''";
+            continue;
+        }
+        if(ch == '\r' || ch == '\n') {
+            out.push_back(' ');
+            continue;
+        }
+        out.push_back(ch);
+    }
+    out.push_back('\'');
+    return out;
+}
+
+auto build_vitepress_frontmatter(const PagePlan& plan,
+                                 std::string_view page_title,
+                                 std::string_view content,
+                                 const std::unordered_map<std::string, std::string>& slot_outputs)
+    -> std::string {
+    auto title = normalize_frontmatter_title(page_title);
+    auto description = select_primary_description_source(plan, slot_outputs);
+    if(description.empty()) {
+        description = extract_first_plain_paragraph(content);
+    }
+    if(description.empty()) {
+        description = title;
+    }
+
+    auto outline = compute_outline_value(content);
+    auto has_outline = outline != "false";
+    auto page_class =
+        std::format("clore-page clore-{}-page", page_type_name(plan.page_type));
+
+    std::string fm;
+    fm.reserve(512 + title.size() + description.size() * 3);
+    fm += "---\n";
+    fm += "layout: doc\n";
+    fm += "title: " + yaml_quote(title) + "\n";
+    fm += "titleTemplate: false\n";
+    fm += "description: " + yaml_quote(description) + "\n";
+    fm += "navbar: true\n";
+    fm += "sidebar: true\n";
+    fm += std::format("aside: {}\n", has_outline ? "true" : "false");
+    fm += "outline: " + outline + "\n";
+    fm += "footer: true\n";
+    fm += "pageClass: " + yaml_quote(page_class) + "\n";
+    fm += "---\n\n";
+    return fm;
+}
+
 auto render_single_page(const PagePlan& plan,
                         const config::TaskConfig& config,
                         const extract::ProjectModel& model,
@@ -176,8 +427,25 @@ auto render_single_page(const PagePlan& plan,
 
     auto blocks = build_blocks(plan, model, config, links);
 
+    // For workflow pages with real LLM output, extract the title from the response
+    auto page_title = plan.title;
+    std::unordered_map<std::string, std::string> adjusted_slot_outputs;
+    const auto* effective_slots = &slot_outputs;
+
+    if(!embed_prompts && plan.page_type == PageType::Workflow) {
+        auto it = slot_outputs.find("workflow");
+        if(it != slot_outputs.end()) {
+            if(auto extracted = extract_workflow_title(it->second)) {
+                page_title = std::move(extracted->first);
+                adjusted_slot_outputs = slot_outputs;
+                adjusted_slot_outputs["workflow"] = std::move(extracted->second);
+                effective_slots = &adjusted_slot_outputs;
+            }
+        }
+    }
+
     std::unordered_map<std::string, std::string> embedded_slot_outputs;
-    auto* slots_for_render = &slot_outputs;
+    auto* slots_for_render = effective_slots;
     if(embed_prompts) {
         embedded_slot_outputs.reserve(slot_outputs.size());
         for(auto& [slot_kind, output] : slot_outputs) {
@@ -186,16 +454,23 @@ auto render_single_page(const PagePlan& plan,
         slots_for_render = &embedded_slot_outputs;
     }
 
-    auto assembly_result = assemble_page(*tmpl_result, plan.title, blocks, *slots_for_render, false);
+    auto assembly_result = assemble_page(*tmpl_result, page_title, blocks, *slots_for_render, false);
     if(!assembly_result.has_value()) {
         return std::unexpected(GenerateError{
             .message = std::format("failed to assemble page '{}': {}",
                                    plan.page_id, assembly_result.error().message)});
     }
 
+    // Prepend VitePress frontmatter when enabled
+    std::string content = std::move(*assembly_result);
+    if(config.builtin.vitepress) {
+        content.insert(0,
+                       build_vitepress_frontmatter(plan, page_title, content, *effective_slots));
+    }
+
     return GeneratedPage{
         .relative_path = plan.relative_path,
-        .content = *assembly_result,
+        .content = std::move(content),
     };
 }
 
@@ -209,6 +484,368 @@ auto extract_summary_from_slot_output(const std::string& overview_output) -> std
         return clore::support::truncate_utf8(overview_output, 300);
     }
     return clore::support::ensure_utf8(overview_output);
+}
+
+struct FeatureReviewCandidate {
+    std::size_t plan_index = 0;
+    std::string page_id;
+    std::string current_title;
+    std::vector<std::string> symbols;
+    std::vector<std::pair<std::string, std::string>> edges;
+    std::vector<std::string> namespaces;
+    std::vector<std::string> files;
+    std::string entry_symbol;
+    std::string exit_symbol;
+    std::size_t chain_length = 0;
+    std::size_t rank_score = 0;
+};
+
+auto namespace_of_qname(std::string_view qname) -> std::string {
+    auto pos = qname.rfind("::");
+    if(pos == std::string_view::npos) {
+        return {};
+    }
+    return std::string(qname.substr(0, pos));
+}
+
+auto json_escape(std::string_view text) -> std::string {
+    std::string out;
+    out.reserve(text.size() + 8);
+    for(auto ch : text) {
+        switch(ch) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out.push_back(ch); break;
+        }
+    }
+    return out;
+}
+
+auto build_json_string_array(const std::vector<std::string>& values) -> std::string {
+    std::string out = "[";
+    for(std::size_t i = 0; i < values.size(); ++i) {
+        if(i > 0) out += ", ";
+        out += "\"";
+        out += json_escape(values[i]);
+        out += "\"";
+    }
+    out += "]";
+    return out;
+}
+
+auto build_workflow_review_candidates(const PagePlanSet& plan_set,
+                                     const extract::ProjectModel& model,
+                                     const config::TaskConfig& config)
+    -> std::vector<FeatureReviewCandidate> {
+    std::unordered_map<std::string, const extract::SymbolInfo*> symbol_by_qname;
+    symbol_by_qname.reserve(model.symbols.size());
+    for(auto& [sym_id, sym] : model.symbols) {
+        symbol_by_qname.emplace(sym.qualified_name, &sym);
+    }
+
+    std::vector<FeatureReviewCandidate> candidates;
+    for(std::size_t i = 0; i < plan_set.plans.size(); ++i) {
+        auto& plan = plan_set.plans[i];
+        if(plan.page_type != PageType::Workflow) continue;
+        if(plan.owner_keys.size() < 2) continue;
+
+        FeatureReviewCandidate candidate;
+        candidate.plan_index = i;
+        candidate.page_id = plan.page_id;
+        candidate.current_title = plan.title;
+        candidate.symbols = plan.owner_keys;
+        candidate.entry_symbol = plan.owner_keys.front();
+        candidate.exit_symbol = plan.owner_keys.back();
+        candidate.chain_length = plan.owner_keys.size();
+
+        std::unordered_set<std::string> ns_seen;
+        std::unordered_set<std::string> file_seen;
+        for(std::size_t j = 0; j < plan.owner_keys.size(); ++j) {
+            auto& qname = plan.owner_keys[j];
+            if(j + 1 < plan.owner_keys.size()) {
+                candidate.edges.emplace_back(qname, plan.owner_keys[j + 1]);
+            }
+
+            auto sym_it = symbol_by_qname.find(qname);
+            if(sym_it == symbol_by_qname.end()) continue;
+            auto* sym = sym_it->second;
+
+            auto ns = sym->enclosing_namespace.empty()
+                ? namespace_of_qname(sym->qualified_name)
+                : sym->enclosing_namespace;
+            if(!ns.empty() && ns_seen.insert(ns).second) {
+                candidate.namespaces.push_back(ns);
+            }
+
+            auto rel_file =
+                make_source_relative(sym->declaration_location.file, config.project_root);
+            if(!rel_file.empty() && file_seen.insert(rel_file).second) {
+                candidate.files.push_back(rel_file);
+            }
+        }
+
+        candidate.rank_score = candidate.chain_length * 1000 + candidate.files.size() * 100 +
+                               candidate.namespaces.size() * 10;
+        candidates.push_back(std::move(candidate));
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const FeatureReviewCandidate& lhs, const FeatureReviewCandidate& rhs) {
+                  if(lhs.rank_score != rhs.rank_score) return lhs.rank_score > rhs.rank_score;
+                  if(lhs.chain_length != rhs.chain_length) return lhs.chain_length > rhs.chain_length;
+                  return lhs.page_id < rhs.page_id;
+              });
+
+    return candidates;
+}
+
+auto build_workflow_review_payload(const std::vector<FeatureReviewCandidate>& candidates)
+    -> std::string {
+    std::string json = "{\n  \"candidates\": [\n";
+    for(std::size_t i = 0; i < candidates.size(); ++i) {
+        auto& candidate = candidates[i];
+        json += "    {\n";
+        json += "      \"page_id\": \"" + json_escape(candidate.page_id) + "\",\n";
+        json += "      \"current_title\": \"" + json_escape(candidate.current_title) + "\",\n";
+        json += "      \"entry_symbol\": \"" + json_escape(candidate.entry_symbol) + "\",\n";
+        json += "      \"exit_symbol\": \"" + json_escape(candidate.exit_symbol) + "\",\n";
+        json += "      \"chain_length\": " + std::to_string(candidate.chain_length) + ",\n";
+        json += "      \"symbols\": " + build_json_string_array(candidate.symbols) + ",\n";
+
+        std::string edge_json = "[";
+        for(std::size_t edge_index = 0; edge_index < candidate.edges.size(); ++edge_index) {
+            auto& edge = candidate.edges[edge_index];
+            if(edge_index > 0) edge_json += ", ";
+            edge_json += "{\"from\":\"" + json_escape(edge.first) + "\",\"to\":\"" +
+                         json_escape(edge.second) + "\"}";
+        }
+        edge_json += "]";
+        json += "      \"edges\": " + edge_json + ",\n";
+        json += "      \"namespaces\": " + build_json_string_array(candidate.namespaces) + ",\n";
+        json += "      \"files\": " + build_json_string_array(candidate.files) + "\n";
+        json += "    }";
+        if(i + 1 < candidates.size()) json += ",";
+        json += "\n";
+    }
+    json += "  ]\n}";
+    return json;
+}
+
+auto build_workflow_review_prompt(const std::vector<FeatureReviewCandidate>& candidates,
+                                 std::size_t selected_count) -> std::string {
+    auto payload = build_workflow_review_payload(candidates);
+    std::string prompt;
+    prompt.reserve(payload.size() + 2048);
+    prompt += "Review workflow candidates extracted from a function-level call graph.\n";
+    prompt += std::format(
+        "Select exactly {} workflows that are major and mutually distinct.\n",
+        selected_count);
+    prompt += "You must reason only from structured semantics.\n";
+    prompt += "Input JSON:\n```json\n";
+    prompt += payload;
+    prompt += "\n```\n\n";
+    prompt += "Return ONLY JSON with this exact schema:\n";
+    prompt += "{\n";
+    prompt += "  \"selected\": [\n";
+    prompt += "    {\"page_id\": \"workflow:...\", \"title\": \"...\"}\n";
+    prompt += "  ]\n";
+    prompt += "}\n";
+    prompt += "Rules:\n";
+    prompt += std::format("- `selected` length must be exactly {}\n", selected_count);
+    prompt += "- `page_id` must be chosen from the input candidates\n";
+    prompt += "- no duplicate `page_id`\n";
+    prompt += "- title must be concise and descriptive\n";
+    prompt += "- no extra keys, no markdown, no explanation\n";
+    return prompt;
+}
+
+auto parse_workflow_review_response(std::string_view response,
+                                   const std::unordered_set<std::string>& allowed_page_ids,
+                                   std::size_t selected_count)
+    -> std::expected<std::unordered_map<std::string, std::string>, GenerateError> {
+    namespace json = eventide::serde::json;
+
+    auto parsed = json::Object::parse(std::string{response});
+    if(!parsed.has_value()) {
+        return std::unexpected(GenerateError{
+            .message = "workflow review returned invalid JSON"});
+    }
+
+    auto selected_value = parsed->get("selected");
+    if(!selected_value.has_value()) {
+        return std::unexpected(GenerateError{
+            .message = "workflow review JSON missing 'selected'"});
+    }
+
+    auto selected_array = selected_value->get_array();
+    if(!selected_array.has_value()) {
+        return std::unexpected(GenerateError{
+            .message = "workflow review 'selected' must be an array"});
+    }
+
+    if(selected_array->size() != selected_count) {
+        return std::unexpected(GenerateError{
+            .message = std::format(
+                "workflow review returned {} selections, expected {}",
+                selected_array->size(), selected_count)});
+    }
+
+    std::unordered_map<std::string, std::string> selected_titles;
+    selected_titles.reserve(selected_array->size());
+
+    for(auto entry : *selected_array) {
+        auto entry_object = entry.get_object();
+        if(!entry_object.has_value()) {
+            return std::unexpected(GenerateError{
+                .message = "workflow review selection entry must be an object"});
+        }
+
+        auto page_id_value = entry_object->get("page_id");
+        auto title_value = entry_object->get("title");
+        if(!page_id_value.has_value() || !title_value.has_value()) {
+            return std::unexpected(GenerateError{
+                .message = "workflow review selection entry missing 'page_id' or 'title'"});
+        }
+
+        auto page_id = page_id_value->get_string();
+        auto title = title_value->get_string();
+        if(!page_id.has_value() || !title.has_value()) {
+            return std::unexpected(GenerateError{
+                .message = "workflow review 'page_id' and 'title' must be strings"});
+        }
+
+        auto page_id_text = std::string(*page_id);
+        auto title_text = collapse_whitespace(*title);
+        if(title_text.empty()) {
+            return std::unexpected(GenerateError{
+                .message = std::format(
+                    "workflow review returned empty title for '{}'", page_id_text)});
+        }
+        if(!allowed_page_ids.contains(page_id_text)) {
+            return std::unexpected(GenerateError{
+                .message = std::format(
+                    "workflow review returned unknown page_id '{}'",
+                    page_id_text)});
+        }
+        if(!selected_titles.emplace(page_id_text, title_text).second) {
+            return std::unexpected(GenerateError{
+                .message = std::format(
+                    "workflow review returned duplicate page_id '{}'",
+                    page_id_text)});
+        }
+    }
+
+    return selected_titles;
+}
+
+auto apply_workflow_review_selection(
+    PagePlanSet& plan_set,
+    const std::unordered_map<std::string, std::string>& selected_titles)
+    -> std::expected<void, GenerateError> {
+    if(selected_titles.empty()) {
+        return std::unexpected(GenerateError{
+            .message = "workflow review produced no selected workflows"});
+    }
+
+    std::unordered_set<std::string> selected_ids;
+    selected_ids.reserve(selected_titles.size());
+    for(auto& [page_id, title] : selected_titles) {
+        selected_ids.insert(page_id);
+    }
+
+    std::vector<PagePlan> filtered_plans;
+    filtered_plans.reserve(plan_set.plans.size());
+    for(auto& plan : plan_set.plans) {
+        if(plan.page_type == PageType::Workflow) {
+            auto title_it = selected_titles.find(plan.page_id);
+            if(title_it == selected_titles.end()) {
+                continue;
+            }
+            plan.title = title_it->second;
+        }
+        filtered_plans.push_back(std::move(plan));
+    }
+
+    std::unordered_set<std::string> kept_page_ids;
+    kept_page_ids.reserve(filtered_plans.size());
+    for(auto& plan : filtered_plans) {
+        kept_page_ids.insert(plan.page_id);
+    }
+
+    std::vector<std::string> filtered_order;
+    filtered_order.reserve(plan_set.generation_order.size());
+    for(auto& page_id : plan_set.generation_order) {
+        if(kept_page_ids.contains(page_id)) {
+            filtered_order.push_back(page_id);
+        }
+    }
+
+    for(auto& plan : filtered_plans) {
+        std::erase_if(plan.depends_on_pages, [&](const std::string& page_id) {
+            return !kept_page_ids.contains(page_id);
+        });
+        std::erase_if(plan.linked_pages, [&](const std::string& page_id) {
+            return page_id.starts_with("workflow:") && !selected_ids.contains(page_id);
+        });
+    }
+
+    plan_set.plans = std::move(filtered_plans);
+    plan_set.generation_order = std::move(filtered_order);
+    return {};
+}
+
+auto review_workflow_pages_with_llm(PagePlanSet& plan_set,
+                                   const config::TaskConfig& config,
+                                   const extract::ProjectModel& model,
+                                   std::string_view llm_model)
+    -> std::expected<void, GenerateError> {
+    auto candidates = build_workflow_review_candidates(plan_set, model, config);
+    if(candidates.empty()) {
+        return {};
+    }
+
+    auto review_count = std::min<std::size_t>(
+        config.workflow_rules.llm_review_top_k, candidates.size());
+    candidates.resize(review_count);
+
+    auto selected_count = std::min<std::size_t>(
+        config.workflow_rules.llm_selected_count, candidates.size());
+    if(selected_count == 0) {
+        return std::unexpected(GenerateError{
+            .message = "workflow review requires at least one selectable candidate"});
+    }
+
+    auto prompt = build_workflow_review_prompt(candidates, selected_count);
+    auto response = clore::net::call_llm(llm_model, config.llm.system_prompt, prompt);
+    if(!response.has_value()) {
+        return std::unexpected(GenerateError{
+            .message = std::format("workflow review LLM request failed: {}",
+                                   response.error().message)});
+    }
+
+    std::unordered_set<std::string> allowed_page_ids;
+    allowed_page_ids.reserve(candidates.size());
+    for(auto& candidate : candidates) {
+        allowed_page_ids.insert(candidate.page_id);
+    }
+
+    auto selected_titles =
+        parse_workflow_review_response(*response, allowed_page_ids, selected_count);
+    if(!selected_titles.has_value()) {
+        return std::unexpected(std::move(selected_titles.error()));
+    }
+
+    auto apply_result = apply_workflow_review_selection(plan_set, *selected_titles);
+    if(!apply_result.has_value()) {
+        return std::unexpected(std::move(apply_result.error()));
+    }
+
+    logging::info("workflow review: {} candidates, {} selected",
+                  candidates.size(), selected_titles->size());
+    return {};
 }
 
 }  // namespace
@@ -287,6 +924,10 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
     }
 
     auto& plan_set = *plan_result;
+    if(auto review_result = review_workflow_pages_with_llm(plan_set, config, model, llm_model);
+       !review_result.has_value()) {
+        return std::unexpected(std::move(review_result.error()));
+    }
     logging::info("page plan: {} pages, generation order size {}",
                   plan_set.plans.size(), plan_set.generation_order.size());
 

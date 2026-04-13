@@ -1,4 +1,4 @@
-Write a "What This Repository Contains" section for the repository overview page.
+Write an "Overview" section for the index page.
 
 Output:
 - Markdown fragment only
@@ -8,7 +8,7 @@ Output:
 - Follow the output language requested by the system prompt
 
 Must explain:
-- the purpose and goals of this repository
+- the purpose and goals of this codebase
 - the major subsystems and their responsibilities
 - key design decisions or architectural constraints
 

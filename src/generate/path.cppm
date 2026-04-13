@@ -179,6 +179,15 @@ auto compute_page_path(const PageIdentity& identity, const config::PathRulesConf
             result = rules.file_prefix + "/" + stem + ".md";
             break;
         }
+        case PageType::Workflow: {
+            auto slug = normalize_name(identity.normalized_owner_key, norm);
+            std::vector<std::string> norm_parts;
+            norm_parts.push_back(rules.workflow_prefix);
+            norm_parts.push_back(slug);
+            norm_parts.push_back("index.md");
+            result = join_path(norm_parts);
+            break;
+        }
     }
 
     sanitize_path_chars(result);

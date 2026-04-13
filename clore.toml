@@ -9,8 +9,9 @@ max_snippet_bytes = 8192
 index = true
 module_page = true
 namespace_page = true
-type_page = true
+type_page = false
 file_page = false
+workflow_page = true
 
 [path_rules]
 index_path = "index.md"
@@ -18,6 +19,7 @@ module_prefix = "modules"
 namespace_prefix = "namespaces"
 type_prefix = "types"
 file_prefix = "files"
+workflow_prefix = "workflows"
 name_normalize = "lowercase"
 
 [prompt_templates]
@@ -26,8 +28,9 @@ type_usage_notes = "templates/prompts/type_usage_notes.txt"
 namespace_summary = "templates/prompts/namespace_summary.txt"
 module_summary = "templates/prompts/module_summary.txt"
 module_architecture = "templates/prompts/module_architecture.txt"
-repository_overview = "templates/prompts/repository_overview.txt"
-reading_guide = "templates/prompts/reading_guide.txt"
+index_overview = "templates/prompts/index_overview.txt"
+index_reading_guide = "templates/prompts/index_reading_guide.txt"
+workflow = "templates/prompts/workflow.txt"
 
 [page_templates]
 index = "templates/pages/index.md"
@@ -35,6 +38,7 @@ module_page = "templates/pages/module.md"
 namespace_page = "templates/pages/namespace.md"
 type_page = "templates/pages/type.md"
 file_page = "templates/pages/file.md"
+workflow_page = "templates/pages/workflow.md"
 
 [evidence_rules]
 max_callers = 5
@@ -43,8 +47,16 @@ max_siblings = 8
 max_source_bytes = 4096
 max_related_summaries = 3
 
+[workflow_rules]
+min_chain_symbols = 2
+min_new_symbols = 1
+max_symbol_overlap_ratio_percent = 50
+max_workflow_pages = 8
+llm_review_top_k = 6
+llm_selected_count = 4
+
 [llm]
-system_prompt = "You are a C++ documentation writer. Generate concise, accurate documentation for C++ code elements. Focus on purpose, design intent, and role in the codebase. Output only Markdown text suitable for embedding in a documentation page."
+system_prompt = "您是一名 C++ 文档编写员。请为 C++ 代码元素生成简洁准确的文档。重点关注代码元素的用途、设计意图及其在代码库中的作用。输出的文档必须为 Markdown 格式，且适合嵌入到文档页面中。使用中文生成。"
 retry_count = 3
 retry_initial_backoff_ms = 250
 
@@ -54,3 +66,6 @@ fail_on_h1_in_output = true
 
 [navigation]
 consume_dependency_summaries = true
+
+[builtin]
+vitepress = true

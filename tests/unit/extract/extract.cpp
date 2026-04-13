@@ -6,7 +6,7 @@
 #include <format>
 #include <fstream>
 
-#include "extract/compdb_test_utils.h"
+#include "extract/compdb.h"
 
 import config;
 import extract;

@@ -79,37 +79,6 @@ auto load_page_template(std::string_view path) -> std::expected<std::string, Ren
 
 namespace {
 
-auto lookup_sym(const extract::ProjectModel& model, extract::SymbolID id)
-    -> const extract::SymbolInfo* {
-    auto it = model.symbols.find(id);
-    return it != model.symbols.end() ? &it->second : nullptr;
-}
-
-auto is_type_kind(extract::SymbolKind kind) -> bool {
-    switch(kind) {
-        case extract::SymbolKind::Class:
-        case extract::SymbolKind::Struct:
-        case extract::SymbolKind::Enum:
-        case extract::SymbolKind::Union:
-        case extract::SymbolKind::Concept:
-        case extract::SymbolKind::Template:
-        case extract::SymbolKind::TypeAlias:
-            return true;
-        default:
-            return false;
-    }
-}
-
-auto make_source_relative(const std::string& path, const std::string& project_root) -> std::string {
-    namespace fs = std::filesystem;
-    if(path.empty() || project_root.empty()) return path;
-    auto abs = fs::path(path).lexically_normal();
-    auto root = fs::path(project_root).lexically_normal();
-    auto rel = abs.lexically_relative(root);
-    if(rel.empty() || rel.string().starts_with("..")) return path;
-    return rel.generic_string();
-}
-
 auto make_relative_link_target(std::string_view current_page_path,
                                std::string_view target_page_path) -> std::string {
     namespace fs = std::filesystem;
@@ -557,6 +526,303 @@ auto render_all_files_index(const extract::ProjectModel& model,
     return result;
 }
 
+auto render_call_chain_block(const PagePlan& plan, const extract::ProjectModel& model) -> std::string {
+    if(plan.owner_keys.size() < 2) return {};
+
+    auto find_symbol = [&](const std::string& qname) -> const extract::SymbolInfo* {
+        for(auto& [id, sym] : model.symbols) {
+            if(sym.qualified_name == qname) {
+                return &sym;
+            }
+        }
+        return nullptr;
+    };
+
+    auto namespace_of = [&](const std::string& qname) -> std::string {
+        auto pos = qname.rfind("::");
+        if(pos == std::string::npos) return {};
+        return qname.substr(0, pos);
+    };
+
+    struct NodeInfo {
+        std::string id;
+        std::string display;
+        std::string namespace_name;
+    };
+    std::vector<NodeInfo> nodes;
+    for(std::size_t i = 0; i < plan.owner_keys.size(); ++i) {
+        auto& qname = plan.owner_keys[i];
+        auto short_name = qname;
+        if(auto pos = qname.rfind("::"); pos != std::string::npos) {
+            short_name = qname.substr(pos + 2);
+        }
+        auto* sym = find_symbol(qname);
+        auto ns_name = sym && !sym->enclosing_namespace.empty() ? sym->enclosing_namespace
+                                                                : namespace_of(qname);
+        nodes.push_back({
+            .id = "N" + std::to_string(i),
+            .display = short_name + "()",
+            .namespace_name = std::move(ns_name),
+        });
+    }
+
+    std::unordered_map<std::string, std::vector<std::size_t>> namespace_groups;
+    std::vector<std::string> namespace_order;
+    std::unordered_set<std::string> seen_namespaces;
+    for(std::size_t i = 0; i < nodes.size(); ++i) {
+        namespace_groups[nodes[i].namespace_name].push_back(i);
+        if(seen_namespaces.insert(nodes[i].namespace_name).second) {
+            namespace_order.push_back(nodes[i].namespace_name);
+        }
+    }
+
+    std::string result = "```mermaid\ngraph LR\n";
+    for(auto& ns_name : namespace_order) {
+        auto& indices = namespace_groups[ns_name];
+        if(!ns_name.empty()) {
+            result += "    subgraph " + ns_name + "\n";
+        }
+        for(auto idx : indices) {
+            result += "    " + nodes[idx].id + "[\"" + nodes[idx].display + "\"]\n";
+        }
+        if(!ns_name.empty()) {
+            result += "    end\n";
+        }
+    }
+    for(std::size_t i = 0; i + 1 < nodes.size(); ++i) {
+        result += "    " + nodes[i].id + " --> " + nodes[i + 1].id + "\n";
+    }
+    result += "```\n";
+    return result;
+}
+
+auto render_participants_block(const PagePlan& plan, const extract::ProjectModel& model,
+                               const config::TaskConfig& config) -> std::string {
+    std::string result;
+    for(auto& qname : plan.owner_keys) {
+        for(auto& [id, sym] : model.symbols) {
+            if(sym.qualified_name != qname) continue;
+            result += "- ";
+            result += std::string(extract::symbol_kind_name(sym.kind));
+            result += " `" + sym.qualified_name + "`";
+            if(!sym.signature.empty()) {
+                result += ": `" + sym.signature + "`";
+            }
+            auto rel = make_source_relative(sym.declaration_location.file, config.project_root);
+            if(!rel.empty() && sym.declaration_location.line > 0) {
+                result += " (" + rel + ":" + std::to_string(sym.declaration_location.line) + ")";
+            }
+            result += "\n";
+            break;
+        }
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+auto render_all_workflows_index(const PagePlan& plan, const LinkResolver& links) -> std::string {
+    std::vector<std::pair<std::string, std::string>> workflows;
+    workflows.reserve(plan.linked_pages.size());
+    std::string result;
+    for(auto& linked : plan.linked_pages) {
+        if(!linked.starts_with("workflow:")) continue;
+        auto slug = linked.substr(9);
+        auto* path = links.resolve(slug);
+        if(!path) continue;
+        workflows.emplace_back(slug, *path);
+    }
+
+    std::sort(workflows.begin(), workflows.end(),
+              [](const auto& lhs, const auto& rhs) {
+                  return lhs.first < rhs.first;
+              });
+
+    for(auto& [slug, path] : workflows) {
+        // Convert slug to display: "generate-pages" -> "Generate Pages"
+        std::string display = slug;
+        for(auto& c : display) {
+            if(c == '-') c = ' ';
+        }
+        if(!display.empty()) {
+            display[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(display[0])));
+        }
+        for(std::size_t i = 1; i < display.size(); ++i) {
+            if(display[i - 1] == ' ') {
+                display[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(display[i])));
+            }
+        }
+        result += "- [" + display + "](" +
+                  make_relative_link_target(plan.relative_path, path) + ")\n";
+    }
+    if(!result.empty()) result += "\n";
+    return result;
+}
+
+auto render_type_diagram(const PagePlan& plan, const extract::ProjectModel& model) -> std::string {
+    if(plan.owner_keys.empty()) return {};
+
+    for(auto& key : plan.owner_keys) {
+        for(auto& [id, sym] : model.symbols) {
+            if(sym.qualified_name != key) continue;
+            if(sym.bases.empty() && sym.derived.empty() && sym.children.empty()) return {};
+
+            std::string result = "```mermaid\nclassDiagram\n";
+            auto last_sep = sym.qualified_name.rfind("::");
+            auto short_name = (last_sep != std::string::npos)
+                                  ? sym.qualified_name.substr(last_sep + 2)
+                                  : sym.qualified_name;
+
+            result += "    class " + short_name + "\n";
+
+            for(auto& base_id : sym.bases) {
+                if(auto* base = lookup_sym(model, base_id)) {
+                    auto bsep = base->qualified_name.rfind("::");
+                    auto bname = (bsep != std::string::npos)
+                                     ? base->qualified_name.substr(bsep + 2)
+                                     : base->qualified_name;
+                    result += "    " + bname + " <|-- " + short_name + "\n";
+                }
+            }
+
+            for(auto& derived_id : sym.derived) {
+                if(auto* derived = lookup_sym(model, derived_id)) {
+                    auto dsep = derived->qualified_name.rfind("::");
+                    auto dname = (dsep != std::string::npos)
+                                     ? derived->qualified_name.substr(dsep + 2)
+                                     : derived->qualified_name;
+                    result += "    " + short_name + " <|-- " + dname + "\n";
+                }
+            }
+
+            result += "```\n";
+            return result;
+        }
+    }
+    return {};
+}
+
+auto render_import_diagram(const PagePlan& plan, const extract::ProjectModel& model) -> std::string {
+    if(plan.owner_keys.empty()) return {};
+
+    for(auto& key : plan.owner_keys) {
+        for(auto& [source_file, mod_unit] : model.modules) {
+            if(mod_unit.name != key) continue;
+            if(mod_unit.imports.empty()) return {};
+
+            auto top_module = [](std::string_view name) -> std::string {
+                auto colon = name.find(':');
+                return std::string(colon == std::string_view::npos ? name : name.substr(0, colon));
+            };
+
+            std::string result = "```mermaid\ngraph LR\n";
+            auto mod_display = top_module(mod_unit.name);
+            result += "    " + mod_display + "\n";
+            std::unordered_set<std::string> seen;
+            for(auto& imp : mod_unit.imports) {
+                auto imp_display = top_module(imp);
+                if(!seen.insert(imp_display).second) continue;
+                result += "    " + imp_display + " --> " + mod_display + "\n";
+            }
+            result += "```\n";
+            return result;
+        }
+    }
+    return {};
+}
+
+auto render_namespace_diagram(const PagePlan& plan, const extract::ProjectModel& model) -> std::string {
+    if(plan.owner_keys.empty()) return {};
+
+    for(auto& key : plan.owner_keys) {
+        auto ns_it = model.namespaces.find(key);
+        if(ns_it == model.namespaces.end()) continue;
+        auto& ns = ns_it->second;
+
+        // Collect type names
+        std::vector<std::string> type_names;
+        for(auto& sym_id : ns.symbols) {
+            auto* sym = lookup_sym(model, sym_id);
+            if(sym && is_type_kind(sym->kind)) {
+                auto sep = sym->qualified_name.rfind("::");
+                type_names.push_back(
+                    sep != std::string::npos ? sym->qualified_name.substr(sep + 2) : sym->qualified_name);
+            }
+        }
+
+        if(type_names.empty() && ns.children.empty()) return {};
+
+        auto last_sep = key.rfind("::");
+        auto ns_short = (last_sep != std::string::npos) ? key.substr(last_sep + 2) : key;
+
+        std::string result = "```mermaid\ngraph TD\n";
+        result += "    NS[\"" + ns_short + "\"]\n";
+
+        for(std::size_t i = 0; i < type_names.size(); ++i) {
+            auto node_id = "T" + std::to_string(i);
+            result += "    " + node_id + "[\"" + type_names[i] + "\"]\n";
+            result += "    NS --> " + node_id + "\n";
+        }
+
+        for(auto& child : ns.children) {
+            if(child.find("(anonymous namespace)") != std::string::npos) continue;
+            auto csep = child.rfind("::");
+            auto child_short = (csep != std::string::npos) ? child.substr(csep + 2) : child;
+            result += "    NS --> " + child_short + "\n";
+        }
+
+        result += "```\n";
+        return result;
+    }
+    return {};
+}
+
+auto render_module_dependency_diagram(const extract::ProjectModel& model) -> std::string {
+    // Build top-level module dependency graph
+    auto top_module = [](std::string_view name) -> std::string {
+        auto colon = name.find(':');
+        return std::string(colon == std::string_view::npos ? name : name.substr(0, colon));
+    };
+
+    std::unordered_map<std::string, std::unordered_set<std::string>> deps;
+    std::unordered_set<std::string> all_modules;
+
+    for(auto& [source_file, mod_unit] : model.modules) {
+        if(!mod_unit.is_interface) continue;
+        auto from = top_module(mod_unit.name);
+        all_modules.insert(from);
+        for(auto& imp : mod_unit.imports) {
+            auto to = top_module(imp);
+            if(to != from) {
+                deps[from].insert(to);
+                all_modules.insert(to);
+            }
+        }
+    }
+
+    if(all_modules.size() < 2) return {};
+
+    std::string result = "```mermaid\ngraph LR\n";
+
+    // Sort for deterministic output
+    std::vector<std::string> sorted_modules(all_modules.begin(), all_modules.end());
+    std::sort(sorted_modules.begin(), sorted_modules.end());
+
+    for(auto& mod : sorted_modules) {
+        result += "    " + mod + "\n";
+    }
+
+    for(auto& [from, targets] : deps) {
+        std::vector<std::string> sorted_targets(targets.begin(), targets.end());
+        std::sort(sorted_targets.begin(), sorted_targets.end());
+        for(auto& to : sorted_targets) {
+            result += "    " + to + " --> " + from + "\n";
+        }
+    }
+
+    result += "```\n";
+    return result;
+}
+
 auto strip_trailing_carriage_return(std::string_view line) -> std::string_view {
     while(!line.empty() && line.back() == '\r') {
         line.remove_suffix(1);
@@ -629,6 +895,13 @@ auto render_deterministic_block(std::string_view block_name,
     if(block_name == "all_namespaces") return render_all_namespaces_index(model, links, plan.relative_path);
     if(block_name == "all_types") return render_all_types_index(model, links, plan.relative_path);
     if(block_name == "all_files") return render_all_files_index(model, config, links, plan.relative_path);
+    if(block_name == "all_workflows") return render_all_workflows_index(plan, links);
+    if(block_name == "call_chain") return render_call_chain_block(plan, model);
+    if(block_name == "participants") return render_participants_block(plan, model, config);
+    if(block_name == "type_diagram") return render_type_diagram(plan, model);
+    if(block_name == "import_diagram") return render_import_diagram(plan, model);
+    if(block_name == "namespace_diagram") return render_namespace_diagram(plan, model);
+    if(block_name == "module_dependency_diagram") return render_module_dependency_diagram(model);
     return {};
 }
 

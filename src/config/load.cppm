@@ -46,6 +46,7 @@ struct RawPageTypesConfig {
     bool namespace_page = false;
     bool type_page = false;
     bool file_page = false;
+    bool workflow_page = false;
 };
 
 struct RawPathRulesConfig {
@@ -54,6 +55,7 @@ struct RawPathRulesConfig {
     std::string namespace_prefix;
     std::string type_prefix;
     std::string file_prefix;
+    std::string workflow_prefix;
     std::string name_normalize;
 };
 
@@ -63,8 +65,9 @@ struct RawPromptTemplatesConfig {
     std::string namespace_summary;
     std::string module_summary;
     std::string module_architecture;
-    std::string repository_overview;
-    std::string reading_guide;
+    std::string index_overview;
+    std::string index_reading_guide;
+    std::string workflow;
 };
 
 struct RawPageTemplatesConfig {
@@ -73,6 +76,7 @@ struct RawPageTemplatesConfig {
     std::string namespace_page;
     std::string type_page;
     std::string file_page;
+    std::string workflow_page;
 };
 
 struct RawEvidenceRulesConfig {
@@ -81,6 +85,15 @@ struct RawEvidenceRulesConfig {
     std::uint32_t max_siblings = 0;
     std::uint32_t max_source_bytes = 0;
     std::uint32_t max_related_summaries = 0;
+};
+
+struct RawWorkflowRulesConfig {
+    std::uint32_t min_chain_symbols = 0;
+    std::uint32_t min_new_symbols = 0;
+    std::uint32_t max_symbol_overlap_ratio_percent = 0;
+    std::uint32_t max_workflow_pages = 0;
+    std::uint32_t llm_review_top_k = 0;
+    std::uint32_t llm_selected_count = 0;
 };
 
 struct RawLLMConfig {
@@ -98,11 +111,15 @@ struct RawNavigationConfig {
     bool consume_dependency_summaries = false;
 };
 
+struct RawBuiltinConfig {
+    bool vitepress = false;
+};
+
 struct RawSectionOrderConfig {
     std::vector<std::string> type_page;
     std::vector<std::string> namespace_page;
     std::vector<std::string> module_page;
-    std::vector<std::string> repository_page;
+    std::vector<std::string> index_page;
     std::vector<std::string> file_page;
 };
 
@@ -117,11 +134,13 @@ struct RawTaskConfig {
     std::optional<RawPromptTemplatesConfig> prompt_templates;
     std::optional<RawPageTemplatesConfig> page_templates;
     std::optional<RawEvidenceRulesConfig> evidence_rules;
+    std::optional<RawWorkflowRulesConfig> workflow_rules;
     std::optional<RawLLMConfig> llm;
     std::optional<RawValidationConfig> validation;
     std::optional<RawNavigationConfig> navigation;
     std::optional<RawSectionOrderConfig> section_order;
     std::optional<RawExtractConfig> extract;
+    std::optional<RawBuiltinConfig> builtin;
     std::optional<std::string> log_level;
 };
 
@@ -145,6 +164,7 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
     cfg.page_types.namespace_page = raw.page_types->namespace_page;
     cfg.page_types.type_page = raw.page_types->type_page;
     cfg.page_types.file_page = raw.page_types->file_page;
+    cfg.page_types.workflow_page = raw.page_types->workflow_page;
 
     if(!raw.path_rules.has_value()) {
         return std::unexpected(ConfigError{.message = "missing required section [path_rules]"});
@@ -154,6 +174,7 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
     cfg.path_rules.namespace_prefix = std::move(raw.path_rules->namespace_prefix);
     cfg.path_rules.type_prefix = std::move(raw.path_rules->type_prefix);
     cfg.path_rules.file_prefix = std::move(raw.path_rules->file_prefix);
+    cfg.path_rules.workflow_prefix = std::move(raw.path_rules->workflow_prefix);
     cfg.path_rules.name_normalize = std::move(raw.path_rules->name_normalize);
 
     if(!raw.prompt_templates.has_value()) {
@@ -164,8 +185,9 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
     cfg.prompt_templates.namespace_summary = std::move(raw.prompt_templates->namespace_summary);
     cfg.prompt_templates.module_summary = std::move(raw.prompt_templates->module_summary);
     cfg.prompt_templates.module_architecture = std::move(raw.prompt_templates->module_architecture);
-    cfg.prompt_templates.repository_overview = std::move(raw.prompt_templates->repository_overview);
-    cfg.prompt_templates.reading_guide = std::move(raw.prompt_templates->reading_guide);
+    cfg.prompt_templates.index_overview = std::move(raw.prompt_templates->index_overview);
+    cfg.prompt_templates.index_reading_guide = std::move(raw.prompt_templates->index_reading_guide);
+    cfg.prompt_templates.workflow = std::move(raw.prompt_templates->workflow);
 
     if(!raw.page_templates.has_value()) {
         return std::unexpected(ConfigError{.message = "missing required section [page_templates]"});
@@ -175,6 +197,7 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
     cfg.page_templates.namespace_page = std::move(raw.page_templates->namespace_page);
     cfg.page_templates.type_page = std::move(raw.page_templates->type_page);
     cfg.page_templates.file_page = std::move(raw.page_templates->file_page);
+    cfg.page_templates.workflow_page = std::move(raw.page_templates->workflow_page);
 
     if(!raw.evidence_rules.has_value()) {
         return std::unexpected(ConfigError{.message = "missing required section [evidence_rules]"});
@@ -184,6 +207,23 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
     cfg.evidence_rules.max_siblings = raw.evidence_rules->max_siblings;
     cfg.evidence_rules.max_source_bytes = raw.evidence_rules->max_source_bytes;
     cfg.evidence_rules.max_related_summaries = raw.evidence_rules->max_related_summaries;
+
+    if(!raw.workflow_rules.has_value()) {
+        return std::unexpected(ConfigError{
+            .message = "missing required section [workflow_rules]"});
+    }
+    cfg.workflow_rules.min_chain_symbols =
+        raw.workflow_rules->min_chain_symbols;
+    cfg.workflow_rules.min_new_symbols =
+        raw.workflow_rules->min_new_symbols;
+    cfg.workflow_rules.max_symbol_overlap_ratio_percent =
+        raw.workflow_rules->max_symbol_overlap_ratio_percent;
+    cfg.workflow_rules.max_workflow_pages =
+        raw.workflow_rules->max_workflow_pages;
+    cfg.workflow_rules.llm_review_top_k =
+        raw.workflow_rules->llm_review_top_k;
+    cfg.workflow_rules.llm_selected_count =
+        raw.workflow_rules->llm_selected_count;
 
     if(!raw.llm.has_value()) {
         return std::unexpected(ConfigError{.message = "missing required section [llm]"});
@@ -207,8 +247,12 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
         cfg.section_order.type_page = std::move(raw.section_order->type_page);
         cfg.section_order.namespace_page = std::move(raw.section_order->namespace_page);
         cfg.section_order.module_page = std::move(raw.section_order->module_page);
-        cfg.section_order.repository_page = std::move(raw.section_order->repository_page);
+        cfg.section_order.index_page = std::move(raw.section_order->index_page);
         cfg.section_order.file_page = std::move(raw.section_order->file_page);
+    }
+
+    if(raw.builtin.has_value()) {
+        cfg.builtin.vitepress = raw.builtin->vitepress;
     }
 
     cfg.log_level = std::move(raw.log_level);

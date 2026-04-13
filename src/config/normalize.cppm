@@ -76,8 +76,9 @@ auto normalize(TaskConfig& config) -> std::expected<void, NormalizeError> {
     if(auto r = make_absolute_if_nonempty(config.prompt_templates.namespace_summary, "prompt_templates.namespace_summary"); !r) return r;
     if(auto r = make_absolute_if_nonempty(config.prompt_templates.module_summary, "prompt_templates.module_summary"); !r) return r;
     if(auto r = make_absolute_if_nonempty(config.prompt_templates.module_architecture, "prompt_templates.module_architecture"); !r) return r;
-    if(auto r = make_absolute_if_nonempty(config.prompt_templates.repository_overview, "prompt_templates.repository_overview"); !r) return r;
-    if(auto r = make_absolute_if_nonempty(config.prompt_templates.reading_guide, "prompt_templates.reading_guide"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.prompt_templates.index_overview, "prompt_templates.index_overview"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.prompt_templates.index_reading_guide, "prompt_templates.index_reading_guide"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.prompt_templates.workflow, "prompt_templates.workflow"); !r) return r;
 
     // Normalize page template paths
     if(auto r = make_absolute_if_nonempty(config.page_templates.index, "page_templates.index"); !r) return r;
@@ -85,6 +86,7 @@ auto normalize(TaskConfig& config) -> std::expected<void, NormalizeError> {
     if(auto r = make_absolute_if_nonempty(config.page_templates.namespace_page, "page_templates.namespace_page"); !r) return r;
     if(auto r = make_absolute_if_nonempty(config.page_templates.type_page, "page_templates.type_page"); !r) return r;
     if(auto r = make_absolute_if_nonempty(config.page_templates.file_page, "page_templates.file_page"); !r) return r;
+    if(auto r = make_absolute_if_nonempty(config.page_templates.workflow_page, "page_templates.workflow_page"); !r) return r;
 
     auto normalize_separators = [](std::string& path) {
         for(auto& c : path) {
@@ -105,13 +107,15 @@ auto normalize(TaskConfig& config) -> std::expected<void, NormalizeError> {
     normalize_separators(config.prompt_templates.namespace_summary);
     normalize_separators(config.prompt_templates.module_summary);
     normalize_separators(config.prompt_templates.module_architecture);
-    normalize_separators(config.prompt_templates.repository_overview);
-    normalize_separators(config.prompt_templates.reading_guide);
+    normalize_separators(config.prompt_templates.index_overview);
+    normalize_separators(config.prompt_templates.index_reading_guide);
+    normalize_separators(config.prompt_templates.workflow);
     normalize_separators(config.page_templates.index);
     normalize_separators(config.page_templates.module_page);
     normalize_separators(config.page_templates.namespace_page);
     normalize_separators(config.page_templates.type_page);
     normalize_separators(config.page_templates.file_page);
+    normalize_separators(config.page_templates.workflow_page);
 
     return {};
 }

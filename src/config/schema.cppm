@@ -33,6 +33,7 @@ struct PageTypesConfig {
     bool namespace_page = false;
     bool type_page = false;
     bool file_page = false;
+    bool workflow_page = false;
 };
 
 // ── path rules ──────────────────────────────────────────────────────
@@ -43,6 +44,7 @@ struct PathRulesConfig {
     std::string namespace_prefix;
     std::string type_prefix;
     std::string file_prefix;
+    std::string workflow_prefix;
     std::string name_normalize;
 };
 
@@ -54,8 +56,9 @@ struct PromptTemplatesConfig {
     std::string namespace_summary;
     std::string module_summary;
     std::string module_architecture;
-    std::string repository_overview;
-    std::string reading_guide;
+    std::string index_overview;
+    std::string index_reading_guide;
+    std::string workflow;
 };
 
 // ── page templates ──────────────────────────────────────────────────
@@ -66,6 +69,7 @@ struct PageTemplatesConfig {
     std::string namespace_page;
     std::string type_page;
     std::string file_page;
+    std::string workflow_page;
 };
 
 // ── evidence rules ──────────────────────────────────────────────────
@@ -76,6 +80,17 @@ struct EvidenceRulesConfig {
     std::uint32_t max_siblings = 0;
     std::uint32_t max_source_bytes = 0;
     std::uint32_t max_related_summaries = 0;
+};
+
+// ── workflow rules ──────────────────────────────────────────────────
+
+struct WorkflowRulesConfig {
+    std::uint32_t min_chain_symbols = 0;
+    std::uint32_t min_new_symbols = 0;
+    std::uint32_t max_symbol_overlap_ratio_percent = 0;
+    std::uint32_t max_workflow_pages = 0;
+    std::uint32_t llm_review_top_k = 0;
+    std::uint32_t llm_selected_count = 0;
 };
 
 // ── llm ─────────────────────────────────────────────────────────────
@@ -99,13 +114,19 @@ struct NavigationConfig {
     bool consume_dependency_summaries = false;
 };
 
+// ── builtin format ──────────────────────────────────────────────────
+
+struct BuiltinConfig {
+    bool vitepress = false;
+};
+
 // ── section order ───────────────────────────────────────────────────
 
 struct SectionOrderConfig {
     std::vector<std::string> type_page;
     std::vector<std::string> namespace_page;
     std::vector<std::string> module_page;
-    std::vector<std::string> repository_page;
+    std::vector<std::string> index_page;
     std::vector<std::string> file_page;
 };
 
@@ -127,10 +148,12 @@ struct TaskConfig {
     PromptTemplatesConfig prompt_templates;
     PageTemplatesConfig page_templates;
     EvidenceRulesConfig evidence_rules;
+    WorkflowRulesConfig workflow_rules;
     LLMConfig llm;
     ValidationConfig validation;
     NavigationConfig navigation;
     SectionOrderConfig section_order;
+    BuiltinConfig builtin;
 
     std::optional<std::string> log_level;
 };

@@ -87,9 +87,9 @@ TEST_SUITE(config_normalize) {
 
     TEST_CASE(normalize_backslashes) {
         TaskConfig config;
-        config.compile_commands_path = "C:\\build\\compile_commands.json";
-        config.project_root = "C:\\project";
-        config.output_root = "C:\\output";
+        config.compile_commands_path = "workspace\\build\\compile_commands.json";
+        config.project_root = "workspace\\project";
+        config.output_root = "workspace\\output";
 
         auto result = normalize(config);
         ASSERT_TRUE(result.has_value());
@@ -103,9 +103,9 @@ TEST_SUITE(config_normalize) {
 
     TEST_CASE(normalize_filter_patterns_backslashes) {
         TaskConfig config;
-        config.compile_commands_path = "C:\\build\\compile_commands.json";
-        config.project_root = "C:\\project";
-        config.output_root = "C:\\output";
+        config.compile_commands_path = "workspace\\build\\compile_commands.json";
+        config.project_root = "workspace\\project";
+        config.output_root = "workspace\\output";
         config.filter.include = {"src\\", "include\\api\\"};
         config.filter.exclude = {"build\\Debug\\_deps\\"};
 
@@ -115,6 +115,22 @@ TEST_SUITE(config_normalize) {
         EXPECT_EQ(config.filter.include[0].find('\\'), std::string::npos);
         EXPECT_EQ(config.filter.include[1].find('\\'), std::string::npos);
         EXPECT_EQ(config.filter.exclude[0].find('\\'), std::string::npos);
+    }
+
+    TEST_CASE(normalize_feature_template_paths) {
+        TaskConfig config;
+        config.workspace_root = "workspace\\clore";
+        config.compile_commands_path = "workspace\\build\\compile_commands.json";
+        config.project_root = "workspace\\project";
+        config.output_root = "workspace\\output";
+        config.prompt_templates.workflow = "templates\\prompts\\workflow.txt";
+        config.page_templates.workflow_page = "templates\\pages\\workflow.md";
+
+        auto result = normalize(config);
+        ASSERT_TRUE(result.has_value());
+
+        EXPECT_EQ(config.prompt_templates.workflow.find('\\'), std::string::npos);
+        EXPECT_EQ(config.page_templates.workflow_page.find('\\'), std::string::npos);
     }
 
     // CRITICAL: empty required paths must be rejected before fs::absolute,
@@ -213,5 +229,135 @@ TEST_SUITE(config_validate_extra) {
 
         fs::remove(temp_file);
         fs::remove_all(temp_dir);
+    }
+
+    TEST_CASE(max_snippet_bytes_must_be_positive) {
+        namespace fs = std::filesystem;
+
+        auto temp_file = fs::temp_directory_path() / "clore_cc_positive.json";
+        {
+            std::ofstream f(temp_file);
+            f << "[]";
+        }
+        auto temp_dir = fs::temp_directory_path() / "clore_proj_positive";
+        fs::create_directories(temp_dir);
+
+        TaskConfig config;
+        config.compile_commands_path = temp_file.string();
+        config.project_root = temp_dir.string();
+        config.output_root = temp_dir.string();
+        config.extract.max_snippet_bytes = 0;
+
+        auto result = validate(config);
+        EXPECT_FALSE(result.has_value());
+
+        fs::remove(temp_file);
+        fs::remove_all(temp_dir);
+    }
+
+    TEST_CASE(workflow_page_requires_workflow_prompt_template_file) {
+        namespace fs = std::filesystem;
+
+        auto temp_root = fs::temp_directory_path() / "clore_validate_feature_prompt";
+        fs::remove_all(temp_root);
+        fs::create_directories(temp_root);
+
+        auto compile_commands = temp_root / "compile_commands.json";
+        {
+            std::ofstream f(compile_commands);
+            f << "[]";
+        }
+
+        auto workflow_page = temp_root / "workflow.md";
+        {
+            std::ofstream f(workflow_page);
+            f << "# Workflow";
+        }
+
+        TaskConfig config;
+        config.compile_commands_path = compile_commands.string();
+        config.project_root = temp_root.string();
+        config.output_root = temp_root.string();
+        config.extract.max_snippet_bytes = 512;
+
+        config.page_types.workflow_page = true;
+        config.path_rules.index_path = "index.md";
+        config.path_rules.module_prefix = "modules";
+        config.path_rules.namespace_prefix = "namespaces";
+        config.path_rules.type_prefix = "types";
+        config.path_rules.file_prefix = "files";
+        config.path_rules.workflow_prefix = "workflows";
+        config.path_rules.name_normalize = "lowercase";
+
+        config.prompt_templates.workflow = (temp_root / "missing_workflow_prompt.txt").string();
+        config.page_templates.workflow_page = workflow_page.string();
+
+        config.evidence_rules.max_callers = 1;
+        config.evidence_rules.max_callees = 1;
+        config.evidence_rules.max_siblings = 1;
+        config.evidence_rules.max_source_bytes = 1;
+        config.evidence_rules.max_related_summaries = 1;
+
+        config.llm.system_prompt = "system";
+        config.llm.retry_count = 1;
+        config.llm.retry_initial_backoff_ms = 1;
+
+        auto result = validate(config);
+        EXPECT_FALSE(result.has_value());
+
+        fs::remove_all(temp_root);
+    }
+
+    TEST_CASE(workflow_page_requires_workflow_page_template_file) {
+        namespace fs = std::filesystem;
+
+        auto temp_root = fs::temp_directory_path() / "clore_validate_workflow_page";
+        fs::remove_all(temp_root);
+        fs::create_directories(temp_root);
+
+        auto compile_commands = temp_root / "compile_commands.json";
+        {
+            std::ofstream f(compile_commands);
+            f << "[]";
+        }
+
+        auto workflow_prompt = temp_root / "workflow.txt";
+        {
+            std::ofstream f(workflow_prompt);
+            f << "Prompt {{evidence}}";
+        }
+
+        TaskConfig config;
+        config.compile_commands_path = compile_commands.string();
+        config.project_root = temp_root.string();
+        config.output_root = temp_root.string();
+        config.extract.max_snippet_bytes = 512;
+
+        config.page_types.workflow_page = true;
+        config.path_rules.index_path = "index.md";
+        config.path_rules.module_prefix = "modules";
+        config.path_rules.namespace_prefix = "namespaces";
+        config.path_rules.type_prefix = "types";
+        config.path_rules.file_prefix = "files";
+        config.path_rules.workflow_prefix = "workflows";
+        config.path_rules.name_normalize = "lowercase";
+
+        config.prompt_templates.workflow = workflow_prompt.string();
+        config.page_templates.workflow_page = (temp_root / "missing_workflow_page.md").string();
+
+        config.evidence_rules.max_callers = 1;
+        config.evidence_rules.max_callees = 1;
+        config.evidence_rules.max_siblings = 1;
+        config.evidence_rules.max_source_bytes = 1;
+        config.evidence_rules.max_related_summaries = 1;
+
+        config.llm.system_prompt = "system";
+        config.llm.retry_count = 1;
+        config.llm.retry_initial_backoff_ms = 1;
+
+        auto result = validate(config);
+        EXPECT_FALSE(result.has_value());
+
+        fs::remove_all(temp_root);
     }
 };

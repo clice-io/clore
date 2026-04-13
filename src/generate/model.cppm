@@ -1,6 +1,7 @@
 module;
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -19,6 +20,7 @@ enum class PageType : std::uint8_t {
     Namespace,
     Type,
     File,
+    Workflow,
 };
 
 auto page_type_name(PageType type) -> std::string_view;
@@ -125,6 +127,16 @@ struct LinkResolver {
     }
 };
 
+// ── shared helpers ──────────────────────────────────────────────────
+
+auto lookup_sym(const extract::ProjectModel& model, extract::SymbolID id)
+    -> const extract::SymbolInfo*;
+
+auto is_type_kind(extract::SymbolKind kind) -> bool;
+
+auto make_source_relative(const std::string& path, const std::string& project_root)
+    -> std::string;
+
 }  // namespace clore::generate
 
 // ── implementation ──────────────────────────────────────────────────
@@ -138,8 +150,41 @@ auto page_type_name(PageType type) -> std::string_view {
         case PageType::Namespace:  return "namespace";
         case PageType::Type:       return "type";
         case PageType::File:       return "file";
+        case PageType::Workflow:   return "workflow";
     }
     return "unknown";
+}
+
+auto lookup_sym(const extract::ProjectModel& model, extract::SymbolID id)
+    -> const extract::SymbolInfo* {
+    auto it = model.symbols.find(id);
+    return it != model.symbols.end() ? &it->second : nullptr;
+}
+
+auto is_type_kind(extract::SymbolKind kind) -> bool {
+    switch(kind) {
+        case extract::SymbolKind::Class:
+        case extract::SymbolKind::Struct:
+        case extract::SymbolKind::Enum:
+        case extract::SymbolKind::Union:
+        case extract::SymbolKind::Concept:
+        case extract::SymbolKind::Template:
+        case extract::SymbolKind::TypeAlias:
+            return true;
+        default:
+            return false;
+    }
+}
+
+auto make_source_relative(const std::string& path, const std::string& project_root)
+    -> std::string {
+    namespace fs = std::filesystem;
+    if(path.empty() || project_root.empty()) return path;
+    auto abs = fs::path(path).lexically_normal();
+    auto root = fs::path(project_root).lexically_normal();
+    auto rel = abs.lexically_relative(root);
+    if(rel.empty() || rel.string().starts_with("..")) return path;
+    return rel.generic_string();
 }
 
 }  // namespace clore::generate

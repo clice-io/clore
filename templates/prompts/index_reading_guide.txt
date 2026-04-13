@@ -1,4 +1,4 @@
-Write a Reading Guide for the repository documentation.
+Write a Reading Guide for the index page.
 
 Output:
 - Markdown fragment only

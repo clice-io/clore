@@ -56,12 +56,14 @@ auto make_config(const fs::path& project_root) -> config::TaskConfig {
     config.page_types.namespace_page = true;
     config.page_types.type_page = true;
     config.page_types.file_page = true;
+    config.page_types.workflow_page = false;
 
     config.path_rules.index_path = "index.md";
     config.path_rules.module_prefix = "modules";
     config.path_rules.namespace_prefix = "namespaces";
     config.path_rules.type_prefix = "types";
     config.path_rules.file_prefix = "files";
+    config.path_rules.workflow_prefix = "workflows";
     config.path_rules.name_normalize = "lowercase";
 
     config.evidence_rules.max_callers = 5;
@@ -69,6 +71,13 @@ auto make_config(const fs::path& project_root) -> config::TaskConfig {
     config.evidence_rules.max_siblings = 8;
     config.evidence_rules.max_source_bytes = 4096;
     config.evidence_rules.max_related_summaries = 3;
+
+    config.workflow_rules.min_chain_symbols = 2;
+    config.workflow_rules.min_new_symbols = 1;
+    config.workflow_rules.max_symbol_overlap_ratio_percent = 50;
+    config.workflow_rules.max_workflow_pages = 8;
+    config.workflow_rules.llm_review_top_k = 6;
+    config.workflow_rules.llm_selected_count = 4;
 
     config.llm.system_prompt = "You are a writer.";
     config.llm.retry_count = 3;
@@ -387,9 +396,15 @@ TEST_SUITE(generate) {
         auto config = make_config(temp.path);
 
         extract::ProjectModel model;
+        auto file = (temp.path / "src" / "demo.cppm").generic_string();
+
+        auto sym = make_type_symbol(500, "Foo", "demo::Foo", file, "A type.");
+        sym.enclosing_namespace = "demo";
+        model.symbols.emplace(sym.id, sym);
 
         extract::NamespaceInfo project_ns;
         project_ns.name = "demo";
+        project_ns.symbols = {sym.id};
 
         extract::NamespaceInfo std_ns;
         std_ns.name = "std";

@@ -1,8 +1,12 @@
 # {{title}}
 
-## What This Repository Contains
+## Overview
 
-{{slot:repository_overview}}
+{{slot:index_overview}}
+
+## Module Dependencies
+
+{{block:module_dependency_diagram}}
 
 ## Modules
 
@@ -20,6 +24,10 @@
 
 {{block:all_files}}
 
+## Features
+
+{{block:all_workflows}}
+
 ## Reading Guide
 
-{{slot:reading_guide}}
+{{slot:index_reading_guide}}

@@ -51,10 +51,17 @@ auto build_evidence_for_module_architecture(
     const PageSummaryCache& summaries,
     std::string_view project_root) -> EvidencePack;
 
-auto build_evidence_for_repository_overview(
+auto build_evidence_for_index_overview(
     const extract::ProjectModel& model,
     const config::EvidenceRulesConfig& rules,
     const PageSummaryCache& summaries) -> EvidencePack;
+
+auto build_evidence_for_workflow(
+    const std::vector<std::string>& chain_keys,
+    const extract::ProjectModel& model,
+    const config::EvidenceRulesConfig& rules,
+    const PageSummaryCache& summaries,
+    std::string_view project_root) -> EvidencePack;
 
 auto format_evidence_text(const EvidencePack& pack) -> std::string;
 
@@ -69,16 +76,6 @@ namespace clore::generate {
 
 namespace {
 
-auto make_source_relative(const std::string& path, const std::string& project_root) -> std::string {
-    namespace fs = std::filesystem;
-    if(path.empty() || project_root.empty()) return path;
-    auto abs = fs::path(path).lexically_normal();
-    auto root = fs::path(project_root).lexically_normal();
-    auto rel = abs.lexically_relative(root);
-    if(rel.empty() || rel.string().starts_with("..")) return path;
-    return rel.generic_string();
-}
-
 auto to_symbol_fact(const extract::SymbolInfo& sym, const std::string& project_root) -> SymbolFact {
     return SymbolFact{
         .id = sym.id,
@@ -88,7 +85,7 @@ auto to_symbol_fact(const extract::SymbolInfo& sym, const std::string& project_r
         .access = sym.access,
         .is_template = sym.is_template,
         .template_params = sym.template_params,
-        .declaration_file = make_source_relative(sym.declaration_location.file, project_root),
+        .declaration_file = clore::generate::make_source_relative(sym.declaration_location.file, project_root),
         .declaration_line = sym.declaration_location.line,
         .doc_comment = sym.doc_comment,
     };
@@ -96,8 +93,7 @@ auto to_symbol_fact(const extract::SymbolInfo& sym, const std::string& project_r
 
 auto lookup(const extract::ProjectModel& model, extract::SymbolID id)
     -> const extract::SymbolInfo* {
-    auto it = model.symbols.find(id);
-    return it != model.symbols.end() ? &it->second : nullptr;
+    return clore::generate::lookup_sym(model, id);
 }
 
 auto collect_facts(const extract::ProjectModel& model,
@@ -444,15 +440,15 @@ auto build_evidence_for_module_architecture(
     return pack;
 }
 
-auto build_evidence_for_repository_overview(
+auto build_evidence_for_index_overview(
     const extract::ProjectModel& model,
     const config::EvidenceRulesConfig& rules,
     const PageSummaryCache& summaries) -> EvidencePack {
 
     EvidencePack pack;
-    pack.slot_kind = "repository_overview";
-    pack.subject_name = "repository";
-    pack.subject_kind = "repository";
+    pack.slot_kind = "index_overview";
+    pack.subject_name = "index";
+    pack.subject_kind = "index";
 
     // Top-level modules
     for(auto& [source_file, mod_unit] : model.modules) {
@@ -477,6 +473,94 @@ auto build_evidence_for_repository_overview(
     // Summaries from module pages
     std::vector<std::string> summary_keys;
     for(auto& fact : pack.target_facts) {
+        summary_keys.push_back(fact.qualified_name);
+    }
+    pack.related_page_summaries = collect_summaries(summaries, summary_keys, rules.max_related_summaries);
+
+    return pack;
+}
+
+auto build_evidence_for_workflow(
+    const std::vector<std::string>& chain_keys,
+    const extract::ProjectModel& model,
+    const config::EvidenceRulesConfig& rules,
+    const PageSummaryCache& summaries,
+    std::string_view project_root) -> EvidencePack {
+
+    auto root = std::string(project_root);
+    EvidencePack pack;
+    pack.slot_kind = "workflow";
+    if(!chain_keys.empty()) {
+        pack.subject_name = chain_keys[0];
+    }
+    pack.subject_kind = "workflow";
+
+    std::unordered_set<extract::SymbolID> chain_symbol_ids;
+
+    // Target facts: symbols in the selected calling chain
+    for(auto& qname : chain_keys) {
+        for(auto& [id, sym] : model.symbols) {
+            if(sym.qualified_name == qname) {
+                chain_symbol_ids.insert(sym.id);
+                pack.target_facts.push_back(to_symbol_fact(sym, root));
+                if(!sym.source_snippet.empty()) {
+                    pack.source_snippets.push_back(
+                        truncate_snippet(sym.source_snippet, rules.max_source_bytes));
+                }
+                break;
+            }
+        }
+    }
+
+    // Local context: explicit chain call edges (structured semantics for LLM)
+    for(std::size_t i = 0; i + 1 < chain_keys.size(); ++i) {
+        SymbolFact edge_fact;
+        edge_fact.qualified_name = chain_keys[i] + " -> " + chain_keys[i + 1];
+        edge_fact.kind_label = "call_edge";
+        pack.local_context.push_back(std::move(edge_fact));
+    }
+
+    // Boundary contexts: direct callees/callers outside the selected chain
+    std::unordered_set<extract::SymbolID> dep_seen;
+    std::unordered_set<extract::SymbolID> rev_seen;
+    for(auto& chain_fact : pack.target_facts) {
+        for(auto& [id, sym] : model.symbols) {
+            if(sym.qualified_name != chain_fact.qualified_name) continue;
+
+            for(auto& callee_id : sym.calls) {
+                if(pack.dependency_context.size() >= rules.max_callees) break;
+                if(chain_symbol_ids.contains(callee_id) || !dep_seen.insert(callee_id).second) {
+                    continue;
+                }
+                if(auto* callee = lookup(model, callee_id)) {
+                    pack.dependency_context.push_back(to_symbol_fact(*callee, root));
+                }
+            }
+
+            for(auto& caller_id : sym.called_by) {
+                if(pack.reverse_usage_context.size() >= rules.max_callers) break;
+                if(chain_symbol_ids.contains(caller_id) ||
+                   !rev_seen.insert(caller_id).second) {
+                    continue;
+                }
+                if(auto* caller = lookup(model, caller_id)) {
+                    pack.reverse_usage_context.push_back(to_symbol_fact(*caller, root));
+                }
+            }
+
+            break;
+        }
+    }
+
+    // Related page summaries from chain participants and nearby boundary symbols
+    std::vector<std::string> summary_keys;
+    for(auto& fact : pack.target_facts) {
+        summary_keys.push_back(fact.qualified_name);
+    }
+    for(auto& fact : pack.dependency_context) {
+        summary_keys.push_back(fact.qualified_name);
+    }
+    for(auto& fact : pack.reverse_usage_context) {
         summary_keys.push_back(fact.qualified_name);
     }
     pack.related_page_summaries = collect_summaries(summaries, summary_keys, rules.max_related_summaries);

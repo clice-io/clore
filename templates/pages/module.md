@@ -8,6 +8,10 @@
 
 {{block:imports}}
 
+## Dependency Diagram
+
+{{block:import_diagram}}
+
 ## Public Types
 
 {{block:types_index}}

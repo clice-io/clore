@@ -4,6 +4,10 @@
 
 {{slot:namespace_summary}}
 
+## Diagram
+
+{{block:namespace_diagram}}
+
 ## Subnamespaces
 
 {{block:subnamespaces}}

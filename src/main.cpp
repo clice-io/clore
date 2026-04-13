@@ -46,12 +46,6 @@ struct Options {
     <std::string> log_level;
 
     DecoKV(style = KVStyle::JoinedOrSeparate,
-           names = {"--max-snippet-bytes", "--max-snippet-bytes="},
-           help = "Maximum bytes of source captured per symbol snippet",
-           required = false)
-    <std::uint32_t> max_snippet_bytes;
-
-    DecoKV(style = KVStyle::JoinedOrSeparate,
             names = {"--model", "--model="},
             help = "Model name for generation",
             required = false)
@@ -144,9 +138,6 @@ int main(int argc, const char** argv) {
     task_config.compile_commands_path = *opts.compile_commands;
     task_config.project_root = *opts.source_dir;
     task_config.output_root = *opts.output_dir;
-    if(opts.max_snippet_bytes.has_value()) {
-        task_config.extract.max_snippet_bytes = *opts.max_snippet_bytes;
-    }
     if(task_config.workspace_root.empty()) {
         task_config.workspace_root = fs::current_path().string();
     }
