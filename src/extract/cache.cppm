@@ -48,10 +48,10 @@ struct CacheRecord {
 
 auto build_compile_signature(const CompileEntry& entry) -> std::uint64_t;
 
-auto hash_file(std::string_view path) -> std::uint64_t;
+auto hash_file(std::string_view path) -> std::expected<std::uint64_t, CacheError>;
 
 auto capture_dependency_snapshot(const std::vector<std::string>& files)
-    -> DependencySnapshot;
+    -> std::expected<DependencySnapshot, CacheError>;
 
 auto dependencies_changed(const DependencySnapshot& snapshot) -> bool;
 
@@ -187,16 +187,19 @@ auto build_compile_signature(const CompileEntry& entry) -> std::uint64_t {
     return llvm::xxh3_64bits(payload);
 }
 
-auto hash_file(std::string_view path) -> std::uint64_t {
+auto hash_file(std::string_view path) -> std::expected<std::uint64_t, CacheError> {
     auto buffer = llvm::MemoryBuffer::getFile(path);
     if(!buffer) {
-        return 0;
+        return std::unexpected(CacheError{
+            .message = std::format("failed to read '{}' for hashing: {}",
+                                   path, buffer.getError().message()),
+        });
     }
     return llvm::xxh3_64bits((*buffer)->getBuffer());
 }
 
 auto capture_dependency_snapshot(const std::vector<std::string>& files)
-    -> DependencySnapshot {
+    -> std::expected<DependencySnapshot, CacheError> {
     DependencySnapshot snapshot;
     snapshot.build_at = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 
@@ -208,14 +211,25 @@ auto capture_dependency_snapshot(const std::vector<std::string>& files)
     snapshot.hashes.reserve(normalized.size());
     for(const auto& file : normalized) {
         auto normalized_path = normalize_path_string(file);
+        auto hash = hash_file(normalized_path);
+        if(!hash.has_value()) {
+            return std::unexpected(CacheError{
+                .message = std::format("failed to hash dependency '{}': {}",
+                                       normalized_path, hash.error().message),
+            });
+        }
         snapshot.files.push_back(normalized_path);
-        snapshot.hashes.push_back(hash_file(normalized_path));
+        snapshot.hashes.push_back(*hash);
     }
 
     return snapshot;
 }
 
 auto dependencies_changed(const DependencySnapshot& snapshot) -> bool {
+    if(snapshot.build_at <= 0 || snapshot.files.empty()) {
+        return true;
+    }
+
     if(snapshot.files.size() != snapshot.hashes.size()) {
         return true;
     }
@@ -235,7 +249,8 @@ auto dependencies_changed(const DependencySnapshot& snapshot) -> bool {
             continue;
         }
 
-        if(hash_file(file) != snapshot.hashes[index]) {
+        auto hash = hash_file(file);
+        if(!hash.has_value() || *hash != snapshot.hashes[index]) {
             return true;
         }
     }

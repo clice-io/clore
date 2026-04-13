@@ -42,7 +42,7 @@ auto read_environment() -> std::expected<EnvironmentConfig, LLMError>;
 
 auto build_chat_completions_url(std::string_view api_base) -> std::string;
 
-auto perform_http_request(std::string_view url,
+auto perform_http_request(const std::string& url,
                           std::string_view api_key,
                           std::string_view request_json)
     -> std::expected<RawHttpResponse, LLMError>;
@@ -178,7 +178,7 @@ struct CurlHeaderCleanup {
     }
 };
 
-auto perform_http_request(std::string_view url,
+auto perform_http_request(const std::string& url,
                           std::string_view api_key,
                           std::string_view request_json)
     -> std::expected<RawHttpResponse, LLMError> {
@@ -208,8 +208,10 @@ auto perform_http_request(std::string_view url,
     std::unique_ptr<curl_slist, CurlHeaderCleanup> headers(raw_headers);
     std::string response_body;
     long http_status = 0;
+    std::string post_data(request_json);
 
-    if(auto status = curl_setopt_checked(easy.get(), CURLOPT_URL, url.data(), "CURLOPT_URL");
+    // libcurl requires a stable NUL-terminated URL string here.
+    if(auto status = curl_setopt_checked(easy.get(), CURLOPT_URL, url.c_str(), "CURLOPT_URL");
        !status.has_value()) {
         return std::unexpected(std::move(status.error()));
     }
@@ -223,14 +225,14 @@ auto perform_http_request(std::string_view url,
         return std::unexpected(std::move(status.error()));
     }
     if(auto status = curl_setopt_checked(easy.get(), CURLOPT_POSTFIELDS,
-                                         request_json.data(),
+                                         post_data.c_str(),
                                          "CURLOPT_POSTFIELDS");
        !status.has_value()) {
         return std::unexpected(std::move(status.error()));
     }
     if(auto status = curl_setopt_checked(
             easy.get(), CURLOPT_POSTFIELDSIZE_LARGE,
-            static_cast<curl_off_t>(request_json.size()),
+            static_cast<curl_off_t>(post_data.size()),
             "CURLOPT_POSTFIELDSIZE_LARGE");
        !status.has_value()) {
         return std::unexpected(std::move(status.error()));

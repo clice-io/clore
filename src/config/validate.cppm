@@ -167,9 +167,6 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
     if(auto r = validate_nonzero(config.evidence_rules.max_related_summaries, "evidence_rules.max_related_summaries"); !r) return r;
 
     // Validate workflow rules
-    if(auto r = validate_nonzero(config.workflow_rules.min_chain_symbols,
-                                 "workflow_rules.min_chain_symbols");
-       !r) return r;
     if(config.workflow_rules.min_chain_symbols < 2) {
         return std::unexpected(ValidationError{
             .message =

@@ -298,8 +298,14 @@ auto write_utf8_text_file(const std::filesystem::path& path, std::string_view co
 
 auto enable_utf8_console() -> void {
 #ifdef _WIN32
-    (void)SetConsoleCP(CP_UTF8);
-    (void)SetConsoleOutputCP(CP_UTF8);
+    if(SetConsoleCP(CP_UTF8) == 0) {
+        clore::logging::warn("SetConsoleCP(CP_UTF8) failed with error {}",
+                             static_cast<std::uint32_t>(GetLastError()));
+    }
+    if(SetConsoleOutputCP(CP_UTF8) == 0) {
+        clore::logging::warn("SetConsoleOutputCP(CP_UTF8) failed with error {}",
+                             static_cast<std::uint32_t>(GetLastError()));
+    }
 #endif
 }
 

@@ -178,6 +178,13 @@ auto call_llm(std::string_view model,
               std::string_view prompt)
     -> std::expected<std::string, LLMError>;
 
+auto call_llm_with_retries(std::string_view model,
+                           std::string_view system_prompt,
+                           std::string_view prompt,
+                           std::uint32_t retry_count,
+                           std::uint32_t retry_initial_backoff_ms)
+    -> std::expected<std::string, LLMError>;
+
 template <typename T>
 auto call_structured_async(std::string_view model,
                            std::string_view system_prompt,
@@ -608,6 +615,7 @@ auto make_schema_value(json::Document& document) -> std::expected<json::Value, L
         }
         return object->as_value();
     } else if constexpr(is_array_v<schema_type>) {
+        constexpr auto fixed_size = std::tuple_size_v<schema_type>;
         auto item_schema = make_schema_value<array_inner_t<schema_type>>(document);
         if(!item_schema.has_value()) {
             return std::unexpected(std::move(item_schema.error()));
@@ -621,6 +629,14 @@ auto make_schema_value(json::Document& document) -> std::expected<json::Value, L
         }
         if(auto status = object->insert("items", std::move(*item_schema)); !status.has_value()) {
             return to_llm_unexpected(status.error(), "failed to set fixed array schema items");
+        }
+        if(auto status = object->insert("minItems", static_cast<std::uint64_t>(fixed_size));
+           !status.has_value()) {
+            return to_llm_unexpected(status.error(), "failed to set fixed array schema minItems");
+        }
+        if(auto status = object->insert("maxItems", static_cast<std::uint64_t>(fixed_size));
+           !status.has_value()) {
+            return to_llm_unexpected(status.error(), "failed to set fixed array schema maxItems");
         }
         return object->as_value();
     } else if constexpr(eventide::refl::reflectable_class<schema_type>) {
@@ -1829,13 +1845,36 @@ auto call_llm_blocking(std::string_view model,
     return std::move(*text);
 }
 
+auto wait_for_retry_delay_or_stop(std::chrono::milliseconds delay,
+                                  const std::function<bool()>& stop_requested) -> bool {
+    constexpr auto kPollInterval = std::chrono::milliseconds(50);
+
+    auto remaining = delay;
+    while(remaining.count() > 0) {
+        if(stop_requested && stop_requested()) {
+            return false;
+        }
+
+        auto slice = remaining < kPollInterval ? remaining : kPollInterval;
+        std::this_thread::sleep_for(slice);
+        remaining -= slice;
+    }
+
+    return !stop_requested || !stop_requested();
+}
+
 auto request_text_with_retries_blocking(std::string model,
                                         std::string system_prompt,
                                         std::string prompt,
                                         std::uint32_t retry_count,
-                                        std::uint32_t retry_initial_backoff_ms)
+                                        std::uint32_t retry_initial_backoff_ms,
+                                        std::function<bool()> stop_requested = {})
     -> std::expected<std::string, LLMError> {
     for(std::uint32_t attempt = 0;; ++attempt) {
+        if(stop_requested && stop_requested()) {
+            return std::unexpected(LLMError("LLM request cancelled"));
+        }
+
         auto result = call_llm_blocking(model, system_prompt, prompt);
         if(result.has_value()) {
             return result;
@@ -1853,7 +1892,9 @@ auto request_text_with_retries_blocking(std::string model,
         logging::warn(
             "LLM request failed: attempt={}/{} retry_in_ms={} reason={}",
             attempt + 1, retry_count + 1, delay->count(), result.error().message);
-        std::this_thread::sleep_for(*delay);
+        if(!wait_for_retry_delay_or_stop(*delay, stop_requested)) {
+            return std::unexpected(LLMError("LLM request cancelled"));
+        }
     }
 }
 
@@ -2101,6 +2142,25 @@ auto parse_response(std::string_view json)
         return std::unexpected(std::move(first_choice.error()));
     }
 
+    auto finish_reason_value = first_choice->get("finish_reason");
+    if(!finish_reason_value.has_value()) {
+        return std::unexpected(LLMError("LLM response choice is missing finish_reason"));
+    }
+    auto finish_reason = detail::expect_string(*finish_reason_value, "choices[0].finish_reason");
+    if(!finish_reason.has_value()) {
+        return std::unexpected(std::move(finish_reason.error()));
+    }
+    if(*finish_reason == "length") {
+        return std::unexpected(LLMError("LLM response was truncated (finish_reason=length)"));
+    }
+    if(*finish_reason == "content_filter") {
+        return std::unexpected(LLMError("LLM response was blocked by content filters"));
+    }
+    if(*finish_reason != "stop" && *finish_reason != "tool_calls") {
+        return std::unexpected(LLMError(std::format(
+            "unsupported LLM finish_reason '{}'", *finish_reason)));
+    }
+
     auto message_value = first_choice->get("message");
     if(!message_value.has_value()) {
         return std::unexpected(LLMError("LLM response choice has no message"));
@@ -2151,6 +2211,15 @@ auto parse_response(std::string_view json)
             return std::unexpected(std::move(parsed_calls.error()));
         }
         output.tool_calls = std::move(*parsed_calls);
+    }
+
+    if(*finish_reason == "tool_calls" && output.tool_calls.empty()) {
+        return std::unexpected(LLMError(
+            "LLM response finish_reason=tool_calls but no tool calls were returned"));
+    }
+    if(*finish_reason == "stop" && !output.tool_calls.empty()) {
+        return std::unexpected(LLMError(
+            "LLM response returned tool calls with finish_reason=stop"));
     }
 
     if(!output.text.has_value() && !output.refusal.has_value() && output.tool_calls.empty()) {
@@ -2384,7 +2453,14 @@ auto LLMClient::run(Callback on_complete) -> std::expected<void, LLMError> {
                     system_prompt,
                     std::move(request.prompt),
                     retry_count,
-                    retry_initial_backoff_ms);
+                    retry_initial_backoff_ms,
+                    [stop_token, run_state] {
+                        if(stop_token.stop_requested()) {
+                            return true;
+                        }
+                        std::lock_guard guard(run_state->mutex);
+                        return run_state->shutdown || run_state->stop_requested;
+                    });
 
                 {
                     std::lock_guard guard(run_state->mutex);
@@ -2504,6 +2580,20 @@ auto call_llm(std::string_view model,
         [=](async::event_loop& loop) {
             return call_llm_async(model, system_prompt, prompt, loop);
         });
+}
+
+auto call_llm_with_retries(std::string_view model,
+                           std::string_view system_prompt,
+                           std::string_view prompt,
+                           std::uint32_t retry_count,
+                           std::uint32_t retry_initial_backoff_ms)
+    -> std::expected<std::string, LLMError> {
+    return detail::request_text_with_retries_blocking(
+        std::string(model),
+        std::string(system_prompt),
+        std::string(prompt),
+        retry_count,
+        retry_initial_backoff_ms);
 }
 
 template <typename T>

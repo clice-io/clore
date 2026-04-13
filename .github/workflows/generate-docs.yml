@@ -10,7 +10,7 @@ jobs:
   generate:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout clore
@@ -24,14 +24,16 @@ jobs:
           cache: false
           locked: true
 
-      - name: Cache .clice
-        uses: actions/cache@v5
+      - name: Restore .clice cache
+        id: restore-clice-cache
+        uses: actions/cache/restore@v5
         with:
           path: .clice/
           key: ${{ runner.os }}-clice
 
-      - name: Cache build directory
-        uses: actions/cache@v5
+      - name: Restore build directory cache
+        id: restore-build-cache
+        uses: actions/cache/restore@v5
         with:
           path: build/Debug/
           key: ${{ runner.os }}-${{ hashFiles('pixi.lock', 'pixi.toml', '**/CMakeLists.txt', 'cmake/**/*.cmake') }}
@@ -42,7 +44,22 @@ jobs:
       - name: Build
         run: pixi run cmake-build Debug
 
+      - name: Save .clice cache
+        if: steps.restore-clice-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .clice/
+          key: ${{ steps.restore-clice-cache.outputs.cache-primary-key }}
+
+      - name: Save build directory cache
+        if: steps.restore-build-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: build/Debug/
+          key: ${{ steps.restore-build-cache.outputs.cache-primary-key }}
+
       - name: Generate documentation
+        if: github.event_name == 'push'
         env:
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

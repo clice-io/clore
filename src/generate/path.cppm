@@ -113,6 +113,43 @@ auto compute_page_path(const PageIdentity& identity, const config::PathRulesConf
     std::string result;
     auto& norm = rules.name_normalize;
 
+    auto trim_ascii = [](std::string_view text) -> std::string_view {
+        while(!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) {
+            text.remove_prefix(1);
+        }
+        while(!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) {
+            text.remove_suffix(1);
+        }
+        return text;
+    };
+
+    auto sanitize_workflow_slug = [&](std::string_view raw_slug) -> std::string {
+        auto trimmed = trim_ascii(raw_slug);
+        std::string sanitized;
+        sanitized.reserve(trimmed.size());
+
+        bool prev_dash = false;
+        for(auto ch : trimmed) {
+            auto uc = static_cast<unsigned char>(ch);
+            if(ch == '/' || ch == '\\' || std::isspace(uc) != 0) {
+                if(!prev_dash) {
+                    sanitized.push_back('-');
+                    prev_dash = true;
+                }
+                continue;
+            }
+            sanitized.push_back(ch);
+            prev_dash = (ch == '-');
+        }
+
+        while(!sanitized.empty() && sanitized.front() == '-') sanitized.erase(sanitized.begin());
+        while(!sanitized.empty() && sanitized.back() == '-') sanitized.pop_back();
+        if(sanitized.empty()) {
+            sanitized = "unnamed";
+        }
+        return sanitized;
+    };
+
     switch(identity.page_type) {
         case PageType::Index: {
             result = rules.index_path;
@@ -180,7 +217,8 @@ auto compute_page_path(const PageIdentity& identity, const config::PathRulesConf
             break;
         }
         case PageType::Workflow: {
-            auto slug = normalize_name(identity.normalized_owner_key, norm);
+            auto slug = sanitize_workflow_slug(
+                normalize_name(identity.normalized_owner_key, norm));
             std::vector<std::string> norm_parts;
             norm_parts.push_back(rules.workflow_prefix);
             norm_parts.push_back(slug);

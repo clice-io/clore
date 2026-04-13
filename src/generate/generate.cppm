@@ -200,6 +200,10 @@ auto extract_workflow_title(const std::string& output)
         ++rest_start;
     }
 
+    if(trim_ascii(output.substr(rest_start)).empty()) {
+        return std::nullopt;
+    }
+
     return std::pair{std::move(title), output.substr(rest_start)};
 }
 
@@ -897,6 +901,24 @@ auto build_workflow_review_calibration_prompt(
     return prompt;
 }
 
+auto build_fallback_workflow_review_selection(
+    const std::vector<WorkflowReviewCandidate>& candidates,
+    std::size_t selected_count) -> std::unordered_map<std::string, std::string> {
+    std::unordered_map<std::string, std::string> selected_titles;
+    selected_titles.reserve(selected_count);
+
+    auto count = std::min(selected_count, candidates.size());
+    for(std::size_t i = 0; i < count; ++i) {
+        auto title = collapse_whitespace(candidates[i].current_title);
+        if(title.empty()) {
+            title = candidates[i].page_id;
+        }
+        selected_titles.emplace(candidates[i].page_id, std::move(title));
+    }
+
+    return selected_titles;
+}
+
 auto request_workflow_review_selection(
     const std::vector<WorkflowReviewCandidate>& candidates,
     const std::unordered_set<std::string>& allowed_page_ids,
@@ -904,12 +926,18 @@ auto request_workflow_review_selection(
     const config::TaskConfig& config,
     std::string_view llm_model)
     -> std::expected<std::unordered_map<std::string, std::string>, GenerateError> {
+    auto fallback_titles = build_fallback_workflow_review_selection(candidates, selected_count);
     auto prompt = build_workflow_review_prompt(candidates, selected_count);
-    auto response = clore::net::call_llm(llm_model, config.llm.system_prompt, prompt);
+    auto response = clore::net::call_llm_with_retries(
+        llm_model,
+        config.llm.system_prompt,
+        prompt,
+        config.llm.retry_count,
+        config.llm.retry_initial_backoff_ms);
     if(!response.has_value()) {
-        return std::unexpected(GenerateError{
-            .message = std::format("workflow review LLM request failed: {}",
-                                   response.error().message)});
+        logging::warn("workflow review LLM request failed; using ranked fallback: {}",
+                      response.error().message);
+        return fallback_titles;
     }
 
     auto selected_titles =
@@ -926,12 +954,16 @@ auto request_workflow_review_selection(
     for(std::uint32_t attempt = 0; attempt < calibration_attempt_limit; ++attempt) {
         auto calibration_prompt = build_workflow_review_calibration_prompt(
             candidates, selected_count, current_output, current_error.message);
-        auto calibration = clore::net::call_llm(
-            llm_model, config.llm.system_prompt, calibration_prompt);
+        auto calibration = clore::net::call_llm_with_retries(
+            llm_model,
+            config.llm.system_prompt,
+            calibration_prompt,
+            config.llm.retry_count,
+            config.llm.retry_initial_backoff_ms);
         if(!calibration.has_value()) {
-            return std::unexpected(GenerateError{
-                .message = std::format("workflow review calibration LLM request failed: {}",
-                                       calibration.error().message)});
+            logging::warn("workflow review calibration request failed; using ranked fallback: {}",
+                          calibration.error().message);
+            return fallback_titles;
         }
 
         current_output = std::move(*calibration);
@@ -948,10 +980,11 @@ auto request_workflow_review_selection(
                       attempt + 1, calibration_attempt_limit, current_error.message);
     }
 
-    return std::unexpected(GenerateError{
-        .message = std::format(
-            "workflow review output remained invalid after {} calibration attempts: {}",
-            calibration_attempt_limit, current_error.message)});
+    logging::warn(
+        "workflow review output remained invalid after {} calibration attempts; using ranked fallback: {}",
+        calibration_attempt_limit,
+        current_error.message);
+    return fallback_titles;
 }
 
 auto apply_workflow_review_selection(

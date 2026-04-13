@@ -83,9 +83,14 @@ constexpr auto kDefaultSystemPrompt = "You are a documentation writer.";
 
 auto make_valid_config(std::string_view system_prompt) -> std::string {
     auto config = std::string(kMinimalValidConfig);
-    auto pos = config.find(kDefaultSystemPrompt);
-    if(pos != std::string::npos) {
-        config.replace(pos, std::char_traits<char>::length(kDefaultSystemPrompt), system_prompt);
+    auto key = std::string_view{"system_prompt = \""};
+    auto value_start = config.find(key);
+    if(value_start != std::string::npos) {
+        value_start += key.size();
+        auto value_end = config.find('"', value_start);
+        if(value_end != std::string::npos) {
+            config.replace(value_start, value_end - value_start, system_prompt);
+        }
     }
     return config;
 }

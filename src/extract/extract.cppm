@@ -21,6 +21,7 @@ export import :scan;
 export import :tooling;
 export import :ast;
 export import :cache;
+export import :qualified_name;
 
 import config;
 import support;
@@ -136,7 +137,7 @@ using Ms    = std::chrono::milliseconds;
 
 struct CacheEvaluation {
     std::uint64_t compile_signature = 0;
-    std::uint64_t source_hash = 0;
+    std::optional<std::uint64_t> source_hash;
     bool scan_valid = false;
     bool ast_valid = false;
 };
@@ -159,65 +160,6 @@ template <typename T>
 void deduplicate(std::vector<T>& values) {
     std::sort(values.begin(), values.end());
     values.erase(std::unique(values.begin(), values.end()), values.end());
-}
-
-auto split_top_level_qualified_name(std::string_view qualified_name)
-    -> std::vector<std::string> {
-    std::vector<std::string> parts;
-    std::string current;
-    current.reserve(qualified_name.size());
-
-    std::size_t template_depth = 0;
-    for(std::size_t index = 0; index < qualified_name.size(); ++index) {
-        auto ch = qualified_name[index];
-        if(ch == '<') {
-            template_depth++;
-            current.push_back(ch);
-            continue;
-        }
-        if(ch == '>') {
-            if(template_depth > 0) {
-                template_depth--;
-            }
-            current.push_back(ch);
-            continue;
-        }
-        if(ch == ':' && template_depth == 0 && index + 1 < qualified_name.size() &&
-           qualified_name[index + 1] == ':') {
-            parts.push_back(current);
-            current.clear();
-            ++index;
-            continue;
-        }
-        current.push_back(ch);
-    }
-
-    if(!current.empty()) {
-        parts.push_back(std::move(current));
-    }
-
-    return parts;
-}
-
-auto join_qualified_name_parts(const std::vector<std::string>& parts,
-                               std::size_t count) -> std::string {
-    std::string joined;
-    for(std::size_t index = 0; index < count; ++index) {
-        if(index > 0) {
-            joined += "::";
-        }
-        joined += parts[index];
-    }
-    return joined;
-}
-
-auto namespace_prefix_from_qualified_name(std::string_view qualified_name)
-    -> std::string {
-    auto parts = split_top_level_qualified_name(qualified_name);
-    if(parts.size() <= 1) {
-        return {};
-    }
-    return join_qualified_name_parts(parts, parts.size() - 1);
 }
 
 auto ensure_namespace_hierarchy(ProjectModel& model, std::string_view namespace_name)
@@ -506,21 +448,23 @@ auto extract_project(const config::TaskConfig& config)
         auto normalized = std::filesystem::path(entry.file).lexically_normal().generic_string();
         auto compile_signature = cache::build_compile_signature(entry);
         auto source_hash = cache::hash_file(normalized);
-        if(source_hash == 0) {
-            return std::unexpected(ExtractError{
-                .message = std::format("failed to hash source file for extract cache: {}",
-                                       normalized)});
+        if(!source_hash.has_value()) {
+            logging::warn("extract cache disabled for {}: {}",
+                          normalized, source_hash.error().message);
         }
 
         CacheEvaluation evaluation{
             .compile_signature = compile_signature,
-            .source_hash = source_hash,
         };
+        if(source_hash.has_value()) {
+            evaluation.source_hash = *source_hash;
+        }
 
         if(auto cache_it = cache_records.find(normalized); cache_it != cache_records.end()) {
             const auto& record = cache_it->second;
-            if(record.compile_signature == compile_signature &&
-               record.source_hash == source_hash) {
+            if(evaluation.source_hash.has_value() &&
+               record.compile_signature == compile_signature &&
+               record.source_hash == *evaluation.source_hash) {
                 seeded_scan_cache.insert_or_assign(normalized, record.scan);
                 evaluation.scan_valid = true;
 
@@ -596,7 +540,13 @@ auto extract_project(const config::TaskConfig& config)
                                            entry.file, ast_result.error().message)});
             }
             ast_data = std::move(*ast_result);
-            ast_deps_snapshot = cache::capture_dependency_snapshot(ast_data.dependencies);
+            auto ast_deps_result = cache::capture_dependency_snapshot(ast_data.dependencies);
+            if(!ast_deps_result.has_value()) {
+                logging::warn("failed to capture AST dependency snapshot for {}: {}",
+                              normalized, ast_deps_result.error().message);
+            } else {
+                ast_deps_snapshot = std::move(*ast_deps_result);
+            }
 
             auto dt_ast = std::chrono::duration_cast<Ms>(Clock::now() - t_ast);
             logging::info("  ast: {} symbols, {} relations ({}ms)",
@@ -685,13 +635,17 @@ auto extract_project(const config::TaskConfig& config)
             }
         }
 
-        cache_records.insert_or_assign(normalized, cache::CacheRecord{
-            .compile_signature = cache_state_it->second.compile_signature,
-            .source_hash = cache_state_it->second.source_hash,
-            .ast_deps = std::move(ast_deps_snapshot),
-            .scan = cache_it->second,
-            .ast = std::move(cached_ast_copy),
-        });
+        if(cache_state_it->second.source_hash.has_value()) {
+            cache_records.insert_or_assign(normalized, cache::CacheRecord{
+                .compile_signature = cache_state_it->second.compile_signature,
+                .source_hash = *cache_state_it->second.source_hash,
+                .ast_deps = std::move(ast_deps_snapshot),
+                .scan = cache_it->second,
+                .ast = std::move(cached_ast_copy),
+            });
+        } else {
+            cache_records.erase(normalized);
+        }
 
         auto dt_file = std::chrono::duration_cast<Ms>(Clock::now() - t_file);
         logging::info("  kept: {} symbols, {} includes ({}ms)",

@@ -287,16 +287,24 @@ auto build_dependency_graph(const CompilationDatabase& db,
     std::unordered_set<std::string> entry_files;
     std::unordered_set<std::string> file_set;
 
-    for(auto& entry : db.entries) {
+    auto normalize_entry_file = [](const CompileEntry& entry) -> std::string {
         namespace fs = std::filesystem;
-        auto normalized = fs::path(entry.file).lexically_normal().generic_string();
+        auto path = fs::path(entry.file);
+        if(path.is_relative()) {
+            path = fs::path(entry.directory) / path;
+        }
+        return path.lexically_normal().generic_string();
+    };
+
+    for(auto& entry : db.entries) {
+        auto normalized = normalize_entry_file(entry);
         entry_files.insert(normalized);
         if(file_set.insert(normalized).second) graph.files.push_back(normalized);
     }
 
     for(auto& entry : db.entries) {
         namespace fs = std::filesystem;
-        auto normalized = fs::path(entry.file).lexically_normal().generic_string();
+        auto normalized = normalize_entry_file(entry);
 
         auto cached_it = initial_cache.find(normalized);
         ScanResult scan_result;

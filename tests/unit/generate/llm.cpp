@@ -1,10 +1,12 @@
 #include "eventide/zest/zest.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -21,6 +23,17 @@ using namespace clore::net;
 namespace {
 
 namespace json = eventide::serde::json;
+
+auto environment_mutex() -> std::mutex& {
+    static std::mutex mutex;
+    return mutex;
+}
+
+struct ScopedEnvironmentLock {
+    std::unique_lock<std::mutex> lock;
+
+    ScopedEnvironmentLock() : lock(environment_mutex()) {}
+};
 
 struct ScopedEnvVar {
     std::string name;
@@ -68,6 +81,10 @@ struct SummaryPayload {
 struct SearchToolArgs {
     std::string query;
     std::int64_t limit = 0;
+};
+
+struct FixedLabelPayload {
+    std::array<std::string, 2> labels;
 };
 
 auto parse_object(std::string_view text) -> std::expected<json::Object, std::string> {
@@ -287,12 +304,42 @@ TEST_SUITE(llm) {
         EXPECT_EQ(parallel_tool_calls_value->get_bool().value_or(true), false);
     }
 
+    TEST_CASE(response_format_fixed_arrays_use_exact_bounds) {
+        auto format = schema::response_format<FixedLabelPayload>();
+
+        ASSERT_TRUE(format.has_value());
+
+        auto encoded = format->schema.to_json_string();
+        ASSERT_TRUE(encoded.has_value());
+        EXPECT_NE(encoded->find(R"("labels":{"type":"array")"), std::string::npos);
+        EXPECT_NE(encoded->find(R"("minItems":2)"), std::string::npos);
+        EXPECT_NE(encoded->find(R"("maxItems":2)"), std::string::npos);
+    }
+
     TEST_CASE(parse_response_success) {
         auto result = extract_text_response(
-            R"({"id":"resp_1","model":"deepseek-chat","choices":[{"message":{"content":"# Title\nGenerated docs"}}]})");
+            R"({"id":"resp_1","model":"deepseek-chat","choices":[{"finish_reason":"stop","message":{"content":"# Title\nGenerated docs"}}]})");
 
         ASSERT_TRUE(result.has_value());
         EXPECT_EQ(*result, "# Title\nGenerated docs");
+    }
+
+    TEST_CASE(parse_response_requires_finish_reason) {
+        auto result = protocol::parse_response(
+            R"({"id":"resp_missing_finish","model":"deepseek-chat","choices":[{"message":{"content":"docs"}}]})");
+
+        EXPECT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().message,
+                  "LLM response choice is missing finish_reason");
+    }
+
+    TEST_CASE(parse_response_rejects_truncated_finish_reason) {
+        auto result = protocol::parse_response(
+            R"({"id":"resp_length","model":"deepseek-chat","choices":[{"finish_reason":"length","message":{"content":"partial"}}]})");
+
+        EXPECT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().message,
+                  "LLM response was truncated (finish_reason=length)");
     }
 
     TEST_CASE(parse_response_api_error) {
@@ -305,7 +352,7 @@ TEST_SUITE(llm) {
 
     TEST_CASE(parse_response_supports_utf8_content) {
         auto result = extract_text_response(
-            R"({"id":"resp_utf8","model":"deepseek-chat","choices":[{"message":{"content":"中文摘要：负责生成文档。"}}]})");
+            R"({"id":"resp_utf8","model":"deepseek-chat","choices":[{"finish_reason":"stop","message":{"content":"中文摘要：负责生成文档。"}}]})");
 
         ASSERT_TRUE(result.has_value());
         EXPECT_EQ(*result, "中文摘要：负责生成文档。");
@@ -313,7 +360,7 @@ TEST_SUITE(llm) {
 
     TEST_CASE(parse_response_supports_content_parts) {
         auto result = extract_text_response(
-            R"({"id":"resp_parts","model":"deepseek-chat","choices":[{"message":{"content":[{"type":"text","text":"第一段。"},{"type":"output_text","text":"第二段。"}]}}]})");
+            R"({"id":"resp_parts","model":"deepseek-chat","choices":[{"finish_reason":"stop","message":{"content":[{"type":"text","text":"第一段。"},{"type":"output_text","text":"第二段。"}]}}]})");
 
         ASSERT_TRUE(result.has_value());
         EXPECT_EQ(*result, "第一段。第二段。");
@@ -321,7 +368,7 @@ TEST_SUITE(llm) {
 
     TEST_CASE(parse_response_supports_tool_calls_and_typed_arguments) {
         auto response = protocol::parse_response(
-            R"({"id":"resp_tool","model":"deepseek-chat","choices":[{"message":{"content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"search_repo","arguments":"{\"query\":\"llm\",\"limit\":2}"}}]}}]})");
+            R"({"id":"resp_tool","model":"deepseek-chat","choices":[{"finish_reason":"tool_calls","message":{"content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"search_repo","arguments":"{\"query\":\"llm\",\"limit\":2}"}}]}}]})");
 
         ASSERT_TRUE(response.has_value());
         ASSERT_EQ(response->message.tool_calls.size(), 1u);
@@ -343,7 +390,7 @@ TEST_SUITE(llm) {
         };
 
         auto response = protocol::parse_response(
-            R"({"id":"resp_tool","model":"deepseek-chat","choices":[{"message":{"content":"Looking it up.","tool_calls":[{"id":"call_1","type":"function","function":{"name":"search_repo","arguments":"{\"query\":\"llm\",\"limit\":1}"}}]}}]})");
+            R"({"id":"resp_tool","model":"deepseek-chat","choices":[{"finish_reason":"tool_calls","message":{"content":"Looking it up.","tool_calls":[{"id":"call_1","type":"function","function":{"name":"search_repo","arguments":"{\"query\":\"llm\",\"limit\":1}"}}]}}]})");
         ASSERT_TRUE(response.has_value());
 
         std::vector<ToolOutput> outputs{
@@ -372,6 +419,7 @@ TEST_SUITE(llm) {
     }
 
     TEST_CASE(call_llm_requires_openai_base_url_env) {
+        ScopedEnvironmentLock env_lock;
         ScopedEnvVar base_url("OPENAI_BASE_URL");
         ScopedEnvVar api_key("OPENAI_API_KEY");
 
@@ -386,6 +434,7 @@ TEST_SUITE(llm) {
     }
 
     TEST_CASE(call_llm_requires_openai_api_key_env) {
+        ScopedEnvironmentLock env_lock;
         ScopedEnvVar base_url("OPENAI_BASE_URL");
         ScopedEnvVar api_key("OPENAI_API_KEY");
 
@@ -400,6 +449,7 @@ TEST_SUITE(llm) {
     }
 
     TEST_CASE(llm_client_requires_openai_base_url_env) {
+        ScopedEnvironmentLock env_lock;
         ScopedEnvVar base_url("OPENAI_BASE_URL");
         ScopedEnvVar api_key("OPENAI_API_KEY");
 
@@ -417,6 +467,7 @@ TEST_SUITE(llm) {
     }
 
     TEST_CASE(llm_client_requires_openai_api_key_env) {
+        ScopedEnvironmentLock env_lock;
         ScopedEnvVar base_url("OPENAI_BASE_URL");
         ScopedEnvVar api_key("OPENAI_API_KEY");
 
@@ -459,6 +510,7 @@ TEST_SUITE(llm) {
     }
 
     TEST_CASE(llm_client_runs_scheduled_requests_and_reports_network_failures) {
+        ScopedEnvironmentLock env_lock;
         ScopedEnvVar base_url("OPENAI_BASE_URL");
         ScopedEnvVar api_key("OPENAI_API_KEY");
 

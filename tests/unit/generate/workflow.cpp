@@ -311,12 +311,76 @@ TEST_SUITE(workflow) {
             .plans = {index_plan, alpha_plan, beta_plan},
         });
         auto block = render_deterministic_block("all_workflows", index_plan, model, cfg, links);
-        auto alpha_pos = block.find("Alpha Flow");
-        auto beta_pos = block.find("Beta Flow");
+        auto alpha_pos = block.find("Alpha");
+        auto beta_pos = block.find("Beta");
 
         ASSERT_TRUE(alpha_pos != std::string::npos);
         ASSERT_TRUE(beta_pos != std::string::npos);
         EXPECT_LT(alpha_pos, beta_pos);
+    }
+
+    TEST_CASE(build_page_plan_set_workflows_depend_only_on_referenced_pages) {
+        ScopedTempDir temp("workflow_dependencies");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_base_config(temp.path);
+        config.page_types.index = false;
+        config.page_types.type_page = true;
+        config.page_types.file_page = true;
+        config.page_types.workflow_page = true;
+
+        extract::ProjectModel model;
+        model.uses_modules = false;
+
+        auto flow_file = (temp.path / "src" / "flow.cpp").generic_string();
+        auto extra_file = (temp.path / "src" / "extra.cpp").generic_string();
+
+        auto entry = make_symbol(301, "entry", "demo::workflow::entry", flow_file);
+        auto step = make_symbol(302, "step", "demo::workflow::step", flow_file);
+        entry.calls = {step.id};
+
+        extract::SymbolInfo unrelated_type;
+        unrelated_type.id = extract::SymbolID{.hash = 303};
+        unrelated_type.kind = extract::SymbolKind::Struct;
+        unrelated_type.name = "Unrelated";
+        unrelated_type.qualified_name = "demo::Unrelated";
+        unrelated_type.signature = "struct Unrelated";
+        unrelated_type.declaration_location = extract::SourceLocation{
+            .file = extra_file,
+            .line = 1,
+            .column = 1,
+        };
+
+        model.symbols.emplace(entry.id, entry);
+        model.symbols.emplace(step.id, step);
+        model.symbols.emplace(unrelated_type.id, unrelated_type);
+
+        model.files.emplace(flow_file, extract::FileInfo{
+            .path = flow_file,
+            .symbols = {entry.id, step.id},
+        });
+        model.files.emplace(extra_file, extract::FileInfo{
+            .path = extra_file,
+            .symbols = {unrelated_type.id},
+        });
+
+        auto result = build_page_plan_set(config, model);
+        ASSERT_TRUE(result.has_value());
+
+        auto workflow_plan = std::ranges::find_if(result->plans, [](const PagePlan& plan) {
+            return plan.page_type == PageType::Workflow;
+        });
+        ASSERT_TRUE(workflow_plan != result->plans.end());
+
+        auto unrelated_file_page = std::string("file:") + extra_file;
+        auto workflow_file_page = std::string("file:") + flow_file;
+
+        EXPECT_EQ(std::ranges::find(workflow_plan->depends_on_pages, "type:demo::Unrelated"),
+                  workflow_plan->depends_on_pages.end());
+        EXPECT_EQ(std::ranges::find(workflow_plan->depends_on_pages, unrelated_file_page),
+                  workflow_plan->depends_on_pages.end());
+        EXPECT_NE(std::ranges::find(workflow_plan->depends_on_pages, workflow_file_page),
+                  workflow_plan->depends_on_pages.end());
     }
 
     TEST_CASE(generate_dry_run_prepends_vitepress_frontmatter) {

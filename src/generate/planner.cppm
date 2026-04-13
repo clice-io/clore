@@ -22,6 +22,7 @@ import :model;
 import :path;
 import config;
 import extract;
+import extract:qualified_name;
 import support;
 
 export namespace clore::generate {
@@ -42,65 +43,12 @@ namespace clore::generate {
 
 namespace {
 
-auto split_qualified_name(std::string_view qname) -> std::vector<std::string> {
-    std::vector<std::string> parts;
-    std::string current;
-    current.reserve(qname.size());
-
-    std::size_t template_depth = 0;
-    for(std::size_t index = 0; index < qname.size(); ++index) {
-        auto ch = qname[index];
-        if(ch == '<') {
-            template_depth++;
-            current.push_back(ch);
-            continue;
-        }
-        if(ch == '>') {
-            if(template_depth > 0) {
-                template_depth--;
-            }
-            current.push_back(ch);
-            continue;
-        }
-        if(ch == ':' && template_depth == 0 && index + 1 < qname.size() &&
-           qname[index + 1] == ':') {
-            parts.push_back(current);
-            current.clear();
-            ++index;
-            continue;
-        }
-        current.push_back(ch);
-    }
-
-    if(!current.empty()) {
-        parts.push_back(std::move(current));
-    }
-
-    return parts;
-}
-
-auto join_qualified_name_parts(const std::vector<std::string>& parts,
-                               std::size_t count) -> std::string {
-    std::string joined;
-    for(std::size_t index = 0; index < count; ++index) {
-        if(index > 0) {
-            joined += "::";
-        }
-        joined += parts[index];
-    }
-    return joined;
-}
-
 auto namespace_of(std::string_view qualified_name) -> std::string {
-    auto parts = split_qualified_name(qualified_name);
-    if(parts.size() <= 1) {
-        return {};
-    }
-    return join_qualified_name_parts(parts, parts.size() - 1);
+    return extract::namespace_prefix_from_qualified_name(qualified_name);
 }
 
 auto short_name_of(std::string_view qualified_name) -> std::string {
-    auto parts = split_qualified_name(qualified_name);
+    auto parts = extract::split_top_level_qualified_name(qualified_name);
     if(parts.empty()) {
         return {};
     }
@@ -500,16 +448,17 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
 
     auto& model = builder.model;
 
-    struct ModuleEdgeRep {
-        std::string from_module;
-        std::string to_module;
+    // Workflow pages are extracted from a callable-level call graph. Even when
+    // module pages are available, the workflow nodes here are callable qualified
+    // names so the resulting pages can render concrete call chains.
+    struct CallableEdgeRep {
         std::string caller_qname;
         std::string callee_qname;
         std::size_t score = 0;
     };
 
-    auto should_replace_edge = [](const ModuleEdgeRep& existing,
-                                  const ModuleEdgeRep& candidate) -> bool {
+    auto should_replace_edge = [](const CallableEdgeRep& existing,
+                                  const CallableEdgeRep& candidate) -> bool {
         if(existing.caller_qname.empty()) return true;
         if(candidate.score != existing.score) return candidate.score > existing.score;
         if(candidate.caller_qname != existing.caller_qname) {
@@ -523,54 +472,53 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
         return caller.calls.size() + callee.called_by.size();
     };
 
-    std::unordered_map<extract::SymbolID, std::string> symbol_to_module;
-    symbol_to_module.reserve(model.symbols.size());
+    std::unordered_map<extract::SymbolID, std::string> callable_node_by_symbol;
+    std::unordered_map<std::string, const extract::SymbolInfo*> callable_symbol_by_qname;
+    callable_node_by_symbol.reserve(model.symbols.size());
+    callable_symbol_by_qname.reserve(model.symbols.size());
     for(auto& [sym_id, sym] : model.symbols) {
         if(!is_callable_kind(sym.kind)) continue;
         if(sym.qualified_name.empty()) continue;
-        symbol_to_module.emplace(sym_id, sym.qualified_name);
+        callable_node_by_symbol.emplace(sym_id, sym.qualified_name);
+        callable_symbol_by_qname.emplace(sym.qualified_name, &sym);
     }
-    if(symbol_to_module.size() < 2) return {};
+    if(callable_node_by_symbol.size() < 2) return {};
 
-    std::unordered_map<std::string, std::size_t> module_callable_weights;
-    for(auto& [sym_id, mod_name] : symbol_to_module) {
+    std::unordered_map<std::string, std::size_t> callable_node_weights;
+    for(auto& [sym_id, callable_qname] : callable_node_by_symbol) {
         auto* sym = lookup_sym(model, sym_id);
         if(sym && is_callable_kind(sym->kind)) {
-            module_callable_weights[mod_name]++;
+            callable_node_weights[callable_qname]++;
         }
     }
 
-    std::unordered_map<std::string, std::unordered_map<std::string, ModuleEdgeRep>> module_edges;
-    std::unordered_set<std::string> active_modules;
+    std::unordered_map<std::string, std::unordered_map<std::string, CallableEdgeRep>> callable_edges;
+    std::unordered_set<std::string> active_callables;
 
     for(auto& [caller_id, caller] : model.symbols) {
         if(!is_callable_kind(caller.kind)) continue;
-        auto caller_mod_it = symbol_to_module.find(caller_id);
-        if(caller_mod_it == symbol_to_module.end()) continue;
+        auto caller_node_it = callable_node_by_symbol.find(caller_id);
+        if(caller_node_it == callable_node_by_symbol.end()) continue;
 
         for(auto& callee_id : caller.calls) {
             auto* callee = lookup_sym(model, callee_id);
             if(!callee || !is_callable_kind(callee->kind)) continue;
 
-            auto callee_mod_it = symbol_to_module.find(callee_id);
-            if(callee_mod_it == symbol_to_module.end()) continue;
-            if(caller_mod_it->second == callee_mod_it->second) continue;
+            auto callee_node_it = callable_node_by_symbol.find(callee_id);
+            if(callee_node_it == callable_node_by_symbol.end()) continue;
+            if(caller_node_it->second == callee_node_it->second) continue;
 
-            active_modules.insert(caller_mod_it->second);
-            active_modules.insert(callee_mod_it->second);
+            active_callables.insert(caller_node_it->second);
+            active_callables.insert(callee_node_it->second);
 
-            ModuleEdgeRep candidate{
-                .from_module = caller_mod_it->second,
-                .to_module = callee_mod_it->second,
-                .caller_qname = caller.qualified_name,
-                .callee_qname = callee->qualified_name,
+            CallableEdgeRep candidate{
+                .caller_qname = caller_node_it->second,
+                .callee_qname = callee_node_it->second,
                 .score = edge_score(caller, *callee),
             };
 
-            auto& current = module_edges[caller_mod_it->second][callee_mod_it->second];
+            auto& current = callable_edges[caller_node_it->second][callee_node_it->second];
             if(should_replace_edge(current, candidate)) {
-                current.from_module = candidate.from_module;
-                current.to_module = candidate.to_module;
                 current.caller_qname = candidate.caller_qname;
                 current.callee_qname = candidate.callee_qname;
                 current.score = candidate.score;
@@ -578,105 +526,121 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
         }
     }
 
-    if(active_modules.size() < 2) return {};
+    if(active_callables.size() < 2) return {};
 
-    std::vector<std::string> modules(active_modules.begin(), active_modules.end());
-    std::sort(modules.begin(), modules.end());
+    std::vector<std::string> callable_nodes(active_callables.begin(), active_callables.end());
+    std::sort(callable_nodes.begin(), callable_nodes.end());
 
-    std::unordered_map<std::string, std::size_t> module_to_index;
-    module_to_index.reserve(modules.size());
-    for(std::size_t i = 0; i < modules.size(); ++i) {
-        module_to_index.emplace(modules[i], i);
+    std::unordered_map<std::string, std::size_t> callable_node_to_index;
+    callable_node_to_index.reserve(callable_nodes.size());
+    for(std::size_t i = 0; i < callable_nodes.size(); ++i) {
+        callable_node_to_index.emplace(callable_nodes[i], i);
     }
 
-    std::vector<std::vector<std::size_t>> graph(modules.size());
-    std::unordered_map<std::size_t, std::unordered_map<std::size_t, ModuleEdgeRep>> edge_by_idx;
+    std::vector<std::vector<std::size_t>> graph(callable_nodes.size());
+    std::unordered_map<std::size_t, std::unordered_map<std::size_t, CallableEdgeRep>> edge_by_idx;
 
-    for(auto& from_mod : modules) {
-        auto from_it = module_edges.find(from_mod);
-        if(from_it == module_edges.end()) continue;
+    for(auto& from_callable : callable_nodes) {
+        auto from_it = callable_edges.find(from_callable);
+        if(from_it == callable_edges.end()) continue;
 
         std::vector<std::string> targets;
         targets.reserve(from_it->second.size());
-        for(auto& [to_mod, rep] : from_it->second) {
-            if(module_to_index.contains(to_mod)) {
-                targets.push_back(to_mod);
+        for(auto& [to_callable, rep] : from_it->second) {
+            if(callable_node_to_index.contains(to_callable)) {
+                targets.push_back(to_callable);
             }
         }
         std::sort(targets.begin(), targets.end());
 
-        auto from_idx = module_to_index.at(from_mod);
-        for(auto& to_mod : targets) {
-            auto to_idx = module_to_index.at(to_mod);
+        auto from_idx = callable_node_to_index.at(from_callable);
+        for(auto& to_callable : targets) {
+            auto to_idx = callable_node_to_index.at(to_callable);
             graph[from_idx].push_back(to_idx);
-            edge_by_idx[from_idx][to_idx] = from_it->second.at(to_mod);
+            edge_by_idx[from_idx][to_idx] = from_it->second.at(to_callable);
         }
     }
 
-    std::vector<int> tarjan_index(modules.size(), -1);
-    std::vector<int> tarjan_low(modules.size(), 0);
-    std::vector<bool> on_stack(modules.size(), false);
-    std::vector<std::size_t> stack_nodes;
-    std::vector<std::size_t> comp_of(modules.size(), std::numeric_limits<std::size_t>::max());
-    std::vector<std::vector<std::size_t>> components;
-    int next_index = 0;
-
-    std::function<void(std::size_t)> strong_connect = [&](std::size_t v) {
-        tarjan_index[v] = next_index;
-        tarjan_low[v] = next_index;
-        next_index++;
-        stack_nodes.push_back(v);
-        on_stack[v] = true;
-
-        for(auto to : graph[v]) {
-            if(tarjan_index[to] == -1) {
-                strong_connect(to);
-                tarjan_low[v] = std::min(tarjan_low[v], tarjan_low[to]);
-            } else if(on_stack[to]) {
-                tarjan_low[v] = std::min(tarjan_low[v], tarjan_index[to]);
-            }
+    std::vector<std::vector<std::size_t>> reverse_graph(callable_nodes.size());
+    for(std::size_t from_idx = 0; from_idx < graph.size(); ++from_idx) {
+        for(auto to_idx : graph[from_idx]) {
+            reverse_graph[to_idx].push_back(from_idx);
         }
+    }
 
-        if(tarjan_low[v] != tarjan_index[v]) return;
+    std::vector<bool> visited(callable_nodes.size(), false);
+    std::vector<std::size_t> finish_order;
+    finish_order.reserve(callable_nodes.size());
+
+    for(std::size_t start = 0; start < callable_nodes.size(); ++start) {
+        if(visited[start]) continue;
+
+        std::vector<std::pair<std::size_t, std::size_t>> stack;
+        stack.emplace_back(start, 0);
+        visited[start] = true;
+
+        while(!stack.empty()) {
+            auto& [node, next_edge_index] = stack.back();
+            if(next_edge_index < graph[node].size()) {
+                auto to = graph[node][next_edge_index++];
+                if(!visited[to]) {
+                    visited[to] = true;
+                    stack.emplace_back(to, 0);
+                }
+                continue;
+            }
+
+            finish_order.push_back(node);
+            stack.pop_back();
+        }
+    }
+
+    std::vector<std::size_t> comp_of(callable_nodes.size(), std::numeric_limits<std::size_t>::max());
+    std::vector<std::vector<std::size_t>> components;
+
+    for(auto it = finish_order.rbegin(); it != finish_order.rend(); ++it) {
+        auto start = *it;
+        if(comp_of[start] != std::numeric_limits<std::size_t>::max()) continue;
 
         components.emplace_back();
         auto comp_idx = components.size() - 1;
+        std::vector<std::size_t> stack{start};
+        comp_of[start] = comp_idx;
 
-        while(true) {
-            auto w = stack_nodes.back();
-            stack_nodes.pop_back();
-            on_stack[w] = false;
-            comp_of[w] = comp_idx;
-            components.back().push_back(w);
-            if(w == v) break;
+        while(!stack.empty()) {
+            auto node = stack.back();
+            stack.pop_back();
+            components.back().push_back(node);
+
+            for(auto from_idx : reverse_graph[node]) {
+                if(comp_of[from_idx] != std::numeric_limits<std::size_t>::max()) {
+                    continue;
+                }
+                comp_of[from_idx] = comp_idx;
+                stack.push_back(from_idx);
+            }
         }
 
         std::sort(components.back().begin(), components.back().end(),
                   [&](std::size_t lhs, std::size_t rhs) {
-                      return modules[lhs] < modules[rhs];
+                      return callable_nodes[lhs] < callable_nodes[rhs];
                   });
-    };
-
-    for(std::size_t v = 0; v < modules.size(); ++v) {
-        if(tarjan_index[v] == -1) {
-            strong_connect(v);
-        }
     }
 
     if(components.size() < 2) return {};
 
     std::vector<std::vector<std::size_t>> comp_graph(components.size());
     std::vector<std::unordered_set<std::size_t>> comp_seen(components.size());
-    std::unordered_map<std::size_t, std::unordered_map<std::size_t, ModuleEdgeRep>> comp_edges;
+    std::unordered_map<std::size_t, std::unordered_map<std::size_t, CallableEdgeRep>> comp_edges;
     std::vector<std::string> comp_key(components.size());
     std::vector<std::size_t> comp_weight(components.size(), 0);
 
     for(std::size_t comp_idx = 0; comp_idx < components.size(); ++comp_idx) {
-        comp_key[comp_idx] = modules[components[comp_idx].front()];
-        for(auto mod_idx : components[comp_idx]) {
-            auto mod_name = modules[mod_idx];
-            auto w_it = module_callable_weights.find(mod_name);
-            comp_weight[comp_idx] += w_it != module_callable_weights.end()
+        comp_key[comp_idx] = callable_nodes[components[comp_idx].front()];
+        for(auto callable_idx : components[comp_idx]) {
+            auto& callable_qname = callable_nodes[callable_idx];
+            auto w_it = callable_node_weights.find(callable_qname);
+            comp_weight[comp_idx] += w_it != callable_node_weights.end()
                 ? std::max<std::size_t>(1, w_it->second)
                 : 1;
         }
@@ -862,10 +826,8 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
     if(workflow_paths.empty()) return {};
 
     auto lookup_symbol_by_qname = [&](std::string_view qname) -> const extract::SymbolInfo* {
-        for(auto& [sym_id, sym] : model.symbols) {
-            if(sym.qualified_name == qname) return &sym;
-        }
-        return nullptr;
+        auto it = callable_symbol_by_qname.find(std::string(qname));
+        return it != callable_symbol_by_qname.end() ? it->second : nullptr;
     };
 
     auto slugify = [](std::string_view text) -> std::string {
@@ -919,7 +881,7 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
     std::unordered_map<std::string, std::size_t> workflow_slug_counts;
 
     for(auto& comp_path : workflow_paths) {
-        std::vector<ModuleEdgeRep> chain_edges;
+        std::vector<CallableEdgeRep> chain_edges;
         chain_edges.reserve(comp_path.size() > 1 ? comp_path.size() - 1 : 0);
         bool valid_chain = true;
         for(std::size_t i = 0; i + 1 < comp_path.size(); ++i) {
@@ -1038,13 +1000,14 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
 
         plan.slot_plans.push_back(builder.make_slot(page_id, "workflow"));
 
-        for(auto& existing : builder.plans) {
-            plan.depends_on_pages.push_back(existing.page_id);
-        }
-
         std::unordered_set<std::string> linked_seen;
+        std::unordered_set<std::string> dependency_seen;
         auto add_linked_page = [&](std::string candidate_page_id) {
             if(candidate_page_id.empty()) return;
+            if(builder.id_to_index.contains(candidate_page_id) &&
+               dependency_seen.insert(candidate_page_id).second) {
+                plan.depends_on_pages.push_back(candidate_page_id);
+            }
             if(linked_seen.insert(candidate_page_id).second) {
                 plan.linked_pages.push_back(std::move(candidate_page_id));
             }

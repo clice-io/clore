@@ -5,6 +5,7 @@ module;
 #include <filesystem>
 #include <limits>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -495,20 +496,35 @@ auto build_evidence_for_workflow(
     }
     pack.subject_kind = "workflow";
 
+    std::unordered_map<std::string, const extract::SymbolInfo*> symbol_by_qname;
+    symbol_by_qname.reserve(model.symbols.size());
+    for(auto& [id, sym] : model.symbols) {
+        if(!sym.qualified_name.empty()) {
+            symbol_by_qname.emplace(sym.qualified_name, &sym);
+        }
+    }
+
     std::unordered_set<extract::SymbolID> chain_symbol_ids;
+    std::vector<const extract::SymbolInfo*> chain_symbols;
+    chain_symbols.reserve(chain_keys.size());
 
     // Target facts: symbols in the selected calling chain
     for(auto& qname : chain_keys) {
-        for(auto& [id, sym] : model.symbols) {
-            if(sym.qualified_name == qname) {
-                chain_symbol_ids.insert(sym.id);
-                pack.target_facts.push_back(to_symbol_fact(sym, root));
-                if(!sym.source_snippet.empty()) {
-                    pack.source_snippets.push_back(
-                        truncate_snippet(sym.source_snippet, rules.max_source_bytes));
-                }
-                break;
-            }
+        auto it = symbol_by_qname.find(qname);
+        if(it == symbol_by_qname.end()) {
+            continue;
+        }
+
+        auto* sym = it->second;
+        if(!chain_symbol_ids.insert(sym->id).second) {
+            continue;
+        }
+
+        chain_symbols.push_back(sym);
+        pack.target_facts.push_back(to_symbol_fact(*sym, root));
+        if(!sym->source_snippet.empty()) {
+            pack.source_snippets.push_back(
+                truncate_snippet(sym->source_snippet, rules.max_source_bytes));
         }
     }
 
@@ -523,32 +539,25 @@ auto build_evidence_for_workflow(
     // Boundary contexts: direct callees/callers outside the selected chain
     std::unordered_set<extract::SymbolID> dep_seen;
     std::unordered_set<extract::SymbolID> rev_seen;
-    for(auto& chain_fact : pack.target_facts) {
-        for(auto& [id, sym] : model.symbols) {
-            if(sym.qualified_name != chain_fact.qualified_name) continue;
-
-            for(auto& callee_id : sym.calls) {
-                if(pack.dependency_context.size() >= rules.max_callees) break;
-                if(chain_symbol_ids.contains(callee_id) || !dep_seen.insert(callee_id).second) {
-                    continue;
-                }
-                if(auto* callee = lookup(model, callee_id)) {
-                    pack.dependency_context.push_back(to_symbol_fact(*callee, root));
-                }
+    for(auto* sym : chain_symbols) {
+        for(auto& callee_id : sym->calls) {
+            if(pack.dependency_context.size() >= rules.max_callees) break;
+            if(chain_symbol_ids.contains(callee_id) || !dep_seen.insert(callee_id).second) {
+                continue;
             }
-
-            for(auto& caller_id : sym.called_by) {
-                if(pack.reverse_usage_context.size() >= rules.max_callers) break;
-                if(chain_symbol_ids.contains(caller_id) ||
-                   !rev_seen.insert(caller_id).second) {
-                    continue;
-                }
-                if(auto* caller = lookup(model, caller_id)) {
-                    pack.reverse_usage_context.push_back(to_symbol_fact(*caller, root));
-                }
+            if(auto* callee = lookup(model, callee_id)) {
+                pack.dependency_context.push_back(to_symbol_fact(*callee, root));
             }
+        }
 
-            break;
+        for(auto& caller_id : sym->called_by) {
+            if(pack.reverse_usage_context.size() >= rules.max_callers) break;
+            if(chain_symbol_ids.contains(caller_id) || !rev_seen.insert(caller_id).second) {
+                continue;
+            }
+            if(auto* caller = lookup(model, caller_id)) {
+                pack.reverse_usage_context.push_back(to_symbol_fact(*caller, root));
+            }
         }
     }
 

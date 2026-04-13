@@ -93,6 +93,37 @@ auto make_relative_link_target(std::string_view current_page_path,
     return rel.generic_string();
 }
 
+auto escape_mermaid_label(std::string_view text) -> std::string {
+    std::string escaped;
+    escaped.reserve(text.size());
+    for(auto ch : text) {
+        switch(ch) {
+            case '\\': escaped += "\\\\"; break;
+            case '"': escaped += "\\\""; break;
+            case '\n':
+            case '\r': escaped += ' '; break;
+            default: escaped.push_back(ch); break;
+        }
+    }
+    return escaped;
+}
+
+auto workflow_slug_to_display(std::string_view slug) -> std::string {
+    std::string display(slug);
+    for(auto& c : display) {
+        if(c == '-') c = ' ';
+    }
+    if(!display.empty()) {
+        display[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(display[0])));
+    }
+    for(std::size_t i = 1; i < display.size(); ++i) {
+        if(display[i - 1] == ' ') {
+            display[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(display[i])));
+        }
+    }
+    return display;
+}
+
 auto make_link(const std::string& name, std::string_view current_page_path,
                const LinkResolver& links) -> std::string {
     if(auto* path = links.resolve(name)) {
@@ -580,10 +611,11 @@ auto render_call_chain_block(const PagePlan& plan, const extract::ProjectModel& 
     for(auto& ns_name : namespace_order) {
         auto& indices = namespace_groups[ns_name];
         if(!ns_name.empty()) {
-            result += "    subgraph " + ns_name + "\n";
+            result += "    subgraph \"" + escape_mermaid_label(ns_name) + "\"\n";
         }
         for(auto idx : indices) {
-            result += "    " + nodes[idx].id + "[\"" + nodes[idx].display + "\"]\n";
+            result += "    " + nodes[idx].id + "[\"" +
+                      escape_mermaid_label(nodes[idx].display) + "\"]\n";
         }
         if(!ns_name.empty()) {
             result += "    end\n";
@@ -638,19 +670,10 @@ auto render_all_workflows_index(const PagePlan& plan, const LinkResolver& links)
               });
 
     for(auto& [slug, path] : workflows) {
-        // Convert slug to display: "generate-pages" -> "Generate Pages"
-        std::string display = slug;
-        for(auto& c : display) {
-            if(c == '-') c = ' ';
-        }
-        if(!display.empty()) {
-            display[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(display[0])));
-        }
-        for(std::size_t i = 1; i < display.size(); ++i) {
-            if(display[i - 1] == ' ') {
-                display[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(display[i])));
-            }
-        }
+        auto* curated_title = links.resolve_page_title("workflow:" + slug);
+        auto display = (curated_title != nullptr && !curated_title->empty())
+            ? *curated_title
+            : workflow_slug_to_display(slug);
         result += "- [" + display + "](" +
                   make_relative_link_target(plan.relative_path, path) + ")\n";
     }
@@ -667,31 +690,45 @@ auto render_type_diagram(const PagePlan& plan, const extract::ProjectModel& mode
             if(sym.bases.empty() && sym.derived.empty() && sym.children.empty()) return {};
 
             std::string result = "```mermaid\nclassDiagram\n";
-            auto last_sep = sym.qualified_name.rfind("::");
-            auto short_name = (last_sep != std::string::npos)
-                                  ? sym.qualified_name.substr(last_sep + 2)
-                                  : sym.qualified_name;
+            auto short_name_of = [](std::string_view qualified_name) -> std::string {
+                auto last_sep = qualified_name.rfind("::");
+                return last_sep != std::string::npos
+                    ? std::string(qualified_name.substr(last_sep + 2))
+                    : std::string(qualified_name);
+            };
 
-            result += "    class " + short_name + "\n";
+            std::unordered_map<std::string, std::string> node_ids;
+            std::vector<std::pair<std::string, std::string>> nodes;
+            auto ensure_node_id = [&](std::string_view qualified_name) -> std::string {
+                auto key = std::string(qualified_name);
+                if(auto it = node_ids.find(key); it != node_ids.end()) {
+                    return it->second;
+                }
+                auto node_id = "C" + std::to_string(nodes.size());
+                node_ids.emplace(key, node_id);
+                nodes.emplace_back(node_id, short_name_of(qualified_name));
+                return node_id;
+            };
+
+            auto current_id = ensure_node_id(sym.qualified_name);
 
             for(auto& base_id : sym.bases) {
                 if(auto* base = lookup_sym(model, base_id)) {
-                    auto bsep = base->qualified_name.rfind("::");
-                    auto bname = (bsep != std::string::npos)
-                                     ? base->qualified_name.substr(bsep + 2)
-                                     : base->qualified_name;
-                    result += "    " + bname + " <|-- " + short_name + "\n";
+                    auto base_node_id = ensure_node_id(base->qualified_name);
+                    result += "    " + base_node_id + " <|-- " + current_id + "\n";
                 }
             }
 
             for(auto& derived_id : sym.derived) {
                 if(auto* derived = lookup_sym(model, derived_id)) {
-                    auto dsep = derived->qualified_name.rfind("::");
-                    auto dname = (dsep != std::string::npos)
-                                     ? derived->qualified_name.substr(dsep + 2)
-                                     : derived->qualified_name;
-                    result += "    " + short_name + " <|-- " + dname + "\n";
+                    auto derived_node_id = ensure_node_id(derived->qualified_name);
+                    result += "    " + current_id + " <|-- " + derived_node_id + "\n";
                 }
+            }
+
+            for(auto& [node_id, label] : nodes) {
+                result += "    class " + node_id + "[\"" +
+                          escape_mermaid_label(label) + "\"]\n";
             }
 
             result += "```\n";
@@ -716,12 +753,30 @@ auto render_import_diagram(const PagePlan& plan, const extract::ProjectModel& mo
 
             std::string result = "```mermaid\ngraph LR\n";
             auto mod_display = top_module(mod_unit.name);
-            result += "    " + mod_display + "\n";
+            std::unordered_map<std::string, std::string> node_ids;
+            std::vector<std::pair<std::string, std::string>> nodes;
+            auto ensure_node_id = [&](std::string_view display_name) -> std::string {
+                auto key = std::string(display_name);
+                if(auto it = node_ids.find(key); it != node_ids.end()) {
+                    return it->second;
+                }
+                auto node_id = "M" + std::to_string(nodes.size());
+                node_ids.emplace(key, node_id);
+                nodes.emplace_back(node_id, key);
+                return node_id;
+            };
+
+            auto module_id = ensure_node_id(mod_display);
             std::unordered_set<std::string> seen;
             for(auto& imp : mod_unit.imports) {
                 auto imp_display = top_module(imp);
                 if(!seen.insert(imp_display).second) continue;
-                result += "    " + imp_display + " --> " + mod_display + "\n";
+                auto import_id = ensure_node_id(imp_display);
+                result += "    " + import_id + " --> " + module_id + "\n";
+            }
+            for(auto& [node_id, label] : nodes) {
+                result += "    " + node_id + "[\"" +
+                          escape_mermaid_label(label) + "\"]\n";
             }
             result += "```\n";
             return result;
@@ -755,19 +810,23 @@ auto render_namespace_diagram(const PagePlan& plan, const extract::ProjectModel&
         auto ns_short = (last_sep != std::string::npos) ? key.substr(last_sep + 2) : key;
 
         std::string result = "```mermaid\ngraph TD\n";
-        result += "    NS[\"" + ns_short + "\"]\n";
+        result += "    NS[\"" + escape_mermaid_label(ns_short) + "\"]\n";
 
         for(std::size_t i = 0; i < type_names.size(); ++i) {
             auto node_id = "T" + std::to_string(i);
-            result += "    " + node_id + "[\"" + type_names[i] + "\"]\n";
+            result += "    " + node_id + "[\"" + escape_mermaid_label(type_names[i]) + "\"]\n";
             result += "    NS --> " + node_id + "\n";
         }
 
+        std::size_t child_index = 0;
         for(auto& child : ns.children) {
             if(child.find("(anonymous namespace)") != std::string::npos) continue;
             auto csep = child.rfind("::");
             auto child_short = (csep != std::string::npos) ? child.substr(csep + 2) : child;
-            result += "    NS --> " + child_short + "\n";
+            auto child_node_id = "NSC" + std::to_string(child_index++);
+            result += "    " + child_node_id + "[\"" +
+                      escape_mermaid_label(child_short) + "\"]\n";
+            result += "    NS --> " + child_node_id + "\n";
         }
 
         result += "```\n";
@@ -807,15 +866,25 @@ auto render_module_dependency_diagram(const extract::ProjectModel& model) -> std
     std::vector<std::string> sorted_modules(all_modules.begin(), all_modules.end());
     std::sort(sorted_modules.begin(), sorted_modules.end());
 
-    for(auto& mod : sorted_modules) {
-        result += "    " + mod + "\n";
+    std::unordered_map<std::string, std::string> node_id_by_module;
+    node_id_by_module.reserve(sorted_modules.size());
+
+    for(std::size_t i = 0; i < sorted_modules.size(); ++i) {
+        auto node_id = std::format("M{}", i);
+        node_id_by_module.emplace(sorted_modules[i], node_id);
+        result += "    " + node_id + "[\"" +
+                  escape_mermaid_label(sorted_modules[i]) + "\"]\n";
     }
 
-    for(auto& [from, targets] : deps) {
-        std::vector<std::string> sorted_targets(targets.begin(), targets.end());
+    for(auto& from : sorted_modules) {
+        auto dep_it = deps.find(from);
+        if(dep_it == deps.end()) continue;
+
+        std::vector<std::string> sorted_targets(dep_it->second.begin(), dep_it->second.end());
         std::sort(sorted_targets.begin(), sorted_targets.end());
         for(auto& to : sorted_targets) {
-            result += "    " + to + " --> " + from + "\n";
+            result += "    " + node_id_by_module.at(to) + " --> " +
+                      node_id_by_module.at(from) + "\n";
         }
     }
 
@@ -856,6 +925,7 @@ auto is_blank_line(std::string_view line) -> bool {
 auto build_link_resolver(const PagePlanSet& plan_set) -> LinkResolver {
     LinkResolver resolver;
     for(auto& plan : plan_set.plans) {
+        resolver.page_id_to_title[plan.page_id] = plan.title;
         for(auto& key : plan.owner_keys) {
             resolver.name_to_path[key] = plan.relative_path;
         }
@@ -965,18 +1035,37 @@ auto assemble_page(const std::string& page_template,
     }
 
     std::size_t i = 0;
+    bool in_fence = false;
+    std::string active_fence;
     while(i < lines.size()) {
-        auto current_line = trim_line(lines[i]);
-        if(current_line.starts_with("## ") || current_line.starts_with("### ")) {
+        auto raw_line = strip_trailing_carriage_return(lines[i]);
+        auto current_line = trim_line(raw_line);
+
+        if(current_line.starts_with("```") || current_line.starts_with("~~~")) {
+            auto fence = std::string(current_line.substr(0, 3));
+            if(!in_fence) {
+                in_fence = true;
+                active_fence = fence;
+            } else if(current_line.starts_with(active_fence)) {
+                in_fence = false;
+                active_fence.clear();
+            }
+
+            cleaned += std::string(raw_line) + "\n";
+            ++i;
+            continue;
+        }
+
+        if(!in_fence && (raw_line.starts_with("## ") || raw_line.starts_with("### "))) {
             std::size_t j = i + 1;
             while(j < lines.size() && is_blank_line(lines[j])) {
                 ++j;
             }
 
             if(j >= lines.size() ||
-               trim_line(lines[j]).starts_with("# ") ||
-               trim_line(lines[j]).starts_with("## ") ||
-               trim_line(lines[j]).starts_with("### ")) {
+               strip_trailing_carriage_return(lines[j]).starts_with("# ") ||
+               strip_trailing_carriage_return(lines[j]).starts_with("## ") ||
+               strip_trailing_carriage_return(lines[j]).starts_with("### ")) {
                 if(fail_on_empty_section) {
                     return std::unexpected(RenderError{
                         std::format("empty section detected: {}", current_line)
@@ -987,7 +1076,7 @@ auto assemble_page(const std::string& page_template,
             }
         }
 
-        cleaned += std::string(strip_trailing_carriage_return(lines[i])) + "\n";
+        cleaned += std::string(raw_line) + "\n";
         ++i;
     }
 

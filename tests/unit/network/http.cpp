@@ -1,6 +1,7 @@
 #include "eventide/zest/zest.h"
 
 #include <cstdlib>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -10,6 +11,17 @@ import network;
 using namespace clore::net::detail;
 
 namespace {
+
+auto environment_mutex() -> std::mutex& {
+    static std::mutex mutex;
+    return mutex;
+}
+
+struct ScopedEnvironmentLock {
+    std::unique_lock<std::mutex> lock;
+
+    ScopedEnvironmentLock() : lock(environment_mutex()) {}
+};
 
 struct ScopedEnvVar {
     std::string name;
@@ -59,6 +71,7 @@ TEST_SUITE(network_http) {
     }
 
     TEST_CASE(read_environment_requires_base_url) {
+        ScopedEnvironmentLock env_lock;
         ScopedEnvVar base_url("OPENAI_BASE_URL");
         ScopedEnvVar api_key("OPENAI_API_KEY");
 
@@ -72,6 +85,7 @@ TEST_SUITE(network_http) {
     }
 
     TEST_CASE(read_environment_requires_api_key) {
+        ScopedEnvironmentLock env_lock;
         ScopedEnvVar base_url("OPENAI_BASE_URL");
         ScopedEnvVar api_key("OPENAI_API_KEY");
 

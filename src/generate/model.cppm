@@ -119,11 +119,19 @@ using PageSummaryCache = std::unordered_map<std::string, std::string>;
 struct LinkResolver {
     /// qualified_name or module_name or ns_name -> page relative_path
     std::unordered_map<std::string, std::string> name_to_path;
+    /// page_id -> rendered title
+    std::unordered_map<std::string, std::string> page_id_to_title;
 
     [[nodiscard]] auto resolve(const std::string& name) const
         -> const std::string* {
         auto it = name_to_path.find(name);
         return it != name_to_path.end() ? &it->second : nullptr;
+    }
+
+    [[nodiscard]] auto resolve_page_title(const std::string& page_id) const
+        -> const std::string* {
+        auto it = page_id_to_title.find(page_id);
+        return it != page_id_to_title.end() ? &it->second : nullptr;
     }
 };
 

@@ -661,6 +661,36 @@ TEST_SUITE(generate) {
         EXPECT_EQ(block.find("std::hash<demo::Widget>"), std::string::npos);
     }
 
+    TEST_CASE(render_deterministic_block_uses_curated_workflow_titles) {
+        ScopedTempDir temp("workflow_titles");
+
+        auto config = make_config(temp.path);
+        extract::ProjectModel model;
+
+        PagePlan index_plan{
+            .page_id = "index",
+            .page_type = PageType::Index,
+            .title = "API Reference",
+            .relative_path = "guides/index.md",
+            .linked_pages = {"workflow:generate-docs-preview"},
+        };
+        PagePlan workflow_plan{
+            .page_id = "workflow:generate-docs-preview",
+            .page_type = PageType::Workflow,
+            .title = "Generate Docs",
+            .relative_path = "workflows/generate-docs-preview/index.md",
+            .owner_keys = {"demo::main", "demo::generate_docs"},
+        };
+
+        auto links = build_link_resolver(PagePlanSet{
+            .plans = {index_plan, workflow_plan},
+        });
+        auto block = render_deterministic_block("all_workflows", index_plan, model, config, links);
+
+        EXPECT_NE(block.find("[Generate Docs]"), std::string::npos);
+        EXPECT_EQ(block.find("Generate Docs Preview"), std::string::npos);
+    }
+
     TEST_CASE(namespace_summary_prompt_uses_namespace_subject) {
         ScopedTempDir temp("namespace_summary_prompt");
         fs::create_directories(temp.path / "src");
@@ -714,6 +744,33 @@ TEST_SUITE(generate) {
         ASSERT_TRUE(result.has_value());
         EXPECT_EQ(result->find("## Summary"), std::string::npos);
         EXPECT_NE(result->find("## Declaration"), std::string::npos);
+    }
+
+    TEST_CASE(assemble_page_keeps_indented_headings_as_content) {
+        std::unordered_map<std::string, std::string> blocks;
+        std::unordered_map<std::string, std::string> slots;
+
+        auto result = assemble_page(
+            "# {{title}}\n\n    ## Literal heading\n\n## Details\n\nBody\n",
+            "`Example`", blocks, slots, false);
+
+        ASSERT_TRUE(result.has_value());
+        EXPECT_NE(result->find("    ## Literal heading"), std::string::npos);
+        EXPECT_NE(result->find("## Details"), std::string::npos);
+    }
+
+    TEST_CASE(compute_page_path_sanitizes_workflow_slugs) {
+        auto config = make_config(fs::temp_directory_path());
+
+        auto result = compute_page_path(
+            PageIdentity{
+                .page_type = PageType::Workflow,
+                .normalized_owner_key = "  docs/generate \\ preview  ",
+            },
+            config.path_rules);
+
+        ASSERT_TRUE(result.has_value());
+        EXPECT_EQ(*result, "workflows/docs-generate-preview/index.md");
     }
 
     TEST_CASE(validate_output_rejects_whitespace_only_content) {
