@@ -40,15 +40,15 @@ jobs:
       - name: Configure
         run: pixi run cmake-config Debug
 
-      - name: Build
-        run: pixi run cmake-build Debug
-
       - name: Save build directory cache
         if: steps.restore-build-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
           path: build/Debug/
           key: ${{ steps.restore-build-cache.outputs.cache-primary-key }}
+
+      - name: Build
+        run: pixi run cmake-build Debug
 
       - name: Generate documentation
         if: github.event_name == 'push'
