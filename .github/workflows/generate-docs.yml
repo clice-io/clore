@@ -3,11 +3,12 @@ name: generate-docs
 on:
   push:
     branches: ["main"]
+  pull_request:
   workflow_dispatch:
 
 jobs:
   generate:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     permissions:
       contents: write
 
@@ -16,68 +17,45 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup pixi
-        uses: prefix-dev/setup-pixi@v0.9.4
+        uses: prefix-dev/setup-pixi@v0.9.5
         with:
           pixi-version: v0.67.0
           activate-environment: true
-          cache: true
+          cache: false
           locked: true
 
-      - name: Restore compiler cache
+      - name: Cache .clice
         uses: actions/cache@v5
         with:
-          path: .cache/sccache
-          key: Windows-sccache-${{ github.sha }}
-          restore-keys: |
-            Windows-sccache-
+          path: .clice/
+          key: ${{ runner.os }}-clice
 
-      - name: Restore configure artifacts cache
-        id: restore-configure-cache
-        uses: actions/cache/restore@v5
+      - name: Cache build directory
+        uses: actions/cache@v5
         with:
-          path: |
-            build/RelWithDebInfo/.llvm
-            build/RelWithDebInfo/include
-            build/RelWithDebInfo/_deps
-            build/RelWithDebInfo/*.tar.*
-          key: >-
-            Windows-configure-RelWithDebInfo-${{
-            hashFiles('pixi.lock', 'pixi.toml', '**/CMakeLists.txt', 'cmake/**/*.cmake')
-            }}-${{ github.sha }}
-          restore-keys: |
-            Windows-configure-RelWithDebInfo-${{ hashFiles('pixi.lock', 'pixi.toml', '**/CMakeLists.txt', 'cmake/**/*.cmake') }}-
-
-      - name: Start sccache
-        run: sccache --start-server
+          path: build/Debug/
+          key: ${{ runner.os }}-${{ hashFiles('pixi.lock', 'pixi.toml', '**/CMakeLists.txt', 'cmake/**/*.cmake') }}
 
       - name: Configure
-        run: pixi run cmake-config
-
-      - name: Save configure artifacts cache
-        if: success()
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            build/RelWithDebInfo/.llvm
-            build/RelWithDebInfo/include
-            build/RelWithDebInfo/_deps
-            build/RelWithDebInfo/*.tar.*
-          key: ${{ steps.restore-configure-cache.outputs.cache-primary-key }}
+        run: pixi run cmake-config Debug
 
       - name: Build
-        run: pixi run cmake-build
+        run: pixi run cmake-build Debug
 
       - name: Generate documentation
+        env:
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          ./build/RelWithDebInfo/bin/clore `
-            --compile-commands build/RelWithDebInfo/compile_commands.json `
-            --source-dir src `
-            --output-dir generated `
-            --log-level info `
-            --dry-run
+          ./build/Debug/bin/clore \
+            --compile-commands build/Debug/compile_commands.json \
+            --source-dir src \
+            --output-dir generated \
+            --log-level info \
+            --model deepseek-chat
 
       - name: Package documentation
-        run: Compress-Archive -Path generated/* -DestinationPath clore-docs.zip
+        run: zip -r clore-docs.zip generated
 
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v7

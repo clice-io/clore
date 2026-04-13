@@ -486,7 +486,7 @@ auto extract_summary_from_slot_output(const std::string& overview_output) -> std
     return clore::support::ensure_utf8(overview_output);
 }
 
-struct FeatureReviewCandidate {
+struct WorkflowReviewCandidate {
     std::size_t plan_index = 0;
     std::string page_id;
     std::string current_title;
@@ -539,20 +539,20 @@ auto build_json_string_array(const std::vector<std::string>& values) -> std::str
 auto build_workflow_review_candidates(const PagePlanSet& plan_set,
                                      const extract::ProjectModel& model,
                                      const config::TaskConfig& config)
-    -> std::vector<FeatureReviewCandidate> {
+    -> std::vector<WorkflowReviewCandidate> {
     std::unordered_map<std::string, const extract::SymbolInfo*> symbol_by_qname;
     symbol_by_qname.reserve(model.symbols.size());
     for(auto& [sym_id, sym] : model.symbols) {
         symbol_by_qname.emplace(sym.qualified_name, &sym);
     }
 
-    std::vector<FeatureReviewCandidate> candidates;
+    std::vector<WorkflowReviewCandidate> candidates;
     for(std::size_t i = 0; i < plan_set.plans.size(); ++i) {
         auto& plan = plan_set.plans[i];
         if(plan.page_type != PageType::Workflow) continue;
         if(plan.owner_keys.size() < 2) continue;
 
-        FeatureReviewCandidate candidate;
+        WorkflowReviewCandidate candidate;
         candidate.plan_index = i;
         candidate.page_id = plan.page_id;
         candidate.current_title = plan.title;
@@ -593,7 +593,7 @@ auto build_workflow_review_candidates(const PagePlanSet& plan_set,
     }
 
     std::sort(candidates.begin(), candidates.end(),
-              [](const FeatureReviewCandidate& lhs, const FeatureReviewCandidate& rhs) {
+              [](const WorkflowReviewCandidate& lhs, const WorkflowReviewCandidate& rhs) {
                   if(lhs.rank_score != rhs.rank_score) return lhs.rank_score > rhs.rank_score;
                   if(lhs.chain_length != rhs.chain_length) return lhs.chain_length > rhs.chain_length;
                   return lhs.page_id < rhs.page_id;
@@ -602,7 +602,7 @@ auto build_workflow_review_candidates(const PagePlanSet& plan_set,
     return candidates;
 }
 
-auto build_workflow_review_payload(const std::vector<FeatureReviewCandidate>& candidates)
+auto build_workflow_review_payload(const std::vector<WorkflowReviewCandidate>& candidates)
     -> std::string {
     std::string json = "{\n  \"candidates\": [\n";
     for(std::size_t i = 0; i < candidates.size(); ++i) {
@@ -634,7 +634,7 @@ auto build_workflow_review_payload(const std::vector<FeatureReviewCandidate>& ca
     return json;
 }
 
-auto build_workflow_review_prompt(const std::vector<FeatureReviewCandidate>& candidates,
+auto build_workflow_review_prompt(const std::vector<WorkflowReviewCandidate>& candidates,
                                  std::size_t selected_count) -> std::string {
     auto payload = build_workflow_review_payload(candidates);
     std::string prompt;
@@ -662,19 +662,104 @@ auto build_workflow_review_prompt(const std::vector<FeatureReviewCandidate>& can
     return prompt;
 }
 
-auto parse_workflow_review_response(std::string_view response,
-                                   const std::unordered_set<std::string>& allowed_page_ids,
-                                   std::size_t selected_count)
-    -> std::expected<std::unordered_map<std::string, std::string>, GenerateError> {
-    namespace json = eventide::serde::json;
-
-    auto parsed = json::Object::parse(std::string{response});
-    if(!parsed.has_value()) {
-        return std::unexpected(GenerateError{
-            .message = "workflow review returned invalid JSON"});
+auto append_json_candidate(std::vector<std::string>& candidates,
+                           std::unordered_set<std::string>& dedupe,
+                           std::string_view raw) -> void {
+    auto trimmed = trim_ascii(raw);
+    if(trimmed.empty()) {
+        return;
     }
 
-    auto selected_value = parsed->get("selected");
+    auto candidate = std::string(trimmed);
+    if(dedupe.emplace(candidate).second) {
+        candidates.push_back(std::move(candidate));
+    }
+}
+
+auto collect_workflow_review_json_candidates(std::string_view response)
+    -> std::vector<std::string> {
+    std::vector<std::string> candidates;
+    std::unordered_set<std::string> dedupe;
+    append_json_candidate(candidates, dedupe, response);
+
+    // Extract fenced blocks first (` ```json ... ``` ` or plain fences).
+    std::size_t fence_search = 0;
+    while(true) {
+        auto fence_start = response.find("```", fence_search);
+        if(fence_start == std::string_view::npos) break;
+
+        auto header_end = response.find('\n', fence_start + 3);
+        if(header_end == std::string_view::npos) break;
+
+        auto header = trim_ascii(response.substr(
+            fence_start + 3, header_end - (fence_start + 3)));
+
+        auto fence_end = response.find("```", header_end + 1);
+        if(fence_end == std::string_view::npos) break;
+
+        auto is_json_fence = header.empty() || header == "json" || header == "JSON";
+        if(is_json_fence) {
+            append_json_candidate(
+                candidates, dedupe,
+                response.substr(header_end + 1, fence_end - (header_end + 1)));
+        }
+        fence_search = fence_end + 3;
+    }
+
+    // Scan free-form text for balanced JSON objects.
+    for(std::size_t start = 0; start < response.size(); ++start) {
+        if(response[start] != '{') continue;
+
+        std::size_t depth = 0;
+        bool in_string = false;
+        bool escaped = false;
+
+        for(std::size_t index = start; index < response.size(); ++index) {
+            auto ch = response[index];
+            if(in_string) {
+                if(escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if(ch == '\\') {
+                    escaped = true;
+                    continue;
+                }
+                if(ch == '"') {
+                    in_string = false;
+                }
+                continue;
+            }
+
+            if(ch == '"') {
+                in_string = true;
+                continue;
+            }
+            if(ch == '{') {
+                ++depth;
+                continue;
+            }
+            if(ch == '}') {
+                if(depth == 0) break;
+                --depth;
+                if(depth == 0) {
+                    append_json_candidate(
+                        candidates, dedupe,
+                        response.substr(start, index - start + 1));
+                    break;
+                }
+            }
+        }
+    }
+
+    return candidates;
+}
+
+auto parse_workflow_review_object(const eventide::serde::json::Object& parsed,
+                                  const std::unordered_set<std::string>& allowed_page_ids,
+                                  std::size_t selected_count)
+    -> std::expected<std::unordered_map<std::string, std::string>, GenerateError> {
+    auto selected_value = parsed.get("selected");
     if(!selected_value.has_value()) {
         return std::unexpected(GenerateError{
             .message = "workflow review JSON missing 'selected'"});
@@ -739,6 +824,134 @@ auto parse_workflow_review_response(std::string_view response,
     }
 
     return selected_titles;
+}
+
+auto parse_workflow_review_response(std::string_view response,
+                                    const std::unordered_set<std::string>& allowed_page_ids,
+                                    std::size_t selected_count)
+    -> std::expected<std::unordered_map<std::string, std::string>, GenerateError> {
+    namespace json = eventide::serde::json;
+
+    auto candidates = collect_workflow_review_json_candidates(response);
+    if(candidates.empty()) {
+        return std::unexpected(GenerateError{
+            .message = "workflow review returned invalid JSON: empty response"});
+    }
+
+    std::optional<GenerateError> last_validation_error;
+    std::string last_parse_error = "unknown JSON parse error";
+
+    for(auto& candidate : candidates) {
+        auto parsed = json::Object::parse(candidate);
+        if(!parsed.has_value()) {
+            last_parse_error = json::error_message(json::make_read_error(parsed.error()));
+            continue;
+        }
+
+        auto validation_result =
+            parse_workflow_review_object(*parsed, allowed_page_ids, selected_count);
+        if(validation_result.has_value()) {
+            return validation_result;
+        }
+        last_validation_error = std::move(validation_result.error());
+    }
+
+    if(last_validation_error.has_value()) {
+        return std::unexpected(std::move(*last_validation_error));
+    }
+
+    return std::unexpected(GenerateError{
+        .message = std::format("workflow review returned invalid JSON: {}",
+                               last_parse_error)});
+}
+
+auto build_workflow_review_calibration_prompt(
+    const std::vector<WorkflowReviewCandidate>& candidates,
+    std::size_t selected_count,
+    std::string_view previous_output,
+    std::string_view validation_error) -> std::string {
+    auto payload = build_workflow_review_payload(candidates);
+    std::string prompt;
+    prompt.reserve(payload.size() + previous_output.size() + validation_error.size() + 3072);
+    prompt += "Fix the workflow review JSON so it strictly matches the required schema.\n";
+    prompt += "Do not explain. Do not wrap with markdown.\n";
+    prompt += std::format("Validation error:\n{}\n\n", validation_error);
+    prompt += "Original invalid output:\n```text\n";
+    prompt += std::string(previous_output);
+    prompt += "\n```\n\n";
+    prompt += "Input candidates JSON:\n```json\n";
+    prompt += payload;
+    prompt += "\n```\n\n";
+    prompt += "Return ONLY JSON with this exact schema:\n";
+    prompt += "{\n";
+    prompt += "  \"selected\": [\n";
+    prompt += "    {\"page_id\": \"workflow:...\", \"title\": \"...\"}\n";
+    prompt += "  ]\n";
+    prompt += "}\n";
+    prompt += "Rules:\n";
+    prompt += std::format("- `selected` length must be exactly {}\n", selected_count);
+    prompt += "- each `page_id` must be chosen from the candidate list\n";
+    prompt += "- no duplicate `page_id`\n";
+    prompt += "- `title` must be non-empty, concise, and descriptive\n";
+    prompt += "- no extra keys\n";
+    return prompt;
+}
+
+auto request_workflow_review_selection(
+    const std::vector<WorkflowReviewCandidate>& candidates,
+    const std::unordered_set<std::string>& allowed_page_ids,
+    std::size_t selected_count,
+    const config::TaskConfig& config,
+    std::string_view llm_model)
+    -> std::expected<std::unordered_map<std::string, std::string>, GenerateError> {
+    auto prompt = build_workflow_review_prompt(candidates, selected_count);
+    auto response = clore::net::call_llm(llm_model, config.llm.system_prompt, prompt);
+    if(!response.has_value()) {
+        return std::unexpected(GenerateError{
+            .message = std::format("workflow review LLM request failed: {}",
+                                   response.error().message)});
+    }
+
+    auto selected_titles =
+        parse_workflow_review_response(*response, allowed_page_ids, selected_count);
+    if(selected_titles.has_value()) {
+        return selected_titles;
+    }
+
+    auto current_error = std::move(selected_titles.error());
+    auto current_output = std::move(*response);
+    logging::warn("workflow review validation failed: {}", current_error.message);
+
+    auto calibration_attempt_limit = config.llm.retry_count;
+    for(std::uint32_t attempt = 0; attempt < calibration_attempt_limit; ++attempt) {
+        auto calibration_prompt = build_workflow_review_calibration_prompt(
+            candidates, selected_count, current_output, current_error.message);
+        auto calibration = clore::net::call_llm(
+            llm_model, config.llm.system_prompt, calibration_prompt);
+        if(!calibration.has_value()) {
+            return std::unexpected(GenerateError{
+                .message = std::format("workflow review calibration LLM request failed: {}",
+                                       calibration.error().message)});
+        }
+
+        current_output = std::move(*calibration);
+        auto calibrated_titles = parse_workflow_review_response(
+            current_output, allowed_page_ids, selected_count);
+        if(calibrated_titles.has_value()) {
+            logging::info("workflow review calibration succeeded on attempt {}/{}",
+                          attempt + 1, calibration_attempt_limit);
+            return calibrated_titles;
+        }
+
+        current_error = std::move(calibrated_titles.error());
+        logging::warn("workflow review calibration attempt {}/{} failed: {}",
+                      attempt + 1, calibration_attempt_limit, current_error.message);
+    }
+
+    return std::unexpected(GenerateError{
+        .message = std::format(
+            "workflow review output remained invalid after {} calibration attempts: {}",
+            calibration_attempt_limit, current_error.message)});
 }
 
 auto apply_workflow_review_selection(
@@ -818,22 +1031,14 @@ auto review_workflow_pages_with_llm(PagePlanSet& plan_set,
             .message = "workflow review requires at least one selectable candidate"});
     }
 
-    auto prompt = build_workflow_review_prompt(candidates, selected_count);
-    auto response = clore::net::call_llm(llm_model, config.llm.system_prompt, prompt);
-    if(!response.has_value()) {
-        return std::unexpected(GenerateError{
-            .message = std::format("workflow review LLM request failed: {}",
-                                   response.error().message)});
-    }
-
     std::unordered_set<std::string> allowed_page_ids;
     allowed_page_ids.reserve(candidates.size());
     for(auto& candidate : candidates) {
         allowed_page_ids.insert(candidate.page_id);
     }
 
-    auto selected_titles =
-        parse_workflow_review_response(*response, allowed_page_ids, selected_count);
+    auto selected_titles = request_workflow_review_selection(
+        candidates, allowed_page_ids, selected_count, config, llm_model);
     if(!selected_titles.has_value()) {
         return std::unexpected(std::move(selected_titles.error()));
     }

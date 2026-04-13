@@ -887,15 +887,6 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
         return out;
     };
 
-    auto stable_hash_text = [](std::string_view text) -> std::uint64_t {
-        std::uint64_t hash = 1469598103934665603ULL;
-        for(auto ch : text) {
-            hash ^= static_cast<unsigned char>(ch);
-            hash *= 1099511628211ULL;
-        }
-        return hash;
-    };
-
     auto& rules = builder.config.workflow_rules;
 
     auto overlap_ratio_percent =
@@ -925,6 +916,7 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
 
     std::vector<std::unordered_set<std::string>> accepted_symbol_sets;
     std::unordered_set<std::string> accepted_symbols_union;
+    std::unordered_map<std::string, std::size_t> workflow_slug_counts;
 
     for(auto& comp_path : workflow_paths) {
         std::vector<ModuleEdgeRep> chain_edges;
@@ -988,23 +980,27 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
         }
         if(overlap_rejected) continue;
 
-        std::string slug_seed;
-        for(std::size_t i = 0; i < owner_keys.size(); ++i) {
-            if(i > 0) slug_seed += "->";
-            slug_seed += owner_keys[i];
-        }
-        if(slug_seed.empty()) continue;
-
         auto first_short = short_name_of(owner_keys.front());
         auto last_short = short_name_of(owner_keys.back());
         if(first_short.empty() || last_short.empty()) continue;
 
-        auto slug = slugify(first_short + "-to-" + last_short);
-        if(slug.empty()) continue;
-        slug += std::format("-{:016x}", stable_hash_text(slug_seed));
+        auto base_slug = slugify(first_short + "-to-" + last_short);
+        if(base_slug.empty()) continue;
 
-        auto page_id = "workflow:" + slug;
-        if(builder.id_to_index.contains(page_id)) continue;
+        auto& slug_count = workflow_slug_counts[base_slug];
+        std::string slug;
+        std::string page_id;
+        while(true) {
+            ++slug_count;
+            slug = base_slug;
+            if(slug_count > 1) {
+                slug += std::format("-{}", slug_count);
+            }
+            page_id = "workflow:" + slug;
+            if(!builder.id_to_index.contains(page_id)) {
+                break;
+            }
+        }
 
         PageIdentity identity{
             .page_type = PageType::Workflow,

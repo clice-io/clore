@@ -211,6 +211,13 @@ TEST_SUITE(workflow) {
         });
         EXPECT_EQ(feature_count, 1u);
 
+        auto workflow_plan = std::ranges::find_if(result->plans, [](const PagePlan& plan) {
+            return plan.page_type == PageType::Workflow;
+        });
+        ASSERT_TRUE(workflow_plan != result->plans.end());
+        EXPECT_EQ(workflow_plan->page_id, "workflow:entry-to-persist");
+        EXPECT_EQ(workflow_plan->relative_path, "workflows/entry-to-persist/index.md");
+
         auto has_chain = std::ranges::any_of(result->plans, [](const PagePlan& plan) {
             if(plan.page_type != PageType::Workflow) return false;
             return std::ranges::find(plan.owner_keys, "demo::workflow::entry") !=
@@ -221,6 +228,57 @@ TEST_SUITE(workflow) {
                        plan.owner_keys.end();
         });
         EXPECT_TRUE(has_chain);
+    }
+
+    TEST_CASE(build_page_plan_set_disambiguates_duplicate_workflow_slugs_without_hash_suffix) {
+        ScopedTempDir temp("workflow_slug_disambiguation");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_base_config(temp.path);
+        config.page_types.index = true;
+        config.page_types.module_page = false;
+        config.page_types.workflow_page = true;
+
+        extract::ProjectModel model;
+        model.uses_modules = false;
+
+        auto src_file = (temp.path / "src" / "workflow.cpp").generic_string();
+
+        auto a_start = make_symbol(201, "start", "demo::a::start", src_file);
+        auto a_mid = make_symbol(202, "process", "demo::a::process", src_file);
+        auto a_end = make_symbol(203, "end", "demo::a::end", src_file);
+        auto b_start = make_symbol(204, "start", "demo::b::start", src_file);
+        auto b_mid = make_symbol(205, "process", "demo::b::process", src_file);
+        auto b_end = make_symbol(206, "end", "demo::b::end", src_file);
+
+        a_start.calls = {a_mid.id};
+        a_mid.calls = {a_end.id};
+        b_start.calls = {b_mid.id};
+        b_mid.calls = {b_end.id};
+
+        model.symbols.emplace(a_start.id, a_start);
+        model.symbols.emplace(a_mid.id, a_mid);
+        model.symbols.emplace(a_end.id, a_end);
+        model.symbols.emplace(b_start.id, b_start);
+        model.symbols.emplace(b_mid.id, b_mid);
+        model.symbols.emplace(b_end.id, b_end);
+
+        auto result = build_page_plan_set(config, model);
+        ASSERT_TRUE(result.has_value());
+
+        auto has_first_slug = std::ranges::any_of(result->plans, [](const PagePlan& plan) {
+            return plan.page_type == PageType::Workflow &&
+                   plan.page_id == "workflow:start-to-end" &&
+                   plan.relative_path == "workflows/start-to-end/index.md";
+        });
+        auto has_second_slug = std::ranges::any_of(result->plans, [](const PagePlan& plan) {
+            return plan.page_type == PageType::Workflow &&
+                   plan.page_id == "workflow:start-to-end-2" &&
+                   plan.relative_path == "workflows/start-to-end-2/index.md";
+        });
+
+        EXPECT_TRUE(has_first_slug);
+        EXPECT_TRUE(has_second_slug);
     }
 
     TEST_CASE(render_all_workflows_index_sorts_workflow_links) {
