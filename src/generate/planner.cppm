@@ -39,31 +39,69 @@ namespace clore::generate {
 
 namespace {
 
-auto split_qualified_name(const std::string& qname) -> std::vector<std::string> {
+auto split_qualified_name(std::string_view qname) -> std::vector<std::string> {
     std::vector<std::string> parts;
-    std::size_t pos = 0;
-    while(pos < qname.size()) {
-        auto found = qname.find("::", pos);
-        if(found == std::string::npos) {
-            parts.push_back(qname.substr(pos));
-            break;
+    std::string current;
+    current.reserve(qname.size());
+
+    std::size_t template_depth = 0;
+    for(std::size_t index = 0; index < qname.size(); ++index) {
+        auto ch = qname[index];
+        if(ch == '<') {
+            template_depth++;
+            current.push_back(ch);
+            continue;
         }
-        parts.push_back(qname.substr(pos, found - pos));
-        pos = found + 2;
+        if(ch == '>') {
+            if(template_depth > 0) {
+                template_depth--;
+            }
+            current.push_back(ch);
+            continue;
+        }
+        if(ch == ':' && template_depth == 0 && index + 1 < qname.size() &&
+           qname[index + 1] == ':') {
+            parts.push_back(current);
+            current.clear();
+            ++index;
+            continue;
+        }
+        current.push_back(ch);
     }
+
+    if(!current.empty()) {
+        parts.push_back(std::move(current));
+    }
+
     return parts;
 }
 
-auto namespace_of(const std::string& qualified_name) -> std::string {
-    auto pos = qualified_name.rfind("::");
-    if(pos == std::string::npos) return {};
-    return qualified_name.substr(0, pos);
+auto join_qualified_name_parts(const std::vector<std::string>& parts,
+                               std::size_t count) -> std::string {
+    std::string joined;
+    for(std::size_t index = 0; index < count; ++index) {
+        if(index > 0) {
+            joined += "::";
+        }
+        joined += parts[index];
+    }
+    return joined;
 }
 
-auto short_name_of(const std::string& qualified_name) -> std::string {
-    auto pos = qualified_name.rfind("::");
-    if(pos == std::string::npos) return qualified_name;
-    return qualified_name.substr(pos + 2);
+auto namespace_of(std::string_view qualified_name) -> std::string {
+    auto parts = split_qualified_name(qualified_name);
+    if(parts.size() <= 1) {
+        return {};
+    }
+    return join_qualified_name_parts(parts, parts.size() - 1);
+}
+
+auto short_name_of(std::string_view qualified_name) -> std::string {
+    auto parts = split_qualified_name(qualified_name);
+    if(parts.empty()) {
+        return {};
+    }
+    return parts.back();
 }
 
 auto is_type_kind(extract::SymbolKind kind) -> bool {
@@ -81,10 +119,100 @@ auto is_type_kind(extract::SymbolKind kind) -> bool {
     }
 }
 
+auto has_reserved_identifier_prefix(std::string_view identifier) -> bool {
+    return identifier.starts_with("_") && identifier.size() > 1 &&
+           (std::isupper(static_cast<unsigned char>(identifier[1])) || identifier[1] == '_');
+}
+
 auto lookup_sym(const extract::ProjectModel& model, extract::SymbolID id)
     -> const extract::SymbolInfo* {
     auto it = model.symbols.find(id);
     return it != model.symbols.end() ? &it->second : nullptr;
+}
+
+auto namespace_of(const extract::SymbolInfo& sym) -> std::string {
+    if(!sym.enclosing_namespace.empty()) {
+        return sym.enclosing_namespace;
+    }
+    return namespace_of(sym.qualified_name);
+}
+
+auto is_renderable_namespace_name(std::string_view ns_name) -> bool {
+    if(ns_name.empty() || ns_name.find("(anonymous namespace)") != std::string_view::npos) {
+        return false;
+    }
+    if(ns_name == "std" || ns_name.starts_with("std::")) {
+        return false;
+    }
+
+    auto parts = split_qualified_name(ns_name);
+    if(parts.empty()) {
+        return false;
+    }
+
+    for(const auto& segment : parts) {
+        if(segment.empty() || segment.find('<') != std::string::npos ||
+           segment.find('>') != std::string::npos ||
+           has_reserved_identifier_prefix(segment)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+auto is_nested_type_page_candidate(const extract::ProjectModel& model,
+                                   const extract::SymbolInfo& sym) -> bool {
+    if(is_type_kind(sym.lexical_parent_kind)) {
+        return true;
+    }
+
+    if(sym.parent.has_value()) {
+        if(auto* parent = lookup_sym(model, *sym.parent)) {
+            if(is_type_kind(parent->kind)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+auto should_generate_type_page(const extract::ProjectModel& model,
+                               const extract::SymbolInfo& sym) -> bool {
+    if(!is_type_kind(sym.kind)) {
+        return false;
+    }
+    if(sym.qualified_name.find("(anonymous namespace)") != std::string::npos) {
+        return false;
+    }
+
+    auto short_name = short_name_of(sym.qualified_name);
+    if(short_name.empty() || has_reserved_identifier_prefix(short_name)) {
+        return false;
+    }
+    if(sym.lexical_parent_kind != extract::SymbolKind::Unknown &&
+       sym.lexical_parent_kind != extract::SymbolKind::Namespace) {
+        return false;
+    }
+    if(sym.parent.has_value()) {
+        if(auto* parent = lookup_sym(model, *sym.parent)) {
+            if(parent->kind == extract::SymbolKind::Function ||
+               parent->kind == extract::SymbolKind::Method) {
+                return false;
+            }
+        }
+    }
+    if(is_nested_type_page_candidate(model, sym)) {
+        return false;
+    }
+
+    auto ns = namespace_of(sym);
+    if(!ns.empty() && !is_renderable_namespace_name(ns)) {
+        return false;
+    }
+
+    return true;
 }
 
 auto find_module_for_file(const extract::ProjectModel& model, const std::string& file_path)
@@ -143,21 +271,9 @@ auto enumerate_type_pages(PlanBuilder& builder) -> std::expected<void, PlanError
     if(!builder.config.page_types.type_page) return {};
 
     for(auto& [id, sym] : builder.model.symbols) {
-        if(!is_type_kind(sym.kind)) continue;
-        // Skip types from anonymous namespaces
-        if(sym.qualified_name.find("(anonymous namespace)") != std::string::npos) continue;
-        // Skip compiler/macro-generated internal types (reserved identifiers starting with _ followed by uppercase or __)
-        auto sn = short_name_of(sym.qualified_name);
-        if(sn.starts_with("_") && sn.size() > 1 &&
-           (std::isupper(static_cast<unsigned char>(sn[1])) || sn[1] == '_')) continue;
-        // Skip nested types (parent is a type)
-        if(sym.parent.has_value()) {
-            if(auto* parent = lookup_sym(builder.model, *sym.parent)) {
-                if(is_type_kind(parent->kind)) continue;
-            }
-        }
+        if(!should_generate_type_page(builder.model, sym)) continue;
 
-        auto ns = namespace_of(sym.qualified_name);
+        auto ns = namespace_of(sym);
         auto short_name = short_name_of(sym.qualified_name);
         auto ns_parts = split_qualified_name(ns);
 
@@ -193,18 +309,22 @@ auto enumerate_type_pages(PlanBuilder& builder) -> std::expected<void, PlanError
         // Dependencies: base types
         for(auto& base_id : sym.bases) {
             if(auto* base = lookup_sym(builder.model, base_id)) {
-                plan.depends_on_pages.push_back("type:" + base->qualified_name);
-                plan.linked_pages.push_back("type:" + base->qualified_name);
+                if(should_generate_type_page(builder.model, *base)) {
+                    plan.depends_on_pages.push_back("type:" + base->qualified_name);
+                    plan.linked_pages.push_back("type:" + base->qualified_name);
+                }
             }
         }
         // Links to derived types
         for(auto& derived_id : sym.derived) {
             if(auto* derived = lookup_sym(builder.model, derived_id)) {
-                plan.linked_pages.push_back("type:" + derived->qualified_name);
+                if(should_generate_type_page(builder.model, *derived)) {
+                    plan.linked_pages.push_back("type:" + derived->qualified_name);
+                }
             }
         }
         // Link to enclosing namespace
-        if(!ns.empty()) {
+        if(!ns.empty() && is_renderable_namespace_name(ns)) {
             plan.linked_pages.push_back("namespace:" + ns);
         }
 
@@ -219,21 +339,9 @@ auto enumerate_namespace_pages(PlanBuilder& builder) -> std::expected<void, Plan
 
     for(auto& [ns_name, ns_info] : builder.model.namespaces) {
         if(ns_info.symbols.empty() && ns_info.children.empty()) continue;
-        // Skip anonymous namespaces
-        if(ns_name.find("(anonymous namespace)") != std::string::npos) continue;
+        if(!is_renderable_namespace_name(ns_name)) continue;
 
         auto parts = split_qualified_name(ns_name);
-
-        // Skip namespaces where any segment is a reserved identifier (_Uppercase or __)
-        bool has_reserved = false;
-        for(auto& seg : parts) {
-            if(seg.starts_with("_") && seg.size() > 1 &&
-               (std::isupper(static_cast<unsigned char>(seg[1])) || seg[1] == '_')) {
-                has_reserved = true;
-                break;
-            }
-        }
-        if(has_reserved) continue;
 
         PageIdentity identity{
             .page_type = PageType::Namespace,
@@ -264,7 +372,7 @@ auto enumerate_namespace_pages(PlanBuilder& builder) -> std::expected<void, Plan
         // Depends on type pages in this namespace
         for(auto& sym_id : ns_info.symbols) {
             if(auto* sym = lookup_sym(builder.model, sym_id)) {
-                if(is_type_kind(sym->kind)) {
+                if(should_generate_type_page(builder.model, *sym)) {
                     plan.depends_on_pages.push_back("type:" + sym->qualified_name);
                     plan.linked_pages.push_back("type:" + sym->qualified_name);
                 }
@@ -273,13 +381,13 @@ auto enumerate_namespace_pages(PlanBuilder& builder) -> std::expected<void, Plan
 
         // Link to parent namespace
         auto parent_ns = namespace_of(ns_name);
-        if(!parent_ns.empty()) {
+        if(!parent_ns.empty() && is_renderable_namespace_name(parent_ns)) {
             plan.linked_pages.push_back("namespace:" + parent_ns);
         }
 
         // Link to child namespaces
         for(auto& child_ns : ns_info.children) {
-            if(child_ns.find("(anonymous namespace)") != std::string::npos) continue;
+            if(!is_renderable_namespace_name(child_ns)) continue;
             plan.linked_pages.push_back("namespace:" + child_ns);
         }
 
@@ -337,7 +445,7 @@ auto enumerate_module_pages(PlanBuilder& builder) -> std::expected<void, PlanErr
         // Dependencies: contained type pages
         for(auto& sym_id : mod_unit.symbols) {
             if(auto* sym = lookup_sym(builder.model, sym_id)) {
-                if(is_type_kind(sym->kind)) {
+                if(should_generate_type_page(builder.model, *sym)) {
                     plan.depends_on_pages.push_back("type:" + sym->qualified_name);
                     plan.linked_pages.push_back("type:" + sym->qualified_name);
                 }

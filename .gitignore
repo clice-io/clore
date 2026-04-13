@@ -49,3 +49,4 @@ __pycache__/
 .claude/
 dist/
 docs/
+.clice/

@@ -3,8 +3,10 @@ module;
 #include <algorithm>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <format>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -45,6 +47,7 @@ struct ExtractedRelation {
 struct ASTResult {
     std::vector<SymbolInfo> symbols;
     std::vector<ExtractedRelation> relations;
+    std::vector<std::string> dependencies;
 };
 
 auto extract_symbols(const CompileEntry& entry, std::uint32_t max_snippet_bytes)
@@ -96,6 +99,54 @@ auto get_access_string(clang::AccessSpecifier access) -> std::string {
         case clang::AS_protected: return "protected";
         case clang::AS_private: return "private";
         default: return "";
+    }
+}
+
+auto print_template_parameters(const clang::TemplateParameterList* params,
+                               const clang::PrintingPolicy& policy) -> std::string {
+    if(params == nullptr) return {};
+
+    std::string param_str;
+    llvm::raw_string_ostream os(param_str);
+    os << "<";
+    bool first = true;
+    for(auto* param : *params) {
+        if(!first) os << ", ";
+        first = false;
+        param->print(os, policy);
+    }
+    os << ">";
+    return param_str;
+}
+
+auto apply_described_template_info(const clang::NamedDecl* decl,
+                                   const clang::PrintingPolicy& policy,
+                                   SymbolInfo& info) -> void {
+    const clang::TemplateParameterList* params = nullptr;
+
+    if(auto* concept_decl = llvm::dyn_cast<clang::ConceptDecl>(decl)) {
+        params = concept_decl->getTemplateParameters();
+    } else if(auto* record = llvm::dyn_cast<clang::CXXRecordDecl>(decl)) {
+        if(auto* tmpl = record->getDescribedClassTemplate()) {
+            params = tmpl->getTemplateParameters();
+        }
+    } else if(auto* func = llvm::dyn_cast<clang::FunctionDecl>(decl)) {
+        if(auto* tmpl = func->getDescribedFunctionTemplate()) {
+            params = tmpl->getTemplateParameters();
+        }
+    } else if(auto* type_alias = llvm::dyn_cast<clang::TypeAliasDecl>(decl)) {
+        if(auto* tmpl = type_alias->getDescribedAliasTemplate()) {
+            params = tmpl->getTemplateParameters();
+        }
+    } else if(auto* var = llvm::dyn_cast<clang::VarDecl>(decl)) {
+        if(auto* tmpl = var->getDescribedVarTemplate()) {
+            params = tmpl->getTemplateParameters();
+        }
+    }
+
+    if(params != nullptr) {
+        info.is_template = true;
+        info.template_params = print_template_parameters(params, policy);
     }
 }
 
@@ -171,6 +222,106 @@ auto make_source_location(const clang::SourceManager& sm, clang::SourceLocation 
     };
 }
 
+struct LexicalContextInfo {
+    std::string enclosing_namespace;
+    std::string parent_name;
+    SymbolKind parent_kind = SymbolKind::Unknown;
+    std::optional<SymbolID> parent_id;
+};
+
+auto join_qualified_segments(const std::vector<std::string>& segments) -> std::string {
+    if(segments.empty()) return {};
+
+    std::string joined;
+    for(std::size_t index = 0; index < segments.size(); ++index) {
+        if(index > 0) {
+            joined += "::";
+        }
+        joined += segments[index];
+    }
+    return joined;
+}
+
+auto describe_lexical_context(const clang::DeclContext* decl_context)
+    -> LexicalContextInfo {
+    LexicalContextInfo info;
+    std::vector<std::string> namespace_segments;
+
+    for(auto* current = decl_context;
+        current != nullptr && !current->isTranslationUnit();
+        current = current->getParent()) {
+        if(auto* namespace_decl = llvm::dyn_cast<clang::NamespaceDecl>(current)) {
+            if(info.parent_name.empty()) {
+                info.parent_name = namespace_decl->getQualifiedNameAsString();
+                info.parent_kind = SymbolKind::Namespace;
+
+                auto parent_id = compute_symbol_id(namespace_decl);
+                if(parent_id.is_valid()) {
+                    info.parent_id = parent_id;
+                }
+            }
+
+            auto namespace_name = namespace_decl->getNameAsString();
+            if(namespace_name.empty()) {
+                namespace_name = "(anonymous namespace)";
+            }
+            namespace_segments.push_back(std::move(namespace_name));
+            continue;
+        }
+
+        if(!info.parent_name.empty()) {
+            continue;
+        }
+
+        auto* named = llvm::dyn_cast<clang::NamedDecl>(current);
+        if(named == nullptr || named->getDeclName().isEmpty()) {
+            continue;
+        }
+
+        auto parent_kind = classify_decl(named);
+        if(parent_kind == SymbolKind::Namespace) {
+            continue;
+        }
+
+        info.parent_name = named->getQualifiedNameAsString();
+        info.parent_kind = parent_kind;
+
+        auto parent_id = compute_symbol_id(named);
+        if(parent_id.is_valid()) {
+            info.parent_id = parent_id;
+        }
+    }
+
+    std::reverse(namespace_segments.begin(), namespace_segments.end());
+    info.enclosing_namespace = join_qualified_segments(namespace_segments);
+    return info;
+}
+
+auto collect_dependency_files(const clang::SourceManager& source_manager)
+    -> std::vector<std::string> {
+    std::vector<std::string> files;
+    std::unordered_set<std::string> seen;
+
+    for(auto it = source_manager.fileinfo_begin(); it != source_manager.fileinfo_end(); ++it) {
+        auto file_ref = it->first;
+        auto path = file_ref.getFileEntry().tryGetRealPathName().str();
+        if(path.empty()) {
+            path = file_ref.getName().str();
+        }
+        if(path.empty()) {
+            continue;
+        }
+
+        auto normalized = std::filesystem::path(path).lexically_normal().generic_string();
+        if(seen.insert(normalized).second) {
+            files.push_back(std::move(normalized));
+        }
+    }
+
+    std::sort(files.begin(), files.end());
+    return files;
+}
+
 enum class RelationKind : std::uint8_t { Call, Reference };
 
 struct RelationEdge {
@@ -220,6 +371,12 @@ public:
 
         if(decl->getDeclName().isEmpty()) return true;
 
+        if(llvm::isa<clang::TemplateDecl>(decl) &&
+           !llvm::isa<clang::ConceptDecl>(decl)) {
+            return true;
+        }
+        if(llvm::isa<clang::ClassTemplateSpecializationDecl>(decl)) return true;
+
         auto id = compute_symbol_id(decl);
         if(!id.is_valid()) return true;
 
@@ -228,6 +385,8 @@ public:
         info.kind = kind;
         info.name = decl->getNameAsString();
         info.qualified_name = decl->getQualifiedNameAsString();
+        auto lexical_context = describe_lexical_context(decl->getDeclContext());
+        info.enclosing_namespace = std::move(lexical_context.enclosing_namespace);
         info.declaration_location = make_source_location(sm, decl->getLocation());
 
         if(auto* func = llvm::dyn_cast<clang::FunctionDecl>(decl)) {
@@ -260,32 +419,12 @@ public:
         info.access = get_access_string(decl->getAccess());
         info.doc_comment = get_doc_comment(context, decl);
         info.source_snippet = get_source_snippet(context, decl, max_snippet_bytes);
+        apply_described_template_info(decl, context.getPrintingPolicy(), info);
 
-        auto* parent_ctx = decl->getDeclContext();
-        if(auto* parent_decl = llvm::dyn_cast_or_null<clang::NamedDecl>(
-               clang::Decl::castFromDeclContext(parent_ctx))) {
-            auto parent_id = compute_symbol_id(parent_decl);
-            if(parent_id.is_valid()) {
-                info.parent = parent_id;
-            }
-        }
-
-        if(auto* tmpl = llvm::dyn_cast<clang::TemplateDecl>(decl)) {
-            info.is_template = true;
-            auto* params = tmpl->getTemplateParameters();
-            if(params) {
-                std::string param_str;
-                llvm::raw_string_ostream os(param_str);
-                os << "<";
-                bool first = true;
-                for(auto* param : *params) {
-                    if(!first) os << ", ";
-                    first = false;
-                    param->print(os, context.getPrintingPolicy());
-                }
-                os << ">";
-                info.template_params = std::move(param_str);
-            }
+        info.lexical_parent_name = std::move(lexical_context.parent_name);
+        info.lexical_parent_kind = lexical_context.parent_kind;
+        if(lexical_context.parent_id.has_value()) {
+            info.parent = *lexical_context.parent_id;
         }
 
         symbols.push_back(std::move(info));
@@ -457,6 +596,7 @@ auto extract_symbols(const CompileEntry& entry, std::uint32_t max_snippet_bytes)
     }
 
     action.EndSourceFile();
+    result.dependencies = collect_dependency_files(instance->getSourceManager());
 
     result.relations.reserve(raw_relations.size());
     for(auto& edge : raw_relations) {

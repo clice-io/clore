@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <string>
 
 import extract;
 
@@ -140,6 +141,12 @@ template <typename T, int N>
 struct Array {
     T data[N];
 };
+
+template <typename T>
+struct Box {};
+
+template <typename T>
+struct Box<T*> {};
 )";
         }
 
@@ -153,6 +160,33 @@ struct Array {
 
         auto& symbols = result->symbols;
         EXPECT_GT(symbols.size(), 0u);
+
+        auto identity_template_count = 0u;
+        auto array_type_count = 0u;
+        auto box_type_count = 0u;
+        auto template_wrapper_count = 0u;
+        for(auto& sym : symbols) {
+            if(sym.name == "identity" && sym.kind == SymbolKind::Function) {
+                if(sym.is_template && sym.template_params.find("typename T") != std::string::npos) {
+                    ++identity_template_count;
+                }
+            }
+            if(sym.name == "Array" && sym.kind == SymbolKind::Struct) {
+                if(sym.is_template && sym.template_params.find("int N") != std::string::npos) {
+                    ++array_type_count;
+                }
+            }
+            if(sym.name == "Box" && sym.kind == SymbolKind::Struct) {
+                ++box_type_count;
+            }
+            if(sym.kind == SymbolKind::Template) {
+                ++template_wrapper_count;
+            }
+        }
+        EXPECT_EQ(identity_template_count, 1u);
+        EXPECT_EQ(array_type_count, 1u);
+        EXPECT_EQ(box_type_count, 1u);
+        EXPECT_EQ(template_wrapper_count, 0u);
 
         fs::remove_all(temp_dir);
     }

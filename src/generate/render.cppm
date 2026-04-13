@@ -1,10 +1,13 @@
 module;
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <format>
+#include <ranges>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -50,8 +53,6 @@ auto write_page(const GeneratedPage& page, std::string_view output_root)
 
 }  // namespace clore::generate
 
-// ── implementation ──────────────────────────────────────────────────
-
 namespace clore::generate {
 
 auto load_page_template(std::string_view path) -> std::expected<std::string, RenderError> {
@@ -84,6 +85,21 @@ auto lookup_sym(const extract::ProjectModel& model, extract::SymbolID id)
     return it != model.symbols.end() ? &it->second : nullptr;
 }
 
+auto is_type_kind(extract::SymbolKind kind) -> bool {
+    switch(kind) {
+        case extract::SymbolKind::Class:
+        case extract::SymbolKind::Struct:
+        case extract::SymbolKind::Enum:
+        case extract::SymbolKind::Union:
+        case extract::SymbolKind::Concept:
+        case extract::SymbolKind::Template:
+        case extract::SymbolKind::TypeAlias:
+            return true;
+        default:
+            return false;
+    }
+}
+
 auto make_source_relative(const std::string& path, const std::string& project_root) -> std::string {
     namespace fs = std::filesystem;
     if(path.empty() || project_root.empty()) return path;
@@ -108,12 +124,9 @@ auto make_relative_link_target(std::string_view current_page_path,
     return rel.generic_string();
 }
 
-/// If the link resolver can resolve `name`, returns `[display](path)`.
-/// Otherwise returns `` `name` ``.
 auto make_link(const std::string& name, std::string_view current_page_path,
                const LinkResolver& links) -> std::string {
     if(auto* path = links.resolve(name)) {
-        // Extract short display name (last segment after ::)
         auto pos = name.rfind("::");
         auto display = (pos != std::string::npos) ? name.substr(pos + 2) : name;
         return "[`" + display + "`](" +
@@ -122,7 +135,6 @@ auto make_link(const std::string& name, std::string_view current_page_path,
     return "`" + name + "`";
 }
 
-/// Like make_link but uses the full qualified name as display text.
 auto make_link_full(const std::string& name, std::string_view current_page_path,
                     const LinkResolver& links) -> std::string {
     if(auto* path = links.resolve(name)) {
@@ -254,12 +266,12 @@ auto render_subnamespaces_block(const PagePlan& plan, const extract::ProjectMode
                                 const LinkResolver& links) -> std::string {
     std::string result;
     for(auto& key : plan.owner_keys) {
-        for(auto& [ns_name, ns_info] : model.namespaces) {
-            if(ns_name.find("(anonymous namespace)") != std::string::npos) continue;
-            if(ns_name.starts_with(key + "::") &&
-               ns_name.find("::", key.size() + 2) == std::string::npos) {
-                result += "- " + make_link_full(ns_name, plan.relative_path, links) + "\n";
-            }
+        auto ns_it = model.namespaces.find(key);
+        if(ns_it == model.namespaces.end()) continue;
+        for(const auto& child_ns : ns_it->second.children) {
+            if(child_ns.find("(anonymous namespace)") != std::string::npos) continue;
+            if(!links.resolve(child_ns)) continue;
+            result += "- " + make_link_full(child_ns, plan.relative_path, links) + "\n";
         }
     }
     if(!result.empty()) result += "\n";
@@ -268,27 +280,36 @@ auto render_subnamespaces_block(const PagePlan& plan, const extract::ProjectMode
 
 auto render_types_index_block(const PagePlan& plan, const extract::ProjectModel& model,
                               const LinkResolver& links) -> std::string {
+    std::vector<extract::SymbolID> symbol_ids;
     std::string result;
+
     for(auto& key : plan.owner_keys) {
+        if(plan.page_type == PageType::Module) {
+            for(auto& [source_file, mod_unit] : model.modules) {
+                if(mod_unit.name != key) continue;
+                symbol_ids.insert(symbol_ids.end(), mod_unit.symbols.begin(), mod_unit.symbols.end());
+            }
+            continue;
+        }
+
         auto ns_it = model.namespaces.find(key);
         if(ns_it == model.namespaces.end()) continue;
-        for(auto& sym_id : ns_it->second.symbols) {
-            auto* sym = lookup_sym(model, sym_id);
-            if(!sym) continue;
-            if(sym->kind == extract::SymbolKind::Class ||
-               sym->kind == extract::SymbolKind::Struct ||
-               sym->kind == extract::SymbolKind::Enum ||
-               sym->kind == extract::SymbolKind::Union ||
-               sym->kind == extract::SymbolKind::Concept ||
-               sym->kind == extract::SymbolKind::Template ||
-               sym->kind == extract::SymbolKind::TypeAlias) {
-                result += "- ";
-                result += std::string(extract::symbol_kind_name(sym->kind));
-                result += " " + make_link_full(sym->qualified_name, plan.relative_path, links) +
-                          "\n";
-            }
-        }
+        symbol_ids.insert(symbol_ids.end(), ns_it->second.symbols.begin(), ns_it->second.symbols.end());
     }
+
+    std::unordered_set<extract::SymbolID> seen;
+    seen.reserve(symbol_ids.size());
+    for(auto sym_id : symbol_ids) {
+        if(!seen.insert(sym_id).second) continue;
+        auto* sym = lookup_sym(model, sym_id);
+        if(!sym || !is_type_kind(sym->kind)) continue;
+        if(!links.resolve(sym->qualified_name)) continue;
+
+        result += "- ";
+        result += std::string(extract::symbol_kind_name(sym->kind));
+        result += " " + make_link_full(sym->qualified_name, plan.relative_path, links) + "\n";
+    }
+
     if(!result.empty()) result += "\n";
     return result;
 }
@@ -317,17 +338,19 @@ auto render_functions_index_block(const PagePlan& plan, const extract::ProjectMo
 auto render_related_pages_block(const PagePlan& plan, const LinkResolver& links) -> std::string {
     std::string result;
     for(auto& linked : plan.linked_pages) {
-        // linked is a page_id like "type:clore::Options" or "namespace:clore"
         auto colon_pos = linked.find(':');
-        if(colon_pos != std::string::npos) {
-            auto entity_name = linked.substr(colon_pos + 1);
-            if(auto* path = links.resolve(entity_name)) {
-                result += "- [`" + entity_name + "`](" +
-                          make_relative_link_target(plan.relative_path, *path) + ")\n";
-                continue;
-            }
+        if(colon_pos == std::string::npos) {
+            continue;
         }
-        result += "- `" + linked + "`\n";
+
+        auto entity_name = linked.substr(colon_pos + 1);
+        auto* path = links.resolve(entity_name);
+        if(!path) {
+            continue;
+        }
+
+        result += "- [`" + entity_name + "`](" +
+                  make_relative_link_target(plan.relative_path, *path) + ")\n";
     }
     if(!result.empty()) result += "\n";
     return result;
@@ -443,7 +466,6 @@ auto render_defined_symbols_block(const PagePlan& plan, const extract::ProjectMo
 auto render_module_info_block(const PagePlan& plan, const extract::ProjectModel& model) -> std::string {
     std::string result;
     for(auto& key : plan.owner_keys) {
-        // key is a file path for FilePage
         auto mod_it = model.modules.find(key);
         if(mod_it == model.modules.end()) continue;
         result += "- Module: `" + mod_it->second.name + "`\n";
@@ -456,16 +478,17 @@ auto render_module_info_block(const PagePlan& plan, const extract::ProjectModel&
     return result;
 }
 
-// Index page: render all modules, namespaces, types, files
 auto render_all_modules_index(const extract::ProjectModel& model,
                               const LinkResolver& links,
                               std::string_view current_page_path) -> std::string {
     std::string result;
     std::vector<std::string> module_names;
+    std::unordered_set<std::string> seen;
     for(auto& [source_file, mod_unit] : model.modules) {
-        if(mod_unit.is_interface) {
-            module_names.push_back(mod_unit.name);
-        }
+        if(!mod_unit.is_interface) continue;
+        if(!seen.insert(mod_unit.name).second) continue;
+        if(!links.resolve(mod_unit.name)) continue;
+        module_names.push_back(mod_unit.name);
     }
     std::sort(module_names.begin(), module_names.end());
     for(auto& name : module_names) {
@@ -480,8 +503,9 @@ auto render_all_namespaces_index(const extract::ProjectModel& model,
                                  std::string_view current_page_path) -> std::string {
     std::string result;
     std::vector<std::string> ns_names;
-    for(auto& [ns_name, _] : model.namespaces) {
+    for(auto& [ns_name, ns_info] : model.namespaces) {
         if(ns_name.find("(anonymous namespace)") != std::string::npos) continue;
+        if(!links.resolve(ns_name)) continue;
         ns_names.push_back(ns_name);
     }
     std::sort(ns_names.begin(), ns_names.end());
@@ -499,15 +523,9 @@ auto render_all_types_index(const extract::ProjectModel& model,
     std::vector<std::string> type_names;
     for(auto& [id, sym] : model.symbols) {
         if(sym.qualified_name.find("(anonymous namespace)") != std::string::npos) continue;
-        if(sym.kind == extract::SymbolKind::Class ||
-           sym.kind == extract::SymbolKind::Struct ||
-           sym.kind == extract::SymbolKind::Enum ||
-           sym.kind == extract::SymbolKind::Union ||
-           sym.kind == extract::SymbolKind::Concept ||
-           sym.kind == extract::SymbolKind::Template ||
-           sym.kind == extract::SymbolKind::TypeAlias) {
-            type_names.push_back(sym.qualified_name);
-        }
+        if(!is_type_kind(sym.kind)) continue;
+        if(!links.resolve(sym.qualified_name)) continue;
+        type_names.push_back(sym.qualified_name);
     }
     std::sort(type_names.begin(), type_names.end());
     for(auto& name : type_names) {
@@ -523,22 +541,48 @@ auto render_all_files_index(const extract::ProjectModel& model,
                             std::string_view current_page_path) -> std::string {
     std::string result;
     std::vector<std::pair<std::string, std::string>> file_entries;
-    for(auto& [path, _] : model.files) {
+    for(auto& [path, file_info] : model.files) {
+        if(!links.resolve(path)) continue;
         auto rel = make_source_relative(path, config.project_root);
         file_entries.emplace_back(rel, path);
     }
     std::sort(file_entries.begin(), file_entries.end());
     for(auto& [rel, abs] : file_entries) {
-        // Try to link using the absolute path (key used in link resolver)
-        if(auto* page_path = links.resolve(abs)) {
-            result += "- [`" + rel + "`](" +
-                      make_relative_link_target(current_page_path, *page_path) + ")\n";
-        } else {
-            result += "- `" + rel + "`\n";
-        }
+        auto* page_path = links.resolve(abs);
+        if(!page_path) continue;
+        result += "- [`" + rel + "`](" +
+                  make_relative_link_target(current_page_path, *page_path) + ")\n";
     }
     if(!result.empty()) result += "\n";
     return result;
+}
+
+auto strip_trailing_carriage_return(std::string_view line) -> std::string_view {
+    while(!line.empty() && line.back() == '\r') {
+        line.remove_suffix(1);
+    }
+    return line;
+}
+
+auto trim_line(std::string_view line) -> std::string_view {
+    line = strip_trailing_carriage_return(line);
+    while(!line.empty() && (line.back() == ' ' || line.back() == '\t')) {
+        line.remove_suffix(1);
+    }
+    while(!line.empty() && (line.front() == ' ' || line.front() == '\t')) {
+        line.remove_prefix(1);
+    }
+    return line;
+}
+
+auto is_blank_line(std::string_view line) -> bool {
+    line = trim_line(line);
+    if(line.empty()) {
+        return true;
+    }
+    return std::ranges::all_of(line, [](char ch) {
+        return std::isspace(static_cast<unsigned char>(ch)) != 0;
+    });
 }
 
 }  // namespace
@@ -546,12 +590,9 @@ auto render_all_files_index(const extract::ProjectModel& model,
 auto build_link_resolver(const PagePlanSet& plan_set) -> LinkResolver {
     LinkResolver resolver;
     for(auto& plan : plan_set.plans) {
-        // Map each owner_key to the page's relative_path
         for(auto& key : plan.owner_keys) {
             resolver.name_to_path[key] = plan.relative_path;
         }
-        // Also map the page_id-derived name
-        // page_id format: "type:X", "namespace:X", "module:X", "file:X"
         auto colon_pos = plan.page_id.find(':');
         if(colon_pos != std::string::npos) {
             auto entity_name = plan.page_id.substr(colon_pos + 1);
@@ -632,7 +673,6 @@ auto assemble_page(const std::string& page_template,
             if(it != slots.end()) {
                 result.append(it->second);
             }
-            // If slot not found, silently omit it (LLM may have failed)
         } else {
             result.append("{{");
             result.append(key);
@@ -642,7 +682,6 @@ auto assemble_page(const std::string& page_template,
         pos = marker_end + 2;
     }
 
-    // Post-process empty sections: either fail or strip them, depending on configuration.
     std::string cleaned;
     cleaned.reserve(result.size());
     std::istringstream stream(result);
@@ -654,26 +693,28 @@ auto assemble_page(const std::string& page_template,
 
     std::size_t i = 0;
     while(i < lines.size()) {
-        // Check if this line is a heading (## or ###)
-        if(lines[i].starts_with("## ") || lines[i].starts_with("### ")) {
-            // Scan ahead: skip blank lines
+        auto current_line = trim_line(lines[i]);
+        if(current_line.starts_with("## ") || current_line.starts_with("### ")) {
             std::size_t j = i + 1;
-            while(j < lines.size() && lines[j].empty()) {
+            while(j < lines.size() && is_blank_line(lines[j])) {
                 ++j;
             }
-            // If next non-blank line is another heading or we're at EOF, this section is empty.
+
             if(j >= lines.size() ||
-               lines[j].starts_with("# ") || lines[j].starts_with("## ") || lines[j].starts_with("### ")) {
+               trim_line(lines[j]).starts_with("# ") ||
+               trim_line(lines[j]).starts_with("## ") ||
+               trim_line(lines[j]).starts_with("### ")) {
                 if(fail_on_empty_section) {
                     return std::unexpected(RenderError{
-                        std::format("empty section detected: {}", lines[i])
+                        std::format("empty section detected: {}", current_line)
                     });
                 }
-                i = j;  // strip the empty section heading + blank lines
+                i = j;
                 continue;
             }
         }
-        cleaned += lines[i] + "\n";
+
+        cleaned += std::string(strip_trailing_carriage_return(lines[i])) + "\n";
         ++i;
     }
 
@@ -687,8 +728,13 @@ auto validate_output(const std::string& content,
         return std::unexpected(RenderError{.message = "LLM output is empty"});
     }
 
+    if(std::ranges::all_of(content, [](char ch) {
+        return std::isspace(static_cast<unsigned char>(ch)) != 0;
+    })) {
+        return std::unexpected(RenderError{.message = "LLM output contains only whitespace"});
+    }
+
     if(validation.fail_on_h1_in_output) {
-        // Check for H1 at beginning of line
         if(content.starts_with("# ")) {
             return std::unexpected(RenderError{
                 .message = "LLM output contains H1 heading '# '"});

@@ -2,6 +2,7 @@ module;
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -19,6 +20,7 @@ export import :compdb;
 export import :scan;
 export import :tooling;
 export import :ast;
+export import :cache;
 
 import config;
 import support;
@@ -132,6 +134,13 @@ auto filter_root_path(const config::TaskConfig& config) -> std::filesystem::path
 using Clock = std::chrono::steady_clock;
 using Ms    = std::chrono::milliseconds;
 
+struct CacheEvaluation {
+    std::uint64_t compile_signature = 0;
+    std::uint64_t source_hash = 0;
+    bool scan_valid = false;
+    bool ast_valid = false;
+};
+
 template <typename T>
 void append_unique(std::vector<T>& values, const T& value) {
     if(std::find(values.begin(), values.end(), value) == values.end()) {
@@ -152,6 +161,65 @@ void deduplicate(std::vector<T>& values) {
     values.erase(std::unique(values.begin(), values.end()), values.end());
 }
 
+auto split_top_level_qualified_name(std::string_view qualified_name)
+    -> std::vector<std::string> {
+    std::vector<std::string> parts;
+    std::string current;
+    current.reserve(qualified_name.size());
+
+    std::size_t template_depth = 0;
+    for(std::size_t index = 0; index < qualified_name.size(); ++index) {
+        auto ch = qualified_name[index];
+        if(ch == '<') {
+            template_depth++;
+            current.push_back(ch);
+            continue;
+        }
+        if(ch == '>') {
+            if(template_depth > 0) {
+                template_depth--;
+            }
+            current.push_back(ch);
+            continue;
+        }
+        if(ch == ':' && template_depth == 0 && index + 1 < qualified_name.size() &&
+           qualified_name[index + 1] == ':') {
+            parts.push_back(current);
+            current.clear();
+            ++index;
+            continue;
+        }
+        current.push_back(ch);
+    }
+
+    if(!current.empty()) {
+        parts.push_back(std::move(current));
+    }
+
+    return parts;
+}
+
+auto join_qualified_name_parts(const std::vector<std::string>& parts,
+                               std::size_t count) -> std::string {
+    std::string joined;
+    for(std::size_t index = 0; index < count; ++index) {
+        if(index > 0) {
+            joined += "::";
+        }
+        joined += parts[index];
+    }
+    return joined;
+}
+
+auto namespace_prefix_from_qualified_name(std::string_view qualified_name)
+    -> std::string {
+    auto parts = split_top_level_qualified_name(qualified_name);
+    if(parts.size() <= 1) {
+        return {};
+    }
+    return join_qualified_name_parts(parts, parts.size() - 1);
+}
+
 auto ensure_namespace_hierarchy(ProjectModel& model, std::string_view namespace_name)
     -> std::string {
     if(namespace_name.empty() ||
@@ -159,13 +227,22 @@ auto ensure_namespace_hierarchy(ProjectModel& model, std::string_view namespace_
         return {};
     }
 
+    auto parts = split_top_level_qualified_name(namespace_name);
+    if(parts.empty()) {
+        return {};
+    }
+
     std::string parent_name;
-    std::size_t search_from = 0;
-    while(true) {
-        auto separator = namespace_name.find("::", search_from);
-        auto current_name = separator == std::string_view::npos
-                                ? std::string(namespace_name)
-                                : std::string(namespace_name.substr(0, separator));
+    std::string current_name;
+    for(const auto& part : parts) {
+        if(part.empty()) {
+            return {};
+        }
+
+        if(!current_name.empty()) {
+            current_name += "::";
+        }
+        current_name += part;
 
         auto& current_info = model.namespaces[current_name];
         current_info.name = current_name;
@@ -176,16 +253,17 @@ auto ensure_namespace_hierarchy(ProjectModel& model, std::string_view namespace_
             append_unique(parent_info.children, current_name);
         }
 
-        if(separator == std::string_view::npos) {
-            return current_name;
-        }
-
-        parent_name = std::move(current_name);
-        search_from = separator + 2;
+        parent_name = current_name;
     }
+
+    return current_name;
 }
 
 auto find_enclosing_namespace(const ProjectModel& model, const SymbolInfo& sym) -> std::string {
+    if(!sym.enclosing_namespace.empty()) {
+        return sym.enclosing_namespace;
+    }
+
     auto parent_id = sym.parent;
     while(parent_id.has_value()) {
         auto parent_it = model.symbols.find(*parent_id);
@@ -198,11 +276,7 @@ auto find_enclosing_namespace(const ProjectModel& model, const SymbolInfo& sym) 
         parent_id = parent_it->second.parent;
     }
 
-    auto ns_end = sym.qualified_name.rfind("::");
-    if(ns_end == std::string::npos) {
-        return {};
-    }
-    return sym.qualified_name.substr(0, ns_end);
+    return namespace_prefix_from_qualified_name(sym.qualified_name);
 }
 
 auto merge_symbol_info(SymbolInfo& current, SymbolInfo&& incoming) -> void {
@@ -218,6 +292,9 @@ auto merge_symbol_info(SymbolInfo& current, SymbolInfo&& incoming) -> void {
     }
     if(current.qualified_name.empty() && !incoming.qualified_name.empty()) {
         current.qualified_name = std::move(incoming.qualified_name);
+    }
+    if(current.enclosing_namespace.empty() && !incoming.enclosing_namespace.empty()) {
+        current.enclosing_namespace = std::move(incoming.enclosing_namespace);
     }
     if(!current.declaration_location.is_known() && incoming.declaration_location.is_known()) {
         current.declaration_location = incoming.declaration_location;
@@ -240,6 +317,13 @@ auto merge_symbol_info(SymbolInfo& current, SymbolInfo&& incoming) -> void {
     }
     if(!current.parent.has_value() && incoming.parent.has_value()) {
         current.parent = incoming.parent;
+    }
+    if(current.lexical_parent_name.empty() && !incoming.lexical_parent_name.empty()) {
+        current.lexical_parent_name = std::move(incoming.lexical_parent_name);
+    }
+    if(current.lexical_parent_kind == SymbolKind::Unknown &&
+       incoming.lexical_parent_kind != SymbolKind::Unknown) {
+        current.lexical_parent_kind = incoming.lexical_parent_kind;
     }
     if(current.access.empty() && !incoming.access.empty()) {
         current.access = std::move(incoming.access);
@@ -394,7 +478,7 @@ auto extract_project(const config::TaskConfig& config)
         if(!abs_path.has_value()) {
             return std::unexpected(std::move(abs_path.error()));
         }
-        entry_copy.file = abs_path->string();
+        entry_copy.file = abs_path->lexically_normal().generic_string();
 
         if(matches_filter(entry_copy.file, config.filter, filter_root)) {
             filtered_db.entries.push_back(std::move(entry_copy));
@@ -404,9 +488,58 @@ auto extract_project(const config::TaskConfig& config)
     logging::info("filter: {} entries pass, {} skipped",
                   filtered_db.entries.size(), skipped);
 
+    auto cache_result = cache::load_extract_cache(config.workspace_root);
+    if(!cache_result.has_value()) {
+        return std::unexpected(ExtractError{
+            .message = std::format("failed to load extract cache: {}",
+                                   cache_result.error().message)});
+    }
+
+    auto cache_records = std::move(*cache_result);
+    std::unordered_map<std::string, CacheEvaluation> cache_evaluations;
+    cache_evaluations.reserve(filtered_db.entries.size());
+
+    ScanCache seeded_scan_cache;
+    std::size_t ast_cache_hits = 0;
+
+    for(const auto& entry : filtered_db.entries) {
+        auto normalized = std::filesystem::path(entry.file).lexically_normal().generic_string();
+        auto compile_signature = cache::build_compile_signature(entry);
+        auto source_hash = cache::hash_file(normalized);
+        if(source_hash == 0) {
+            return std::unexpected(ExtractError{
+                .message = std::format("failed to hash source file for extract cache: {}",
+                                       normalized)});
+        }
+
+        CacheEvaluation evaluation{
+            .compile_signature = compile_signature,
+            .source_hash = source_hash,
+        };
+
+        if(auto cache_it = cache_records.find(normalized); cache_it != cache_records.end()) {
+            const auto& record = cache_it->second;
+            if(record.compile_signature == compile_signature &&
+               record.source_hash == source_hash) {
+                seeded_scan_cache.insert_or_assign(normalized, record.scan);
+                evaluation.scan_valid = true;
+
+                if(!cache::dependencies_changed(record.ast_deps)) {
+                    evaluation.ast_valid = true;
+                    ++ast_cache_hits;
+                }
+            }
+        }
+
+        cache_evaluations.insert_or_assign(normalized, evaluation);
+    }
+
+    logging::info("extract cache: {} scan hits, {} ast hits",
+                  seeded_scan_cache.size(), ast_cache_hits);
+
     // 2. Build dependency graph + ScanCache
     auto t1 = Clock::now();
-    auto dep_result = build_dependency_graph(filtered_db);
+    auto dep_result = build_dependency_graph(filtered_db, seeded_scan_cache);
     if(!dep_result.has_value()) {
         return std::unexpected(ExtractError{
             .message = std::format("failed to build dependency graph: {}",
@@ -435,22 +568,44 @@ auto extract_project(const config::TaskConfig& config)
         auto& entry = filtered_db.entries[idx];
         namespace fs = std::filesystem;
         auto normalized = fs::path(entry.file).lexically_normal().generic_string();
+        auto cache_state_it = cache_evaluations.find(normalized);
+        if(cache_state_it == cache_evaluations.end()) {
+            return std::unexpected(ExtractError{
+                .message = std::format("missing extract cache evaluation for {}", normalized)});
+        }
 
         logging::info("extracting {}/{}: {}", idx + 1, total_entries, normalized);
         auto t_file = Clock::now();
 
         auto t_ast = Clock::now();
-        auto ast_result = extract_symbols(entry, *config.extract.max_snippet_bytes);
-        if(!ast_result.has_value()) {
-            return std::unexpected(ExtractError{
-                .message = std::format("failed to extract symbols from {}: {}",
-                                       entry.file, ast_result.error().message)});
-        }
-        auto dt_ast = std::chrono::duration_cast<Ms>(Clock::now() - t_ast);
-        logging::info("  ast: {} symbols, {} relations ({}ms)",
-                      ast_result->symbols.size(), ast_result->relations.size(), dt_ast.count());
+        ASTResult ast_data;
+        cache::DependencySnapshot ast_deps_snapshot;
 
-        auto cache_key = fs::path(entry.file).lexically_normal().string();
+        auto cache_record_it = cache_records.find(normalized);
+        if(cache_state_it->second.ast_valid && cache_record_it != cache_records.end()) {
+            ast_data = cache_record_it->second.ast;
+            ast_deps_snapshot = cache_record_it->second.ast_deps;
+            auto dt_ast = std::chrono::duration_cast<Ms>(Clock::now() - t_ast);
+            logging::info("  ast cache: {} symbols, {} relations ({}ms)",
+                          ast_data.symbols.size(), ast_data.relations.size(), dt_ast.count());
+        } else {
+            auto ast_result = extract_symbols(entry, *config.extract.max_snippet_bytes);
+            if(!ast_result.has_value()) {
+                return std::unexpected(ExtractError{
+                    .message = std::format("failed to extract symbols from {}: {}",
+                                           entry.file, ast_result.error().message)});
+            }
+            ast_data = std::move(*ast_result);
+            ast_deps_snapshot = cache::capture_dependency_snapshot(ast_data.dependencies);
+
+            auto dt_ast = std::chrono::duration_cast<Ms>(Clock::now() - t_ast);
+            logging::info("  ast: {} symbols, {} relations ({}ms)",
+                          ast_data.symbols.size(), ast_data.relations.size(), dt_ast.count());
+        }
+
+        auto cached_ast_copy = ast_data;
+
+        auto cache_key = fs::path(entry.file).lexically_normal().generic_string();
         auto cache_it = scan_cache.find(cache_key);
 
         auto& current_file_info = model.files[normalized];
@@ -484,7 +639,7 @@ auto extract_project(const config::TaskConfig& config)
         }
 
         std::size_t symbols_kept = 0;
-        for(auto& sym : ast_result->symbols) {
+        for(auto& sym : ast_data.symbols) {
             namespace fs = std::filesystem;
             auto decl_file = fs::path(sym.declaration_location.file);
             if(decl_file.is_relative()) {
@@ -519,7 +674,7 @@ auto extract_project(const config::TaskConfig& config)
             }
         }
 
-        for(auto& rel : ast_result->relations) {
+        for(const auto& rel : ast_data.relations) {
             auto from_it = model.symbols.find(rel.from);
             if(from_it == model.symbols.end()) continue;
 
@@ -529,6 +684,15 @@ auto extract_project(const config::TaskConfig& config)
                 append_unique(from_it->second.references, rel.to);
             }
         }
+
+        cache_records.insert_or_assign(normalized, cache::CacheRecord{
+            .compile_signature = cache_state_it->second.compile_signature,
+            .source_hash = cache_state_it->second.source_hash,
+            .ast_deps = std::move(ast_deps_snapshot),
+            .scan = cache_it->second,
+            .ast = std::move(cached_ast_copy),
+        });
+
         auto dt_file = std::chrono::duration_cast<Ms>(Clock::now() - t_file);
         logging::info("  kept: {} symbols, {} includes ({}ms)",
                       symbols_kept, includes_kept, dt_file.count());
@@ -564,6 +728,13 @@ auto extract_project(const config::TaskConfig& config)
             logging::info("  module '{}' (interface={}) from {}",
                           mod.name, mod.is_interface, source_file);
         }
+    }
+
+    auto save_cache_result = cache::save_extract_cache(config.workspace_root, cache_records);
+    if(!save_cache_result.has_value()) {
+        return std::unexpected(ExtractError{
+            .message = std::format("failed to save extract cache: {}",
+                                   save_cache_result.error().message)});
     }
 
     std::size_t total_calls = 0, total_refs = 0;

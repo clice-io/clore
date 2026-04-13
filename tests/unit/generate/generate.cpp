@@ -312,6 +312,102 @@ TEST_SUITE(generate) {
                     root_plan->linked_pages.end());
     }
 
+    TEST_CASE(build_page_plan_set_skips_lexically_nested_type_pages) {
+        ScopedTempDir temp("skip_nested_type_pages");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_config(temp.path);
+
+        extract::ProjectModel model;
+        auto file = (temp.path / "src" / "widget.cppm").generic_string();
+
+        auto outer = make_type_symbol(300, "Outer", "demo::Outer", file, "Outer type.");
+        auto helper = make_type_symbol(301, "Inner", "demo::Outer::Inner", file, "Nested helper.");
+        helper.lexical_parent_name = "demo::Outer";
+        helper.lexical_parent_kind = extract::SymbolKind::Struct;
+        helper.enclosing_namespace = "demo";
+
+        model.symbols.emplace(outer.id, outer);
+        model.symbols.emplace(helper.id, helper);
+
+        extract::NamespaceInfo ns;
+        ns.name = "demo";
+        ns.symbols = {outer.id, helper.id};
+        model.namespaces.emplace(ns.name, ns);
+
+        auto result = build_page_plan_set(config, model);
+
+        ASSERT_TRUE(result.has_value());
+        EXPECT_TRUE(std::ranges::any_of(result->plans, [](const PagePlan& p) {
+            return p.page_id == "type:demo::Outer";
+        }));
+        EXPECT_FALSE(std::ranges::any_of(result->plans, [](const PagePlan& p) {
+            return p.page_id == "type:demo::Outer::Inner";
+        }));
+    }
+
+    TEST_CASE(build_page_plan_set_skips_function_local_type_pages) {
+        ScopedTempDir temp("skip_function_local_type_pages");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_config(temp.path);
+
+        extract::ProjectModel model;
+        auto file = (temp.path / "src" / "client.cppm").generic_string();
+
+        auto exported = make_type_symbol(310, "Client", "demo::Client", file, "Client type.");
+        auto local = make_type_symbol(311, "ActiveRunReset", "ActiveRunReset", file, "Local helper.");
+        local.enclosing_namespace = "demo";
+        local.lexical_parent_name = "demo::run";
+        local.lexical_parent_kind = extract::SymbolKind::Function;
+
+        model.symbols.emplace(exported.id, exported);
+        model.symbols.emplace(local.id, local);
+
+        extract::NamespaceInfo ns;
+        ns.name = "demo";
+        ns.symbols = {exported.id, local.id};
+        model.namespaces.emplace(ns.name, ns);
+
+        auto result = build_page_plan_set(config, model);
+
+        ASSERT_TRUE(result.has_value());
+        EXPECT_TRUE(std::ranges::any_of(result->plans, [](const PagePlan& p) {
+            return p.page_id == "type:demo::Client";
+        }));
+        EXPECT_FALSE(std::ranges::any_of(result->plans, [](const PagePlan& p) {
+            return p.page_id == "type:ActiveRunReset";
+        }));
+    }
+
+    TEST_CASE(build_page_plan_set_skips_std_namespace_pages) {
+        ScopedTempDir temp("skip_std_namespace_pages");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_config(temp.path);
+
+        extract::ProjectModel model;
+
+        extract::NamespaceInfo project_ns;
+        project_ns.name = "demo";
+
+        extract::NamespaceInfo std_ns;
+        std_ns.name = "std";
+
+        model.namespaces.emplace(project_ns.name, project_ns);
+        model.namespaces.emplace(std_ns.name, std_ns);
+
+        auto result = build_page_plan_set(config, model);
+
+        ASSERT_TRUE(result.has_value());
+        EXPECT_TRUE(std::ranges::any_of(result->plans, [](const PagePlan& p) {
+            return p.page_id == "namespace:demo";
+        }));
+        EXPECT_FALSE(std::ranges::any_of(result->plans, [](const PagePlan& p) {
+            return p.page_id == "namespace:std";
+        }));
+    }
+
     TEST_CASE(build_page_plan_set_orders_independent_modules_lexicographically) {
         ScopedTempDir temp("module_generation_order");
         fs::create_directories(temp.path / "src");
@@ -469,6 +565,87 @@ TEST_SUITE(generate) {
         EXPECT_NE(block.find("(../files/src/math.md)"), std::string::npos);
     }
 
+    TEST_CASE(render_deterministic_block_renders_module_type_indexes) {
+        ScopedTempDir temp("module_type_index");
+        fs::create_directories(temp.path / "src");
+
+        auto config = make_config(temp.path);
+
+        extract::ProjectModel model;
+        model.uses_modules = true;
+
+        auto file = (temp.path / "src" / "math.cppm").generic_string();
+        auto widget = make_type_symbol(400, "Widget", "demo::Widget", file, "Widget type.");
+        model.symbols.emplace(widget.id, widget);
+        model.modules.emplace(
+            file,
+            extract::ModuleUnit{
+                .name = "demo.math",
+                .is_interface = true,
+                .source_file = file,
+                .symbols = {widget.id},
+            });
+
+        PagePlan module_plan{
+            .page_id = "module:demo.math",
+            .page_type = PageType::Module,
+            .title = "Module `demo.math`",
+            .relative_path = "modules/demo/math.md",
+            .owner_keys = {"demo.math"},
+        };
+        PagePlan type_plan{
+            .page_id = "type:demo::Widget",
+            .page_type = PageType::Type,
+            .title = "`demo::Widget`",
+            .relative_path = "types/demo/widget.md",
+            .owner_keys = {"demo::Widget"},
+        };
+
+        PagePlanSet plan_set{
+            .plans = {module_plan, type_plan},
+        };
+
+        auto links = build_link_resolver(plan_set);
+        auto block = render_deterministic_block("types_index", module_plan, model, config, links);
+
+        EXPECT_NE(block.find("demo::Widget"), std::string::npos);
+        EXPECT_NE(block.find("../../types/demo/widget.md"), std::string::npos);
+    }
+
+    TEST_CASE(render_deterministic_block_skips_unplanned_namespaces_in_index) {
+        ScopedTempDir temp("filtered_index_namespaces");
+
+        auto config = make_config(temp.path);
+        extract::ProjectModel model;
+        model.namespaces.emplace("demo", extract::NamespaceInfo{.name = "demo"});
+        model.namespaces.emplace("std::hash<demo::Widget>",
+                                 extract::NamespaceInfo{.name = "std::hash<demo::Widget>"});
+
+        PagePlan index_plan{
+            .page_id = "index",
+            .page_type = PageType::Index,
+            .title = "API Reference",
+            .relative_path = "index.md",
+        };
+        PagePlan namespace_plan{
+            .page_id = "namespace:demo",
+            .page_type = PageType::Namespace,
+            .title = "Namespace `demo`",
+            .relative_path = "namespaces/demo/index.md",
+            .owner_keys = {"demo"},
+        };
+
+        PagePlanSet plan_set{
+            .plans = {index_plan, namespace_plan},
+        };
+
+        auto links = build_link_resolver(plan_set);
+        auto block = render_deterministic_block("all_namespaces", index_plan, model, config, links);
+
+        EXPECT_NE(block.find("demo"), std::string::npos);
+        EXPECT_EQ(block.find("std::hash<demo::Widget>"), std::string::npos);
+    }
+
     TEST_CASE(namespace_summary_prompt_uses_namespace_subject) {
         ScopedTempDir temp("namespace_summary_prompt");
         fs::create_directories(temp.path / "src");
@@ -507,5 +684,28 @@ TEST_SUITE(generate) {
         ASSERT_FALSE(prompt.empty());
         EXPECT_NE(prompt.find("namespace `demo::config`"), std::string::npos);
         EXPECT_EQ(prompt.find("namespace `demo::config::Type0`"), std::string::npos);
+    }
+
+    TEST_CASE(assemble_page_strips_empty_sections_from_crlf_templates) {
+        std::unordered_map<std::string, std::string> blocks{
+            {"declaration", "```cpp\nstruct Example {};\n```\n"},
+        };
+        std::unordered_map<std::string, std::string> slots;
+
+        auto result = assemble_page(
+            "# {{title}}\r\n\r\n## Summary\r\n\r\n{{slot:type_overview}}\r\n\r\n## Declaration\r\n\r\n{{block:declaration}}",
+            "`Example`", blocks, slots, false);
+
+        ASSERT_TRUE(result.has_value());
+        EXPECT_EQ(result->find("## Summary"), std::string::npos);
+        EXPECT_NE(result->find("## Declaration"), std::string::npos);
+    }
+
+    TEST_CASE(validate_output_rejects_whitespace_only_content) {
+        auto validation = config::ValidationConfig{};
+        auto result = validate_output("  \r\n\t\n", validation);
+
+        EXPECT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().message, "LLM output contains only whitespace");
     }
 };

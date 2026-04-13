@@ -72,6 +72,10 @@ struct DependencyResult {
 auto build_dependency_graph(const CompilationDatabase& db)
     -> std::expected<DependencyResult, ScanError>;
 
+auto build_dependency_graph(const CompilationDatabase& db,
+                           const ScanCache& initial_cache)
+    -> std::expected<DependencyResult, ScanError>;
+
 auto topological_order(const DependencyGraph& graph)
     -> std::expected<std::vector<std::string>, ScanError>;
 
@@ -270,6 +274,13 @@ auto scan_file(const CompileEntry& entry) -> std::expected<ScanResult, ScanError
 
 auto build_dependency_graph(const CompilationDatabase& db)
     -> std::expected<DependencyResult, ScanError> {
+    static const ScanCache empty_cache;
+    return build_dependency_graph(db, empty_cache);
+}
+
+auto build_dependency_graph(const CompilationDatabase& db,
+                           const ScanCache& initial_cache)
+    -> std::expected<DependencyResult, ScanError> {
     DependencyResult result;
     auto& graph = result.graph;
     auto& cache = result.cache;
@@ -278,22 +289,29 @@ auto build_dependency_graph(const CompilationDatabase& db)
 
     for(auto& entry : db.entries) {
         namespace fs = std::filesystem;
-        auto normalized = fs::path(entry.file).lexically_normal().string();
+        auto normalized = fs::path(entry.file).lexically_normal().generic_string();
         entry_files.insert(normalized);
         if(file_set.insert(normalized).second) graph.files.push_back(normalized);
     }
 
     for(auto& entry : db.entries) {
         namespace fs = std::filesystem;
-        auto normalized = fs::path(entry.file).lexically_normal().string();
+        auto normalized = fs::path(entry.file).lexically_normal().generic_string();
 
-        auto scan_result = scan_file(entry);
-        if(!scan_result.has_value()) {
-            return std::unexpected(std::move(scan_result.error()));
+        auto cached_it = initial_cache.find(normalized);
+        ScanResult scan_result;
+        if(cached_it != initial_cache.end()) {
+            scan_result = cached_it->second;
+        } else {
+            auto scanned = scan_file(entry);
+            if(!scanned.has_value()) {
+                return std::unexpected(std::move(scanned.error()));
+            }
+            scan_result = std::move(*scanned);
         }
 
-        for(auto& inc : scan_result->includes) {
-            auto inc_normalized = fs::path(inc.path).lexically_normal().string();
+        for(auto& inc : scan_result.includes) {
+            auto inc_normalized = fs::path(inc.path).lexically_normal().generic_string();
             if(entry_files.contains(inc_normalized)) {
                 graph.edges.push_back(DependencyEdge{
                     .from = normalized,
@@ -302,7 +320,7 @@ auto build_dependency_graph(const CompilationDatabase& db)
             }
         }
 
-        cache.emplace(normalized, std::move(*scan_result));
+        cache.emplace(normalized, std::move(scan_result));
     }
 
     return result;

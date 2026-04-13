@@ -31,6 +31,7 @@ struct SymbolInfo {
     SymbolKind kind = SymbolKind::Unknown;
     std::string name;
     std::string qualified_name;
+    std::string enclosing_namespace;
     std::string signature;
 
     SourceLocation declaration_location;
@@ -40,6 +41,8 @@ struct SymbolInfo {
     std::string source_snippet;
 
     std::optional<SymbolID> parent;
+    std::string lexical_parent_name;
+    SymbolKind lexical_parent_kind = SymbolKind::Unknown;
     std::vector<SymbolID> children;
 
     std::vector<SymbolID> bases;

@@ -18,10 +18,10 @@ export import :evidence;
 export import :prompt;
 export import :render;
 export import :planner;
-export import :llm;
 
 import config;
 import extract;
+import network;
 import support;
 
 export namespace clore::generate {
@@ -351,8 +351,9 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
     std::uint64_t next_tag = 0;
     std::optional<GenerateError> schedule_error;
 
-    LLMClient client(llm_model, config.llm.system_prompt, rate_limit,
-                     config.llm.retry_count, config.llm.retry_initial_backoff_ms);
+    clore::net::LLMClient client(llm_model, config.llm.system_prompt, rate_limit,
+                                 config.llm.retry_count,
+                                 config.llm.retry_initial_backoff_ms);
 
     // ── write a completed page immediately ──────────────────────────
 
@@ -360,6 +361,14 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
         -> std::expected<void, GenerateError> {
         auto& state = states[state_idx];
         auto& plan = plan_set.plans[state.plan_index];
+
+        if(state.slot_outputs.size() != state.total_slots) {
+            return std::unexpected(GenerateError{
+                .message = std::format(
+                    "page '{}' completed with {} of {} slot outputs",
+                    plan.page_id, state.slot_outputs.size(), state.total_slots),
+            });
+        }
 
         auto page_result = render_single_page(plan, config, model, state.slot_outputs, false, links);
         if(!page_result.has_value()) {
@@ -425,6 +434,7 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
                 }
 
                 // LLM page: build evidence + prompts, submit to client
+                std::size_t submitted_slots = 0;
                 for(auto& slot : plan.slot_plans) {
                     auto evidence = build_evidence_for_slot(
                         slot, plan, model, config, summaries);
@@ -453,17 +463,31 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
                     }
 
                     auto tag = next_tag++;
-                    tag_map[tag] = TagInfo{.state_index = i, .slot_kind = slot.slot_kind};
+                    tag_map[tag] = TagInfo{
+                        .state_index = i,
+                        .slot_kind = slot.slot_kind,
+                    };
                     auto submit_r = client.submit(tag, std::move(prompt));
                     if(!submit_r.has_value()) {
                         schedule_error = GenerateError{.message = submit_r.error().message};
                         return submitted_any_llm;
                     }
                     submitted_any_llm = true;
+                    ++submitted_slots;
                 }
 
-                logging::info("submitted LLM for '{}': {} slots",
-                              plan.page_id, plan.slot_plans.size());
+                if(state.completed_slots == state.total_slots) {
+                    auto r = write_completed_page(i);
+                    if(!r.has_value()) {
+                        schedule_error = std::move(r.error());
+                        return submitted_any_llm;
+                    }
+                    changed = true;
+                    continue;
+                }
+
+                logging::info("submitted LLM for '{}': {} requests",
+                              plan.page_id, submitted_slots);
             }
         }
 
@@ -479,30 +503,45 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
 
     if(has_llm_work) {
         auto run_result = client.run(
-            [&](std::uint64_t tag, std::expected<std::string, LLMError> result) {
+            [&](std::uint64_t tag, std::expected<std::string, clore::net::LLMError> result) {
                 if(schedule_error.has_value()) return;
 
                 auto tag_it = tag_map.find(tag);
                 if(tag_it == tag_map.end()) return;
 
-                auto state_idx = tag_it->second.state_index;
-                auto& slot_kind = tag_it->second.slot_kind;
+                auto tag_info = std::move(tag_it->second);
+                tag_map.erase(tag_it);
+
+                auto state_idx = tag_info.state_index;
+                auto& slot_kind = tag_info.slot_kind;
                 auto& state = states[state_idx];
                 auto& plan = plan_set.plans[state.plan_index];
 
                 if(result.has_value()) {
-                    auto output_check = validate_output(
-                        *result, config.validation);
-                    if(output_check.has_value()) {
-                        state.slot_outputs[slot_kind] = std::move(*result);
-                    } else {
-                        logging::warn("output validation failed for slot '{}' in '{}': {}",
-                                      slot_kind, plan.page_id,
-                                      output_check.error().message);
+                    auto output = std::move(*result);
+                    auto output_check = validate_output(output, config.validation);
+                    if(!output_check.has_value()) {
+                        schedule_error = GenerateError{
+                            .message = std::format(
+                                "output validation failed for slot '{}' in '{}': {}",
+                                slot_kind, plan.page_id,
+                                output_check.error().message),
+                        };
+                        logging::warn(schedule_error->message);
+                        client.request_stop();
+                        return;
                     }
+
+                    state.slot_outputs[slot_kind] = std::move(output);
                 } else {
-                    logging::warn("LLM failed for slot '{}' in '{}': {}",
-                                  slot_kind, plan.page_id, result.error().message);
+                    schedule_error = GenerateError{
+                        .message = std::format(
+                            "LLM failed for slot '{}' in '{}': {}",
+                            slot_kind, plan.page_id, result.error().message),
+                    };
+                    logging::warn(schedule_error->message);
+                    client.request_stop();
+                    return;
                 }
 
                 state.completed_slots++;
@@ -511,9 +550,15 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
                     auto r = write_completed_page(state_idx);
                     if(!r.has_value()) {
                         schedule_error = std::move(r.error());
+                        logging::warn(schedule_error->message);
+                        client.request_stop();
                         return;
                     }
                     submit_ready_pages();
+                    if(schedule_error.has_value()) {
+                        logging::warn(schedule_error->message);
+                        client.request_stop();
+                    }
                 }
             });
 
