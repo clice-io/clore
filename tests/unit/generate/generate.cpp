@@ -687,6 +687,71 @@ TEST_CASE(render_page_markdown_links_type_declarations_and_implementations_bidir
     EXPECT_EQ(module_markdown->find("struct Widget {}"), std::string::npos);
 }
 
+TEST_CASE(render_page_markdown_emits_file_dependency_diagram_when_graph_is_nontrivial) {
+    ScopedTempDir temp("file_dependency_diagram");
+    fs::create_directories(temp.path / "src");
+    fs::create_directories(temp.path / "include");
+
+    auto config = make_config(temp.path);
+    extract::ProjectModel model;
+    auto file = (temp.path / "src" / "engine.cpp").generic_string();
+    auto include = (temp.path / "include" / "engine.hpp").generic_string();
+
+    auto state = make_type_symbol(450, "State", "demo::State", file, "State type.", "demo");
+    auto run = make_function_symbol(451, "run", "demo::run", "void run()", file, "demo");
+    add_symbol(model, std::move(state));
+    add_symbol(model, std::move(run));
+    model.files[file].includes = {include};
+
+    PagePlan file_plan{
+        .page_id = "file:" + file,
+        .page_type = PageType::File,
+        .title = "File `src/engine.cpp`",
+        .relative_path = "files/src/engine.md",
+        .owner_keys = {file},
+    };
+
+    PagePlanSet plan_set{
+        .plans = {file_plan}
+    };
+    auto links = build_link_resolver(plan_set, model);
+    auto result = render_page_markdown(file_plan, config, model, {}, links);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->find("## Dependency Diagram"), std::string::npos);
+    EXPECT_NE(result->find("```mermaid"), std::string::npos);
+    EXPECT_NE(result->find("graph LR"), std::string::npos);
+}
+
+TEST_CASE(render_page_markdown_omits_file_dependency_diagram_for_tiny_graph) {
+    ScopedTempDir temp("file_dependency_diagram_tiny");
+    fs::create_directories(temp.path / "src");
+
+    auto config = make_config(temp.path);
+    extract::ProjectModel model;
+    auto file = (temp.path / "src" / "tiny.cpp").generic_string();
+
+    auto run = make_function_symbol(452, "run", "demo::run", "void run()", file, "demo");
+    add_symbol(model, std::move(run));
+
+    PagePlan file_plan{
+        .page_id = "file:" + file,
+        .page_type = PageType::File,
+        .title = "File `src/tiny.cpp`",
+        .relative_path = "files/src/tiny.md",
+        .owner_keys = {file},
+    };
+
+    PagePlanSet plan_set{
+        .plans = {file_plan}
+    };
+    auto links = build_link_resolver(plan_set, model);
+    auto result = render_page_markdown(file_plan, config, model, {}, links);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->find("## Dependency Diagram"), std::string::npos);
+}
+
 TEST_CASE(render_page_bundle_places_complex_type_members_in_nested_doc_page_without_code_blocks) {
     ScopedTempDir temp("type_member_order");
     fs::create_directories(temp.path / "src");
@@ -974,8 +1039,14 @@ TEST_CASE(render_page_bundle_emits_nested_symbol_docs_for_complex_module_types) 
     auto root_page = std::ranges::find_if(*bundle, [](const GeneratedPage& page) {
         return page.relative_path == "modules/demo/math/index.md";
     });
+    auto detail_page = std::ranges::find_if(*bundle, [](const GeneratedPage& page) {
+        return page.relative_path == "modules/demo/math/types/widget.md";
+    });
     ASSERT_TRUE(root_page != bundle->end());
+    ASSERT_TRUE(detail_page != bundle->end());
     EXPECT_NE(root_page->content.find("[Overview](types/widget.md)"), std::string::npos);
+    EXPECT_NE(detail_page->content.find("## Structure Diagram"), std::string::npos);
+    EXPECT_NE(detail_page->content.find("```mermaid"), std::string::npos);
 }
 
 TEST_CASE(render_page_markdown_omits_workflow_wrapper_heading) {

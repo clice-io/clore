@@ -70,6 +70,10 @@ struct MermaidDiagram {
     std::string code;
 };
 
+struct BlockQuote {
+    std::vector<InlineFragment> fragments;
+};
+
 struct RawMarkdown {
     std::string markdown;
 };
@@ -78,7 +82,7 @@ struct SemanticSection;
 using SemanticSectionPtr = std::shared_ptr<SemanticSection>;
 
 struct MarkdownNode {
-    std::variant<Paragraph, BulletList, CodeFence, MermaidDiagram, RawMarkdown,
+    std::variant<Paragraph, BulletList, CodeFence, MermaidDiagram, BlockQuote, RawMarkdown,
                  SemanticSectionPtr>
         value;
 };
@@ -111,6 +115,8 @@ auto make_raw_markdown(std::string markdown) -> MarkdownNode;
 auto make_code_fence(std::string language, std::string code) -> MarkdownNode;
 
 auto make_mermaid(std::string code) -> MarkdownNode;
+
+auto make_blockquote(std::string text) -> MarkdownNode;
 
 auto make_section(SemanticKind kind, std::string subject_key, std::string heading,
                   std::uint8_t level, bool omit_if_empty = true)
@@ -238,6 +244,11 @@ auto render_node(const MarkdownNode& node) -> std::string {
                 }
                 rendered += "```\n\n";
                 return rendered;
+            } else if constexpr(std::is_same_v<T, BlockQuote>) {
+                if(value.fragments.empty()) {
+                    return {};
+                }
+                return ensure_double_newline("> " + render_inlines(value.fragments));
             } else if constexpr(std::is_same_v<T, RawMarkdown>) {
                 if(value.markdown.empty()) {
                     return {};
@@ -285,6 +296,10 @@ auto make_code_fence(std::string language, std::string code) -> MarkdownNode {
 
 auto make_mermaid(std::string code) -> MarkdownNode {
     return MarkdownNode{MermaidDiagram{.code = std::move(code)}};
+}
+
+auto make_blockquote(std::string text) -> MarkdownNode {
+    return MarkdownNode{BlockQuote{{make_text(std::move(text))}}};
 }
 
 auto make_section(SemanticKind kind, std::string subject_key, std::string heading,

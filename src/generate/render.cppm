@@ -783,6 +783,13 @@ auto build_list_section(std::string heading, std::uint8_t level, BulletList list
     return section;
 }
 
+constexpr std::size_t kMermaidMinNodes = 4;
+constexpr std::size_t kMermaidMinEdges = 3;
+
+auto should_emit_mermaid(std::size_t node_count, std::size_t edge_count) -> bool {
+    return node_count >= kMermaidMinNodes || edge_count >= kMermaidMinEdges;
+}
+
 auto append_type_structure_sections(std::vector<MarkdownNode>& nodes,
                                     const extract::ProjectModel& model,
                                     const extract::SymbolInfo& sym,
@@ -816,6 +823,74 @@ auto append_type_structure_sections(std::vector<MarkdownNode>& nodes,
               [](const extract::SymbolInfo* lhs, const extract::SymbolInfo* rhs) {
                   return lhs->qualified_name < rhs->qualified_name;
               });
+
+    auto collect_member_symbols = [&](auto&& predicate) -> std::vector<const extract::SymbolInfo*> {
+        std::vector<const extract::SymbolInfo*> members;
+        members.reserve(sym.children.size());
+        for(auto child_id: sym.children) {
+            if(auto* child = lookup_sym(model, child_id); child != nullptr && predicate(*child)) {
+                members.push_back(child);
+            }
+        }
+        std::sort(members.begin(),
+                  members.end(),
+                  [](const extract::SymbolInfo* lhs, const extract::SymbolInfo* rhs) {
+                      return lhs->qualified_name < rhs->qualified_name;
+                  });
+        return members;
+    };
+
+    auto member_type_symbols = collect_member_symbols(
+        [](const extract::SymbolInfo& child) { return is_type_kind(child.kind); });
+    auto member_variable_symbols = collect_member_symbols(
+        [](const extract::SymbolInfo& child) { return is_variable_kind(child.kind); });
+    auto member_function_symbols = collect_member_symbols(
+        [](const extract::SymbolInfo& child) { return is_function_kind(child.kind); });
+
+    auto edge_count = base_symbols.size() + derived_symbols.size() + member_type_symbols.size() +
+                      member_variable_symbols.size() + member_function_symbols.size();
+    auto node_count = 1 + edge_count;
+    if(should_emit_mermaid(node_count, edge_count)) {
+        auto type_label = short_name_of(sym.qualified_name);
+        if(type_label.empty()) {
+            type_label = sym.name.empty() ? sym.qualified_name : sym.name;
+        }
+
+        std::string diagram = "graph TD\n";
+        diagram += "    SELF[\"" + escape_mermaid_label(type_label) + "\"]\n";
+
+        auto append_nodes = [&](std::string_view prefix,
+                                const std::vector<const extract::SymbolInfo*>& symbols,
+                                std::string_view edge_op,
+                                std::string_view marker,
+                                bool call_suffix) {
+            for(std::size_t i = 0; i < symbols.size(); ++i) {
+                auto id = std::string(prefix) + std::to_string(i);
+                auto label = short_name_of(symbols[i]->qualified_name);
+                if(label.empty()) {
+                    label = symbols[i]->name.empty() ? symbols[i]->qualified_name : symbols[i]->name;
+                }
+                auto rendered = std::string(marker) + label + (call_suffix ? "()" : "");
+                diagram += "    " + id + "[\"" + escape_mermaid_label(rendered) + "\"]\n";
+                if(edge_op == "-->self") {
+                    diagram += "    " + id + " --> SELF\n";
+                } else if(edge_op == "self-->") {
+                    diagram += "    SELF --> " + id + "\n";
+                }
+            }
+        };
+
+        append_nodes("B", base_symbols, "-->self", "base: ", false);
+        append_nodes("D", derived_symbols, "self-->", "derived: ", false);
+        append_nodes("MT", member_type_symbols, "self-->", "type: ", false);
+        append_nodes("MV", member_variable_symbols, "self-->", "var: ", false);
+        append_nodes("MF", member_function_symbols, "self-->", "fn: ", true);
+
+        auto section = make_section(SemanticKind::Section, {}, "Structure Diagram", level);
+        section->children.push_back(make_mermaid(std::move(diagram)));
+        nodes.push_back(MarkdownNode{section});
+    }
+
     nodes.push_back(MarkdownNode{build_list_section(
         "Derived Types",
         level,
@@ -868,31 +943,31 @@ auto render_import_diagram_code(const extract::ModuleUnit& mod_unit) -> std::str
         return std::string(colon == std::string_view::npos ? name : name.substr(0, colon));
     };
 
-    std::string result = "graph LR\n";
-    std::unordered_map<std::string, std::string> node_ids;
-    std::vector<std::pair<std::string, std::string>> nodes;
-    auto ensure_node_id = [&](std::string_view label) -> std::string {
-        auto key = std::string(label);
-        if(auto it = node_ids.find(key); it != node_ids.end()) {
-            return it->second;
-        }
-        auto node_id = "M" + std::to_string(nodes.size());
-        node_ids.emplace(key, node_id);
-        nodes.emplace_back(node_id, key);
-        return node_id;
-    };
-
-    auto module_id = ensure_node_id(top_module(mod_unit.name));
+    auto module_label = top_module(mod_unit.name);
     std::unordered_set<std::string> seen;
+    std::vector<std::string> imports;
     for(const auto& imp: mod_unit.imports) {
         auto label = top_module(imp);
-        if(!seen.insert(label).second) {
+        if(label == module_label || !seen.insert(label).second) {
             continue;
         }
-        result += "    " + ensure_node_id(label) + " --> " + module_id + "\n";
+        imports.push_back(label);
     }
-    for(const auto& [node_id, label]: nodes) {
-        result += "    " + node_id + "[\"" + escape_mermaid_label(label) + "\"]\n";
+
+    auto edge_count = imports.size();
+    auto node_count = 1 + imports.size();
+    if(!should_emit_mermaid(node_count, edge_count)) {
+        return {};
+    }
+
+    std::sort(imports.begin(), imports.end());
+
+    std::string result = "graph LR\n";
+    result += "    M0[\"" + escape_mermaid_label(module_label) + "\"]\n";
+    for(std::size_t i = 0; i < imports.size(); ++i) {
+        auto node_id = "I" + std::to_string(i);
+        result += "    " + node_id + "[\"" + escape_mermaid_label(imports[i]) + "\"]\n";
+        result += "    " + node_id + " --> M0\n";
     }
     return result;
 }
@@ -909,14 +984,21 @@ auto render_namespace_diagram_code(const extract::ProjectModel& model,
             type_names.push_back(short_name_of(sym->qualified_name));
         }
     }
-    bool has_child = false;
+    std::sort(type_names.begin(), type_names.end());
+    type_names.erase(std::unique(type_names.begin(), type_names.end()), type_names.end());
+
+    std::vector<std::string> children;
     for(const auto& child: ns_it->second.children) {
         if(!child.contains("(anonymous namespace)")) {
-            has_child = true;
-            break;
+            children.push_back(short_name_of(child));
         }
     }
-    if(type_names.empty() && !has_child) {
+    std::sort(children.begin(), children.end());
+    children.erase(std::unique(children.begin(), children.end()), children.end());
+
+    auto edge_count = type_names.size() + children.size();
+    auto node_count = 1 + edge_count;
+    if(!should_emit_mermaid(node_count, edge_count)) {
         return {};
     }
 
@@ -927,15 +1009,71 @@ auto render_namespace_diagram_code(const extract::ProjectModel& model,
         result += "    " + node_id + "[\"" + escape_mermaid_label(type_names[i]) + "\"]\n";
         result += "    NS --> " + node_id + "\n";
     }
-    std::size_t child_index = 0;
-    for(const auto& child: ns_it->second.children) {
-        if(child.contains("(anonymous namespace)")) {
-            continue;
-        }
-        auto node_id = "NSC" + std::to_string(child_index++);
-        result += "    " + node_id + "[\"" + escape_mermaid_label(short_name_of(child)) + "\"]\n";
+    for(std::size_t child_index = 0; child_index < children.size(); ++child_index) {
+        auto node_id = "NSC" + std::to_string(child_index);
+        result += "    " + node_id + "[\"" + escape_mermaid_label(children[child_index]) + "\"]\n";
         result += "    NS --> " + node_id + "\n";
     }
+    return result;
+}
+
+auto render_file_dependency_diagram_code(const PagePlan& plan,
+                                         const config::TaskConfig& config,
+                                         const extract::ProjectModel& model) -> std::string {
+    if(plan.owner_keys.empty()) {
+        return {};
+    }
+    auto file_it = model.files.find(plan.owner_keys.front());
+    if(file_it == model.files.end()) {
+        return {};
+    }
+
+    std::vector<std::string> include_labels;
+    include_labels.reserve(file_it->second.includes.size());
+    for(const auto& include: file_it->second.includes) {
+        auto label = make_source_relative(include, config.project_root);
+        if(label.empty()) {
+            label = include;
+        }
+        include_labels.push_back(std::move(label));
+    }
+    std::sort(include_labels.begin(), include_labels.end());
+    include_labels.erase(std::unique(include_labels.begin(), include_labels.end()),
+                         include_labels.end());
+
+    auto symbols = collect_implementation_symbols(plan, model, [](const extract::SymbolInfo& sym) {
+        return is_type_kind(sym.kind) || is_variable_kind(sym.kind) || is_function_kind(sym.kind);
+    });
+
+    auto edge_count = include_labels.size() + symbols.size();
+    auto node_count = 1 + edge_count;
+    if(!should_emit_mermaid(node_count, edge_count)) {
+        return {};
+    }
+
+    auto file_label = make_source_relative(plan.owner_keys.front(), config.project_root);
+    if(file_label.empty()) {
+        file_label = plan.owner_keys.front();
+    }
+
+    std::string result = "graph LR\n";
+    result += "    F[\"" + escape_mermaid_label(file_label) + "\"]\n";
+    for(std::size_t i = 0; i < include_labels.size(); ++i) {
+        auto node_id = "I" + std::to_string(i);
+        result += "    " + node_id + "[\"" + escape_mermaid_label(include_labels[i]) + "\"]\n";
+        result += "    " + node_id + " --> F\n";
+    }
+    for(std::size_t i = 0; i < symbols.size(); ++i) {
+        auto node_id = "S" + std::to_string(i);
+        auto symbol_label = short_name_of(symbols[i]->qualified_name);
+        if(symbol_label.empty()) {
+            symbol_label =
+                symbols[i]->name.empty() ? symbols[i]->qualified_name : symbols[i]->name;
+        }
+        result += "    " + node_id + "[\"" + escape_mermaid_label(symbol_label) + "\"]\n";
+        result += "    F --> " + node_id + "\n";
+    }
+
     return result;
 }
 
@@ -962,6 +1100,14 @@ auto render_module_dependency_diagram_code(const extract::ProjectModel& model) -
         }
     }
     if(modules.size() < 2) {
+        return {};
+    }
+
+    std::size_t edge_count = 0;
+    for(const auto& [_, to_set]: deps) {
+        edge_count += to_set.size();
+    }
+    if(!should_emit_mermaid(modules.size(), edge_count)) {
         return {};
     }
 
@@ -1422,6 +1568,11 @@ auto build_workflow_call_chain_code(const PagePlan& plan) -> std::string {
     if(plan.owner_keys.size() < 2) {
         return {};
     }
+    auto node_count = plan.owner_keys.size();
+    auto edge_count = node_count - 1;
+    if(!should_emit_mermaid(node_count, edge_count)) {
+        return {};
+    }
     std::string result = "graph LR\n";
     for(std::size_t i = 0; i < plan.owner_keys.size(); ++i) {
         result += "    N" + std::to_string(i) + "[\"" +
@@ -1700,6 +1851,12 @@ auto build_file_page_root(const PagePlan& plan,
             }
             return list;
         }())});
+    }
+    if(auto dependency_diagram = render_file_dependency_diagram_code(plan, config, model);
+       !dependency_diagram.empty()) {
+        auto section = make_section(SemanticKind::Section, {}, "Dependency Diagram", 2);
+        section->children.push_back(make_mermaid(std::move(dependency_diagram)));
+        root->children.push_back(MarkdownNode{section});
     }
 
     auto add_impl_section = [&](std::string heading,
