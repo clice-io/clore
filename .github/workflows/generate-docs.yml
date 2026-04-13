@@ -25,7 +25,6 @@ jobs:
           locked: true
 
       - name: Restore .clice cache
-        id: restore-clice-cache
         uses: actions/cache/restore@v5
         with:
           path: .clice/
@@ -43,13 +42,6 @@ jobs:
 
       - name: Build
         run: pixi run cmake-build Debug
-
-      - name: Save .clice cache
-        if: steps.restore-clice-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: .clice/
-          key: ${{ steps.restore-clice-cache.outputs.cache-primary-key }}
 
       - name: Save build directory cache
         if: steps.restore-build-cache.outputs.cache-hit != 'true'
@@ -71,10 +63,19 @@ jobs:
             --log-level info \
             --model deepseek-chat
 
+      - name: Save .clice cache
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v5
+        with:
+          path: .clice/
+          key: ${{ steps.restore-clice-cache.outputs.cache-primary-key }}
+
       - name: Package documentation
+        if: github.event_name == 'push'
         run: zip -r clore-docs.zip generated
 
       - name: Upload documentation artifact
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
         with:
           name: clore-docs
