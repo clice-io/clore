@@ -1,12 +1,11 @@
 #include "eventide/zest/zest.h"
+#include "../../include/test_support/environment.h"
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <cstdlib>
 #include <expected>
 #include <functional>
-#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -23,54 +22,6 @@ using namespace clore::net;
 namespace {
 
 namespace json = eventide::serde::json;
-
-auto environment_mutex() -> std::mutex& {
-    static std::mutex mutex;
-    return mutex;
-}
-
-struct ScopedEnvironmentLock {
-    std::unique_lock<std::mutex> lock;
-
-    ScopedEnvironmentLock() : lock(environment_mutex()) {}
-};
-
-struct ScopedEnvVar {
-    std::string name;
-    std::optional<std::string> original_value;
-
-    explicit ScopedEnvVar(std::string var_name) : name(std::move(var_name)) {
-        if(auto* value = std::getenv(name.c_str()); value != nullptr) {
-            original_value = value;
-        }
-    }
-
-    ~ScopedEnvVar() { restore(); }
-
-    void set(std::string_view value) const {
-#ifdef _WIN32
-        _putenv_s(name.c_str(), std::string(value).c_str());
-#else
-        setenv(name.c_str(), std::string(value).c_str(), 1);
-#endif
-    }
-
-    void unset() const {
-#ifdef _WIN32
-        _putenv_s(name.c_str(), "");
-#else
-        unsetenv(name.c_str());
-#endif
-    }
-
-    void restore() const {
-        if(original_value.has_value()) {
-            set(*original_value);
-            return;
-        }
-        unset();
-    }
-};
 
 struct SummaryPayload {
     std::string title;

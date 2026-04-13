@@ -63,7 +63,8 @@ auto split_top_level_qualified_name(std::string_view qualified_name)
 auto join_qualified_name_parts(const std::vector<std::string>& parts,
                                std::size_t count) -> std::string {
     std::string joined;
-    for(std::size_t index = 0; index < count; ++index) {
+    auto safe_count = count < parts.size() ? count : parts.size();
+    for(std::size_t index = 0; index < safe_count; ++index) {
         if(index > 0) {
             joined += "::";
         }

@@ -109,6 +109,12 @@ auto ensure_curl_global_init() -> std::expected<void, LLMError> {
         if(code != CURLE_OK) {
             init_error = LLMError(
                 std::format("curl_global_init failed: {}", curl_easy_strerror(code)));
+            return;
+        }
+
+        if(std::atexit(&curl_global_cleanup) != 0) {
+            curl_global_cleanup();
+            init_error = LLMError("std::atexit(curl_global_cleanup) failed");
         }
     });
 

@@ -431,13 +431,13 @@ auto extract_project(const config::TaskConfig& config)
                   filtered_db.entries.size(), skipped);
 
     auto cache_result = cache::load_extract_cache(config.workspace_root);
+    std::unordered_map<std::string, cache::CacheRecord> cache_records;
     if(!cache_result.has_value()) {
-        return std::unexpected(ExtractError{
-            .message = std::format("failed to load extract cache: {}",
-                                   cache_result.error().message)});
+        logging::warn("failed to load extract cache; proceeding without cache: {}",
+                      cache_result.error().message);
+    } else {
+        cache_records = std::move(*cache_result);
     }
-
-    auto cache_records = std::move(*cache_result);
     std::unordered_map<std::string, CacheEvaluation> cache_evaluations;
     cache_evaluations.reserve(filtered_db.entries.size());
 
@@ -686,9 +686,8 @@ auto extract_project(const config::TaskConfig& config)
 
     auto save_cache_result = cache::save_extract_cache(config.workspace_root, cache_records);
     if(!save_cache_result.has_value()) {
-        return std::unexpected(ExtractError{
-            .message = std::format("failed to save extract cache: {}",
-                                   save_cache_result.error().message)});
+        logging::warn("failed to save extract cache; continuing without persisted cache: {}",
+                      save_cache_result.error().message);
     }
 
     std::size_t total_calls = 0, total_refs = 0;

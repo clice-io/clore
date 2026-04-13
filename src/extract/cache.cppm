@@ -201,7 +201,8 @@ auto hash_file(std::string_view path) -> std::expected<std::uint64_t, CacheError
 auto capture_dependency_snapshot(const std::vector<std::string>& files)
     -> std::expected<DependencySnapshot, CacheError> {
     DependencySnapshot snapshot;
-    snapshot.build_at = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    snapshot.build_at = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
 
     std::vector<std::string> normalized = files;
     std::ranges::sort(normalized);
@@ -244,7 +245,8 @@ auto dependencies_changed(const DependencySnapshot& snapshot) -> bool {
             continue;
         }
 
-        auto current_mtime = llvm::sys::toTimeT(status.getLastModificationTime());
+        auto current_mtime = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            status.getLastModificationTime().time_since_epoch()).count();
         if(current_mtime <= snapshot.build_at) {
             continue;
         }

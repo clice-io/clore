@@ -177,6 +177,16 @@ auto wrap_prompt_output_for_embed(std::string_view slot_kind, std::string_view p
     return wrapped;
 }
 
+auto trim_ascii(std::string_view text) -> std::string_view {
+    while(!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) {
+        text.remove_prefix(1);
+    }
+    while(!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) {
+        text.remove_suffix(1);
+    }
+    return text;
+}
+
 // Try to extract a "Title: ..." line from the LLM workflow output.
 // Returns {extracted_title, remaining_content} or nullopt on failure.
 auto extract_workflow_title(const std::string& output)
@@ -205,16 +215,6 @@ auto extract_workflow_title(const std::string& output)
     }
 
     return std::pair{std::move(title), output.substr(rest_start)};
-}
-
-auto trim_ascii(std::string_view text) -> std::string_view {
-    while(!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) {
-        text.remove_prefix(1);
-    }
-    while(!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) {
-        text.remove_suffix(1);
-    }
-    return text;
 }
 
 auto collapse_whitespace(std::string_view text) -> std::string {

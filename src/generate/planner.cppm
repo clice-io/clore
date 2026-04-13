@@ -22,7 +22,6 @@ import :model;
 import :path;
 import config;
 import extract;
-import extract:qualified_name;
 import support;
 
 export namespace clore::generate {
@@ -79,7 +78,7 @@ auto is_renderable_namespace_name(std::string_view ns_name) -> bool {
         return false;
     }
 
-    auto parts = split_qualified_name(ns_name);
+    auto parts = extract::split_top_level_qualified_name(ns_name);
     if(parts.empty()) {
         return false;
     }
@@ -210,7 +209,7 @@ auto enumerate_type_pages(PlanBuilder& builder) -> std::expected<void, PlanError
 
         auto ns = namespace_of(sym);
         auto short_name = short_name_of(sym.qualified_name);
-        auto ns_parts = split_qualified_name(ns);
+        auto ns_parts = extract::split_top_level_qualified_name(ns);
 
         PageIdentity identity{
             .page_type = PageType::Type,
@@ -276,7 +275,7 @@ auto enumerate_namespace_pages(PlanBuilder& builder) -> std::expected<void, Plan
         if(ns_info.symbols.empty() && ns_info.children.empty()) continue;
         if(!is_renderable_namespace_name(ns_name)) continue;
 
-        auto parts = split_qualified_name(ns_name);
+        auto parts = extract::split_top_level_qualified_name(ns_name);
 
         PageIdentity identity{
             .page_type = PageType::Namespace,
@@ -342,7 +341,7 @@ auto enumerate_module_pages(PlanBuilder& builder) -> std::expected<void, PlanErr
         if(!mod_unit.is_interface) continue;
         if(!seen.insert(mod_unit.name).second) continue;
 
-        auto parts = split_qualified_name(mod_unit.name);
+        auto parts = extract::split_top_level_qualified_name(mod_unit.name);
 
         PageIdentity identity{
             .page_type = PageType::Module,
@@ -994,7 +993,6 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
             .page_type = PageType::Workflow,
             .title = "Workflow: " + title_chain,
             .relative_path = *path_result,
-            .owner_keys = std::move(owner_keys),
             .deterministic_blocks = {"call_chain", "participants", "related_pages"},
         };
 
@@ -1034,6 +1032,8 @@ auto enumerate_workflow_pages(PlanBuilder& builder) -> std::expected<void, PlanE
                 }
             }
         }
+
+        plan.owner_keys = std::move(owner_keys);
 
         if(auto r = builder.add_plan(std::move(plan)); !r) return r;
 
