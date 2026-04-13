@@ -1,23 +1,13 @@
-Write an "Overview" section for the index page.
+R"clore(Write a top-level overview for this C++ project documentation set.
 
 Output:
 - Markdown fragment only
-- 2 to 4 short paragraphs
+- 1 to 2 short paragraphs
 - No heading
 - No YAML
-- Follow the output language requested by the system prompt
+- No code fences or pasted source code
 
-Must explain:
-- the purpose and goals of this codebase
-- the major subsystems and their responsibilities
-- key design decisions or architectural constraints
-
-Must not repeat:
-- module lists
-- namespace lists
-- source file lists
-
+Summarize the main subsystems and how readers should understand the project at a high level.
 Use only the EVIDENCE section below.
-If evidence is insufficient, explicitly explain what key evidence is missing.
 
-{{evidence}}
+{{evidence}})clore"

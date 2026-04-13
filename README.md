@@ -5,9 +5,8 @@
 [![generate-docs](https://github.com/clice-io/clore/actions/workflows/generate-docs.yml/badge.svg)](https://github.com/clice-io/clore/actions/workflows/generate-docs.yml)
 [![Documentation](https://img.shields.io/badge/view-documentation-blue)](https://docs.clice.io/clore/)
 
-clore is a document generator both for humans and agents, combining LLVM and LLM, designed from modern c++.
-
+clore is a document generator for humans and agents that combines LLVM and LLM technologies and is written in modern C++.
 
 ## How to build
 
-Just run `pixi run build`. If you haven't install pixi, you must firstly install it.
+Run `pixi run build`. If you don't have pixi installed, install it first.

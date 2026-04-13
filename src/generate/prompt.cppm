@@ -1,10 +1,9 @@
 module;
 
 #include <expected>
+#include <format>
 #include <string>
 #include <string_view>
-
-#include <format>
 
 export module generate:prompt;
 
@@ -28,156 +27,58 @@ namespace clore::generate {
 
 namespace {
 
+constexpr std::string_view kNamespaceSummaryPrompt =
+#include "../../templates/prompts/namespace_summary.txt"
+    ;
+
+constexpr std::string_view kModuleSummaryPrompt =
+#include "../../templates/prompts/module_summary.txt"
+    ;
+
+constexpr std::string_view kModuleArchitecturePrompt =
+#include "../../templates/prompts/module_architecture.txt"
+    ;
+
+constexpr std::string_view kIndexOverviewPrompt =
+#include "../../templates/prompts/index_overview.txt"
+    ;
+
+constexpr std::string_view kIndexReadingGuidePrompt =
+#include "../../templates/prompts/index_reading_guide.txt"
+    ;
+
+constexpr std::string_view kWorkflowPrompt =
+#include "../../templates/prompts/workflow.txt"
+    ;
+
+constexpr std::string_view kFunctionDeclarationSummaryPrompt =
+#include "../../templates/prompts/function_declaration_summary.txt"
+    ;
+
+constexpr std::string_view kFunctionImplementationSummaryPrompt =
+#include "../../templates/prompts/function_implementation_summary.txt"
+    ;
+
+constexpr std::string_view kTypeDeclarationSummaryPrompt =
+#include "../../templates/prompts/type_declaration_summary.txt"
+    ;
+
+constexpr std::string_view kTypeImplementationSummaryPrompt =
+#include "../../templates/prompts/type_implementation_summary.txt"
+    ;
+
 auto prompt_template_of(PromptKind kind) -> std::string_view {
     switch(kind) {
-        case PromptKind::NamespaceSummary:
-            return R"(Write a summary for the namespace `{{target_name}}`.
-
-Output:
-- Markdown fragment only
-- 1 to 2 short paragraphs
-- No heading
-- No YAML
-- No code fences or pasted source code
-
-Describe the namespace's responsibility, notable declarations, and architectural role.
-Use only the EVIDENCE section below.
-
-{{evidence}})";
-        case PromptKind::ModuleSummary:
-            return R"(Write a summary for the module `{{target_name}}`.
-
-Output:
-- Markdown fragment only
-- 1 to 2 short paragraphs
-- No heading
-- No YAML
-- No code fences or pasted source code
-
-Describe the module's responsibility and the public-facing implementation scope it owns.
-Use only the EVIDENCE section below.
-
-{{evidence}})";
-        case PromptKind::ModuleArchitecture:
-            return R"(Write an architecture note for the module `{{target_name}}`.
-
-Output:
-- Markdown fragment only
-- 1 to 2 short paragraphs
-- No heading
-- No YAML
-- No code fences or pasted source code
-
-Focus on decomposition, imports, internal layering, and implementation structure.
-Use only the EVIDENCE section below.
-
-{{evidence}})";
-        case PromptKind::IndexOverview:
-            return R"(Write a top-level overview for this C++ project documentation set.
-
-Output:
-- Markdown fragment only
-- 1 to 2 short paragraphs
-- No heading
-- No YAML
-- No code fences or pasted source code
-
-Summarize the main subsystems and how readers should understand the project at a high level.
-Use only the EVIDENCE section below.
-
-{{evidence}})";
-        case PromptKind::IndexReadingGuide:
-            return R"(Write a reading guide for this C++ project documentation set.
-
-Output:
-- Markdown fragment only
-- 1 short paragraph or compact bullet list
-- No heading
-- No YAML
-- No code fences or pasted source code
-
-Explain how readers should navigate declarations, implementations, and workflows.
-Use only the EVIDENCE section below.
-
-{{evidence}})";
-        case PromptKind::Workflow:
-            return R"(Write a workflow page for `{{target_name}}`.
-
-Output:
-- Markdown fragment only
-- May start with `Title: ...` on the first line if you want to refine the page title
-- Use headings only from level 2 downward
-- No YAML
-- No code fences or pasted source code
-
-Describe the workflow, key stages, and the responsibilities of the participating symbols.
-Use only the EVIDENCE section below.
-
-{{evidence}})";
-        case PromptKind::FunctionDeclarationSummary:
-            return R"(Write a declaration summary for the {{target_kind}} `{{target_name}}`.
-
-Context: this summary appears on a declaration page. Focus on caller-facing responsibility and contract.
-
-Output:
-- Markdown fragment only
-- 1 to 2 short paragraphs
-- No heading
-- No YAML
-- No code fences or pasted source code
-
-Do not describe implementation details.
-Use only the EVIDENCE section below.
-
-{{evidence}})";
-        case PromptKind::FunctionImplementationSummary:
-            return R"(Write an implementation summary for the {{target_kind}} `{{target_name}}`.
-
-Context: this summary appears on an implementation page. Focus on algorithm, internal control flow, and dependencies.
-
-Output:
-- Markdown fragment only
-- 1 to 2 short paragraphs
-- No heading
-- No YAML
-- No code fences or pasted source code
-
-Do not restate the public contract.
-Use only the EVIDENCE section below.
-
-{{evidence}})";
-        case PromptKind::TypeDeclarationSummary:
-            return R"(Write a declaration summary for the {{target_kind}} `{{target_name}}`.
-
-Context: this summary appears on a declaration page. Focus on what the type represents and how it is used.
-
-Output:
-- Markdown fragment only
-- 1 to 2 short paragraphs
-- No heading
-- No YAML
-- No code fences or pasted source code
-
-Do not focus on member-by-member implementation detail.
-Use only the EVIDENCE section below.
-
-{{evidence}})";
-        case PromptKind::TypeImplementationSummary:
-            return R"(Write an implementation summary for the {{target_kind}} `{{target_name}}`.
-
-Context: this summary appears on an implementation page. Focus on internal structure, invariants, and important member implementations.
-
-Output:
-- Markdown fragment only
-- 1 to 2 short paragraphs
-- No heading
-- No YAML
-- No code fences or pasted source code
-
-Do not restate the public API contract.
-Use only the EVIDENCE section below.
-
-{{evidence}})";
+        case PromptKind::NamespaceSummary: return kNamespaceSummaryPrompt;
+        case PromptKind::ModuleSummary: return kModuleSummaryPrompt;
+        case PromptKind::ModuleArchitecture: return kModuleArchitecturePrompt;
+        case PromptKind::IndexOverview: return kIndexOverviewPrompt;
+        case PromptKind::IndexReadingGuide: return kIndexReadingGuidePrompt;
+        case PromptKind::Workflow: return kWorkflowPrompt;
+        case PromptKind::FunctionDeclarationSummary: return kFunctionDeclarationSummaryPrompt;
+        case PromptKind::FunctionImplementationSummary: return kFunctionImplementationSummaryPrompt;
+        case PromptKind::TypeDeclarationSummary: return kTypeDeclarationSummaryPrompt;
+        case PromptKind::TypeImplementationSummary: return kTypeImplementationSummaryPrompt;
     }
     return {};
 }
@@ -249,11 +150,11 @@ auto build_prompt(PromptKind kind, const EvidencePack& evidence)
     auto tmpl = prompt_template_of(kind);
     if(tmpl.empty()) {
         return std::unexpected(PromptError{
-            .message = std::format("unsupported prompt kind: {}",
-                                   prompt_kind_name(kind))});
+            .message = std::format("unsupported prompt kind: {}", prompt_kind_name(kind))});
     }
-    return instantiate_prompt_with_evidence(
-        std::string(tmpl), evidence, format_evidence_text(evidence));
+    return instantiate_prompt_with_evidence(std::string(tmpl),
+                                            evidence,
+                                            format_evidence_text(evidence));
 }
 
 }  // namespace clore::generate

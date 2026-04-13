@@ -1,26 +1,15 @@
-Write a declaration summary for the {{target_kind}} `{{target_name}}`.
+R"clore(Write a declaration summary for the {{target_kind}} `{{target_name}}`.
 
-Context: This summary appears on a namespace (declaration) page and should describe
-how this function is used by callers, what purpose it serves, and what contract it provides.
+Context: this summary appears on a declaration page. Focus on caller-facing responsibility and contract.
 
 Output:
 - Markdown fragment only
 - 1 to 2 short paragraphs
 - No heading
 - No YAML
-- Follow the output language requested by the system prompt
+- No code fences or pasted source code
 
-Must explain:
-- what this function does from the caller's perspective
-- what callers typically expect (parameters, return value, side effects)
-- its role in the codebase and relationship to sibling declarations
-
-Must not:
-- describe the implementation
-- repeat the full signature
-- include source locations
-
+Do not describe implementation details.
 Use only the EVIDENCE section below.
-If evidence is insufficient, explicitly explain what key evidence is missing.
 
-{{evidence}}
+{{evidence}})clore"

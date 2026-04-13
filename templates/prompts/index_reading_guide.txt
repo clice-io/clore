@@ -1,23 +1,13 @@
-Write a Reading Guide for the index page.
+R"clore(Write a reading guide for this C++ project documentation set.
 
 Output:
 - Markdown fragment only
-- 1 to 3 short paragraphs
+- 1 short paragraph or compact bullet list
 - No heading
 - No YAML
-- Follow the output language requested by the system prompt
+- No code fences or pasted source code
 
-Must explain:
-- the recommended reading order for understanding this codebase
-- which modules or namespaces to start with for newcomers
-- how the documentation is organized
-
-Must not repeat:
-- module lists
-- namespace lists
-- source file lists
-
+Explain how readers should navigate declarations, implementations, and workflows.
 Use only the EVIDENCE section below.
-If evidence is insufficient, explicitly explain what key evidence is missing.
 
-{{evidence}}
+{{evidence}})clore"

@@ -1,27 +1,15 @@
-Write a declaration summary for the {{target_kind}} `{{target_name}}`.
+R"clore(Write a declaration summary for the {{target_kind}} `{{target_name}}`.
 
-Context: This summary appears on a namespace (declaration) page and should describe
-what this type represents from the user's perspective — its purpose, how it is used,
-and what role it plays among sibling declarations.
+Context: this summary appears on a declaration page. Focus on what the type represents and how it is used.
 
 Output:
 - Markdown fragment only
 - 1 to 2 short paragraphs
 - No heading
 - No YAML
-- Follow the output language requested by the system prompt
+- No code fences or pasted source code
 
-Must explain:
-- what this type represents and why it exists
-- how callers or users interact with it
-- its relationship to nearby types (base types, type aliases, associated functions)
-
-Must not:
-- describe the implementation or internal members in detail
-- repeat the full declaration
-- include source locations
-
+Do not focus on member-by-member implementation detail.
 Use only the EVIDENCE section below.
-If evidence is insufficient, explicitly explain what key evidence is missing.
 
-{{evidence}}
+{{evidence}})clore"

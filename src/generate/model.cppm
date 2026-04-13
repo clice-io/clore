@@ -113,14 +113,12 @@ struct LinkResolver {
     /// page_id -> rendered title
     std::unordered_map<std::string, std::string> page_id_to_title;
 
-    [[nodiscard]] auto resolve(const std::string& name) const
-        -> const std::string* {
+    [[nodiscard]] auto resolve(const std::string& name) const -> const std::string* {
         auto it = name_to_path.find(name);
         return it != name_to_path.end() ? &it->second : nullptr;
     }
 
-    [[nodiscard]] auto resolve_page_title(const std::string& page_id) const
-        -> const std::string* {
+    [[nodiscard]] auto resolve_page_title(const std::string& page_id) const -> const std::string* {
         auto it = page_id_to_title.find(page_id);
         return it != page_id_to_title.end() ? &it->second : nullptr;
     }
@@ -138,15 +136,14 @@ auto is_type_kind(extract::SymbolKind kind) -> bool;
 
 auto is_function_kind(extract::SymbolKind kind) -> bool;
 
-auto is_page_level_symbol(const extract::ProjectModel& model,
-                          const extract::SymbolInfo& sym) -> bool;
+auto is_page_level_symbol(const extract::ProjectModel& model, const extract::SymbolInfo& sym)
+    -> bool;
 
 auto prompt_request_key(const PromptRequest& request) -> std::string;
 
 auto is_page_summary_prompt(PromptKind kind) -> bool;
 
-auto make_source_relative(const std::string& path, const std::string& project_root)
-    -> std::string;
+auto make_source_relative(const std::string& path, const std::string& project_root) -> std::string;
 
 }  // namespace clore::generate
 
@@ -156,11 +153,11 @@ namespace clore::generate {
 
 auto page_type_name(PageType type) -> std::string_view {
     switch(type) {
-        case PageType::Index:      return "index";
-        case PageType::Module:     return "module";
-        case PageType::Namespace:  return "namespace";
-        case PageType::File:       return "file";
-        case PageType::Workflow:   return "workflow";
+        case PageType::Index: return "index";
+        case PageType::Module: return "module";
+        case PageType::Namespace: return "namespace";
+        case PageType::File: return "file";
+        case PageType::Workflow: return "workflow";
     }
     return "unknown";
 }
@@ -199,25 +196,21 @@ auto is_type_kind(extract::SymbolKind kind) -> bool {
         case extract::SymbolKind::Union:
         case extract::SymbolKind::Concept:
         case extract::SymbolKind::Template:
-        case extract::SymbolKind::TypeAlias:
-            return true;
-        default:
-            return false;
+        case extract::SymbolKind::TypeAlias: return true;
+        default: return false;
     }
 }
 
 auto is_function_kind(extract::SymbolKind kind) -> bool {
     switch(kind) {
         case extract::SymbolKind::Function:
-        case extract::SymbolKind::Method:
-            return true;
-        default:
-            return false;
+        case extract::SymbolKind::Method: return true;
+        default: return false;
     }
 }
 
-auto is_page_level_symbol(const extract::ProjectModel& model,
-                          const extract::SymbolInfo& sym) -> bool {
+auto is_page_level_symbol(const extract::ProjectModel& model, const extract::SymbolInfo& sym)
+    -> bool {
     if(sym.lexical_parent_kind != extract::SymbolKind::Unknown &&
        sym.lexical_parent_kind != extract::SymbolKind::Namespace) {
         return false;
@@ -245,14 +238,15 @@ auto is_page_summary_prompt(PromptKind kind) -> bool {
     return kind == PromptKind::NamespaceSummary || kind == PromptKind::ModuleSummary;
 }
 
-auto make_source_relative(const std::string& path, const std::string& project_root)
-    -> std::string {
+auto make_source_relative(const std::string& path, const std::string& project_root) -> std::string {
     namespace fs = std::filesystem;
-    if(path.empty() || project_root.empty()) return path;
+    if(path.empty() || project_root.empty())
+        return path;
     auto abs = fs::path(path).lexically_normal();
     auto root = fs::path(project_root).lexically_normal();
     auto rel = abs.lexically_relative(root);
-    if(rel.empty() || rel.string().starts_with("..")) return path;
+    if(rel.empty() || rel.string().starts_with(".."))
+        return path;
     return rel.generic_string();
 }
 

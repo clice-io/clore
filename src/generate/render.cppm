@@ -30,13 +30,23 @@ struct RenderError {
 };
 
 auto build_link_resolver(const PagePlanSet& plan_set) -> LinkResolver;
+auto build_link_resolver(const PagePlanSet& plan_set, const extract::ProjectModel& model)
+    -> LinkResolver;
 
-auto render_page_markdown(
-    const PagePlan& plan,
-    const config::TaskConfig& config,
-    const extract::ProjectModel& model,
-    const std::unordered_map<std::string, std::string>& prompt_outputs,
-    const LinkResolver& links) -> std::expected<std::string, RenderError>;
+auto normalize_prompt_output(std::string_view content) -> std::string;
+
+auto render_page_markdown(const PagePlan& plan,
+                          const config::TaskConfig& config,
+                          const extract::ProjectModel& model,
+                          const std::unordered_map<std::string, std::string>& prompt_outputs,
+                          const LinkResolver& links) -> std::expected<std::string, RenderError>;
+
+auto render_page_bundle(const PagePlan& plan,
+                        const config::TaskConfig& config,
+                        const extract::ProjectModel& model,
+                        const std::unordered_map<std::string, std::string>& prompt_outputs,
+                        const LinkResolver& links)
+    -> std::expected<std::vector<GeneratedPage>, RenderError>;
 
 auto validate_output(const std::string& content) -> std::expected<void, RenderError>;
 
@@ -54,6 +64,34 @@ struct LinkTarget {
     std::string target;
 };
 
+enum class SymbolDocView : std::uint8_t {
+    Declaration,
+    Implementation,
+    Details,
+};
+
+struct SymbolDocPlan {
+    const extract::SymbolInfo* symbol = nullptr;
+    std::string index_path;
+    std::string detail_path;
+    std::vector<SymbolDocPlan> children;
+};
+
+struct PageDocLayout {
+    std::vector<SymbolDocPlan> type_docs;
+    std::vector<SymbolDocPlan> variable_docs;
+    std::vector<SymbolDocPlan> function_docs;
+    std::unordered_map<std::string, std::string> index_paths;
+    std::unordered_map<std::string, std::string> detail_paths;
+};
+
+template <typename Visitor>
+auto for_each_symbol_doc_group(const PageDocLayout& layout, Visitor&& visitor) -> void {
+    visitor(layout.type_docs);
+    visitor(layout.variable_docs);
+    visitor(layout.function_docs);
+}
+
 auto trim_ascii(std::string_view text) -> std::string_view {
     while(!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) {
         text.remove_prefix(1);
@@ -64,10 +102,63 @@ auto trim_ascii(std::string_view text) -> std::string_view {
     return text;
 }
 
+auto page_supports_symbol_subpages(const PagePlan& plan) -> bool {
+    return plan.page_type == PageType::Namespace || plan.page_type == PageType::Module;
+}
+
+auto page_directory_of(std::string_view relative_path) -> std::string {
+    namespace fs = std::filesystem;
+    auto path = fs::path(relative_path).lexically_normal();
+    if(path.filename() == "index.md") {
+        return path.parent_path().generic_string();
+    }
+    return path.parent_path().generic_string();
+}
+
+auto join_relative_paths(std::string_view base,
+                         std::string_view first,
+                         std::string_view second = {}) -> std::string {
+    namespace fs = std::filesystem;
+    auto result = fs::path(base);
+    if(!first.empty()) {
+        result /= fs::path(first);
+    }
+    if(!second.empty()) {
+        result /= fs::path(second);
+    }
+    return result.lexically_normal().generic_string();
+}
+
+auto sanitize_doc_slug(std::string_view raw) -> std::string {
+    std::string slug;
+    slug.reserve(raw.size());
+    bool prev_dash = false;
+    for(auto ch: raw) {
+        auto uc = static_cast<unsigned char>(ch);
+        if(std::isalnum(uc) != 0) {
+            slug.push_back(static_cast<char>(std::tolower(uc)));
+            prev_dash = false;
+            continue;
+        }
+        if(!prev_dash) {
+            slug.push_back('-');
+            prev_dash = true;
+        }
+    }
+    while(!slug.empty() && slug.front() == '-')
+        slug.erase(slug.begin());
+    while(!slug.empty() && slug.back() == '-')
+        slug.pop_back();
+    if(slug.empty()) {
+        slug = "unnamed";
+    }
+    return slug;
+}
+
 auto strip_inline_markdown(std::string_view text) -> std::string {
     std::string out;
     out.reserve(text.size());
-    for(auto ch : text) {
+    for(auto ch: text) {
         if(ch == '`' || ch == '*' || ch == '_' || ch == '[' || ch == ']' || ch == '#') {
             continue;
         }
@@ -97,9 +188,8 @@ auto extract_first_plain_paragraph(std::string_view markdown) -> std::string {
             }
             continue;
         }
-        if(trimmed.starts_with("#") || trimmed.starts_with(">") ||
-           trimmed.starts_with("|") || trimmed.starts_with("- ") ||
-           trimmed.starts_with("* ")) {
+        if(trimmed.starts_with("#") || trimmed.starts_with(">") || trimmed.starts_with("|") ||
+           trimmed.starts_with("- ") || trimmed.starts_with("* ")) {
             if(!paragraph.empty()) {
                 break;
             }
@@ -152,7 +242,7 @@ auto make_relative_link_target(std::string_view current_page_path,
 auto escape_mermaid_label(std::string_view text) -> std::string {
     std::string escaped;
     escaped.reserve(text.size());
-    for(auto ch : text) {
+    for(auto ch: text) {
         switch(ch) {
             case '\\': escaped += "\\\\"; break;
             case '"': escaped += "\\\""; break;
@@ -173,6 +263,16 @@ auto prompt_output_of(const std::unordered_map<std::string, std::string>& output
     };
     auto it = outputs.find(prompt_request_key(request));
     return it != outputs.end() ? &it->second : nullptr;
+}
+
+auto normalize_prompt_outputs(const std::unordered_map<std::string, std::string>& outputs)
+    -> std::unordered_map<std::string, std::string> {
+    std::unordered_map<std::string, std::string> normalized;
+    normalized.reserve(outputs.size());
+    for(const auto& [key, value]: outputs) {
+        normalized.emplace(key, normalize_prompt_output(value));
+    }
+    return normalized;
 }
 
 auto make_link_target(std::string_view current_page_path,
@@ -217,23 +317,100 @@ auto is_variable_kind(extract::SymbolKind kind) -> bool {
     return kind == extract::SymbolKind::Variable || kind == extract::SymbolKind::EnumMember;
 }
 
+auto symbol_doc_group(const extract::SymbolInfo& sym) -> std::string_view {
+    if(is_type_kind(sym.kind)) {
+        return "types";
+    }
+    if(is_function_kind(sym.kind)) {
+        return "functions";
+    }
+    return "variables";
+}
+
+auto detail_view_for(const PagePlan& plan, const extract::SymbolInfo& sym) -> SymbolDocView {
+    switch(plan.page_type) {
+        case PageType::Namespace: return SymbolDocView::Declaration;
+        case PageType::Module:
+            return is_variable_kind(sym.kind) ? SymbolDocView::Details
+                                              : SymbolDocView::Implementation;
+        default: return SymbolDocView::Details;
+    }
+}
+
+auto collect_documentable_children(const extract::ProjectModel& model,
+                                   const extract::SymbolInfo& sym)
+    -> std::vector<const extract::SymbolInfo*> {
+    std::vector<const extract::SymbolInfo*> children;
+    children.reserve(sym.children.size());
+    for(auto child_id: sym.children) {
+        auto* child = lookup_sym(model, child_id);
+        if(child == nullptr) {
+            continue;
+        }
+        if(!is_type_kind(child->kind) && !is_function_kind(child->kind) &&
+           !is_variable_kind(child->kind)) {
+            continue;
+        }
+        children.push_back(child);
+    }
+
+    std::sort(children.begin(),
+              children.end(),
+              [](const extract::SymbolInfo* lhs, const extract::SymbolInfo* rhs) {
+                  if(lhs->qualified_name != rhs->qualified_name) {
+                      return lhs->qualified_name < rhs->qualified_name;
+                  }
+                  return lhs->name < rhs->name;
+              });
+    return children;
+}
+
+auto should_render_symbol_subpage(const extract::ProjectModel& model,
+                                  const extract::SymbolInfo& sym) -> bool {
+    if(!is_type_kind(sym.kind)) {
+        return false;
+    }
+
+    auto children = collect_documentable_children(model, sym);
+    auto has_member_type = std::ranges::any_of(children, [](const extract::SymbolInfo* child) {
+        return child != nullptr && is_type_kind(child->kind);
+    });
+    auto has_member_variable = std::ranges::any_of(children, [](const extract::SymbolInfo* child) {
+        return child != nullptr && is_variable_kind(child->kind);
+    });
+    auto has_member_function = std::ranges::any_of(children, [](const extract::SymbolInfo* child) {
+        return child != nullptr && is_function_kind(child->kind);
+    });
+
+    auto has_type_axis = has_member_type || sym.is_template;
+    return has_type_axis && has_member_variable && has_member_function;
+}
+
+auto default_symbol_slug(const extract::SymbolInfo& sym) -> std::string {
+    auto base = !sym.name.empty() ? sym.name : short_name_of(sym.qualified_name);
+    if(base.empty()) {
+        base = std::string(extract::symbol_kind_name(sym.kind));
+    }
+    return sanitize_doc_slug(base);
+}
+
 template <typename Predicate>
 auto collect_namespace_symbols(const extract::ProjectModel& model,
                                std::string_view namespace_name,
-                               Predicate&& predicate)
-    -> std::vector<const extract::SymbolInfo*> {
+                               Predicate&& predicate) -> std::vector<const extract::SymbolInfo*> {
     std::vector<const extract::SymbolInfo*> symbols;
     auto ns_it = model.namespaces.find(std::string(namespace_name));
     if(ns_it == model.namespaces.end()) {
         return symbols;
     }
-    for(auto sym_id : ns_it->second.symbols) {
+    for(auto sym_id: ns_it->second.symbols) {
         if(auto* sym = lookup_sym(model, sym_id);
            sym != nullptr && is_page_level_symbol(model, *sym) && predicate(*sym)) {
             symbols.push_back(sym);
         }
     }
-    std::sort(symbols.begin(), symbols.end(),
+    std::sort(symbols.begin(),
+              symbols.end(),
               [](const extract::SymbolInfo* lhs, const extract::SymbolInfo* rhs) {
                   return lhs->qualified_name < rhs->qualified_name;
               });
@@ -248,10 +425,10 @@ auto collect_implementation_symbols(const PagePlan& plan,
     std::vector<const extract::SymbolInfo*> symbols;
     std::unordered_set<extract::SymbolID> seen;
 
-    for(const auto& key : plan.owner_keys) {
+    for(const auto& key: plan.owner_keys) {
         if(plan.page_type == PageType::Module) {
             if(auto* module = extract::find_module_by_name(model, key)) {
-                for(auto sym_id : module->symbols) {
+                for(auto sym_id: module->symbols) {
                     if(!seen.insert(sym_id).second) {
                         continue;
                     }
@@ -268,7 +445,7 @@ auto collect_implementation_symbols(const PagePlan& plan,
         if(file_it == model.files.end()) {
             continue;
         }
-        for(auto sym_id : file_it->second.symbols) {
+        for(auto sym_id: file_it->second.symbols) {
             if(!seen.insert(sym_id).second) {
                 continue;
             }
@@ -279,11 +456,127 @@ auto collect_implementation_symbols(const PagePlan& plan,
         }
     }
 
-    std::sort(symbols.begin(), symbols.end(),
+    std::sort(symbols.begin(),
+              symbols.end(),
               [](const extract::SymbolInfo* lhs, const extract::SymbolInfo* rhs) {
                   return lhs->qualified_name < rhs->qualified_name;
               });
     return symbols;
+}
+
+auto prompt_kind_for_symbol(const PagePlan& plan, const extract::SymbolInfo& sym)
+    -> std::optional<PromptKind> {
+    switch(plan.page_type) {
+        case PageType::Namespace:
+            if(is_type_kind(sym.kind)) {
+                return PromptKind::TypeDeclarationSummary;
+            }
+            if(is_function_kind(sym.kind)) {
+                return PromptKind::FunctionDeclarationSummary;
+            }
+            break;
+        case PageType::Module:
+        case PageType::File:
+            if(is_type_kind(sym.kind)) {
+                return PromptKind::TypeImplementationSummary;
+            }
+            if(is_function_kind(sym.kind)) {
+                return PromptKind::FunctionImplementationSummary;
+            }
+            break;
+        case PageType::Index:
+        case PageType::Workflow: break;
+    }
+    return std::nullopt;
+}
+
+auto build_symbol_doc_plans(const PagePlan& plan,
+                            const extract::ProjectModel& model,
+                            const std::vector<const extract::SymbolInfo*>& symbols,
+                            std::string_view base_dir) -> std::vector<SymbolDocPlan> {
+    std::unordered_map<std::string, std::size_t> slug_counts;
+    std::vector<SymbolDocPlan> plans;
+    plans.reserve(symbols.size());
+
+    for(const auto* sym: symbols) {
+        if(sym == nullptr || !should_render_symbol_subpage(model, *sym)) {
+            continue;
+        }
+
+        auto base_slug = default_symbol_slug(*sym);
+        auto slug_key = std::string(symbol_doc_group(*sym)) + "/" + base_slug;
+        auto& count = slug_counts[slug_key];
+        ++count;
+
+        auto slug = count == 1 ? base_slug : std::format("{}-{}", base_slug, count);
+        auto group_dir = join_relative_paths(base_dir, symbol_doc_group(*sym));
+
+        SymbolDocPlan doc{
+            .symbol = sym,
+            .index_path = join_relative_paths(group_dir, slug + ".md"),
+            .detail_path = {},
+            .children = {},
+        };
+        plans.push_back(std::move(doc));
+    }
+
+    return plans;
+}
+
+auto register_symbol_doc_plan(PageDocLayout& layout, const SymbolDocPlan& plan) -> void {
+    if(plan.symbol == nullptr || plan.symbol->qualified_name.empty()) {
+        return;
+    }
+
+    layout.index_paths[plan.symbol->qualified_name] = plan.index_path;
+    if(!plan.detail_path.empty()) {
+        layout.detail_paths[plan.symbol->qualified_name] = plan.detail_path;
+    }
+    for(const auto& child: plan.children) {
+        register_symbol_doc_plan(layout, child);
+    }
+}
+
+auto build_page_doc_layout(const PagePlan& plan, const extract::ProjectModel& model)
+    -> PageDocLayout {
+    PageDocLayout layout;
+    if(!page_supports_symbol_subpages(plan)) {
+        return layout;
+    }
+
+    auto base_dir = page_directory_of(plan.relative_path);
+    if(base_dir.empty()) {
+        return layout;
+    }
+
+    auto collect_page_symbols = [&](auto&& predicate) -> std::vector<const extract::SymbolInfo*> {
+        if(plan.page_type == PageType::Namespace) {
+            return collect_namespace_symbols(model, plan.owner_keys.front(), predicate);
+        }
+        return collect_implementation_symbols(plan, model, predicate);
+    };
+
+    auto assign_group = [&](auto& group, auto&& predicate) {
+        group = build_symbol_doc_plans(plan, model, collect_page_symbols(predicate), base_dir);
+    };
+
+    assign_group(layout.type_docs, [](const extract::SymbolInfo& sym) {
+        return is_type_kind(sym.kind);
+    });
+    assign_group(layout.variable_docs, [](const extract::SymbolInfo& sym) {
+        return is_variable_kind(sym.kind);
+    });
+    assign_group(layout.function_docs, [](const extract::SymbolInfo& sym) {
+        return is_function_kind(sym.kind);
+    });
+
+    for_each_symbol_doc_group(layout, [&](const std::vector<SymbolDocPlan>& group) {
+        for(const auto& plan_entry: group) {
+            register_symbol_doc_plan(layout, plan_entry);
+        }
+    });
+
+    return layout;
 }
 
 auto build_symbol_link_list(const std::vector<const extract::SymbolInfo*>& symbols,
@@ -291,41 +584,41 @@ auto build_symbol_link_list(const std::vector<const extract::SymbolInfo*>& symbo
                             const LinkResolver& links,
                             bool use_full_name = true) -> BulletList {
     BulletList list;
-    for(const auto* sym : symbols) {
+    for(const auto* sym: symbols) {
         ListItem item;
-        item.fragments.push_back(make_text(std::string(extract::symbol_kind_name(sym->kind)) + " "));
+        item.fragments.push_back(
+            make_text(std::string(extract::symbol_kind_name(sym->kind)) + " "));
         auto label = use_full_name ? sym->qualified_name : short_name_of(sym->qualified_name);
         if(auto* target_path = links.resolve(sym->qualified_name)) {
-            item.fragments.push_back(make_link(
-                label.empty() ? sym->qualified_name : label,
-                make_relative_link_target(current_page_path, *target_path),
-                true));
-        } else {
             item.fragments.push_back(
-                make_text(label.empty() ? sym->qualified_name : label));
+                make_link(label.empty() ? sym->qualified_name : label,
+                          make_relative_link_target(current_page_path, *target_path),
+                          true));
+        } else {
+            item.fragments.push_back(make_text(label.empty() ? sym->qualified_name : label));
         }
         list.items.push_back(std::move(item));
     }
     return list;
 }
 
-auto build_symbol_source_locations(const extract::SymbolInfo& sym,
-                                   const config::TaskConfig& config) -> BulletList {
+auto build_symbol_source_locations(const extract::SymbolInfo& sym, const config::TaskConfig& config)
+    -> BulletList {
     BulletList list;
     if(sym.declaration_location.is_known()) {
         ListItem item;
         item.fragments.push_back(make_text("Declared at: "));
-        item.fragments.push_back(make_code(
-            make_source_relative(sym.declaration_location.file, config.project_root) + ":" +
-            std::to_string(sym.declaration_location.line)));
+        item.fragments.push_back(
+            make_code(make_source_relative(sym.declaration_location.file, config.project_root) +
+                      ":" + std::to_string(sym.declaration_location.line)));
         list.items.push_back(std::move(item));
     }
     if(sym.definition_location.has_value() && sym.definition_location->is_known()) {
         ListItem item;
         item.fragments.push_back(make_text("Defined at: "));
-        item.fragments.push_back(make_code(
-            make_source_relative(sym.definition_location->file, config.project_root) + ":" +
-            std::to_string(sym.definition_location->line)));
+        item.fragments.push_back(
+            make_code(make_source_relative(sym.definition_location->file, config.project_root) +
+                      ":" + std::to_string(sym.definition_location->line)));
         list.items.push_back(std::move(item));
     }
     return list;
@@ -334,12 +627,14 @@ auto build_symbol_source_locations(const extract::SymbolInfo& sym,
 template <typename Predicate>
 auto build_member_list(const extract::ProjectModel& model,
                        const extract::SymbolInfo& sym,
+                       std::string_view current_page_path,
+                       const LinkResolver& links,
                        Predicate&& predicate) -> BulletList {
     std::vector<const extract::SymbolInfo*> members;
     members.reserve(sym.children.size());
 
     BulletList list;
-    for(auto child_id : sym.children) {
+    for(auto child_id: sym.children) {
         auto* child = lookup_sym(model, child_id);
         if(child == nullptr) {
             continue;
@@ -350,14 +645,15 @@ auto build_member_list(const extract::ProjectModel& model,
         members.push_back(child);
     }
 
-    std::sort(members.begin(), members.end(),
+    std::sort(members.begin(),
+              members.end(),
               [](const extract::SymbolInfo* lhs, const extract::SymbolInfo* rhs) {
                   auto lhs_name = lhs->qualified_name.empty() ? lhs->name : lhs->qualified_name;
                   auto rhs_name = rhs->qualified_name.empty() ? rhs->name : rhs->qualified_name;
                   return lhs_name < rhs_name;
               });
 
-    for(const auto* child : members) {
+    for(const auto* child: members) {
         ListItem item;
         auto access = child->access.empty() ? std::string{"public"} : child->access;
         item.fragments.push_back(
@@ -366,7 +662,13 @@ auto build_member_list(const extract::ProjectModel& model,
         if(label.empty()) {
             label = child->qualified_name;
         }
-        item.fragments.push_back(make_code(std::move(label)));
+        if(auto* target_path = links.resolve(child->qualified_name);
+           target_path != nullptr && *target_path != current_page_path) {
+            item.fragments.push_back(
+                make_link(label, make_relative_link_target(current_page_path, *target_path), true));
+        } else {
+            item.fragments.push_back(make_code(std::move(label)));
+        }
         list.items.push_back(std::move(item));
     }
     return list;
@@ -376,8 +678,7 @@ auto find_implementation_pages(const extract::SymbolInfo& sym,
                                const extract::ProjectModel& model,
                                const LinkResolver& links,
                                std::string_view current_page_path,
-                               const std::string& project_root)
-    -> std::vector<LinkTarget> {
+                               const std::string& project_root) -> std::vector<LinkTarget> {
     std::vector<LinkTarget> results;
     std::unordered_set<std::string> seen;
 
@@ -388,18 +689,17 @@ auto find_implementation_pages(const extract::SymbolInfo& sym,
         if(auto* mod = extract::find_module_by_source(model, file_path)) {
             if(auto* target_path = links.resolve(mod->name)) {
                 if(seen.insert(*target_path).second) {
-                    results.push_back(make_link_target(current_page_path, "Module " + mod->name,
-                                                       *target_path));
+                    results.push_back(
+                        make_link_target(current_page_path, "Module " + mod->name, *target_path));
                 }
             }
             return;
         }
         if(auto* target_path = links.resolve(file_path)) {
             if(seen.insert(*target_path).second) {
-                results.push_back(make_link_target(
-                    current_page_path,
-                    make_source_relative(file_path, project_root),
-                    *target_path));
+                results.push_back(make_link_target(current_page_path,
+                                                   make_source_relative(file_path, project_root),
+                                                   *target_path));
             }
         }
     };
@@ -413,14 +713,13 @@ auto find_implementation_pages(const extract::SymbolInfo& sym,
 
 auto find_declaration_page(const extract::SymbolInfo& sym,
                            const LinkResolver& links,
-                           std::string_view current_page_path)
-    -> std::optional<LinkTarget> {
+                           std::string_view current_page_path) -> std::optional<LinkTarget> {
     if(auto* target_path = links.resolve(sym.qualified_name);
        target_path != nullptr && *target_path != current_page_path) {
         auto ns_name = !sym.enclosing_namespace.empty() ? sym.enclosing_namespace
                                                         : namespace_of(sym.qualified_name);
-        auto label = ns_name.empty() ? std::string{"Declaration page"}
-                                     : std::string{"Namespace "} + ns_name;
+        auto label =
+            ns_name.empty() ? std::string{"Declaration page"} : std::string{"Namespace "} + ns_name;
         return make_link_target(current_page_path, std::move(label), *target_path);
     }
 
@@ -448,7 +747,7 @@ auto build_related_page_targets(const PagePlan& plan,
                                 std::string_view current_page_path) -> std::vector<LinkTarget> {
     std::vector<LinkTarget> targets;
     std::unordered_set<std::string> seen;
-    for(const auto& linked : plan.linked_pages) {
+    for(const auto& linked: plan.linked_pages) {
         auto colon = linked.find(':');
         auto entity_name = colon == std::string::npos ? linked : linked.substr(colon + 1);
         auto* target_path = links.resolve(entity_name);
@@ -466,9 +765,8 @@ auto build_related_page_targets(const PagePlan& plan,
     return targets;
 }
 
-auto build_prompt_section(std::string heading,
-                          std::uint8_t level,
-                          const std::string* output) -> SemanticSectionPtr {
+auto build_prompt_section(std::string heading, std::uint8_t level, const std::string* output)
+    -> SemanticSectionPtr {
     auto section = make_section(SemanticKind::Section, {}, std::move(heading), level);
     if(output != nullptr && !trim_ascii(*output).empty()) {
         section->children.push_back(make_raw_markdown(*output));
@@ -476,9 +774,8 @@ auto build_prompt_section(std::string heading,
     return section;
 }
 
-auto build_list_section(std::string heading,
-                        std::uint8_t level,
-                        BulletList list) -> SemanticSectionPtr {
+auto build_list_section(std::string heading, std::uint8_t level, BulletList list)
+    -> SemanticSectionPtr {
     auto section = make_section(SemanticKind::Section, {}, std::move(heading), level);
     if(!list.items.empty()) {
         section->children.push_back(MarkdownNode{std::move(list)});
@@ -493,48 +790,67 @@ auto append_type_structure_sections(std::vector<MarkdownNode>& nodes,
                                     const LinkResolver& links,
                                     std::uint8_t level) -> void {
     std::vector<const extract::SymbolInfo*> base_symbols;
-    for(auto base_id : sym.bases) {
+    for(auto base_id: sym.bases) {
         if(auto* base = lookup_sym(model, base_id)) {
             base_symbols.push_back(base);
         }
     }
-    std::sort(base_symbols.begin(), base_symbols.end(),
+    std::sort(base_symbols.begin(),
+              base_symbols.end(),
               [](const extract::SymbolInfo* lhs, const extract::SymbolInfo* rhs) {
                   return lhs->qualified_name < rhs->qualified_name;
               });
-    nodes.push_back(MarkdownNode{build_list_section(
-        "Base Types", level,
-        build_symbol_link_list(base_symbols, current_page_path, links, true))});
+    nodes.push_back(MarkdownNode{
+        build_list_section("Base Types",
+                           level,
+                           build_symbol_link_list(base_symbols, current_page_path, links, true))});
 
     std::vector<const extract::SymbolInfo*> derived_symbols;
-    for(auto derived_id : sym.derived) {
+    for(auto derived_id: sym.derived) {
         if(auto* derived = lookup_sym(model, derived_id)) {
             derived_symbols.push_back(derived);
         }
     }
-    std::sort(derived_symbols.begin(), derived_symbols.end(),
+    std::sort(derived_symbols.begin(),
+              derived_symbols.end(),
               [](const extract::SymbolInfo* lhs, const extract::SymbolInfo* rhs) {
                   return lhs->qualified_name < rhs->qualified_name;
               });
     nodes.push_back(MarkdownNode{build_list_section(
-        "Derived Types", level,
+        "Derived Types",
+        level,
         build_symbol_link_list(derived_symbols, current_page_path, links, true))});
 
-    nodes.push_back(MarkdownNode{build_list_section(
-        "Member Types", level,
-        build_member_list(model, sym, [](const extract::SymbolInfo& child) {
-            return is_type_kind(child.kind);
-        }))});
-    nodes.push_back(MarkdownNode{build_list_section(
-        "Member Variables", level,
-        build_member_list(model, sym, [](const extract::SymbolInfo& child) {
-            return is_variable_kind(child.kind);
-        }))});
-    nodes.push_back(MarkdownNode{build_list_section(
-        "Member Functions", level,
-        build_member_list(model, sym, [](const extract::SymbolInfo& child) {
-            return is_function_kind(child.kind);
-        }))});
+    nodes.push_back(
+        MarkdownNode{build_list_section("Member Types",
+                                        level,
+                                        build_member_list(model,
+                                                          sym,
+                                                          current_page_path,
+                                                          links,
+                                                          [](const extract::SymbolInfo& child) {
+                                                              return is_type_kind(child.kind);
+                                                          }))});
+    nodes.push_back(
+        MarkdownNode{build_list_section("Member Variables",
+                                        level,
+                                        build_member_list(model,
+                                                          sym,
+                                                          current_page_path,
+                                                          links,
+                                                          [](const extract::SymbolInfo& child) {
+                                                              return is_variable_kind(child.kind);
+                                                          }))});
+    nodes.push_back(
+        MarkdownNode{build_list_section("Member Functions",
+                                        level,
+                                        build_member_list(model,
+                                                          sym,
+                                                          current_page_path,
+                                                          links,
+                                                          [](const extract::SymbolInfo& child) {
+                                                              return is_function_kind(child.kind);
+                                                          }))});
 }
 
 auto add_prompt_output(std::vector<MarkdownNode>& nodes, const std::string* output) -> void {
@@ -568,14 +884,14 @@ auto render_import_diagram_code(const extract::ModuleUnit& mod_unit) -> std::str
 
     auto module_id = ensure_node_id(top_module(mod_unit.name));
     std::unordered_set<std::string> seen;
-    for(const auto& imp : mod_unit.imports) {
+    for(const auto& imp: mod_unit.imports) {
         auto label = top_module(imp);
         if(!seen.insert(label).second) {
             continue;
         }
         result += "    " + ensure_node_id(label) + " --> " + module_id + "\n";
     }
-    for(const auto& [node_id, label] : nodes) {
+    for(const auto& [node_id, label]: nodes) {
         result += "    " + node_id + "[\"" + escape_mermaid_label(label) + "\"]\n";
     }
     return result;
@@ -588,13 +904,13 @@ auto render_namespace_diagram_code(const extract::ProjectModel& model,
         return {};
     }
     std::vector<std::string> type_names;
-    for(auto sym_id : ns_it->second.symbols) {
+    for(auto sym_id: ns_it->second.symbols) {
         if(auto* sym = lookup_sym(model, sym_id); sym != nullptr && is_type_kind(sym->kind)) {
             type_names.push_back(short_name_of(sym->qualified_name));
         }
     }
     bool has_child = false;
-    for(const auto& child : ns_it->second.children) {
+    for(const auto& child: ns_it->second.children) {
         if(!child.contains("(anonymous namespace)")) {
             has_child = true;
             break;
@@ -612,7 +928,7 @@ auto render_namespace_diagram_code(const extract::ProjectModel& model,
         result += "    NS --> " + node_id + "\n";
     }
     std::size_t child_index = 0;
-    for(const auto& child : ns_it->second.children) {
+    for(const auto& child: ns_it->second.children) {
         if(child.contains("(anonymous namespace)")) {
             continue;
         }
@@ -631,13 +947,13 @@ auto render_module_dependency_diagram_code(const extract::ProjectModel& model) -
 
     std::unordered_map<std::string, std::unordered_set<std::string>> deps;
     std::unordered_set<std::string> modules;
-    for(const auto& [_, mod_unit] : model.modules) {
+    for(const auto& [_, mod_unit]: model.modules) {
         if(!mod_unit.is_interface) {
             continue;
         }
         auto from = top_module(mod_unit.name);
         modules.insert(from);
-        for(const auto& imp : mod_unit.imports) {
+        for(const auto& imp: mod_unit.imports) {
             auto to = top_module(imp);
             if(to != from) {
                 deps[from].insert(to);
@@ -658,18 +974,420 @@ auto render_module_dependency_diagram_code(const extract::ProjectModel& model) -
         node_ids.emplace(sorted[i], node_id);
         result += "    " + node_id + "[\"" + escape_mermaid_label(sorted[i]) + "\"]\n";
     }
-    for(const auto& from : sorted) {
+    for(const auto& from: sorted) {
         auto dep_it = deps.find(from);
         if(dep_it == deps.end()) {
             continue;
         }
         std::vector<std::string> targets(dep_it->second.begin(), dep_it->second.end());
         std::sort(targets.begin(), targets.end());
-        for(const auto& to : targets) {
+        for(const auto& to: targets) {
             result += "    " + node_ids.at(to) + " --> " + node_ids.at(from) + "\n";
         }
     }
     return result;
+}
+
+auto symbol_semantic_kind(const extract::SymbolInfo& sym) -> SemanticKind {
+    if(is_type_kind(sym.kind)) {
+        return SemanticKind::Type;
+    }
+    if(is_function_kind(sym.kind)) {
+        return SemanticKind::Function;
+    }
+    return SemanticKind::Variable;
+}
+
+auto doc_label(SymbolDocView view) -> std::string_view {
+    switch(view) {
+        case SymbolDocView::Declaration: return "Declaration";
+        case SymbolDocView::Implementation: return "Implementation";
+        case SymbolDocView::Details: return "Details";
+    }
+    return "Details";
+}
+
+auto find_doc_index_path(const PageDocLayout& layout, std::string_view qualified_name)
+    -> const std::string* {
+    auto it = layout.index_paths.find(std::string(qualified_name));
+    return it != layout.index_paths.end() ? &it->second : nullptr;
+}
+
+auto find_doc_detail_path(const PageDocLayout& layout, std::string_view qualified_name)
+    -> const std::string* {
+    auto it = layout.detail_paths.find(std::string(qualified_name));
+    return it != layout.detail_paths.end() ? &it->second : nullptr;
+}
+
+auto build_child_doc_list(const std::vector<SymbolDocPlan>& children,
+                          std::string_view current_page_path) -> BulletList {
+    BulletList list;
+    for(const auto& child: children) {
+        if(child.symbol == nullptr) {
+            continue;
+        }
+        ListItem item;
+        item.fragments.push_back(
+            make_text(std::string(extract::symbol_kind_name(child.symbol->kind)) + " "));
+        item.fragments.push_back(
+            make_link(child.symbol->qualified_name,
+                      make_relative_link_target(current_page_path, child.index_path),
+                      true));
+        list.items.push_back(std::move(item));
+    }
+    return list;
+}
+
+auto add_symbol_summary_content(std::vector<MarkdownNode>& nodes,
+                                const extract::SymbolInfo& sym,
+                                const std::string* output) -> void {
+    if(output != nullptr && !trim_ascii(*output).empty()) {
+        nodes.push_back(make_raw_markdown(*output));
+        return;
+    }
+
+    if(!trim_ascii(sym.doc_comment).empty()) {
+        nodes.push_back(make_paragraph(std::string(trim_ascii(sym.doc_comment))));
+        return;
+    }
+
+    if(!sym.signature.empty()) {
+        Paragraph paragraph;
+        paragraph.fragments.push_back(make_text("Signature: "));
+        paragraph.fragments.push_back(make_code(sym.signature));
+        nodes.push_back(MarkdownNode{std::move(paragraph)});
+    }
+}
+
+auto add_symbol_doc_links(std::vector<MarkdownNode>& nodes,
+                          std::string_view current_page_path,
+                          const PageDocLayout& layout,
+                          const extract::SymbolInfo& sym,
+                          SymbolDocView view) -> void {
+    std::vector<LinkTarget> targets;
+    if(auto* index_path = find_doc_index_path(layout, sym.qualified_name);
+       index_path != nullptr && *index_path != current_page_path) {
+        targets.push_back(make_link_target(current_page_path, "Overview", *index_path));
+    }
+    if(auto* detail_path = find_doc_detail_path(layout, sym.qualified_name);
+       detail_path != nullptr && *detail_path != current_page_path) {
+        targets.push_back(
+            make_link_target(current_page_path, std::string(doc_label(view)), *detail_path));
+    }
+    push_link_paragraph(nodes, "Docs: ", targets);
+}
+
+auto push_owner_link(std::vector<MarkdownNode>& nodes,
+                     std::string_view current_page_path,
+                     const PagePlan& owner_plan) -> void {
+    Paragraph paragraph;
+    paragraph.fragments.push_back(make_text("Owner: "));
+    paragraph.fragments.push_back(
+        make_link(strip_inline_markdown(owner_plan.title),
+                  make_relative_link_target(current_page_path, owner_plan.relative_path)));
+    nodes.push_back(MarkdownNode{std::move(paragraph)});
+}
+
+auto collect_related_symbols(const extract::ProjectModel& model,
+                             const std::vector<extract::SymbolID>& ids)
+    -> std::vector<const extract::SymbolInfo*> {
+    std::vector<const extract::SymbolInfo*> symbols;
+    std::unordered_set<extract::SymbolID> seen;
+    symbols.reserve(ids.size());
+    for(auto id: ids) {
+        if(!seen.insert(id).second) {
+            continue;
+        }
+        if(auto* sym = lookup_sym(model, id)) {
+            symbols.push_back(sym);
+        }
+    }
+    std::sort(symbols.begin(),
+              symbols.end(),
+              [](const extract::SymbolInfo* lhs, const extract::SymbolInfo* rhs) {
+                  return lhs->qualified_name < rhs->qualified_name;
+              });
+    return symbols;
+}
+
+auto append_relation_section(std::vector<MarkdownNode>& nodes,
+                             std::string heading,
+                             std::uint8_t level,
+                             const std::vector<extract::SymbolID>& ids,
+                             const extract::ProjectModel& model,
+                             std::string_view current_page_path,
+                             const LinkResolver& links) -> void {
+    auto symbols = collect_related_symbols(model, ids);
+    nodes.push_back(MarkdownNode{
+        build_list_section(std::move(heading),
+                           level,
+                           build_symbol_link_list(symbols, current_page_path, links, true))});
+}
+
+auto render_document_page(std::string relative_path,
+                          Frontmatter frontmatter,
+                          SemanticSectionPtr root) -> std::expected<GeneratedPage, RenderError> {
+    MarkdownDocument document;
+    document.frontmatter = std::move(frontmatter);
+    document.children.push_back(MarkdownNode{std::move(root)});
+
+    auto content = render_markdown(document);
+    if(content.empty()) {
+        return std::unexpected(RenderError{
+            .message = std::format("rendered markdown is empty for '{}'", relative_path)});
+    }
+
+    return GeneratedPage{
+        .relative_path = std::move(relative_path),
+        .content = std::move(content),
+    };
+}
+
+auto build_symbol_frontmatter(const extract::SymbolInfo& sym,
+                              std::string_view title,
+                              const std::string* output,
+                              std::string_view fallback_description) -> Frontmatter {
+    auto description = output != nullptr ? extract_first_plain_paragraph(*output) : std::string{};
+    if(description.empty() && !trim_ascii(sym.doc_comment).empty()) {
+        description = extract_first_plain_paragraph(sym.doc_comment);
+    }
+    if(description.empty() && !fallback_description.empty()) {
+        description = std::string(fallback_description);
+    }
+    if(description.empty()) {
+        description = normalize_frontmatter_title(title);
+    }
+
+    return Frontmatter{
+        .title = normalize_frontmatter_title(title),
+        .description = std::move(description),
+    };
+}
+
+auto render_symbol_overview_page(const SymbolDocPlan& doc_plan,
+                                 const PagePlan& owner_plan,
+                                 const config::TaskConfig& config,
+                                 const extract::ProjectModel& model,
+                                 const std::unordered_map<std::string, std::string>& outputs,
+                                 const LinkResolver& links,
+                                 const PageDocLayout& layout)
+    -> std::expected<GeneratedPage, RenderError> {
+    if(doc_plan.symbol == nullptr) {
+        return std::unexpected(RenderError{.message = "symbol overview page missing symbol"});
+    }
+
+    auto view = detail_view_for(owner_plan, *doc_plan.symbol);
+    const std::string* output = nullptr;
+    if(auto kind = prompt_kind_for_symbol(owner_plan, *doc_plan.symbol); kind.has_value()) {
+        output = prompt_output_of(outputs, *kind, doc_plan.symbol->qualified_name);
+    }
+
+    auto heading = "`" + doc_plan.symbol->qualified_name + "`";
+    auto root = make_section(symbol_semantic_kind(*doc_plan.symbol),
+                             doc_plan.symbol->qualified_name,
+                             heading,
+                             1,
+                             false);
+    push_owner_link(root->children, doc_plan.index_path, owner_plan);
+    add_symbol_doc_links(root->children, doc_plan.index_path, layout, *doc_plan.symbol, view);
+
+    auto locations = build_symbol_source_locations(*doc_plan.symbol, config);
+    if(!locations.items.empty()) {
+        root->children.push_back(MarkdownNode{std::move(locations)});
+    }
+
+    if(owner_plan.page_type != PageType::Namespace) {
+        push_optional_link_paragraph(
+            root->children,
+            "Declaration: ",
+            find_declaration_page(*doc_plan.symbol, links, doc_plan.index_path));
+    }
+    if(owner_plan.page_type == PageType::Namespace) {
+        push_link_paragraph(root->children,
+                            "Implementations: ",
+                            find_implementation_pages(*doc_plan.symbol,
+                                                      model,
+                                                      links,
+                                                      doc_plan.index_path,
+                                                      config.project_root));
+    }
+
+    add_symbol_summary_content(root->children, *doc_plan.symbol, output);
+
+    if(is_type_kind(doc_plan.symbol->kind)) {
+        append_type_structure_sections(root->children,
+                                       model,
+                                       *doc_plan.symbol,
+                                       doc_plan.index_path,
+                                       links,
+                                       2);
+    }
+
+    if(!doc_plan.children.empty()) {
+        root->children.push_back(MarkdownNode{
+            build_list_section("Nested Pages",
+                               2,
+                               build_child_doc_list(doc_plan.children, doc_plan.index_path))});
+    }
+
+    return render_document_page(
+        doc_plan.index_path,
+        build_symbol_frontmatter(*doc_plan.symbol,
+                                 doc_plan.symbol->qualified_name,
+                                 output,
+                                 std::string(doc_label(view)) + " overview"),
+        std::move(root));
+}
+
+auto render_symbol_detail_page(const SymbolDocPlan& doc_plan,
+                               const PagePlan& owner_plan,
+                               const config::TaskConfig& config,
+                               const extract::ProjectModel& model,
+                               const std::unordered_map<std::string, std::string>& outputs,
+                               const LinkResolver& links,
+                               const PageDocLayout& layout)
+    -> std::expected<GeneratedPage, RenderError> {
+    if(doc_plan.symbol == nullptr) {
+        return std::unexpected(RenderError{.message = "symbol detail page missing symbol"});
+    }
+
+    auto view = detail_view_for(owner_plan, *doc_plan.symbol);
+    const std::string* output = nullptr;
+    if(auto kind = prompt_kind_for_symbol(owner_plan, *doc_plan.symbol); kind.has_value()) {
+        output = prompt_output_of(outputs, *kind, doc_plan.symbol->qualified_name);
+    }
+
+    auto heading = std::format("`{}` {}", doc_plan.symbol->qualified_name, doc_label(view));
+    auto root = make_section(symbol_semantic_kind(*doc_plan.symbol),
+                             doc_plan.symbol->qualified_name,
+                             heading,
+                             1,
+                             false);
+    push_owner_link(root->children, doc_plan.detail_path, owner_plan);
+    add_symbol_doc_links(root->children, doc_plan.detail_path, layout, *doc_plan.symbol, view);
+
+    auto locations = build_symbol_source_locations(*doc_plan.symbol, config);
+    if(!locations.items.empty()) {
+        root->children.push_back(MarkdownNode{std::move(locations)});
+    }
+
+    if(owner_plan.page_type != PageType::Namespace) {
+        push_optional_link_paragraph(
+            root->children,
+            "Declaration: ",
+            find_declaration_page(*doc_plan.symbol, links, doc_plan.detail_path));
+    }
+    if(owner_plan.page_type == PageType::Namespace) {
+        push_link_paragraph(root->children,
+                            "Implementations: ",
+                            find_implementation_pages(*doc_plan.symbol,
+                                                      model,
+                                                      links,
+                                                      doc_plan.detail_path,
+                                                      config.project_root));
+    }
+
+    if(output != nullptr && !trim_ascii(*output).empty()) {
+        root->children.push_back(
+            MarkdownNode{build_prompt_section(std::string(doc_label(view)) + " Notes", 2, output)});
+    } else {
+        add_symbol_summary_content(root->children, *doc_plan.symbol, output);
+    }
+
+    if(is_type_kind(doc_plan.symbol->kind)) {
+        append_type_structure_sections(root->children,
+                                       model,
+                                       *doc_plan.symbol,
+                                       doc_plan.detail_path,
+                                       links,
+                                       2);
+    } else if(is_function_kind(doc_plan.symbol->kind)) {
+        append_relation_section(root->children,
+                                "Calls",
+                                2,
+                                doc_plan.symbol->calls,
+                                model,
+                                doc_plan.detail_path,
+                                links);
+        append_relation_section(root->children,
+                                "Called By",
+                                2,
+                                doc_plan.symbol->called_by,
+                                model,
+                                doc_plan.detail_path,
+                                links);
+    } else {
+        append_relation_section(root->children,
+                                "References",
+                                2,
+                                doc_plan.symbol->references,
+                                model,
+                                doc_plan.detail_path,
+                                links);
+        append_relation_section(root->children,
+                                "Referenced By",
+                                2,
+                                doc_plan.symbol->referenced_by,
+                                model,
+                                doc_plan.detail_path,
+                                links);
+    }
+
+    if(!doc_plan.children.empty()) {
+        root->children.push_back(MarkdownNode{
+            build_list_section("Nested Pages",
+                               2,
+                               build_child_doc_list(doc_plan.children, doc_plan.detail_path))});
+    }
+
+    return render_document_page(
+        doc_plan.detail_path,
+        build_symbol_frontmatter(
+            *doc_plan.symbol,
+            std::format("{} {}", doc_plan.symbol->qualified_name, doc_label(view)),
+            output,
+            std::string(doc_label(view)) + " details"),
+        std::move(root));
+}
+
+auto append_symbol_doc_pages(std::vector<GeneratedPage>& pages,
+                             const std::vector<SymbolDocPlan>& doc_plans,
+                             const PagePlan& owner_plan,
+                             const config::TaskConfig& config,
+                             const extract::ProjectModel& model,
+                             const std::unordered_map<std::string, std::string>& outputs,
+                             const LinkResolver& links,
+                             const PageDocLayout& layout) -> std::expected<void, RenderError> {
+    for(const auto& doc_plan: doc_plans) {
+        auto overview =
+            render_symbol_overview_page(doc_plan, owner_plan, config, model, outputs, links, layout);
+        if(!overview.has_value()) {
+            return std::unexpected(std::move(overview.error()));
+        }
+        pages.push_back(std::move(*overview));
+
+        if(!doc_plan.detail_path.empty()) {
+            auto detail = render_symbol_detail_page(
+                doc_plan, owner_plan, config, model, outputs, links, layout);
+            if(!detail.has_value()) {
+                return std::unexpected(std::move(detail.error()));
+            }
+            pages.push_back(std::move(*detail));
+        }
+
+        if(auto nested = append_symbol_doc_pages(pages,
+                                                 doc_plan.children,
+                                                 owner_plan,
+                                                 config,
+                                                 model,
+                                                 outputs,
+                                                 links,
+                                                 layout);
+           !nested.has_value()) {
+            return nested;
+        }
+    }
+    return {};
 }
 
 auto extract_workflow_title(const std::string& output)
@@ -719,18 +1437,20 @@ auto build_workflow_participants(const PagePlan& plan,
                                  const extract::ProjectModel& model,
                                  const config::TaskConfig& config) -> BulletList {
     BulletList list;
-    for(const auto& qname : plan.owner_keys) {
+    for(const auto& qname: plan.owner_keys) {
         auto* sym = find_sym(model, qname);
         if(sym == nullptr) {
             continue;
         }
         ListItem item;
-        item.fragments.push_back(make_text(std::string(extract::symbol_kind_name(sym->kind)) + " "));
+        item.fragments.push_back(
+            make_text(std::string(extract::symbol_kind_name(sym->kind)) + " "));
         item.fragments.push_back(make_code(sym->qualified_name));
         auto rel = make_source_relative(sym->declaration_location.file, config.project_root);
         if(!rel.empty() && sym->declaration_location.line > 0) {
             item.fragments.push_back(make_text(" ("));
-            item.fragments.push_back(make_code(rel + ":" + std::to_string(sym->declaration_location.line)));
+            item.fragments.push_back(
+                make_code(rel + ":" + std::to_string(sym->declaration_location.line)));
             item.fragments.push_back(make_text(")"));
         }
         list.items.push_back(std::move(item));
@@ -742,10 +1462,14 @@ auto build_namespace_page_root(const PagePlan& plan,
                                const config::TaskConfig& config,
                                const extract::ProjectModel& model,
                                const std::unordered_map<std::string, std::string>& outputs,
-                               const LinkResolver& links) -> SemanticSectionPtr {
-    auto root = make_section(SemanticKind::Namespace, plan.owner_keys.front(), plan.title, 1, false);
-    root->children.push_back(MarkdownNode{build_prompt_section(
-        "Summary", 2, prompt_output_of(outputs, PromptKind::NamespaceSummary))});
+                               const LinkResolver& links,
+                               const PageDocLayout& layout) -> SemanticSectionPtr {
+    auto root =
+        make_section(SemanticKind::Namespace, plan.owner_keys.front(), plan.title, 1, false);
+    root->children.push_back(MarkdownNode{
+        build_prompt_section("Summary",
+                             2,
+                             prompt_output_of(outputs, PromptKind::NamespaceSummary))});
 
     auto namespace_diagram = render_namespace_diagram_code(model, plan.owner_keys.front());
     if(!namespace_diagram.empty()) {
@@ -760,18 +1484,19 @@ auto build_namespace_page_root(const PagePlan& plan,
         if(ns_it == model.namespaces.end()) {
             return list;
         }
-        std::vector<std::string> children(ns_it->second.children.begin(), ns_it->second.children.end());
+        std::vector<std::string> children(ns_it->second.children.begin(),
+                                          ns_it->second.children.end());
         std::sort(children.begin(), children.end());
-        for(const auto& child : children) {
+        for(const auto& child: children) {
             if(child.contains("(anonymous namespace)")) {
                 continue;
             }
             if(auto* target_path = links.resolve(child)) {
                 ListItem item;
-                item.fragments.push_back(make_link(
-                    child,
-                    make_relative_link_target(plan.relative_path, *target_path),
-                    true));
+                item.fragments.push_back(
+                    make_link(child,
+                              make_relative_link_target(plan.relative_path, *target_path),
+                              true));
                 list.items.push_back(std::move(item));
             }
         }
@@ -784,43 +1509,62 @@ auto build_namespace_page_root(const PagePlan& plan,
                                   auto&& predicate,
                                   std::optional<PromptKind> prompt_kind) {
         auto section = make_section(SemanticKind::Section, {}, std::move(heading), 2);
-        for(const auto* sym : collect_namespace_symbols(model, plan.owner_keys.front(), predicate)) {
-            auto entity = make_section(entity_kind, sym->qualified_name,
-                                       "`" + sym->qualified_name + "`", 3);
+        for(const auto* sym: collect_namespace_symbols(model, plan.owner_keys.front(), predicate)) {
+            auto entity =
+                make_section(entity_kind, sym->qualified_name, "`" + sym->qualified_name + "`", 3);
+            auto has_doc_page = find_doc_index_path(layout, sym->qualified_name) != nullptr;
             auto locations = build_symbol_source_locations(*sym, config);
             if(!locations.items.empty()) {
                 entity->children.push_back(MarkdownNode{std::move(locations)});
             }
-            push_link_paragraph(entity->children, "Implementations: ",
-                                find_implementation_pages(*sym, model, links,
+            push_link_paragraph(entity->children,
+                                "Implementations: ",
+                                find_implementation_pages(*sym,
+                                                          model,
+                                                          links,
                                                           plan.relative_path,
                                                           config.project_root));
+            add_symbol_doc_links(entity->children,
+                                 plan.relative_path,
+                                 layout,
+                                 *sym,
+                                 detail_view_for(plan, *sym));
             if(prompt_kind.has_value()) {
                 add_prompt_output(entity->children,
                                   prompt_output_of(outputs, *prompt_kind, sym->qualified_name));
             }
-            if(is_type_kind(sym->kind)) {
-                append_type_structure_sections(entity->children, model, *sym,
-                                               plan.relative_path, links, 4);
+            if(is_type_kind(sym->kind) && !has_doc_page) {
+                append_type_structure_sections(entity->children,
+                                               model,
+                                               *sym,
+                                               plan.relative_path,
+                                               links,
+                                               4);
             }
             section->children.push_back(MarkdownNode{entity});
         }
         root->children.push_back(MarkdownNode{section});
     };
 
-    add_entity_section("Types", SemanticKind::Type,
-                       [](const extract::SymbolInfo& sym) { return is_type_kind(sym.kind); },
-                       PromptKind::TypeDeclarationSummary);
-    add_entity_section("Variables", SemanticKind::Variable,
-                       [](const extract::SymbolInfo& sym) { return is_variable_kind(sym.kind); },
-                       std::nullopt);
-    add_entity_section("Functions", SemanticKind::Function,
-                       [](const extract::SymbolInfo& sym) { return is_function_kind(sym.kind); },
-                       PromptKind::FunctionDeclarationSummary);
+    add_entity_section(
+        "Types",
+        SemanticKind::Type,
+        [](const extract::SymbolInfo& sym) { return is_type_kind(sym.kind); },
+        PromptKind::TypeDeclarationSummary);
+    add_entity_section(
+        "Variables",
+        SemanticKind::Variable,
+        [](const extract::SymbolInfo& sym) { return is_variable_kind(sym.kind); },
+        std::nullopt);
+    add_entity_section(
+        "Functions",
+        SemanticKind::Function,
+        [](const extract::SymbolInfo& sym) { return is_function_kind(sym.kind); },
+        PromptKind::FunctionDeclarationSummary);
 
     root->children.push_back(MarkdownNode{build_list_section("Related Pages", 2, [&]() {
         BulletList list;
-        for(const auto& target : build_related_page_targets(plan, links, plan.relative_path)) {
+        for(const auto& target: build_related_page_targets(plan, links, plan.relative_path)) {
             ListItem item;
             item.fragments.push_back(make_link(target.label, target.target));
             list.items.push_back(std::move(item));
@@ -835,21 +1579,22 @@ auto build_module_page_root(const PagePlan& plan,
                             const config::TaskConfig& config,
                             const extract::ProjectModel& model,
                             const std::unordered_map<std::string, std::string>& outputs,
-                            const LinkResolver& links) -> SemanticSectionPtr {
+                            const LinkResolver& links,
+                            const PageDocLayout& layout) -> SemanticSectionPtr {
     auto root = make_section(SemanticKind::Module, plan.owner_keys.front(), plan.title, 1, false);
-    root->children.push_back(MarkdownNode{build_prompt_section(
-        "Summary", 2, prompt_output_of(outputs, PromptKind::ModuleSummary))});
+    root->children.push_back(MarkdownNode{
+        build_prompt_section("Summary", 2, prompt_output_of(outputs, PromptKind::ModuleSummary))});
 
     if(auto* module = extract::find_module_by_name(model, plan.owner_keys.front())) {
         root->children.push_back(MarkdownNode{build_list_section("Imports", 2, [&]() {
             BulletList list;
-            for(const auto& imported : module->imports) {
+            for(const auto& imported: module->imports) {
                 ListItem item;
                 if(auto* target_path = links.resolve(imported)) {
-                    item.fragments.push_back(make_link(
-                        imported,
-                        make_relative_link_target(plan.relative_path, *target_path),
-                        true));
+                    item.fragments.push_back(
+                        make_link(imported,
+                                  make_relative_link_target(plan.relative_path, *target_path),
+                                  true));
                 } else {
                     item.fragments.push_back(make_code(imported));
                 }
@@ -870,45 +1615,63 @@ auto build_module_page_root(const PagePlan& plan,
                                 auto&& predicate,
                                 std::optional<PromptKind> prompt_kind) {
         auto section = make_section(SemanticKind::Section, {}, std::move(heading), 2);
-        for(const auto* sym : collect_implementation_symbols(plan, model, predicate)) {
-            auto entity = make_section(entity_kind, sym->qualified_name,
-                                       "`" + sym->qualified_name + "`", 3);
+        for(const auto* sym: collect_implementation_symbols(plan, model, predicate)) {
+            auto entity =
+                make_section(entity_kind, sym->qualified_name, "`" + sym->qualified_name + "`", 3);
+            auto has_doc_page = find_doc_index_path(layout, sym->qualified_name) != nullptr;
             auto locations = build_symbol_source_locations(*sym, config);
             if(!locations.items.empty()) {
                 entity->children.push_back(MarkdownNode{std::move(locations)});
             }
-            push_optional_link_paragraph(entity->children, "Declaration: ",
+            push_optional_link_paragraph(entity->children,
+                                         "Declaration: ",
                                          find_declaration_page(*sym, links, plan.relative_path));
+            add_symbol_doc_links(entity->children,
+                                 plan.relative_path,
+                                 layout,
+                                 *sym,
+                                 detail_view_for(plan, *sym));
             if(prompt_kind.has_value()) {
                 add_prompt_output(entity->children,
                                   prompt_output_of(outputs, *prompt_kind, sym->qualified_name));
             }
-            if(is_type_kind(sym->kind)) {
-                append_type_structure_sections(entity->children, model, *sym,
-                                               plan.relative_path, links, 4);
+            if(is_type_kind(sym->kind) && !has_doc_page) {
+                append_type_structure_sections(entity->children,
+                                               model,
+                                               *sym,
+                                               plan.relative_path,
+                                               links,
+                                               4);
             }
             section->children.push_back(MarkdownNode{entity});
         }
         root->children.push_back(MarkdownNode{section});
     };
 
-    add_impl_section("Types", SemanticKind::Type,
-                     [](const extract::SymbolInfo& sym) { return is_type_kind(sym.kind); },
-                     PromptKind::TypeImplementationSummary);
-    add_impl_section("Variables", SemanticKind::Variable,
-                     [](const extract::SymbolInfo& sym) { return is_variable_kind(sym.kind); },
-                     std::nullopt);
-    add_impl_section("Functions", SemanticKind::Function,
-                     [](const extract::SymbolInfo& sym) { return is_function_kind(sym.kind); },
-                     PromptKind::FunctionImplementationSummary);
+    add_impl_section(
+        "Types",
+        SemanticKind::Type,
+        [](const extract::SymbolInfo& sym) { return is_type_kind(sym.kind); },
+        PromptKind::TypeImplementationSummary);
+    add_impl_section(
+        "Variables",
+        SemanticKind::Variable,
+        [](const extract::SymbolInfo& sym) { return is_variable_kind(sym.kind); },
+        std::nullopt);
+    add_impl_section(
+        "Functions",
+        SemanticKind::Function,
+        [](const extract::SymbolInfo& sym) { return is_function_kind(sym.kind); },
+        PromptKind::FunctionImplementationSummary);
 
-    root->children.push_back(MarkdownNode{build_prompt_section(
-        "Internal Structure", 2,
-        prompt_output_of(outputs, PromptKind::ModuleArchitecture))});
+    root->children.push_back(MarkdownNode{
+        build_prompt_section("Internal Structure",
+                             2,
+                             prompt_output_of(outputs, PromptKind::ModuleArchitecture))});
 
     root->children.push_back(MarkdownNode{build_list_section("Related Pages", 2, [&]() {
         BulletList list;
-        for(const auto& target : build_related_page_targets(plan, links, plan.relative_path)) {
+        for(const auto& target: build_related_page_targets(plan, links, plan.relative_path)) {
             ListItem item;
             item.fragments.push_back(make_link(target.label, target.target));
             list.items.push_back(std::move(item));
@@ -929,9 +1692,10 @@ auto build_file_page_root(const PagePlan& plan,
     if(auto file_it = model.files.find(plan.owner_keys.front()); file_it != model.files.end()) {
         root->children.push_back(MarkdownNode{build_list_section("Includes", 2, [&]() {
             BulletList list;
-            for(const auto& include : file_it->second.includes) {
+            for(const auto& include: file_it->second.includes) {
                 ListItem item;
-                item.fragments.push_back(make_code(make_source_relative(include, config.project_root)));
+                item.fragments.push_back(
+                    make_code(make_source_relative(include, config.project_root)));
                 list.items.push_back(std::move(item));
             }
             return list;
@@ -943,47 +1707,58 @@ auto build_file_page_root(const PagePlan& plan,
                                 auto&& predicate,
                                 std::optional<PromptKind> prompt_kind) {
         auto section = make_section(SemanticKind::Section, {}, std::move(heading), 2);
-        for(const auto* sym : collect_implementation_symbols(plan, model, predicate)) {
-            auto entity = make_section(entity_kind, sym->qualified_name,
-                                       "`" + sym->qualified_name + "`", 3);
+        for(const auto* sym: collect_implementation_symbols(plan, model, predicate)) {
+            auto entity =
+                make_section(entity_kind, sym->qualified_name, "`" + sym->qualified_name + "`", 3);
             auto locations = build_symbol_source_locations(*sym, config);
             if(!locations.items.empty()) {
                 entity->children.push_back(MarkdownNode{std::move(locations)});
             }
-            push_optional_link_paragraph(entity->children, "Declaration: ",
+            push_optional_link_paragraph(entity->children,
+                                         "Declaration: ",
                                          find_declaration_page(*sym, links, plan.relative_path));
             if(prompt_kind.has_value()) {
                 add_prompt_output(entity->children,
                                   prompt_output_of(outputs, *prompt_kind, sym->qualified_name));
             }
             if(is_type_kind(sym->kind)) {
-                append_type_structure_sections(entity->children, model, *sym,
-                                               plan.relative_path, links, 4);
+                append_type_structure_sections(entity->children,
+                                               model,
+                                               *sym,
+                                               plan.relative_path,
+                                               links,
+                                               4);
             }
             section->children.push_back(MarkdownNode{entity});
         }
         root->children.push_back(MarkdownNode{section});
     };
 
-    add_impl_section("Types", SemanticKind::Type,
-                     [](const extract::SymbolInfo& sym) { return is_type_kind(sym.kind); },
-                     PromptKind::TypeImplementationSummary);
-    add_impl_section("Variables", SemanticKind::Variable,
-                     [](const extract::SymbolInfo& sym) { return is_variable_kind(sym.kind); },
-                     std::nullopt);
-    add_impl_section("Functions", SemanticKind::Function,
-                     [](const extract::SymbolInfo& sym) { return is_function_kind(sym.kind); },
-                     PromptKind::FunctionImplementationSummary);
+    add_impl_section(
+        "Types",
+        SemanticKind::Type,
+        [](const extract::SymbolInfo& sym) { return is_type_kind(sym.kind); },
+        PromptKind::TypeImplementationSummary);
+    add_impl_section(
+        "Variables",
+        SemanticKind::Variable,
+        [](const extract::SymbolInfo& sym) { return is_variable_kind(sym.kind); },
+        std::nullopt);
+    add_impl_section(
+        "Functions",
+        SemanticKind::Function,
+        [](const extract::SymbolInfo& sym) { return is_function_kind(sym.kind); },
+        PromptKind::FunctionImplementationSummary);
 
     if(auto module_name = find_module_for_file(model, plan.owner_keys.front())) {
         auto section = make_section(SemanticKind::Section, {}, "Module Information", 2);
         Paragraph paragraph;
         paragraph.fragments.push_back(make_text("Module: "));
         if(auto* target_path = links.resolve(*module_name)) {
-            paragraph.fragments.push_back(make_link(
-                *module_name,
-                make_relative_link_target(plan.relative_path, *target_path),
-                true));
+            paragraph.fragments.push_back(
+                make_link(*module_name,
+                          make_relative_link_target(plan.relative_path, *target_path),
+                          true));
         } else {
             paragraph.fragments.push_back(make_code(*module_name));
         }
@@ -993,7 +1768,7 @@ auto build_file_page_root(const PagePlan& plan,
 
     root->children.push_back(MarkdownNode{build_list_section("Related Pages", 2, [&]() {
         BulletList list;
-        for(const auto& target : build_related_page_targets(plan, links, plan.relative_path)) {
+        for(const auto& target: build_related_page_targets(plan, links, plan.relative_path)) {
             ListItem item;
             item.fragments.push_back(make_link(target.label, target.target));
             list.items.push_back(std::move(item));
@@ -1011,8 +1786,7 @@ auto build_workflow_page_root(const PagePlan& plan,
                               std::string page_title,
                               const LinkResolver& links) -> SemanticSectionPtr {
     auto root = make_section(SemanticKind::Workflow, plan.page_id, std::move(page_title), 1, false);
-    root->children.push_back(MarkdownNode{build_prompt_section(
-        "Workflow", 2, prompt_output_of(outputs, PromptKind::Workflow))});
+    add_prompt_output(root->children, prompt_output_of(outputs, PromptKind::Workflow));
 
     auto chain = build_workflow_call_chain_code(plan);
     if(!chain.empty()) {
@@ -1021,11 +1795,11 @@ auto build_workflow_page_root(const PagePlan& plan,
         root->children.push_back(MarkdownNode{section});
     }
 
-    root->children.push_back(MarkdownNode{build_list_section(
-        "Participants", 2, build_workflow_participants(plan, model, config))});
+    root->children.push_back(MarkdownNode{
+        build_list_section("Participants", 2, build_workflow_participants(plan, model, config))});
     root->children.push_back(MarkdownNode{build_list_section("Related Pages", 2, [&]() {
         BulletList list;
-        for(const auto& target : build_related_page_targets(plan, links, plan.relative_path)) {
+        for(const auto& target: build_related_page_targets(plan, links, plan.relative_path)) {
             ListItem item;
             item.fragments.push_back(make_link(target.label, target.target));
             list.items.push_back(std::move(item));
@@ -1042,29 +1816,31 @@ auto build_index_page_root(const PagePlan& plan,
                            const std::unordered_map<std::string, std::string>& outputs,
                            const LinkResolver& links) -> SemanticSectionPtr {
     auto root = make_section(SemanticKind::Index, {}, plan.title, 1, false);
-    root->children.push_back(MarkdownNode{build_prompt_section(
-        "Overview", 2, prompt_output_of(outputs, PromptKind::IndexOverview))});
-    root->children.push_back(MarkdownNode{build_prompt_section(
-        "Reading Guide", 2, prompt_output_of(outputs, PromptKind::IndexReadingGuide))});
+    root->children.push_back(MarkdownNode{
+        build_prompt_section("Overview", 2, prompt_output_of(outputs, PromptKind::IndexOverview))});
+    root->children.push_back(MarkdownNode{
+        build_prompt_section("Reading Guide",
+                             2,
+                             prompt_output_of(outputs, PromptKind::IndexReadingGuide))});
 
     if(model.uses_modules) {
         root->children.push_back(MarkdownNode{build_list_section("Modules", 2, [&]() {
             BulletList list;
             std::unordered_set<std::string> seen;
             std::vector<std::string> names;
-            for(const auto& [_, mod_unit] : model.modules) {
+            for(const auto& [_, mod_unit]: model.modules) {
                 if(mod_unit.is_interface && seen.insert(mod_unit.name).second &&
                    links.resolve(mod_unit.name) != nullptr) {
                     names.push_back(mod_unit.name);
                 }
             }
             std::sort(names.begin(), names.end());
-            for(const auto& name : names) {
+            for(const auto& name: names) {
                 ListItem item;
-                item.fragments.push_back(make_link(
-                    name,
-                    make_relative_link_target(plan.relative_path, *links.resolve(name)),
-                    true));
+                item.fragments.push_back(
+                    make_link(name,
+                              make_relative_link_target(plan.relative_path, *links.resolve(name)),
+                              true));
                 list.items.push_back(std::move(item));
             }
             return list;
@@ -1073,18 +1849,18 @@ auto build_index_page_root(const PagePlan& plan,
         root->children.push_back(MarkdownNode{build_list_section("Files", 2, [&]() {
             BulletList list;
             std::vector<std::pair<std::string, std::string>> files;
-            for(const auto& [path, _] : model.files) {
+            for(const auto& [path, _]: model.files) {
                 if(links.resolve(path) != nullptr) {
                     files.emplace_back(make_source_relative(path, config.project_root), path);
                 }
             }
             std::sort(files.begin(), files.end());
-            for(const auto& [label, key] : files) {
+            for(const auto& [label, key]: files) {
                 ListItem item;
-                item.fragments.push_back(make_link(
-                    label,
-                    make_relative_link_target(plan.relative_path, *links.resolve(key)),
-                    true));
+                item.fragments.push_back(
+                    make_link(label,
+                              make_relative_link_target(plan.relative_path, *links.resolve(key)),
+                              true));
                 list.items.push_back(std::move(item));
             }
             return list;
@@ -1094,18 +1870,18 @@ auto build_index_page_root(const PagePlan& plan,
     root->children.push_back(MarkdownNode{build_list_section("Namespaces", 2, [&]() {
         BulletList list;
         std::vector<std::string> namespaces;
-        for(const auto& [name, _] : model.namespaces) {
+        for(const auto& [name, _]: model.namespaces) {
             if(!name.contains("(anonymous namespace)") && links.resolve(name) != nullptr) {
                 namespaces.push_back(name);
             }
         }
         std::sort(namespaces.begin(), namespaces.end());
-        for(const auto& name : namespaces) {
+        for(const auto& name: namespaces) {
             ListItem item;
-            item.fragments.push_back(make_link(
-                name,
-                make_relative_link_target(plan.relative_path, *links.resolve(name)),
-                true));
+            item.fragments.push_back(
+                make_link(name,
+                          make_relative_link_target(plan.relative_path, *links.resolve(name)),
+                          true));
             list.items.push_back(std::move(item));
         }
         return list;
@@ -1113,13 +1889,14 @@ auto build_index_page_root(const PagePlan& plan,
 
     root->children.push_back(MarkdownNode{build_list_section("Types", 2, [&]() {
         std::vector<const extract::SymbolInfo*> symbols;
-        for(const auto& [_, sym] : model.symbols) {
+        for(const auto& [_, sym]: model.symbols) {
             if(is_type_kind(sym.kind) && !sym.qualified_name.contains("(anonymous namespace)") &&
                links.resolve(sym.qualified_name) != nullptr) {
                 symbols.push_back(&sym);
             }
         }
-        std::sort(symbols.begin(), symbols.end(),
+        std::sort(symbols.begin(),
+                  symbols.end(),
                   [](const extract::SymbolInfo* lhs, const extract::SymbolInfo* rhs) {
                       return lhs->qualified_name < rhs->qualified_name;
                   });
@@ -1129,7 +1906,7 @@ auto build_index_page_root(const PagePlan& plan,
     root->children.push_back(MarkdownNode{build_list_section("Workflows", 2, [&]() {
         BulletList list;
         std::vector<std::pair<std::string, std::string>> workflows;
-        for(const auto& linked : plan.linked_pages) {
+        for(const auto& linked: plan.linked_pages) {
             if(!linked.starts_with("workflow:")) {
                 continue;
             }
@@ -1139,17 +1916,14 @@ auto build_index_page_root(const PagePlan& plan,
                 continue;
             }
             auto* title = links.resolve_page_title(linked);
-            auto label = title != nullptr && !title->empty() ? strip_inline_markdown(*title)
-                                                             : slug;
+            auto label = title != nullptr && !title->empty() ? strip_inline_markdown(*title) : slug;
             workflows.emplace_back(label, *path);
         }
         std::sort(workflows.begin(), workflows.end());
-        for(const auto& [label, path] : workflows) {
+        for(const auto& [label, path]: workflows) {
             ListItem item;
-            item.fragments.push_back(make_link(
-                label,
-                make_relative_link_target(plan.relative_path, path),
-                false));
+            item.fragments.push_back(
+                make_link(label, make_relative_link_target(plan.relative_path, path), false));
             list.items.push_back(std::move(item));
         }
         return list;
@@ -1170,25 +1944,24 @@ auto build_page_root(const PagePlan& plan,
                      const extract::ProjectModel& model,
                      const std::unordered_map<std::string, std::string>& outputs,
                      const LinkResolver& links,
+                     const PageDocLayout& layout,
                      std::string title) -> SemanticSectionPtr {
     switch(plan.page_type) {
-        case PageType::Index:
-            return build_index_page_root(plan, config, model, outputs, links);
+        case PageType::Index: return build_index_page_root(plan, config, model, outputs, links);
         case PageType::Namespace:
-            return build_namespace_page_root(plan, config, model, outputs, links);
+            return build_namespace_page_root(plan, config, model, outputs, links, layout);
         case PageType::Module:
-            return build_module_page_root(plan, config, model, outputs, links);
-        case PageType::File:
-            return build_file_page_root(plan, config, model, outputs, links);
+            return build_module_page_root(plan, config, model, outputs, links, layout);
+        case PageType::File: return build_file_page_root(plan, config, model, outputs, links);
         case PageType::Workflow:
             return build_workflow_page_root(plan, config, model, outputs, std::move(title), links);
     }
     return make_section(SemanticKind::Section, {}, std::move(title), 1, false);
 }
 
-auto select_primary_description_source(
-    const PagePlan& plan,
-    const std::unordered_map<std::string, std::string>& outputs) -> std::string {
+auto select_primary_description_source(const PagePlan& plan,
+                                       const std::unordered_map<std::string, std::string>& outputs)
+    -> std::string {
     auto from_prompt = [&](PromptKind kind) -> std::string {
         auto* output = prompt_output_of(outputs, kind);
         return output != nullptr ? extract_first_plain_paragraph(*output) : std::string{};
@@ -1196,24 +1969,29 @@ auto select_primary_description_source(
 
     switch(plan.page_type) {
         case PageType::Namespace:
-            if(auto text = from_prompt(PromptKind::NamespaceSummary); !text.empty()) return text;
+            if(auto text = from_prompt(PromptKind::NamespaceSummary); !text.empty())
+                return text;
             break;
         case PageType::Module:
-            if(auto text = from_prompt(PromptKind::ModuleSummary); !text.empty()) return text;
-            if(auto text = from_prompt(PromptKind::ModuleArchitecture); !text.empty()) return text;
+            if(auto text = from_prompt(PromptKind::ModuleSummary); !text.empty())
+                return text;
+            if(auto text = from_prompt(PromptKind::ModuleArchitecture); !text.empty())
+                return text;
             break;
         case PageType::Workflow:
-            if(auto text = from_prompt(PromptKind::Workflow); !text.empty()) return text;
+            if(auto text = from_prompt(PromptKind::Workflow); !text.empty())
+                return text;
             break;
         case PageType::Index:
-            if(auto text = from_prompt(PromptKind::IndexOverview); !text.empty()) return text;
-            if(auto text = from_prompt(PromptKind::IndexReadingGuide); !text.empty()) return text;
+            if(auto text = from_prompt(PromptKind::IndexOverview); !text.empty())
+                return text;
+            if(auto text = from_prompt(PromptKind::IndexReadingGuide); !text.empty())
+                return text;
             break;
-        case PageType::File:
-            break;
+        case PageType::File: break;
     }
 
-    for(const auto& [_, value] : outputs) {
+    for(const auto& [_, value]: outputs) {
         if(auto text = extract_first_plain_paragraph(value); !text.empty()) {
             return text;
         }
@@ -1224,8 +2002,7 @@ auto select_primary_description_source(
 auto build_frontmatter(const PagePlan& plan,
                        std::string_view page_title,
                        std::string_view body,
-                       const std::unordered_map<std::string, std::string>& outputs)
-    -> Frontmatter {
+                       const std::unordered_map<std::string, std::string>& outputs) -> Frontmatter {
     auto title = normalize_frontmatter_title(page_title);
     auto description = select_primary_description_source(plan, outputs);
     if(description.empty()) {
@@ -1241,20 +2018,42 @@ auto build_frontmatter(const PagePlan& plan,
     };
 }
 
-}  // namespace
-
-auto build_link_resolver(const PagePlanSet& plan_set) -> LinkResolver {
+auto build_link_resolver_impl(PagePlanSet plan_set, const extract::ProjectModel* model)
+    -> LinkResolver {
     LinkResolver resolver;
-    for(const auto& plan : plan_set.plans) {
+    auto register_preferred_path =
+        [&](std::string_view name, std::string_view path, bool overwrite) {
+            if(overwrite) {
+                resolver.name_to_path[std::string(name)] = std::string(path);
+                return;
+            }
+            resolver.name_to_path.emplace(std::string(name), std::string(path));
+        };
+
+    for(const auto& plan: plan_set.plans) {
         resolver.page_id_to_title[plan.page_id] = plan.title;
-        for(const auto& key : plan.owner_keys) {
+        for(const auto& key: plan.owner_keys) {
             resolver.name_to_path[key] = plan.relative_path;
         }
         auto colon = plan.page_id.find(':');
         if(colon != std::string::npos) {
             resolver.name_to_path[plan.page_id.substr(colon + 1)] = plan.relative_path;
         }
-        for(const auto& request : plan.prompt_requests) {
+
+        if(model != nullptr) {
+            auto layout = build_page_doc_layout(plan, *model);
+            if(plan.page_type == PageType::Namespace) {
+                for(const auto& [qualified_name, path]: layout.index_paths) {
+                    register_preferred_path(qualified_name, path, true);
+                }
+            } else if(plan.page_type == PageType::Module) {
+                for(const auto& [qualified_name, path]: layout.index_paths) {
+                    register_preferred_path(qualified_name, path, false);
+                }
+            }
+        }
+
+        for(const auto& request: plan.prompt_requests) {
             if(request.target_key.empty()) {
                 continue;
             }
@@ -1262,38 +2061,105 @@ auto build_link_resolver(const PagePlanSet& plan_set) -> LinkResolver {
             switch(request.kind) {
                 case PromptKind::TypeDeclarationSummary:
                 case PromptKind::FunctionDeclarationSummary:
-                    resolver.name_to_path[request.target_key] = plan.relative_path;
+                    register_preferred_path(request.target_key, plan.relative_path, true);
                     break;
                 case PromptKind::TypeImplementationSummary:
                 case PromptKind::FunctionImplementationSummary:
-                    resolver.name_to_path.emplace(request.target_key, plan.relative_path);
+                    register_preferred_path(request.target_key, plan.relative_path, false);
                     break;
-                default:
-                    break;
+                default: break;
             }
         }
     }
+
     return resolver;
 }
 
-auto render_page_markdown(
-    const PagePlan& plan,
-    const config::TaskConfig& config,
-    const extract::ProjectModel& model,
-    const std::unordered_map<std::string, std::string>& prompt_outputs,
-    const LinkResolver& links) -> std::expected<std::string, RenderError> {
+}  // namespace
+
+auto build_link_resolver(const PagePlanSet& plan_set) -> LinkResolver {
+    return build_link_resolver_impl(plan_set, nullptr);
+}
+
+auto build_link_resolver(const PagePlanSet& plan_set, const extract::ProjectModel& model)
+    -> LinkResolver {
+    return build_link_resolver_impl(plan_set, &model);
+}
+
+auto normalize_prompt_output(std::string_view content) -> std::string {
+    if(content.find("```") == std::string_view::npos) {
+        return std::string(content);
+    }
+
+    std::istringstream stream{std::string(content)};
+    std::string line;
+    std::string normalized;
+    bool first = true;
+    while(std::getline(stream, line)) {
+        if(line.ends_with('\r')) {
+            line.pop_back();
+        }
+        if(trim_ascii(line).starts_with("```")) {
+            continue;
+        }
+        if(!first) {
+            normalized.push_back('\n');
+        }
+        normalized += line;
+        first = false;
+    }
+
+    // Defensive fallback: strip any remaining inline triple-backtick markers.
+    // Some LLM outputs place fences inline (e.g. "... ```code``` ..."), which the
+    // line-based filter above cannot fully remove.
+    std::size_t fence = 0;
+    while((fence = normalized.find("```", fence)) != std::string::npos) {
+        normalized.erase(fence, 3);
+    }
+
+    return normalized;
+}
+
+auto render_page_markdown(const PagePlan& plan,
+                          const config::TaskConfig& config,
+                          const extract::ProjectModel& model,
+                          const std::unordered_map<std::string, std::string>& prompt_outputs,
+                          const LinkResolver& links) -> std::expected<std::string, RenderError> {
+    auto bundle = render_page_bundle(plan, config, model, prompt_outputs, links);
+    if(!bundle.has_value()) {
+        return std::unexpected(std::move(bundle.error()));
+    }
+    auto it = std::ranges::find_if(*bundle, [&](const GeneratedPage& page) {
+        return page.relative_path == plan.relative_path;
+    });
+    if(it == bundle->end()) {
+        return std::unexpected(RenderError{
+            .message = std::format("rendered page bundle is missing '{}'", plan.relative_path)});
+    }
+    return it->content;
+}
+
+auto render_page_bundle(const PagePlan& plan,
+                        const config::TaskConfig& config,
+                        const extract::ProjectModel& model,
+                        const std::unordered_map<std::string, std::string>& prompt_outputs,
+                        const LinkResolver& links)
+    -> std::expected<std::vector<GeneratedPage>, RenderError> {
+    auto normalized_outputs = normalize_prompt_outputs(prompt_outputs);
     auto page_title = plan.title;
     if(plan.page_type == PageType::Workflow) {
-        if(auto* output = prompt_output_of(prompt_outputs, PromptKind::Workflow)) {
+        if(auto* output = prompt_output_of(normalized_outputs, PromptKind::Workflow)) {
             if(auto extracted = extract_workflow_title(*output)) {
                 page_title = extracted->first;
             }
         }
     }
 
+    auto layout = build_page_doc_layout(plan, model);
+
     MarkdownDocument document;
-    document.children.push_back(MarkdownNode{build_page_root(
-        plan, config, model, prompt_outputs, links, page_title)});
+    document.children.push_back(MarkdownNode{
+        build_page_root(plan, config, model, normalized_outputs, links, layout, page_title)});
     auto body = render_markdown(document);
     if(body.empty()) {
         return std::unexpected(RenderError{
@@ -1301,8 +2167,31 @@ auto render_page_markdown(
         });
     }
 
-    document.frontmatter = build_frontmatter(plan, page_title, body, prompt_outputs);
-    return render_markdown(document);
+    document.frontmatter = build_frontmatter(plan, page_title, body, normalized_outputs);
+    std::vector<GeneratedPage> pages;
+    pages.push_back(GeneratedPage{
+        .relative_path = plan.relative_path,
+        .content = render_markdown(document),
+    });
+
+    if(page_supports_symbol_subpages(plan)) {
+        std::optional<RenderError> append_error;
+        for_each_symbol_doc_group(layout, [&](const std::vector<SymbolDocPlan>& group) {
+            if(append_error.has_value()) {
+                return;
+            }
+            if(auto result = append_symbol_doc_pages(
+                   pages, group, plan, config, model, normalized_outputs, links, layout);
+               !result.has_value()) {
+                append_error = std::move(result.error());
+            }
+        });
+        if(append_error.has_value()) {
+            return std::unexpected(std::move(*append_error));
+        }
+    }
+
+    return pages;
 }
 
 auto validate_output(const std::string& content) -> std::expected<void, RenderError> {
@@ -1310,8 +2199,8 @@ auto validate_output(const std::string& content) -> std::expected<void, RenderEr
         return std::unexpected(RenderError{.message = "LLM output is empty"});
     }
     if(std::ranges::all_of(content, [](char ch) {
-        return std::isspace(static_cast<unsigned char>(ch)) != 0;
-    })) {
+           return std::isspace(static_cast<unsigned char>(ch)) != 0;
+       })) {
         return std::unexpected(RenderError{.message = "LLM output contains only whitespace"});
     }
     if(content.starts_with("# ") || content.find("\n# ") != std::string::npos) {
@@ -1334,12 +2223,11 @@ auto write_page(const GeneratedPage& page, std::string_view output_root)
             .message = std::format("page output path must be relative: {}", page.relative_path),
         });
     }
-    for(const auto& part : rel) {
+    for(const auto& part: rel) {
         if(part == "." || part == "..") {
             return std::unexpected(RenderError{
-                .message = std::format(
-                    "page output path must not contain '.' or '..': {}",
-                    page.relative_path),
+                .message = std::format("page output path must not contain '.' or '..': {}",
+                                       page.relative_path),
             });
         }
     }
@@ -1352,7 +2240,8 @@ auto write_page(const GeneratedPage& page, std::string_view output_root)
         if(ec) {
             return std::unexpected(RenderError{
                 .message = std::format("failed to create directory {}: {}",
-                                       parent.generic_string(), ec.message()),
+                                       parent.generic_string(),
+                                       ec.message()),
             });
         }
     }

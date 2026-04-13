@@ -38,11 +38,11 @@ auto generate_dry_run(const config::TaskConfig& config, const extract::ProjectMo
 /// Non-blocking page generation with structured concurrency.
 /// Pages are written to output_root immediately when all their LLM prompts complete.
 /// Returns the number of pages written.
-auto generate_pages(const config::TaskConfig& config, const extract::ProjectModel& model,
+auto generate_pages(const config::TaskConfig& config,
+                    const extract::ProjectModel& model,
                     std::string_view llm_model,
                     std::uint32_t rate_limit,
-                    std::string_view output_root)
-    -> std::expected<std::size_t, GenerateError>;
+                    std::string_view output_root) -> std::expected<std::size_t, GenerateError>;
 
 auto write_pages(const std::vector<GeneratedPage>& pages, std::string_view output_root)
     -> std::expected<void, GenerateError>;
@@ -96,7 +96,7 @@ auto collapse_whitespace(std::string_view text) -> std::string {
     std::string out;
     out.reserve(text.size());
     bool in_space = false;
-    for(auto ch : text) {
+    for(auto ch: text) {
         if(std::isspace(static_cast<unsigned char>(ch)) != 0) {
             if(!in_space) {
                 out.push_back(' ');
@@ -121,7 +121,7 @@ auto namespace_of_qname(std::string_view qname) -> std::string {
 auto json_escape(std::string_view text) -> std::string {
     std::string out;
     out.reserve(text.size() + 8);
-    for(auto ch : text) {
+    for(auto ch: text) {
         switch(ch) {
             case '\\': out += "\\\\"; break;
             case '"': out += "\\\""; break;
@@ -153,7 +153,7 @@ auto deduplicate_prompt_requests(const PagePlan& plan) -> std::vector<PromptRequ
     unique.reserve(plan.prompt_requests.size());
     std::unordered_set<std::string> seen;
     seen.reserve(plan.prompt_requests.size());
-    for(const auto& request : plan.prompt_requests) {
+    for(const auto& request: plan.prompt_requests) {
         auto key = prompt_request_key(request);
         if(seen.insert(key).second) {
             unique.push_back(request);
@@ -162,9 +162,8 @@ auto deduplicate_prompt_requests(const PagePlan& plan) -> std::vector<PromptRequ
     return unique;
 }
 
-auto set_evidence_metadata(EvidencePack pack,
-                           const PagePlan& plan,
-                           const PromptRequest& request) -> EvidencePack {
+auto set_evidence_metadata(EvidencePack pack, const PagePlan& plan, const PromptRequest& request)
+    -> EvidencePack {
     pack.page_id = plan.page_id;
     pack.prompt_kind = std::string(prompt_kind_name(request.kind));
     if(pack.subject_name.empty()) {
@@ -190,9 +189,13 @@ auto build_evidence_for_request(const PromptRequest& request,
                 auto ns_it = model.namespaces.find(plan.owner_keys.front());
                 if(ns_it != model.namespaces.end()) {
                     return set_evidence_metadata(
-                        build_evidence_for_namespace_summary(ns_it->second, model, rules,
-                                                             summaries, config.project_root),
-                        plan, request);
+                        build_evidence_for_namespace_summary(ns_it->second,
+                                                             model,
+                                                             rules,
+                                                             summaries,
+                                                             config.project_root),
+                        plan,
+                        request);
                 }
             }
             break;
@@ -200,9 +203,13 @@ auto build_evidence_for_request(const PromptRequest& request,
             if(!plan.owner_keys.empty()) {
                 if(auto* mod = extract::find_module_by_name(model, plan.owner_keys.front())) {
                     return set_evidence_metadata(
-                        build_evidence_for_module_summary(*mod, model, rules, summaries,
+                        build_evidence_for_module_summary(*mod,
+                                                          model,
+                                                          rules,
+                                                          summaries,
                                                           config.project_root),
-                        plan, request);
+                        plan,
+                        request);
                 }
             }
             break;
@@ -210,18 +217,26 @@ auto build_evidence_for_request(const PromptRequest& request,
             if(!plan.owner_keys.empty()) {
                 if(auto* mod = extract::find_module_by_name(model, plan.owner_keys.front())) {
                     return set_evidence_metadata(
-                        build_evidence_for_module_architecture(*mod, model, rules, summaries,
+                        build_evidence_for_module_architecture(*mod,
+                                                               model,
+                                                               rules,
+                                                               summaries,
                                                                config.project_root),
-                        plan, request);
+                        plan,
+                        request);
                 }
             }
             break;
         case PromptKind::IndexOverview:
         case PromptKind::IndexReadingGuide:
-            return set_evidence_metadata(
-                build_evidence_for_index_overview(model, rules, summaries), plan, request);
+            return set_evidence_metadata(build_evidence_for_index_overview(model, rules, summaries),
+                                         plan,
+                                         request);
         case PromptKind::Workflow: {
-            auto pack = build_evidence_for_workflow(plan.owner_keys, model, rules, summaries,
+            auto pack = build_evidence_for_workflow(plan.owner_keys,
+                                                    model,
+                                                    rules,
+                                                    summaries,
                                                     config.project_root);
             auto title_view = std::string_view(plan.title);
             constexpr std::string_view workflow_prefix = "Workflow: ";
@@ -235,9 +250,13 @@ auto build_evidence_for_request(const PromptRequest& request,
             if(!request.target_key.empty()) {
                 if(auto* sym = find_sym(model, request.target_key)) {
                     return set_evidence_metadata(
-                        build_evidence_for_function_declaration_summary(
-                            *sym, model, rules, summaries, config.project_root),
-                        plan, request);
+                        build_evidence_for_function_declaration_summary(*sym,
+                                                                        model,
+                                                                        rules,
+                                                                        summaries,
+                                                                        config.project_root),
+                        plan,
+                        request);
                 }
             }
             break;
@@ -245,9 +264,12 @@ auto build_evidence_for_request(const PromptRequest& request,
             if(!request.target_key.empty()) {
                 if(auto* sym = find_sym(model, request.target_key)) {
                     return set_evidence_metadata(
-                        build_evidence_for_function_implementation_summary(
-                            *sym, model, rules, config.project_root),
-                        plan, request);
+                        build_evidence_for_function_implementation_summary(*sym,
+                                                                           model,
+                                                                           rules,
+                                                                           config.project_root),
+                        plan,
+                        request);
                 }
             }
             break;
@@ -255,9 +277,13 @@ auto build_evidence_for_request(const PromptRequest& request,
             if(!request.target_key.empty()) {
                 if(auto* sym = find_sym(model, request.target_key)) {
                     return set_evidence_metadata(
-                        build_evidence_for_type_declaration_summary(
-                            *sym, model, rules, summaries, config.project_root),
-                        plan, request);
+                        build_evidence_for_type_declaration_summary(*sym,
+                                                                    model,
+                                                                    rules,
+                                                                    summaries,
+                                                                    config.project_root),
+                        plan,
+                        request);
                 }
             }
             break;
@@ -265,9 +291,12 @@ auto build_evidence_for_request(const PromptRequest& request,
             if(!request.target_key.empty()) {
                 if(auto* sym = find_sym(model, request.target_key)) {
                     return set_evidence_metadata(
-                        build_evidence_for_type_implementation_summary(
-                            *sym, model, rules, config.project_root),
-                        plan, request);
+                        build_evidence_for_type_implementation_summary(*sym,
+                                                                       model,
+                                                                       rules,
+                                                                       config.project_root),
+                        plan,
+                        request);
                 }
             }
             break;
@@ -349,12 +378,12 @@ auto workflow_output_key() -> std::string {
     return prompt_request_key(PromptRequest{.kind = PromptKind::Workflow});
 }
 
-auto render_generated_page(const PagePlan& plan,
-                           const config::TaskConfig& config,
-                           const extract::ProjectModel& model,
-                           const std::unordered_map<std::string, std::string>& prompt_outputs,
-                           const LinkResolver& links)
-    -> std::expected<GeneratedPage, GenerateError> {
+auto render_generated_pages(const PagePlan& plan,
+                            const config::TaskConfig& config,
+                            const extract::ProjectModel& model,
+                            const std::unordered_map<std::string, std::string>& prompt_outputs,
+                            const LinkResolver& links)
+    -> std::expected<std::vector<GeneratedPage>, GenerateError> {
     PagePlan adjusted_plan = plan;
     std::unordered_map<std::string, std::string> adjusted_outputs;
     const auto* effective_outputs = &prompt_outputs;
@@ -372,8 +401,8 @@ auto render_generated_page(const PagePlan& plan,
         }
     }
 
-    auto render_result = render_page_markdown(adjusted_plan, config, model,
-                                              *effective_outputs, links);
+    auto render_result =
+        render_page_bundle(adjusted_plan, config, model, *effective_outputs, links);
     if(!render_result.has_value()) {
         return std::unexpected(GenerateError{
             .message = std::format("failed to render page '{}': {}",
@@ -382,10 +411,7 @@ auto render_generated_page(const PagePlan& plan,
         });
     }
 
-    return GeneratedPage{
-        .relative_path = adjusted_plan.relative_path,
-        .content = std::move(*render_result),
-    };
+    return std::move(*render_result);
 }
 
 auto update_summary_cache(PageSummaryCache& summaries,
@@ -397,7 +423,7 @@ auto update_summary_cache(PageSummaryCache& summaries,
         return;
     }
 
-    for(const auto& request : prompt_requests) {
+    for(const auto& request: prompt_requests) {
         if(!is_page_summary_prompt(request.kind)) {
             continue;
         }
@@ -454,22 +480,21 @@ auto build_workflow_review_candidates(const PagePlanSet& plan_set,
                 candidate.namespaces.push_back(ns);
             }
 
-            auto rel_file = make_source_relative(sym->declaration_location.file,
-                                                 config.project_root);
+            auto rel_file =
+                make_source_relative(sym->declaration_location.file, config.project_root);
             if(!rel_file.empty() && seen_files.insert(rel_file).second) {
                 candidate.files.push_back(rel_file);
             }
         }
 
-        candidate.rank_score = candidate.chain_length * 1000 +
-                               candidate.files.size() * 100 +
+        candidate.rank_score = candidate.chain_length * 1000 + candidate.files.size() * 100 +
                                candidate.namespaces.size() * 10;
         candidates.push_back(std::move(candidate));
     }
 
-    std::sort(candidates.begin(), candidates.end(),
-              [](const WorkflowReviewCandidate& lhs,
-                 const WorkflowReviewCandidate& rhs) {
+    std::sort(candidates.begin(),
+              candidates.end(),
+              [](const WorkflowReviewCandidate& lhs, const WorkflowReviewCandidate& rhs) {
                   if(lhs.rank_score != rhs.rank_score) {
                       return lhs.rank_score > rhs.rank_score;
                   }
@@ -524,9 +549,8 @@ auto build_workflow_review_prompt(const std::vector<WorkflowReviewCandidate>& ca
     std::string prompt;
     prompt.reserve(payload.size() + 2048);
     prompt += "Review workflow candidates extracted from a function-level call graph.\n";
-    prompt += std::format(
-        "Select exactly {} workflows that are major and mutually distinct.\n",
-        selected_count);
+    prompt += std::format("Select exactly {} workflows that are major and mutually distinct.\n",
+                          selected_count);
     prompt += "You must reason only from structured semantics.\n";
     prompt += "Input JSON:\n```json\n";
     prompt += payload;
@@ -578,8 +602,7 @@ auto collect_workflow_review_json_candidates(std::string_view response)
             break;
         }
 
-        auto header = trim_ascii(response.substr(
-            fence_start + 3, header_end - (fence_start + 3)));
+        auto header = trim_ascii(response.substr(fence_start + 3, header_end - (fence_start + 3)));
 
         auto fence_end = response.find("```", header_end + 1);
         if(fence_end == std::string_view::npos) {
@@ -588,9 +611,9 @@ auto collect_workflow_review_json_candidates(std::string_view response)
 
         auto is_json_fence = header.empty() || header == "json" || header == "JSON";
         if(is_json_fence) {
-            append_json_candidate(candidates, dedupe,
-                                  response.substr(header_end + 1,
-                                                  fence_end - (header_end + 1)));
+            append_json_candidate(candidates,
+                                  dedupe,
+                                  response.substr(header_end + 1, fence_end - (header_end + 1)));
         }
         fence_search = fence_end + 3;
     }
@@ -635,7 +658,8 @@ auto collect_workflow_review_json_candidates(std::string_view response)
                 }
                 --depth;
                 if(depth == 0) {
-                    append_json_candidate(candidates, dedupe,
+                    append_json_candidate(candidates,
+                                          dedupe,
                                           response.substr(start, index - start + 1));
                     break;
                 }
@@ -667,14 +691,15 @@ auto parse_workflow_review_object(const eventide::serde::json::Object& parsed,
     if(selected_array->size() != selected_count) {
         return std::unexpected(GenerateError{
             .message = std::format("workflow review returned {} selections, expected {}",
-                                   selected_array->size(), selected_count),
+                                   selected_array->size(),
+                                   selected_count),
         });
     }
 
     std::unordered_map<std::string, std::string> selected_titles;
     selected_titles.reserve(selected_array->size());
 
-    for(auto entry : *selected_array) {
+    for(auto entry: *selected_array) {
         auto entry_object = entry.get_object();
         if(!entry_object.has_value()) {
             return std::unexpected(GenerateError{
@@ -702,20 +727,20 @@ auto parse_workflow_review_object(const eventide::serde::json::Object& parsed,
         auto title_text = collapse_whitespace(*title);
         if(title_text.empty()) {
             return std::unexpected(GenerateError{
-                .message = std::format("workflow review returned empty title for '{}'",
-                                       page_id_text),
+                .message =
+                    std::format("workflow review returned empty title for '{}'", page_id_text),
             });
         }
         if(!allowed_page_ids.contains(page_id_text)) {
             return std::unexpected(GenerateError{
-                .message = std::format("workflow review returned unknown page_id '{}'",
-                                       page_id_text),
+                .message =
+                    std::format("workflow review returned unknown page_id '{}'", page_id_text),
             });
         }
         if(!selected_titles.emplace(page_id_text, title_text).second) {
             return std::unexpected(GenerateError{
-                .message = std::format("workflow review returned duplicate page_id '{}'",
-                                       page_id_text),
+                .message =
+                    std::format("workflow review returned duplicate page_id '{}'", page_id_text),
             });
         }
     }
@@ -739,7 +764,7 @@ auto parse_workflow_review_response(std::string_view response,
     std::optional<GenerateError> last_validation_error;
     std::string last_parse_error = "unknown JSON parse error";
 
-    for(const auto& candidate : candidates) {
+    for(const auto& candidate: candidates) {
         auto parsed = json::Object::parse(candidate);
         if(!parsed.has_value()) {
             last_parse_error = json::error_message(json::make_read_error(parsed.error()));
@@ -759,20 +784,18 @@ auto parse_workflow_review_response(std::string_view response,
     }
 
     return std::unexpected(GenerateError{
-        .message = std::format("workflow review returned invalid JSON: {}",
-                               last_parse_error),
+        .message = std::format("workflow review returned invalid JSON: {}", last_parse_error),
     });
 }
 
-auto build_workflow_review_calibration_prompt(
-    const std::vector<WorkflowReviewCandidate>& candidates,
-    std::size_t selected_count,
-    std::string_view previous_output,
-    std::string_view validation_error) -> std::string {
+auto
+    build_workflow_review_calibration_prompt(const std::vector<WorkflowReviewCandidate>& candidates,
+                                             std::size_t selected_count,
+                                             std::string_view previous_output,
+                                             std::string_view validation_error) -> std::string {
     auto payload = build_workflow_review_payload(candidates);
     std::string prompt;
-    prompt.reserve(payload.size() + previous_output.size() + validation_error.size() +
-                   3072);
+    prompt.reserve(payload.size() + previous_output.size() + validation_error.size() + 3072);
     prompt += "Fix the workflow review JSON so it strictly matches the required schema.\n";
     prompt += "Do not explain. Do not wrap with markdown.\n";
     prompt += std::format("Validation error:\n{}\n\n", validation_error);
@@ -815,22 +838,19 @@ auto build_fallback_workflow_review_selection(
     return selected_titles;
 }
 
-auto request_workflow_review_selection(
-    const std::vector<WorkflowReviewCandidate>& candidates,
-    const std::unordered_set<std::string>& allowed_page_ids,
-    std::size_t selected_count,
-    const config::TaskConfig& config,
-    std::string_view llm_model)
+auto request_workflow_review_selection(const std::vector<WorkflowReviewCandidate>& candidates,
+                                       const std::unordered_set<std::string>& allowed_page_ids,
+                                       std::size_t selected_count,
+                                       const config::TaskConfig& config,
+                                       std::string_view llm_model)
     -> std::expected<std::unordered_map<std::string, std::string>, GenerateError> {
-    auto fallback_titles = build_fallback_workflow_review_selection(candidates,
-                                                                    selected_count);
+    auto fallback_titles = build_fallback_workflow_review_selection(candidates, selected_count);
     auto prompt = build_workflow_review_prompt(candidates, selected_count);
-    auto response = clore::net::call_llm_with_retries(
-        llm_model,
-        config.llm.system_prompt,
-        prompt,
-        config.llm.retry_count,
-        config.llm.retry_initial_backoff_ms);
+    auto response = clore::net::call_llm_with_retries(llm_model,
+                                                      config.llm.system_prompt,
+                                                      prompt,
+                                                      config.llm.retry_count,
+                                                      config.llm.retry_initial_backoff_ms);
     if(!response.has_value()) {
         logging::warn("workflow review LLM request failed; using ranked fallback: {}",
                       response.error().message);
@@ -849,14 +869,15 @@ auto request_workflow_review_selection(
 
     auto calibration_attempt_limit = config.llm.retry_count;
     for(std::uint32_t attempt = 0; attempt < calibration_attempt_limit; ++attempt) {
-        auto calibration_prompt = build_workflow_review_calibration_prompt(
-            candidates, selected_count, current_output, current_error.message);
-        auto calibration = clore::net::call_llm_with_retries(
-            llm_model,
-            config.llm.system_prompt,
-            calibration_prompt,
-            config.llm.retry_count,
-            config.llm.retry_initial_backoff_ms);
+        auto calibration_prompt = build_workflow_review_calibration_prompt(candidates,
+                                                                           selected_count,
+                                                                           current_output,
+                                                                           current_error.message);
+        auto calibration = clore::net::call_llm_with_retries(llm_model,
+                                                             config.llm.system_prompt,
+                                                             calibration_prompt,
+                                                             config.llm.retry_count,
+                                                             config.llm.retry_initial_backoff_ms);
         if(!calibration.has_value()) {
             logging::warn("workflow review calibration request failed; using ranked fallback: {}",
                           calibration.error().message);
@@ -864,17 +885,20 @@ auto request_workflow_review_selection(
         }
 
         current_output = std::move(*calibration);
-        auto calibrated_titles = parse_workflow_review_response(
-            current_output, allowed_page_ids, selected_count);
+        auto calibrated_titles =
+            parse_workflow_review_response(current_output, allowed_page_ids, selected_count);
         if(calibrated_titles.has_value()) {
             logging::info("workflow review calibration succeeded on attempt {}/{}",
-                          attempt + 1, calibration_attempt_limit);
+                          attempt + 1,
+                          calibration_attempt_limit);
             return calibrated_titles;
         }
 
         current_error = std::move(calibrated_titles.error());
         logging::warn("workflow review calibration attempt {}/{} failed: {}",
-                      attempt + 1, calibration_attempt_limit, current_error.message);
+                      attempt + 1,
+                      calibration_attempt_limit,
+                      current_error.message);
     }
 
     logging::warn(
@@ -896,13 +920,13 @@ auto apply_workflow_review_selection(
 
     std::unordered_set<std::string> selected_ids;
     selected_ids.reserve(selected_titles.size());
-    for(const auto& [page_id, _] : selected_titles) {
+    for(const auto& [page_id, _]: selected_titles) {
         selected_ids.insert(page_id);
     }
 
     std::vector<PagePlan> filtered_plans;
     filtered_plans.reserve(plan_set.plans.size());
-    for(auto& plan : plan_set.plans) {
+    for(auto& plan: plan_set.plans) {
         if(plan.page_type == PageType::Workflow) {
             auto title_it = selected_titles.find(plan.page_id);
             if(title_it == selected_titles.end()) {
@@ -915,28 +939,24 @@ auto apply_workflow_review_selection(
 
     std::unordered_set<std::string> kept_page_ids;
     kept_page_ids.reserve(filtered_plans.size());
-    for(const auto& plan : filtered_plans) {
+    for(const auto& plan: filtered_plans) {
         kept_page_ids.insert(plan.page_id);
     }
 
     std::vector<std::string> filtered_order;
     filtered_order.reserve(plan_set.generation_order.size());
-    for(const auto& page_id : plan_set.generation_order) {
+    for(const auto& page_id: plan_set.generation_order) {
         if(kept_page_ids.contains(page_id)) {
             filtered_order.push_back(page_id);
         }
     }
 
-    for(auto& plan : filtered_plans) {
+    for(auto& plan: filtered_plans) {
         std::erase_if(plan.depends_on_pages,
-                      [&](const std::string& page_id) {
-                          return !kept_page_ids.contains(page_id);
-                      });
-        std::erase_if(plan.linked_pages,
-                      [&](const std::string& page_id) {
-                          return page_id.starts_with("workflow:") &&
-                                 !selected_ids.contains(page_id);
-                      });
+                      [&](const std::string& page_id) { return !kept_page_ids.contains(page_id); });
+        std::erase_if(plan.linked_pages, [&](const std::string& page_id) {
+            return page_id.starts_with("workflow:") && !selected_ids.contains(page_id);
+        });
     }
 
     plan_set.plans = std::move(filtered_plans);
@@ -954,12 +974,12 @@ auto review_workflow_pages_with_llm(PagePlanSet& plan_set,
         return {};
     }
 
-    auto review_count = std::min<std::size_t>(config.workflow_rules.llm_review_top_k,
-                                              candidates.size());
+    auto review_count =
+        std::min<std::size_t>(config.workflow_rules.llm_review_top_k, candidates.size());
     candidates.resize(review_count);
 
-    auto selected_count = std::min<std::size_t>(config.workflow_rules.llm_selected_count,
-                                                candidates.size());
+    auto selected_count =
+        std::min<std::size_t>(config.workflow_rules.llm_selected_count, candidates.size());
     if(selected_count == 0) {
         return std::unexpected(GenerateError{
             .message = "workflow review requires at least one selectable candidate",
@@ -968,12 +988,15 @@ auto review_workflow_pages_with_llm(PagePlanSet& plan_set,
 
     std::unordered_set<std::string> allowed_page_ids;
     allowed_page_ids.reserve(candidates.size());
-    for(const auto& candidate : candidates) {
+    for(const auto& candidate: candidates) {
         allowed_page_ids.insert(candidate.page_id);
     }
 
-    auto selected_titles = request_workflow_review_selection(
-        candidates, allowed_page_ids, selected_count, config, llm_model);
+    auto selected_titles = request_workflow_review_selection(candidates,
+                                                             allowed_page_ids,
+                                                             selected_count,
+                                                             config,
+                                                             llm_model);
     if(!selected_titles.has_value()) {
         return std::unexpected(std::move(selected_titles.error()));
     }
@@ -984,7 +1007,8 @@ auto review_workflow_pages_with_llm(PagePlanSet& plan_set,
     }
 
     logging::info("workflow review: {} candidates, {} selected",
-                  candidates.size(), selected_titles->size());
+                  candidates.size(),
+                  selected_titles->size());
     return {};
 }
 
@@ -999,7 +1023,8 @@ auto generate_dry_run(const config::TaskConfig& config, const extract::ProjectMo
 
     auto& plan_set = *plan_result;
     logging::info("page plan: {} pages, generation order size {}",
-                  plan_set.plans.size(), plan_set.generation_order.size());
+                  plan_set.plans.size(),
+                  plan_set.generation_order.size());
 
     std::unordered_map<std::string, std::size_t> id_to_index;
     id_to_index.reserve(plan_set.plans.size());
@@ -1011,9 +1036,9 @@ auto generate_dry_run(const config::TaskConfig& config, const extract::ProjectMo
     std::vector<GeneratedPage> pages;
     pages.reserve(plan_set.generation_order.size());
 
-    auto links = build_link_resolver(plan_set);
+    auto links = build_link_resolver(plan_set, model);
 
-    for(const auto& page_id : plan_set.generation_order) {
+    for(const auto& page_id: plan_set.generation_order) {
         auto idx_it = id_to_index.find(page_id);
         if(idx_it == id_to_index.end()) {
             continue;
@@ -1024,37 +1049,39 @@ auto generate_dry_run(const config::TaskConfig& config, const extract::ProjectMo
         std::unordered_map<std::string, std::string> prompt_outputs;
         prompt_outputs.reserve(prompt_requests.size());
 
-        for(const auto& request : prompt_requests) {
+        for(const auto& request: prompt_requests) {
             auto evidence = build_evidence_for_request(request, plan, model, config, summaries);
             auto prompt_result = build_prompt(request.kind, evidence);
             if(!prompt_result.has_value()) {
                 return std::unexpected(GenerateError{
                     .message = std::format("failed to build prompt '{}' for '{}': {}",
-                                           prompt_request_key(request), page_id,
+                                           prompt_request_key(request),
+                                           page_id,
                                            prompt_result.error().message),
                 });
             }
             auto key = prompt_request_key(request);
-            prompt_outputs.emplace(key,
-                                   wrap_prompt_output_for_embed(key, *prompt_result));
+            prompt_outputs.emplace(key, wrap_prompt_output_for_embed(key, *prompt_result));
         }
 
-        auto page_result = render_generated_page(plan, config, model, prompt_outputs, links);
+        auto page_result = render_generated_pages(plan, config, model, prompt_outputs, links);
         if(!page_result.has_value()) {
             return std::unexpected(std::move(page_result.error()));
         }
 
-        pages.push_back(std::move(*page_result));
+        for(auto& page: *page_result) {
+            pages.push_back(std::move(page));
+        }
     }
 
     return pages;
 }
 
-auto generate_pages(const config::TaskConfig& config, const extract::ProjectModel& model,
+auto generate_pages(const config::TaskConfig& config,
+                    const extract::ProjectModel& model,
                     std::string_view llm_model,
                     std::uint32_t rate_limit,
-                    std::string_view output_root)
-    -> std::expected<std::size_t, GenerateError> {
+                    std::string_view output_root) -> std::expected<std::size_t, GenerateError> {
     auto plan_result = build_page_plan_set(config, model);
     if(!plan_result.has_value()) {
         return std::unexpected(GenerateError{.message = plan_result.error().message});
@@ -1067,7 +1094,8 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
     }
 
     logging::info("page plan: {} pages, generation order size {}",
-                  plan_set.plans.size(), plan_set.generation_order.size());
+                  plan_set.plans.size(),
+                  plan_set.generation_order.size());
 
     std::unordered_map<std::string, std::size_t> id_to_plan;
     id_to_plan.reserve(plan_set.plans.size());
@@ -1077,18 +1105,18 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
 
     std::vector<std::vector<PromptRequest>> prompt_requests_by_plan;
     prompt_requests_by_plan.reserve(plan_set.plans.size());
-    for(const auto& plan : plan_set.plans) {
+    for(const auto& plan: plan_set.plans) {
         prompt_requests_by_plan.push_back(deduplicate_prompt_requests(plan));
     }
 
-    auto links = build_link_resolver(plan_set);
+    auto links = build_link_resolver(plan_set, model);
 
     std::vector<PageState> states;
     states.reserve(plan_set.generation_order.size());
     std::unordered_map<std::string, std::size_t> id_to_state;
     id_to_state.reserve(plan_set.generation_order.size());
 
-    for(const auto& page_id : plan_set.generation_order) {
+    for(const auto& page_id: plan_set.generation_order) {
         auto plan_it = id_to_plan.find(page_id);
         if(plan_it == id_to_plan.end()) {
             continue;
@@ -1105,7 +1133,7 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
     std::unordered_map<std::string, std::vector<std::size_t>> dependents;
     for(std::size_t i = 0; i < states.size(); ++i) {
         const auto& plan = plan_set.plans[states[i].plan_index];
-        for(const auto& dep_id : plan.depends_on_pages) {
+        for(const auto& dep_id: plan.depends_on_pages) {
             if(id_to_state.contains(dep_id)) {
                 states[i].unsatisfied_deps++;
                 dependents[dep_id].push_back(i);
@@ -1119,12 +1147,13 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
     std::uint64_t next_tag = 0;
     std::optional<GenerateError> schedule_error;
 
-    clore::net::LLMClient client(llm_model, config.llm.system_prompt, rate_limit,
+    clore::net::LLMClient client(llm_model,
+                                 config.llm.system_prompt,
+                                 rate_limit,
                                  config.llm.retry_count,
                                  config.llm.retry_initial_backoff_ms);
 
-    auto write_completed_page = [&](std::size_t state_idx)
-        -> std::expected<void, GenerateError> {
+    auto write_completed_page = [&](std::size_t state_idx) -> std::expected<void, GenerateError> {
         auto& state = states[state_idx];
         auto& plan = plan_set.plans[state.plan_index];
         const auto& prompt_requests = prompt_requests_by_plan[state.plan_index];
@@ -1132,7 +1161,8 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
         if(state.prompt_outputs.size() != state.total_prompts) {
             return std::unexpected(GenerateError{
                 .message = std::format("page '{}' completed with {} of {} prompt outputs",
-                                       plan.page_id, state.prompt_outputs.size(),
+                                       plan.page_id,
+                                       state.prompt_outputs.size(),
                                        state.total_prompts),
             });
         }
@@ -1148,28 +1178,29 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
             }
         }
 
-        auto page_result = render_generated_page(plan, config, model,
-                                                 state.prompt_outputs, links);
+        auto page_result = render_generated_pages(plan, config, model, state.prompt_outputs, links);
         if(!page_result.has_value()) {
             return std::unexpected(std::move(page_result.error()));
         }
 
-        auto write_result = write_page(*page_result, output_root);
-        if(!write_result.has_value()) {
-            return std::unexpected(GenerateError{
-                .message = write_result.error().message,
-            });
+        for(const auto& page: *page_result) {
+            auto write_result = write_page(page, output_root);
+            if(!write_result.has_value()) {
+                return std::unexpected(GenerateError{
+                    .message = write_result.error().message,
+                });
+            }
+            logging::info("  written {}", page.relative_path);
         }
 
         state.written = true;
-        ++written_count;
-        logging::info("  written {}", page_result->relative_path);
+        written_count += page_result->size();
 
         update_summary_cache(summaries, plan, prompt_requests, state.prompt_outputs);
 
         auto dep_it = dependents.find(plan.page_id);
         if(dep_it != dependents.end()) {
-            for(auto dep_state_idx : dep_it->second) {
+            for(auto dep_state_idx: dep_it->second) {
                 if(states[dep_state_idx].unsatisfied_deps > 0) {
                     states[dep_state_idx].unsatisfied_deps--;
                 }
@@ -1206,14 +1237,15 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
                 }
 
                 std::size_t submitted_prompts = 0;
-                for(const auto& request : prompt_requests) {
-                    auto evidence = build_evidence_for_request(request, plan, model, config,
-                                                               summaries);
+                for(const auto& request: prompt_requests) {
+                    auto evidence =
+                        build_evidence_for_request(request, plan, model, config, summaries);
                     auto prompt_result = build_prompt(request.kind, evidence);
                     if(!prompt_result.has_value()) {
                         schedule_error = GenerateError{
                             .message = std::format("failed to build prompt '{}' for '{}': {}",
-                                                   prompt_request_key(request), plan.page_id,
+                                                   prompt_request_key(request),
+                                                   plan.page_id,
                                                    prompt_result.error().message),
                         };
                         return submitted_any_llm;
@@ -1237,7 +1269,8 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
                 }
 
                 logging::info("submitted LLM for '{}': {} requests",
-                              plan.page_id, submitted_prompts);
+                              plan.page_id,
+                              submitted_prompts);
             }
         }
 
@@ -1251,8 +1284,7 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
 
     if(has_llm_work) {
         auto run_result = client.run(
-            [&](std::uint64_t tag,
-                std::expected<std::string, clore::net::LLMError> result) {
+            [&](std::uint64_t tag, std::expected<std::string, clore::net::LLMError> result) {
                 if(schedule_error.has_value()) {
                     return;
                 }
@@ -1269,24 +1301,34 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
                 const auto& plan = plan_set.plans[state.plan_index];
 
                 if(result.has_value()) {
-                    auto output_check = validate_output(*result);
+                    auto normalized_output = normalize_prompt_output(*result);
+                    if(normalized_output != *result && result->find("```") != std::string::npos) {
+                        logging::warn(
+                            "normalized fenced markdown from prompt '{}' in '{}' before validation",
+                            tag_info.output_key,
+                            plan.page_id);
+                    }
+
+                    auto output_check = validate_output(normalized_output);
                     if(!output_check.has_value()) {
                         schedule_error = GenerateError{
-                            .message = std::format(
-                                "output validation failed for prompt '{}' in '{}': {}",
-                                tag_info.output_key, plan.page_id,
-                                output_check.error().message),
+                            .message =
+                                std::format("output validation failed for prompt '{}' in '{}': {}",
+                                            tag_info.output_key,
+                                            plan.page_id,
+                                            output_check.error().message),
                         };
                         logging::warn(schedule_error->message);
                         client.request_stop();
                         return;
                     }
 
-                    state.prompt_outputs[tag_info.output_key] = std::move(*result);
+                    state.prompt_outputs[tag_info.output_key] = std::move(normalized_output);
                 } else {
                     schedule_error = GenerateError{
                         .message = std::format("LLM failed for prompt '{}' in '{}': {}",
-                                               tag_info.output_key, plan.page_id,
+                                               tag_info.output_key,
+                                               plan.page_id,
                                                result.error().message),
                     };
                     logging::warn(schedule_error->message);
@@ -1315,8 +1357,7 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
 
         if(!run_result.has_value()) {
             return std::unexpected(GenerateError{
-                .message = std::format("LLM event loop error: {}",
-                                       run_result.error().message),
+                .message = std::format("LLM event loop error: {}", run_result.error().message),
             });
         }
     }
@@ -1334,7 +1375,7 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
 
 auto write_pages(const std::vector<GeneratedPage>& pages, std::string_view output_root)
     -> std::expected<void, GenerateError> {
-    for(const auto& page : pages) {
+    for(const auto& page: pages) {
         auto result = write_page(page, output_root);
         if(!result.has_value()) {
             return std::unexpected(GenerateError{.message = result.error().message});

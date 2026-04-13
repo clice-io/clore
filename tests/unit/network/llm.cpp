@@ -336,17 +336,17 @@ TEST_SUITE(llm) {
     TEST_CASE(append_tool_outputs_builds_follow_up_history) {
         std::vector<Message> history{
             SystemMessage{.content = "system"},
-            UserMessage{.content = "Find the llm module."},
+            UserMessage{.content = "Find the OpenAI client module."},
         };
 
         auto response = protocol::parse_response(
-            R"({"id":"resp_tool","model":"deepseek-chat","choices":[{"finish_reason":"tool_calls","message":{"content":"Looking it up.","tool_calls":[{"id":"call_1","type":"function","function":{"name":"search_repo","arguments":"{\"query\":\"llm\",\"limit\":1}"}}]}}]})");
+            R"({"id":"resp_tool","model":"deepseek-chat","choices":[{"finish_reason":"tool_calls","message":{"content":"Looking it up.","tool_calls":[{"id":"call_1","type":"function","function":{"name":"search_repo","arguments":"{\"query\":\"openai\",\"limit\":1}"}}]}}]})");
         ASSERT_TRUE(response.has_value());
 
         std::vector<ToolOutput> outputs{
             ToolOutput{
                 .tool_call_id = "call_1",
-                .output = R"({"matches":["src/llm/llm.cppm"]})",
+                .output = R"({"matches":["src/network/openai.cppm"]})",
             },
         };
 
@@ -365,7 +365,7 @@ TEST_SUITE(llm) {
         auto* tool_result = std::get_if<ToolResultMessage>(&(*merged)[3]);
         ASSERT_TRUE(tool_result != nullptr);
         EXPECT_EQ(tool_result->tool_call_id, "call_1");
-        EXPECT_EQ(tool_result->content, R"({"matches":["src/llm/llm.cppm"]})");
+        EXPECT_EQ(tool_result->content, R"({"matches":["src/network/openai.cppm"]})");
     }
 
     TEST_CASE(llm_client_run_with_no_work_succeeds) {
@@ -374,7 +374,7 @@ TEST_SUITE(llm) {
         // run() with nothing submitted should return immediately
         auto result = client.run([](std::uint64_t, auto) {});
 
-        // No pending work → no env required, early exit
+        // No pending work -> no env required, early exit
         EXPECT_TRUE(result.has_value());
     }
 

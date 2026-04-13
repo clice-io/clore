@@ -1,26 +1,16 @@
-Write an implementation summary for the {{target_kind}} `{{target_name}}`.
+R"clore(Write an implementation summary for the {{target_kind}} `{{target_name}}`.
 
-Context: This summary appears on a module/file (implementation) page and should describe
-how this function is implemented — its algorithm, data flow, and internal logic.
+Context: this summary appears on an implementation page. Focus on algorithm, internal control flow, and dependencies.
 
 Output:
 - Markdown fragment only
 - 1 to 2 short paragraphs
 - No heading
 - No YAML
-- Follow the output language requested by the system prompt
+- No code fences or pasted source code
 
-Must explain:
-- how the function is implemented (algorithm, key steps)
-- what internal helpers or callees it delegates to
-- notable implementation details (error handling, performance, edge cases)
-
-Must not:
-- describe the public contract (that belongs on the declaration page)
-- repeat the full source code
-- include source locations
-
+If you need to mention identifiers, use inline code rather than fenced blocks.
+Do not restate the public contract.
 Use only the EVIDENCE section below.
-If evidence is insufficient, explicitly explain what key evidence is missing.
 
-{{evidence}}
+{{evidence}})clore"

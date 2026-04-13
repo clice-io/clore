@@ -27,8 +27,7 @@ struct PageIdentity {
     std::string source_relative_path;
 };
 
-auto compute_page_path(const PageIdentity& identity)
-    -> std::expected<std::string, PathError>;
+auto compute_page_path(const PageIdentity& identity) -> std::expected<std::string, PathError>;
 
 auto validate_no_path_conflicts(const std::vector<std::pair<std::string, std::string>>& path_to_id)
     -> std::expected<void, PathError>;
@@ -49,8 +48,9 @@ constexpr std::string_view kWorkflowPrefix = "workflows";
 
 auto normalize_name(std::string_view name) -> std::string {
     std::string result(name);
-    std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
     return result;
 }
 
@@ -72,7 +72,8 @@ auto split_qualified(std::string_view name, std::string_view sep) -> std::vector
 auto join_path(const std::vector<std::string>& parts) -> std::string {
     std::string result;
     for(std::size_t i = 0; i < parts.size(); ++i) {
-        if(i > 0) result += '/';
+        if(i > 0)
+            result += '/';
         result += parts[i];
     }
     return result;
@@ -83,34 +84,34 @@ auto validate_path_component(std::string_view path) -> std::expected<void, PathE
         return std::unexpected(PathError{.message = "generated path is empty"});
     }
     if(path.find("..") != std::string_view::npos) {
-        return std::unexpected(PathError{
-            .message = std::format("generated path contains '..': {}", path)});
+        return std::unexpected(
+            PathError{.message = std::format("generated path contains '..': {}", path)});
     }
     if(path.starts_with('/') || path.starts_with('\\')) {
-        return std::unexpected(PathError{
-            .message = std::format("generated path is absolute: {}", path)});
+        return std::unexpected(
+            PathError{.message = std::format("generated path is absolute: {}", path)});
     }
     return {};
 }
 
 // Replace characters illegal in Windows file/directory names
 auto sanitize_path_chars(std::string& path) -> void {
-    for(auto& c : path) {
+    for(auto& c: path) {
         switch(c) {
-            case '<': case '>': case '"': case '|': case '?': case '*':
-                c = '_';
-                break;
-            default:
-                break;
+            case '<':
+            case '>':
+            case '"':
+            case '|':
+            case '?':
+            case '*': c = '_'; break;
+            default: break;
         }
     }
 }
 
 }  // namespace
 
-auto compute_page_path(const PageIdentity& identity)
-    -> std::expected<std::string, PathError> {
-
+auto compute_page_path(const PageIdentity& identity) -> std::expected<std::string, PathError> {
     std::string result;
 
     auto trim_ascii = [](std::string_view text) -> std::string_view {
@@ -129,7 +130,7 @@ auto compute_page_path(const PageIdentity& identity)
         sanitized.reserve(trimmed.size());
 
         bool prev_dash = false;
-        for(auto ch : trimmed) {
+        for(auto ch: trimmed) {
             auto uc = static_cast<unsigned char>(ch);
             if(ch == '/' || ch == '\\' || std::isspace(uc) != 0) {
                 if(!prev_dash) {
@@ -142,8 +143,10 @@ auto compute_page_path(const PageIdentity& identity)
             prev_dash = (ch == '-');
         }
 
-        while(!sanitized.empty() && sanitized.front() == '-') sanitized.erase(sanitized.begin());
-        while(!sanitized.empty() && sanitized.back() == '-') sanitized.pop_back();
+        while(!sanitized.empty() && sanitized.front() == '-')
+            sanitized.erase(sanitized.begin());
+        while(!sanitized.empty() && sanitized.back() == '-')
+            sanitized.pop_back();
         if(sanitized.empty()) {
             sanitized = "unnamed";
         }
@@ -169,7 +172,7 @@ auto compute_page_path(const PageIdentity& identity)
             }
             std::vector<std::string> norm_parts;
             norm_parts.push_back(std::string(kModulePrefix));
-            for(auto& p : parts) {
+            for(auto& p: parts) {
                 norm_parts.push_back(normalize_name(p));
             }
             if(partition.empty()) {
@@ -184,7 +187,7 @@ auto compute_page_path(const PageIdentity& identity)
             auto parts = split_qualified(identity.qualified_name, "::");
             std::vector<std::string> norm_parts;
             norm_parts.push_back(std::string(kNamespacePrefix));
-            for(auto& p : parts) {
+            for(auto& p: parts) {
                 norm_parts.push_back(normalize_name(p));
             }
             norm_parts.push_back("index.md");
@@ -205,8 +208,7 @@ auto compute_page_path(const PageIdentity& identity)
             break;
         }
         case PageType::Workflow: {
-            auto slug = sanitize_workflow_slug(
-                normalize_name(identity.normalized_owner_key));
+            auto slug = sanitize_workflow_slug(normalize_name(identity.normalized_owner_key));
             std::vector<std::string> norm_parts;
             norm_parts.push_back(std::string(kWorkflowPrefix));
             norm_parts.push_back(slug + ".md");
@@ -227,12 +229,14 @@ auto compute_page_path(const PageIdentity& identity)
 auto validate_no_path_conflicts(const std::vector<std::pair<std::string, std::string>>& path_to_id)
     -> std::expected<void, PathError> {
     std::unordered_map<std::string, std::string> seen;
-    for(auto& [path, id] : path_to_id) {
+    for(auto& [path, id]: path_to_id) {
         auto [it, inserted] = seen.emplace(path, id);
         if(!inserted) {
-            return std::unexpected(PathError{
-                .message = std::format("path conflict: '{}' and '{}' both map to '{}'",
-                                       it->second, id, path)});
+            return std::unexpected(
+                PathError{.message = std::format("path conflict: '{}' and '{}' both map to '{}'",
+                                                 it->second,
+                                                 id,
+                                                 path)});
         }
     }
     return {};

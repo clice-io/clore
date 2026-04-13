@@ -1,31 +1,13 @@
-Write a workflow description for "{{target_name}}".
-
-Start your response with a single-line short descriptive title (3–8 words) for this workflow, prefixed with "Title: ". Then leave a blank line before the workflow description.
-
-Example first line:
-Title: Configuration Loading and Validation
+R"clore(Write a workflow page for `{{target_name}}`.
 
 Output:
 - Markdown fragment only
-- 2 to 5 paragraphs
-- No heading
+- May start with `Title: ...` on the first line if you want to refine the page title
+- Use headings only from level 2 downward
 - No YAML
-- Follow the output language requested by the system prompt
-- MUST include at least one mermaid diagram (```mermaid ... ```) showing the call flow or data flow of this workflow
+- No code fences or pasted source code
 
-Must explain:
-- the high-level purpose and goal of this workflow
-- what triggers this workflow and what its entry point is
-- the step-by-step logic of how data flows through the calling chain
-- the role each participant function/module plays in the chain
-- what outputs or side effects this workflow produces
-
-Must not:
-- list raw symbol signatures
-- repeat the participant list verbatim
-- describe internal implementation details of individual functions
-
+Describe the workflow, key stages, and the responsibilities of the participating symbols.
 Use only the EVIDENCE section below.
-If evidence is insufficient, explicitly explain what key evidence is missing.
 
-{{evidence}}
+{{evidence}})clore"
