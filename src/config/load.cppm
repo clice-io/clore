@@ -1,5 +1,6 @@
 module;
 
+#include <algorithm>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -99,10 +100,12 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
 }
 
 auto reject_forbidden_keys(const ::toml::table& table) -> std::expected<void, ConfigError> {
-    constexpr std::string_view forbidden_top_level_keys[] = {
+    constexpr std::string_view cli_backed_keys[] = {
         "compile_commands_path",
         "project_root",
         "output_root",
+    };
+    constexpr std::string_view removed_sections[] = {
         "validation",
         "navigation",
         "builtin",
@@ -114,11 +117,29 @@ auto reject_forbidden_keys(const ::toml::table& table) -> std::expected<void, Co
         "section_order",
     };
 
-    for(auto key : forbidden_top_level_keys) {
-        if(table.contains(key)) {
+    auto contains_key = [](const auto& keys, std::string_view key) {
+        for(auto candidate : keys) {
+            if(candidate == key) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    for(const auto& [key, _] : table) {
+        if(key.str().empty()) {
+            continue;
+        }
+
+        auto key_name = std::string_view{key.str()};
+        if(contains_key(cli_backed_keys, key_name)) {
             return std::unexpected(ConfigError{
                 .message = std::format("configuration key '{}' is not supported; use CLI arguments instead",
-                                       key)});
+                                       key_name)});
+        }
+        if(contains_key(removed_sections, key_name)) {
+            return std::unexpected(ConfigError{
+                .message = std::format("configuration key '{}' is no longer supported", key_name)});
         }
     }
 

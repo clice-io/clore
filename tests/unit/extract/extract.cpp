@@ -155,6 +155,18 @@ void Widget::set_value(int v) { value_ = v; }
         EXPECT_TRUE(found_multiply);
         EXPECT_TRUE(found_widget);
 
+        auto math_h = (temp_dir / "src" / "math.h").lexically_normal().generic_string();
+        auto math_cpp = (temp_dir / "src" / "math.cpp").lexically_normal().generic_string();
+        auto add_it = std::ranges::find_if(model.symbols, [](const auto& item) {
+            return item.second.qualified_name == "mylib::math::add";
+        });
+        ASSERT_TRUE(add_it != model.symbols.end());
+        EXPECT_EQ(add_it->second.declaration_location.file, math_h);
+        ASSERT_TRUE(add_it->second.definition_location.has_value());
+        EXPECT_EQ(add_it->second.definition_location->file, math_cpp);
+        EXPECT_TRUE(model.files.contains(add_it->second.declaration_location.file));
+        EXPECT_TRUE(model.files.contains(add_it->second.definition_location->file));
+
         fs::remove_all(temp_dir);
     }
 

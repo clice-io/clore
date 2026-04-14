@@ -99,6 +99,9 @@ exclude = ["test/.*", "build/.*"]
 compile_commands_path = "/tmp/compile_commands.json"
 )" );
         EXPECT_FALSE(result.has_value());
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().message,
+              "configuration key 'compile_commands_path' is not supported; use CLI arguments instead");
     }
 
     TEST_CASE(load_rejects_project_root) {
@@ -121,6 +124,9 @@ output_root = "/tmp/output"
 index = true
 )" );
         EXPECT_FALSE(result.has_value());
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().message,
+              "configuration key 'page_types' is no longer supported");
     }
 
     TEST_CASE(load_from_invalid_toml) {
@@ -170,6 +176,9 @@ fail_on_empty_section = true
 fail_on_h1_in_output = true
 )" );
         EXPECT_FALSE(result.has_value());
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().message,
+              "configuration key 'validation' is no longer supported");
     }
 
     TEST_CASE(load_rejects_removed_navigation_section) {

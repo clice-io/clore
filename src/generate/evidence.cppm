@@ -119,6 +119,32 @@ auto collect_facts(const extract::ProjectModel& model,
     return facts;
 }
 
+template <typename... Groups>
+auto collect_merged_facts(const extract::ProjectModel& model,
+                          std::uint32_t max_count,
+                          const std::string& project_root,
+                          const Groups&... groups) -> std::vector<SymbolFact> {
+    std::vector<SymbolFact> facts;
+    std::unordered_set<extract::SymbolID> seen;
+
+    auto append_group = [&](const auto& ids) {
+        for(const auto& id : ids) {
+            if(facts.size() >= max_count) {
+                return;
+            }
+            if(!seen.insert(id).second) {
+                continue;
+            }
+            if(auto* sym = lookup(model, id)) {
+                facts.push_back(to_symbol_fact(*sym, project_root));
+            }
+        }
+    };
+
+    (append_group(groups), ...);
+    return facts;
+}
+
 auto collect_summaries(const PageSummaryCache& cache,
                        const std::vector<std::string>& keys,
                        std::uint32_t max_count) -> std::vector<std::string> {
@@ -403,9 +429,11 @@ auto build_evidence_for_function_declaration_summary(
     pack.target_facts.push_back(to_symbol_fact(target, root));
 
     // Callers — how this function is used
-    pack.reverse_usage_context = collect_facts(model, target.called_by, rules.max_callers, root);
-    auto refs = collect_facts(model, target.referenced_by, rules.max_callers, root);
-    for(auto& f : refs) pack.reverse_usage_context.push_back(std::move(f));
+    pack.reverse_usage_context = collect_merged_facts(model,
+                                                      rules.max_callers,
+                                                      root,
+                                                      target.called_by,
+                                                      target.referenced_by);
 
     // Callees — what it delegates to (helps understand contract)
     pack.dependency_context = collect_facts(model, target.calls, rules.max_callees, root);
@@ -489,14 +517,15 @@ auto build_evidence_for_type_declaration_summary(
     pack.target_facts.push_back(to_symbol_fact(target, root));
 
     // Callers / references — how this type is used
-    pack.reverse_usage_context = collect_facts(model, target.called_by, rules.max_callers, root);
-    auto refs = collect_facts(model, target.referenced_by, rules.max_callers, root);
-    for(auto& f : refs) pack.reverse_usage_context.push_back(std::move(f));
+    pack.reverse_usage_context = collect_merged_facts(model,
+                                                      rules.max_callers,
+                                                      root,
+                                                      target.called_by,
+                                                      target.referenced_by,
+                                                      target.derived);
 
     // Base types and derived types
     pack.dependency_context = collect_facts(model, target.bases, rules.max_callees, root);
-    auto derived = collect_facts(model, target.derived, rules.max_callers, root);
-    for(auto& f : derived) pack.reverse_usage_context.push_back(std::move(f));
 
     // Sibling types as local context
     if(!target.enclosing_namespace.empty()) {

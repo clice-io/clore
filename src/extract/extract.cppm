@@ -651,15 +651,29 @@ auto extract_project(const config::TaskConfig& config)
                 continue;
             }
 
-            auto symbol_id = sym.id;
+            auto normalized_sym = sym;
+            normalized_sym.declaration_location.file = owner_path.generic_string();
+            if(normalized_sym.definition_location.has_value() &&
+               !normalized_sym.definition_location->file.empty()) {
+                auto definition_path_result = resolve_path_under_directory(
+                    normalized_sym.definition_location->file,
+                    entry.directory);
+                if(!definition_path_result.has_value()) {
+                    return std::unexpected(std::move(definition_path_result.error()));
+                }
+                normalized_sym.definition_location->file =
+                    definition_path_result->lexically_normal().generic_string();
+            }
+
+            auto symbol_id = normalized_sym.id;
 
             auto sym_it = model.symbols.find(symbol_id);
             if(sym_it == model.symbols.end()) {
-                auto [inserted_it, _] = model.symbols.emplace(symbol_id, sym);
+                auto [inserted_it, _] = model.symbols.emplace(symbol_id, std::move(normalized_sym));
                 sym_it = inserted_it;
                 ++symbols_kept;
             } else {
-                merge_symbol_info(sym_it->second, sym);
+                merge_symbol_info(sym_it->second, std::move(normalized_sym));
             }
         }
 

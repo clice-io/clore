@@ -245,6 +245,28 @@ auto extract_summary_from_prompt_output(const std::string& output) -> std::strin
     return clore::support::ensure_utf8(output);
 }
 
+auto summary_cache_key_for_request(const PagePlan& plan, const PromptRequest& request)
+    -> std::optional<std::string> {
+    switch(request.kind) {
+        case PromptKind::NamespaceSummary:
+        case PromptKind::ModuleSummary:
+            if(!request.target_key.empty()) {
+                return request.target_key;
+            }
+            if(!plan.owner_keys.empty()) {
+                return plan.owner_keys.front();
+            }
+            return std::nullopt;
+        case PromptKind::FunctionDeclarationSummary:
+        case PromptKind::TypeDeclarationSummary:
+            if(!request.target_key.empty()) {
+                return request.target_key;
+            }
+            return std::nullopt;
+        default: return std::nullopt;
+    }
+}
+
 auto render_generated_pages(const PagePlan& plan,
                             const config::TaskConfig& config,
                             const extract::ProjectModel& model,
@@ -268,16 +290,12 @@ auto update_summary_cache(PageSummaryCache& summaries,
                           const std::vector<PromptRequest>& prompt_requests,
                           const std::unordered_map<std::string, std::string>& prompt_outputs)
     -> void {
-    if(plan.owner_keys.empty()) {
-        return;
-    }
-
     for(const auto& request: prompt_requests) {
-        if(!is_page_summary_prompt(request.kind)) {
+        auto cache_key = summary_cache_key_for_request(plan, request);
+        if(!cache_key.has_value()) {
             continue;
         }
-        auto key = prompt_request_key(request);
-        auto it = prompt_outputs.find(key);
+        auto it = prompt_outputs.find(prompt_request_key(request));
         if(it == prompt_outputs.end()) {
             continue;
         }
@@ -285,8 +303,7 @@ auto update_summary_cache(PageSummaryCache& summaries,
         if(summary.empty()) {
             continue;
         }
-        summaries[plan.owner_keys.front()] = std::move(summary);
-        return;
+        summaries[*cache_key] = std::move(summary);
     }
 }
 

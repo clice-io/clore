@@ -859,6 +859,80 @@ TEST_CASE(namespace_summary_prompt_uses_namespace_subject) {
     EXPECT_NE(prompt->find("Write a summary for the namespace `demo::config`."), std::string::npos);
 }
 
+TEST_CASE(function_declaration_summary_deduplicates_and_caps_reverse_usage_context) {
+    ScopedTempDir temp("function_reverse_usage");
+    fs::create_directories(temp.path / "src");
+
+    auto config = make_config(temp.path);
+    config.evidence_rules.max_callers = 2;
+
+    extract::ProjectModel model;
+    auto file = (temp.path / "src" / "demo.cpp").generic_string();
+
+    auto target = make_function_symbol(900, "target", "demo::target", "void target()", file, "demo");
+    auto caller_a = make_function_symbol(901, "callerA", "demo::callerA", "void callerA()", file, "demo");
+    auto caller_b = make_function_symbol(902, "callerB", "demo::callerB", "void callerB()", file, "demo");
+    auto ref_only = make_function_symbol(903, "refOnly", "demo::refOnly", "void refOnly()", file, "demo");
+
+    target.called_by = {caller_a.id, caller_b.id};
+    target.referenced_by = {caller_b.id, ref_only.id};
+
+    add_symbol(model, target);
+    add_symbol(model, caller_a);
+    add_symbol(model, caller_b);
+    add_symbol(model, ref_only);
+    add_namespace(model, "demo", {target.id, caller_a.id, caller_b.id, ref_only.id});
+
+    PageSummaryCache summaries;
+    auto evidence = build_evidence_for_function_declaration_summary(target,
+                                                                    model,
+                                                                    config.evidence_rules,
+                                                                    summaries,
+                                                                    config.project_root);
+
+    ASSERT_EQ(evidence.reverse_usage_context.size(), 2u);
+    EXPECT_EQ(evidence.reverse_usage_context[0].qualified_name, "demo::callerA");
+    EXPECT_EQ(evidence.reverse_usage_context[1].qualified_name, "demo::callerB");
+}
+
+TEST_CASE(type_declaration_summary_deduplicates_and_caps_reverse_usage_context) {
+    ScopedTempDir temp("type_reverse_usage");
+    fs::create_directories(temp.path / "src");
+
+    auto config = make_config(temp.path);
+    config.evidence_rules.max_callers = 3;
+
+    extract::ProjectModel model;
+    auto file = (temp.path / "src" / "widget.cpp").generic_string();
+
+    auto target = make_type_symbol(910, "Widget", "demo::Widget", file, "Widget doc.", "demo");
+    auto use_a = make_function_symbol(911, "useA", "demo::useA", "void useA()", file, "demo");
+    auto use_b = make_function_symbol(912, "useB", "demo::useB", "void useB()", file, "demo");
+    auto derived = make_type_symbol(913, "Derived", "demo::Derived", file, "Derived doc.", "demo");
+
+    target.called_by = {use_a.id};
+    target.referenced_by = {use_a.id, derived.id};
+    target.derived = {derived.id, use_b.id};
+
+    add_symbol(model, target);
+    add_symbol(model, use_a);
+    add_symbol(model, use_b);
+    add_symbol(model, derived);
+    add_namespace(model, "demo", {target.id, use_a.id, use_b.id, derived.id});
+
+    PageSummaryCache summaries;
+    auto evidence = build_evidence_for_type_declaration_summary(target,
+                                                                model,
+                                                                config.evidence_rules,
+                                                                summaries,
+                                                                config.project_root);
+
+    ASSERT_EQ(evidence.reverse_usage_context.size(), 3u);
+    EXPECT_EQ(evidence.reverse_usage_context[0].qualified_name, "demo::useA");
+    EXPECT_EQ(evidence.reverse_usage_context[1].qualified_name, "demo::Derived");
+    EXPECT_EQ(evidence.reverse_usage_context[2].qualified_name, "demo::useB");
+}
+
 TEST_CASE(compute_page_path_places_index_at_root) {
     auto result = compute_page_path(PageIdentity{
         .page_type = PageType::Index,

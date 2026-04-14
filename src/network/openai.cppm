@@ -2330,28 +2330,27 @@ auto LLMClient::submit(std::uint64_t tag, std::string prompt)
     {
         std::lock_guard guard(active_run_mutex_);
         active_run = active_run_;
-    }
-
-    if(active_run != nullptr) {
-        {
-            std::lock_guard guard(active_run->mutex);
-            if(active_run->shutdown || active_run->stop_requested) {
-                return {};
-            }
-
-            active_run->pending.push_back(PendingRequest{
+        if(active_run == nullptr) {
+            pending_.push_back(PendingRequest{
                 .tag = tag,
                 .prompt = std::move(prompt),
             });
+            return {};
         }
-        active_run->condition.notify_one();
-        return {};
     }
 
-    pending_.push_back(PendingRequest{
-        .tag = tag,
-        .prompt = std::move(prompt),
-    });
+    {
+        std::lock_guard guard(active_run->mutex);
+        if(active_run->shutdown || active_run->stop_requested) {
+            return {};
+        }
+
+        active_run->pending.push_back(PendingRequest{
+            .tag = tag,
+            .prompt = std::move(prompt),
+        });
+    }
+    active_run->condition.notify_one();
     return {};
 }
 
@@ -2360,19 +2359,18 @@ auto LLMClient::request_stop() noexcept -> void {
     {
         std::lock_guard guard(active_run_mutex_);
         active_run = active_run_;
-    }
-
-    if(active_run != nullptr) {
-        {
-            std::lock_guard guard(active_run->mutex);
-            active_run->stop_requested = true;
-            active_run->pending.clear();
+        if(active_run == nullptr) {
+            pending_.clear();
+            return;
         }
-        active_run->condition.notify_all();
-        return;
     }
 
-    pending_.clear();
+    {
+        std::lock_guard guard(active_run->mutex);
+        active_run->stop_requested = true;
+        active_run->pending.clear();
+    }
+    active_run->condition.notify_all();
 }
 
 auto LLMClient::compute_retry_delay(std::uint32_t next_attempt) const
@@ -2384,8 +2382,11 @@ auto LLMClient::run(Callback on_complete) -> std::expected<void, LLMError> {
     if(configuration_error_.has_value()) {
         return std::unexpected(*configuration_error_);
     }
-    if(pending_.empty()) {
-        return {};
+    {
+        std::lock_guard guard(active_run_mutex_);
+        if(pending_.empty()) {
+            return {};
+        }
     }
 
     auto environment = detail::read_environment();
@@ -2394,11 +2395,13 @@ auto LLMClient::run(Callback on_complete) -> std::expected<void, LLMError> {
     }
 
     auto run_state = std::make_shared<RunState>();
-    run_state->pending = std::move(pending_);
-    pending_.clear();
-
     {
         std::lock_guard guard(active_run_mutex_);
+        if(pending_.empty()) {
+            return {};
+        }
+        run_state->pending = std::move(pending_);
+        pending_.clear();
         active_run_ = run_state;
     }
 
