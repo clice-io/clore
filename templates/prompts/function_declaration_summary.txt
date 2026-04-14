@@ -1,0 +1,15 @@
+R"clore(Write a declaration summary for the {{target_kind}} `{{target_name}}`.
+
+Context: this summary appears on a declaration page. Focus on caller-facing responsibility and contract.
+
+Output:
+- Markdown fragment only
+- 1 to 2 short paragraphs
+- No heading
+- No YAML
+- No code fences or pasted source code
+
+Do not describe implementation details.
+Use only the EVIDENCE section below.
+
+{{evidence}})clore"

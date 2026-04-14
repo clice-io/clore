@@ -2,6 +2,7 @@ file(GLOB_RECURSE CLORE_MODULE_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/config/*.cppm"
     "${CMAKE_CURRENT_SOURCE_DIR}/extract/*.cppm"
     "${CMAKE_CURRENT_SOURCE_DIR}/generate/*.cppm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/network/*.cppm"
     "${CMAKE_CURRENT_SOURCE_DIR}/support/*.cppm"
 )
 
@@ -31,6 +32,7 @@ target_link_libraries(clore-core PUBLIC
     llvm-libs
     CURL::libcurl
     spdlog::spdlog
+    eventide::async
     eventide::serde::toml
     eventide::serde::json
     simdjson::simdjson

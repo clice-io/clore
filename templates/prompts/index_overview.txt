@@ -1,0 +1,13 @@
+R"clore(Write a top-level overview for this C++ project documentation set.
+
+Output:
+- Markdown fragment only
+- 1 to 2 short paragraphs
+- No heading
+- No YAML
+- No code fences or pasted source code
+
+Summarize the main subsystems and how readers should understand the project at a high level.
+Use only the EVIDENCE section below.
+
+{{evidence}})clore"

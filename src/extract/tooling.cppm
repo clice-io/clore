@@ -14,8 +14,7 @@ import :compdb;
 
 export namespace clore::extract {
 
-auto create_compiler_instance(const CompileEntry& entry,
-                              bool suppress_diagnostics = true)
+auto create_compiler_instance(const CompileEntry& entry)
     -> std::unique_ptr<clang::CompilerInstance>;
 
 }  // namespace clore::extract
@@ -24,8 +23,7 @@ auto create_compiler_instance(const CompileEntry& entry,
 
 namespace clore::extract {
 
-auto create_compiler_instance(const CompileEntry& entry,
-                              bool suppress_diagnostics)
+auto create_compiler_instance(const CompileEntry& entry)
     -> std::unique_ptr<clang::CompilerInstance> {
     auto driver_args = sanitize_driver_arguments(entry);
     if(driver_args.empty()) {
@@ -77,7 +75,6 @@ auto create_compiler_instance(const CompileEntry& entry,
 
     auto instance = std::make_unique<clang::CompilerInstance>(std::move(invocation));
     instance->createDiagnostics(*vfs, new clang::IgnoringDiagConsumer(), true);
-    instance->getDiagnostics().setSuppressAllDiagnostics(suppress_diagnostics);
     instance->createFileManager(vfs);
 
     if(!instance->createTarget()) {

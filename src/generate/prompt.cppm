@@ -1,19 +1,14 @@
 module;
 
 #include <expected>
-#include <filesystem>
 #include <format>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <string_view>
-#include <system_error>
 
 export module generate:prompt;
 
 import :model;
 import :evidence;
-import config;
 
 export namespace clore::generate {
 
@@ -21,10 +16,8 @@ struct PromptError {
     std::string message;
 };
 
-auto load_prompt_template(std::string_view path) -> std::expected<std::string, PromptError>;
-
-auto instantiate_prompt(const std::string& tmpl,
-                        const EvidencePack& evidence) -> std::string;
+auto build_prompt(PromptKind kind, const EvidencePack& evidence)
+    -> std::expected<std::string, PromptError>;
 
 }  // namespace clore::generate
 
@@ -33,6 +26,52 @@ auto instantiate_prompt(const std::string& tmpl,
 namespace clore::generate {
 
 namespace {
+
+constexpr std::string_view kNamespaceSummaryPrompt =
+#include "../../templates/prompts/namespace_summary.txt"
+    ;
+
+constexpr std::string_view kModuleSummaryPrompt =
+#include "../../templates/prompts/module_summary.txt"
+    ;
+
+constexpr std::string_view kModuleArchitecturePrompt =
+#include "../../templates/prompts/module_architecture.txt"
+    ;
+
+constexpr std::string_view kIndexOverviewPrompt =
+#include "../../templates/prompts/index_overview.txt"
+    ;
+
+constexpr std::string_view kFunctionDeclarationSummaryPrompt =
+#include "../../templates/prompts/function_declaration_summary.txt"
+    ;
+
+constexpr std::string_view kFunctionImplementationSummaryPrompt =
+#include "../../templates/prompts/function_implementation_summary.txt"
+    ;
+
+constexpr std::string_view kTypeDeclarationSummaryPrompt =
+#include "../../templates/prompts/type_declaration_summary.txt"
+    ;
+
+constexpr std::string_view kTypeImplementationSummaryPrompt =
+#include "../../templates/prompts/type_implementation_summary.txt"
+    ;
+
+auto prompt_template_of(PromptKind kind) -> std::string_view {
+    switch(kind) {
+        case PromptKind::NamespaceSummary: return kNamespaceSummaryPrompt;
+        case PromptKind::ModuleSummary: return kModuleSummaryPrompt;
+        case PromptKind::ModuleArchitecture: return kModuleArchitecturePrompt;
+        case PromptKind::IndexOverview: return kIndexOverviewPrompt;
+        case PromptKind::FunctionDeclarationSummary: return kFunctionDeclarationSummaryPrompt;
+        case PromptKind::FunctionImplementationSummary: return kFunctionImplementationSummaryPrompt;
+        case PromptKind::TypeDeclarationSummary: return kTypeDeclarationSummaryPrompt;
+        case PromptKind::TypeImplementationSummary: return kTypeImplementationSummaryPrompt;
+    }
+    return {};
+}
 
 auto target_name_of(const EvidencePack& evidence) -> std::string_view {
     if(!evidence.subject_name.empty()) {
@@ -96,53 +135,16 @@ auto instantiate_prompt_with_evidence(const std::string& tmpl,
 
 }  // namespace
 
-auto load_prompt_template(std::string_view path) -> std::expected<std::string, PromptError> {
-    namespace fs = std::filesystem;
-
-    if(path.empty()) {
-        return std::unexpected(PromptError{.message = "prompt template path is empty"});
-    }
-
-    auto file_path = fs::path(path);
-    std::error_code ec;
-    auto exists = fs::exists(file_path, ec);
-    if(ec) {
+auto build_prompt(PromptKind kind, const EvidencePack& evidence)
+    -> std::expected<std::string, PromptError> {
+    auto tmpl = prompt_template_of(kind);
+    if(tmpl.empty()) {
         return std::unexpected(PromptError{
-            .message = std::format("prompt template check failed: {}: {}",
-                                   path, ec.message())});
+            .message = std::format("unsupported prompt kind: {}", prompt_kind_name(kind))});
     }
-    if(!exists) {
-        return std::unexpected(PromptError{
-            .message = std::format("prompt template not found: {}", path)});
-    }
-
-    std::ifstream file(file_path);
-    if(!file.is_open()) {
-        return std::unexpected(PromptError{
-            .message = std::format("failed to open prompt template: {}", path)});
-    }
-
-    std::ostringstream ss;
-    ss << file.rdbuf();
-    auto content = ss.str();
-
-    if(file.bad() || (file.fail() && !file.eof()) || ss.bad()) {
-        return std::unexpected(PromptError{
-            .message = std::format("failed to read prompt template: {}", path)});
-    }
-
-    if(content.empty()) {
-        return std::unexpected(PromptError{
-            .message = std::format("prompt template is empty: {}", path)});
-    }
-
-    return content;
-}
-
-auto instantiate_prompt(const std::string& tmpl,
-                        const EvidencePack& evidence) -> std::string {
-    return instantiate_prompt_with_evidence(
-        tmpl, evidence, format_evidence_text(evidence));
+    return instantiate_prompt_with_evidence(std::string(tmpl),
+                                            evidence,
+                                            format_evidence_text(evidence));
 }
 
 }  // namespace clore::generate

@@ -4,17 +4,21 @@
 
 {{slot:namespace_summary}}
 
+## Diagram
+
+{{block:namespace_diagram}}
+
 ## Subnamespaces
 
 {{block:subnamespaces}}
 
 ## Types
 
-{{block:types_index}}
+{{block:types_declarations}}
 
 ## Functions
 
-{{block:functions_index}}
+{{block:functions_declarations}}
 
 ## Related Pages
 

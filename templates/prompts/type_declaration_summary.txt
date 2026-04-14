@@ -1,0 +1,15 @@
+R"clore(Write a declaration summary for the {{target_kind}} `{{target_name}}`.
+
+Context: this summary appears on a declaration page. Focus on what the type represents and how it is used.
+
+Output:
+- Markdown fragment only
+- 1 to 2 short paragraphs
+- No heading
+- No YAML
+- No code fences or pasted source code
+
+Do not focus on member-by-member implementation detail.
+Use only the EVIDENCE section below.
+
+{{evidence}})clore"

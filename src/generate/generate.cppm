@@ -1,13 +1,17 @@
 module;
 
+#include <algorithm>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <format>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 export module generate;
@@ -18,10 +22,10 @@ export import :evidence;
 export import :prompt;
 export import :render;
 export import :planner;
-export import :llm;
 
 import config;
 import extract;
+import network;
 import support;
 
 export namespace clore::generate {
@@ -30,115 +34,186 @@ auto generate_dry_run(const config::TaskConfig& config, const extract::ProjectMo
     -> std::expected<std::vector<GeneratedPage>, GenerateError>;
 
 /// Non-blocking page generation with structured concurrency.
-/// Pages are written to output_root immediately when all their LLM slots complete.
+/// Pages are written to output_root immediately when all their LLM prompts complete.
 /// Returns the number of pages written.
-auto generate_pages(const config::TaskConfig& config, const extract::ProjectModel& model,
+auto generate_pages(const config::TaskConfig& config,
+                    const extract::ProjectModel& model,
                     std::string_view llm_model,
                     std::uint32_t rate_limit,
-                    std::string_view output_root)
-    -> std::expected<std::size_t, GenerateError>;
+                    std::string_view output_root) -> std::expected<std::size_t, GenerateError>;
 
 auto write_pages(const std::vector<GeneratedPage>& pages, std::string_view output_root)
     -> std::expected<void, GenerateError>;
 
 }  // namespace clore::generate
 
-// ── implementation ──────────────────────────────────────────────────
-
 namespace clore::generate {
 
 namespace {
 
-auto get_page_template_path(const config::TaskConfig& config, PageType type) -> std::string {
-    switch(type) {
-        case PageType::Index:      return config.page_templates.index;
-        case PageType::Module:     return config.page_templates.module_page;
-        case PageType::Namespace:  return config.page_templates.namespace_page;
-        case PageType::Type:       return config.page_templates.type_page;
-        case PageType::File:       return config.page_templates.file_page;
+struct PageState {
+    std::size_t plan_index = 0;
+    std::size_t total_prompts = 0;
+    std::size_t completed_prompts = 0;
+    std::size_t unsatisfied_deps = 0;
+    bool submitted = false;
+    bool written = false;
+    std::unordered_map<std::string, std::string> prompt_outputs;
+};
+
+struct TagInfo {
+    std::size_t state_index = 0;
+    std::string output_key;
+};
+
+auto deduplicate_prompt_requests(const PagePlan& plan) -> std::vector<PromptRequest> {
+    std::vector<PromptRequest> unique;
+    unique.reserve(plan.prompt_requests.size());
+    std::unordered_set<std::string> seen;
+    seen.reserve(plan.prompt_requests.size());
+    for(const auto& request: plan.prompt_requests) {
+        auto key = prompt_request_key(request);
+        if(seen.insert(key).second) {
+            unique.push_back(request);
+        }
     }
-    return {};
+    return unique;
 }
 
-auto build_blocks(const PagePlan& plan, const extract::ProjectModel& model,
-                  const config::TaskConfig& config,
-                  const LinkResolver& links) -> std::unordered_map<std::string, std::string> {
-    std::unordered_map<std::string, std::string> blocks;
-    for(auto& block_name : plan.deterministic_blocks) {
-        blocks[block_name] = render_deterministic_block(block_name, plan, model, config, links);
+auto set_evidence_metadata(EvidencePack pack, const PagePlan& plan, const PromptRequest& request)
+    -> EvidencePack {
+    pack.page_id = plan.page_id;
+    pack.prompt_kind = std::string(prompt_kind_name(request.kind));
+    if(pack.subject_name.empty()) {
+        if(!request.target_key.empty()) {
+            pack.subject_name = request.target_key;
+        } else if(!plan.owner_keys.empty()) {
+            pack.subject_name = plan.owner_keys.front();
+        }
     }
-    return blocks;
+    return pack;
 }
 
-auto build_evidence_for_slot(const SlotPlan& slot, const PagePlan& plan,
-                             const extract::ProjectModel& model,
-                             const config::TaskConfig& config,
-                             const PageSummaryCache& summaries) -> EvidencePack {
-    auto& slot_kind = slot.slot_kind;
-    auto& rules = config.evidence_rules;
+auto build_evidence_for_request(const PromptRequest& request,
+                                const PagePlan& plan,
+                                const extract::ProjectModel& model,
+                                const config::TaskConfig& config,
+                                const PageSummaryCache& summaries) -> EvidencePack {
+    const auto& rules = config.evidence_rules;
 
-    if(slot_kind == "type_overview") {
-        if(!plan.owner_keys.empty()) {
-            for(auto& [id, sym] : model.symbols) {
-                if(sym.qualified_name == plan.owner_keys[0]) {
-                    return build_evidence_for_type_overview(sym, model, rules, summaries, config.project_root);
+    switch(request.kind) {
+        case PromptKind::NamespaceSummary:
+            if(!plan.owner_keys.empty()) {
+                auto ns_it = model.namespaces.find(plan.owner_keys.front());
+                if(ns_it != model.namespaces.end()) {
+                    return set_evidence_metadata(
+                        build_evidence_for_namespace_summary(ns_it->second,
+                                                             model,
+                                                             rules,
+                                                             summaries,
+                                                             config.project_root),
+                        plan,
+                        request);
                 }
             }
-        }
-    }
-
-    if(slot_kind == "type_usage_notes") {
-        if(!plan.owner_keys.empty()) {
-            for(auto& [id, sym] : model.symbols) {
-                if(sym.qualified_name == plan.owner_keys[0]) {
-                    return build_evidence_for_type_usage_notes(sym, model, rules, config.project_root);
+            break;
+        case PromptKind::ModuleSummary:
+            if(!plan.owner_keys.empty()) {
+                if(auto* mod = extract::find_module_by_name(model, plan.owner_keys.front())) {
+                    return set_evidence_metadata(
+                        build_evidence_for_module_summary(*mod,
+                                                          model,
+                                                          rules,
+                                                          summaries,
+                                                          config.project_root),
+                        plan,
+                        request);
                 }
             }
-        }
-    }
-
-    if(slot_kind == "namespace_summary") {
-        if(!plan.owner_keys.empty()) {
-            auto it = model.namespaces.find(plan.owner_keys[0]);
-            if(it != model.namespaces.end()) {
-                return build_evidence_for_namespace_summary(it->second, model, rules, summaries, config.project_root);
-            }
-        }
-    }
-
-    if(slot_kind == "module_summary") {
-        if(!plan.owner_keys.empty()) {
-            for(auto& [source_file, mod_unit] : model.modules) {
-                if(mod_unit.name == plan.owner_keys[0]) {
-                    return build_evidence_for_module_summary(mod_unit, model, rules, summaries, config.project_root);
+            break;
+        case PromptKind::ModuleArchitecture:
+            if(!plan.owner_keys.empty()) {
+                if(auto* mod = extract::find_module_by_name(model, plan.owner_keys.front())) {
+                    return set_evidence_metadata(
+                        build_evidence_for_module_architecture(*mod,
+                                                               model,
+                                                               rules,
+                                                               summaries,
+                                                               config.project_root),
+                        plan,
+                        request);
                 }
             }
-        }
-    }
-
-    if(slot_kind == "module_architecture") {
-        if(!plan.owner_keys.empty()) {
-            for(auto& [source_file, mod_unit] : model.modules) {
-                if(mod_unit.name == plan.owner_keys[0]) {
-                    return build_evidence_for_module_architecture(mod_unit, model, rules, summaries, config.project_root);
+            break;
+        case PromptKind::IndexOverview:
+            return set_evidence_metadata(build_evidence_for_index_overview(model, rules, summaries),
+                                         plan,
+                                         request);
+        case PromptKind::FunctionDeclarationSummary:
+            if(!request.target_key.empty()) {
+                if(auto* sym = find_sym(model, request.target_key)) {
+                    return set_evidence_metadata(
+                        build_evidence_for_function_declaration_summary(*sym,
+                                                                        model,
+                                                                        rules,
+                                                                        summaries,
+                                                                        config.project_root),
+                        plan,
+                        request);
                 }
             }
-        }
+            break;
+        case PromptKind::FunctionImplementationSummary:
+            if(!request.target_key.empty()) {
+                if(auto* sym = find_sym(model, request.target_key)) {
+                    return set_evidence_metadata(
+                        build_evidence_for_function_implementation_summary(*sym,
+                                                                           model,
+                                                                           rules,
+                                                                           config.project_root),
+                        plan,
+                        request);
+                }
+            }
+            break;
+        case PromptKind::TypeDeclarationSummary:
+            if(!request.target_key.empty()) {
+                if(auto* sym = find_sym(model, request.target_key)) {
+                    return set_evidence_metadata(
+                        build_evidence_for_type_declaration_summary(*sym,
+                                                                    model,
+                                                                    rules,
+                                                                    summaries,
+                                                                    config.project_root),
+                        plan,
+                        request);
+                }
+            }
+            break;
+        case PromptKind::TypeImplementationSummary:
+            if(!request.target_key.empty()) {
+                if(auto* sym = find_sym(model, request.target_key)) {
+                    return set_evidence_metadata(
+                        build_evidence_for_type_implementation_summary(*sym,
+                                                                       model,
+                                                                       rules,
+                                                                       config.project_root),
+                        plan,
+                        request);
+                }
+            }
+            break;
     }
 
-    if(slot_kind == "repository_overview" || slot_kind == "reading_guide") {
-        return build_evidence_for_repository_overview(model, rules, summaries);
-    }
-
-    return EvidencePack{.slot_kind = slot_kind};
+    return set_evidence_metadata(EvidencePack{}, plan, request);
 }
 
-auto wrap_prompt_output_for_embed(std::string_view slot_kind, std::string_view prompt)
+auto wrap_prompt_output_for_embed(std::string_view request_key, std::string_view prompt)
     -> std::string {
     std::string wrapped;
-    wrapped.reserve(slot_kind.size() + prompt.size() + 32);
+    wrapped.reserve(request_key.size() + prompt.size() + 32);
     wrapped += "> Prompt (`";
-    wrapped += slot_kind;
+    wrapped += request_key;
     wrapped += "`)\n";
 
     std::istringstream stream{std::string(prompt)};
@@ -158,64 +233,152 @@ auto wrap_prompt_output_for_embed(std::string_view slot_kind, std::string_view p
     return wrapped;
 }
 
-auto render_single_page(const PagePlan& plan,
-                        const config::TaskConfig& config,
-                        const extract::ProjectModel& model,
-                        const std::unordered_map<std::string, std::string>& slot_outputs,
-                        bool embed_prompts,
-                        const LinkResolver& links)
-    -> std::expected<GeneratedPage, GenerateError> {
-
-    auto tmpl_path = get_page_template_path(config, plan.page_type);
-    auto tmpl_result = load_page_template(tmpl_path);
-    if(!tmpl_result.has_value()) {
-        return std::unexpected(GenerateError{
-            .message = std::format("failed to load page template for '{}': {}",
-                                   plan.page_id, tmpl_result.error().message)});
+auto extract_summary_from_prompt_output(const std::string& output) -> std::string {
+    auto end = output.find("\n\n");
+    if(end != std::string::npos) {
+        return clore::support::ensure_utf8(output.substr(0, end));
     }
-
-    auto blocks = build_blocks(plan, model, config, links);
-
-    std::unordered_map<std::string, std::string> embedded_slot_outputs;
-    auto* slots_for_render = &slot_outputs;
-    if(embed_prompts) {
-        embedded_slot_outputs.reserve(slot_outputs.size());
-        for(auto& [slot_kind, output] : slot_outputs) {
-            embedded_slot_outputs[slot_kind] = wrap_prompt_output_for_embed(slot_kind, output);
-        }
-        slots_for_render = &embedded_slot_outputs;
+    if(output.size() > 300) {
+        return clore::support::truncate_utf8(output, 300);
     }
-
-    auto assembly_result = assemble_page(*tmpl_result, plan.title, blocks, *slots_for_render, false);
-    if(!assembly_result.has_value()) {
-        return std::unexpected(GenerateError{
-            .message = std::format("failed to assemble page '{}': {}",
-                                   plan.page_id, assembly_result.error().message)});
-    }
-
-    return GeneratedPage{
-        .relative_path = plan.relative_path,
-        .content = *assembly_result,
-    };
+    return clore::support::ensure_utf8(output);
 }
 
-auto extract_summary_from_slot_output(const std::string& overview_output) -> std::string {
-    // Take first paragraph as summary
-    auto end = overview_output.find("\n\n");
-    if(end != std::string::npos) {
-        return overview_output.substr(0, end);
+auto render_generated_pages(const PagePlan& plan,
+                            const config::TaskConfig& config,
+                            const extract::ProjectModel& model,
+                            const std::unordered_map<std::string, std::string>& prompt_outputs,
+                            const LinkResolver& links)
+    -> std::expected<std::vector<GeneratedPage>, GenerateError> {
+    auto render_result = render_page_bundle(plan, config, model, prompt_outputs, links);
+    if(!render_result.has_value()) {
+        return std::unexpected(GenerateError{
+            .message = std::format("failed to render page '{}': {}",
+                                   plan.page_id,
+                                   render_result.error().message),
+        });
     }
-    if(overview_output.size() > 300) {
-        return overview_output.substr(0, 300);
+
+    return std::move(*render_result);
+}
+
+auto update_summary_cache(PageSummaryCache& summaries,
+                          const PagePlan& plan,
+                          const std::vector<PromptRequest>& prompt_requests,
+                          const std::unordered_map<std::string, std::string>& prompt_outputs)
+    -> void {
+    if(plan.owner_keys.empty()) {
+        return;
     }
-    return overview_output;
+
+    for(const auto& request: prompt_requests) {
+        if(!is_page_summary_prompt(request.kind)) {
+            continue;
+        }
+        auto key = prompt_request_key(request);
+        auto it = prompt_outputs.find(key);
+        if(it == prompt_outputs.end()) {
+            continue;
+        }
+        auto summary = extract_summary_from_prompt_output(it->second);
+        if(summary.empty()) {
+            continue;
+        }
+        summaries[plan.owner_keys.front()] = std::move(summary);
+        return;
+    }
+}
+
+auto llms_entry_label(const PagePlan& plan, const config::TaskConfig& config) -> std::string {
+    switch(plan.page_type) {
+        case PageType::Module:
+        case PageType::Namespace:
+            if(!plan.owner_keys.empty()) {
+                return plan.owner_keys.front();
+            }
+            break;
+        case PageType::File:
+            if(!plan.owner_keys.empty()) {
+                return make_source_relative(plan.owner_keys.front(), config.project_root);
+            }
+            break;
+        case PageType::Index: return plan.title;
+    }
+    return plan.title;
+}
+
+auto append_llms_section(std::string& content,
+                         std::string_view heading,
+                         const PagePlanSet& plan_set,
+                         PageType page_type,
+                         const config::TaskConfig& config) -> void {
+    std::vector<const PagePlan*> pages;
+    pages.reserve(plan_set.plans.size());
+    for(const auto& plan: plan_set.plans) {
+        if(plan.page_type == page_type) {
+            pages.push_back(&plan);
+        }
+    }
+    if(pages.empty()) {
+        return;
+    }
+
+    std::sort(pages.begin(),
+              pages.end(),
+              [&](const PagePlan* lhs, const PagePlan* rhs) {
+                  auto lhs_label = llms_entry_label(*lhs, config);
+                  auto rhs_label = llms_entry_label(*rhs, config);
+                  if(lhs_label != rhs_label) {
+                      return lhs_label < rhs_label;
+                  }
+                  return lhs->relative_path < rhs->relative_path;
+              });
+
+    content += "## ";
+    content += heading;
+    content += "\n\n";
+    for(const auto* plan: pages) {
+        content += "- [";
+        content += llms_entry_label(*plan, config);
+        content += "](";
+        content += plan->relative_path;
+        content += ")\n";
+    }
+    content += "\n";
+}
+
+auto build_llms_page(const PagePlanSet& plan_set, const config::TaskConfig& config)
+    -> GeneratedPage {
+    namespace fs = std::filesystem;
+
+    auto project_name = fs::path(config.project_root).filename().generic_string();
+    if(project_name.empty()) {
+        project_name = "project";
+    }
+
+    std::string content;
+    content.reserve(2048);
+    content += "# ";
+    content += project_name;
+    content += "\n\n";
+    content += "> Machine-readable index for the generated C++ reference.\n\n";
+    content += "- [API Reference](index.md)\n\n";
+    content += "The primary reference is organized into modules, namespaces, and source files.\n\n";
+
+    append_llms_section(content, "Modules", plan_set, PageType::Module, config);
+    append_llms_section(content, "Namespaces", plan_set, PageType::Namespace, config);
+    append_llms_section(content, "Files", plan_set, PageType::File, config);
+
+    return GeneratedPage{
+        .relative_path = "llms.txt",
+        .content = std::move(content),
+    };
 }
 
 }  // namespace
 
 auto generate_dry_run(const config::TaskConfig& config, const extract::ProjectModel& model)
     -> std::expected<std::vector<GeneratedPage>, GenerateError> {
-
     auto plan_result = build_page_plan_set(config, model);
     if(!plan_result.has_value()) {
         return std::unexpected(GenerateError{.message = plan_result.error().message});
@@ -223,10 +386,11 @@ auto generate_dry_run(const config::TaskConfig& config, const extract::ProjectMo
 
     auto& plan_set = *plan_result;
     logging::info("page plan: {} pages, generation order size {}",
-                  plan_set.plans.size(), plan_set.generation_order.size());
+                  plan_set.plans.size(),
+                  plan_set.generation_order.size());
 
-    // Build page_id -> plan index
     std::unordered_map<std::string, std::size_t> id_to_index;
+    id_to_index.reserve(plan_set.plans.size());
     for(std::size_t i = 0; i < plan_set.plans.size(); ++i) {
         id_to_index[plan_set.plans[i].page_id] = i;
     }
@@ -235,101 +399,101 @@ auto generate_dry_run(const config::TaskConfig& config, const extract::ProjectMo
     std::vector<GeneratedPage> pages;
     pages.reserve(plan_set.generation_order.size());
 
-    auto links = build_link_resolver(plan_set);
+    auto links = build_link_resolver(plan_set, model);
 
-    for(auto& page_id : plan_set.generation_order) {
+    for(const auto& page_id: plan_set.generation_order) {
         auto idx_it = id_to_index.find(page_id);
-        if(idx_it == id_to_index.end()) continue;
-        auto& plan = plan_set.plans[idx_it->second];
-
-        // Build prompts for dry-run display
-        std::unordered_map<std::string, std::string> slot_outputs;
-        for(auto& slot : plan.slot_plans) {
-            auto evidence = build_evidence_for_slot(slot, plan, model, config, summaries);
-
-            auto tmpl_result = load_prompt_template(slot.prompt_template_path);
-            if(!tmpl_result.has_value()) {
-                slot_outputs[slot.slot_kind] = "> [prompt template load failed: " + tmpl_result.error().message + "]\n";
-                continue;
-            }
-
-            auto prompt = instantiate_prompt(*tmpl_result, evidence);
-            if(prompt.empty()) {
-                return std::unexpected(GenerateError{
-                    .message = std::format(
-                        "prompt rendering produced empty output for slot '{}' in page '{}'",
-                        slot.slot_kind, page_id)});
-            }
-
-            slot_outputs[slot.slot_kind] = std::move(prompt);
+        if(idx_it == id_to_index.end()) {
+            continue;
         }
 
-        auto page_result = render_single_page(plan, config, model, slot_outputs, true, links);
+        const auto& plan = plan_set.plans[idx_it->second];
+        auto prompt_requests = deduplicate_prompt_requests(plan);
+        std::unordered_map<std::string, std::string> prompt_outputs;
+        prompt_outputs.reserve(prompt_requests.size());
+
+        for(const auto& request: prompt_requests) {
+            auto evidence = build_evidence_for_request(request, plan, model, config, summaries);
+            auto prompt_result = build_prompt(request.kind, evidence);
+            if(!prompt_result.has_value()) {
+                return std::unexpected(GenerateError{
+                    .message = std::format("failed to build prompt '{}' for '{}': {}",
+                                           prompt_request_key(request),
+                                           page_id,
+                                           prompt_result.error().message),
+                });
+            }
+            auto key = prompt_request_key(request);
+            prompt_outputs.emplace(key, wrap_prompt_output_for_embed(key, *prompt_result));
+        }
+
+        auto page_result = render_generated_pages(plan, config, model, prompt_outputs, links);
         if(!page_result.has_value()) {
             return std::unexpected(std::move(page_result.error()));
         }
 
-        pages.push_back(std::move(*page_result));
+        for(auto& page: *page_result) {
+            pages.push_back(std::move(page));
+        }
     }
 
+    pages.push_back(build_llms_page(plan_set, config));
     return pages;
 }
 
-auto generate_pages(const config::TaskConfig& config, const extract::ProjectModel& model,
+auto generate_pages(const config::TaskConfig& config,
+                    const extract::ProjectModel& model,
                     std::string_view llm_model,
                     std::uint32_t rate_limit,
-                    std::string_view output_root)
-    -> std::expected<std::size_t, GenerateError> {
-
+                    std::string_view output_root) -> std::expected<std::size_t, GenerateError> {
     auto plan_result = build_page_plan_set(config, model);
     if(!plan_result.has_value()) {
         return std::unexpected(GenerateError{.message = plan_result.error().message});
     }
 
     auto& plan_set = *plan_result;
-    logging::info("page plan: {} pages, generation order size {}",
-                  plan_set.plans.size(), plan_set.generation_order.size());
 
-    // Build page_id -> plan index
+    logging::info("page plan: {} pages, generation order size {}",
+                  plan_set.plans.size(),
+                  plan_set.generation_order.size());
+
     std::unordered_map<std::string, std::size_t> id_to_plan;
+    id_to_plan.reserve(plan_set.plans.size());
     for(std::size_t i = 0; i < plan_set.plans.size(); ++i) {
         id_to_plan[plan_set.plans[i].page_id] = i;
     }
 
-    auto links = build_link_resolver(plan_set);
+    std::vector<std::vector<PromptRequest>> prompt_requests_by_plan;
+    prompt_requests_by_plan.reserve(plan_set.plans.size());
+    for(const auto& plan: plan_set.plans) {
+        prompt_requests_by_plan.push_back(deduplicate_prompt_requests(plan));
+    }
 
-    // ── dependency graph ────────────────────────────────────────────
-
-    struct PageState {
-        std::size_t plan_index;
-        std::size_t total_slots;
-        std::size_t completed_slots = 0;
-        std::size_t unsatisfied_deps = 0;
-        bool submitted = false;
-        bool written = false;
-        std::unordered_map<std::string, std::string> slot_outputs;
-    };
+    auto links = build_link_resolver(plan_set, model);
 
     std::vector<PageState> states;
     states.reserve(plan_set.generation_order.size());
     std::unordered_map<std::string, std::size_t> id_to_state;
+    id_to_state.reserve(plan_set.generation_order.size());
 
-    for(auto& page_id : plan_set.generation_order) {
+    for(const auto& page_id: plan_set.generation_order) {
         auto plan_it = id_to_plan.find(page_id);
-        if(plan_it == id_to_plan.end()) continue;
-        auto state_idx = states.size();
-        id_to_state[page_id] = state_idx;
+        if(plan_it == id_to_plan.end()) {
+            continue;
+        }
+
+        auto state_index = states.size();
+        id_to_state[page_id] = state_index;
         states.push_back(PageState{
             .plan_index = plan_it->second,
-            .total_slots = plan_set.plans[plan_it->second].slot_plans.size(),
+            .total_prompts = prompt_requests_by_plan[plan_it->second].size(),
         });
     }
 
-    // Compute unsatisfied deps + build dependents adjacency list
     std::unordered_map<std::string, std::vector<std::size_t>> dependents;
     for(std::size_t i = 0; i < states.size(); ++i) {
-        auto& plan = plan_set.plans[states[i].plan_index];
-        for(auto& dep_id : plan.depends_on_pages) {
+        const auto& plan = plan_set.plans[states[i].plan_index];
+        for(const auto& dep_id: plan.depends_on_pages) {
             if(id_to_state.contains(dep_id)) {
                 states[i].unsatisfied_deps++;
                 dependents[dep_id].push_back(i);
@@ -337,58 +501,55 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
         }
     }
 
-    // ── shared scheduler state ──────────────────────────────────────
-
-    std::unordered_map<std::string, std::string> prompt_tmpl_cache;
     PageSummaryCache summaries;
     std::size_t written_count = 0;
-
-    struct TagInfo {
-        std::size_t state_index;
-        std::string slot_kind;
-    };
     std::unordered_map<std::uint64_t, TagInfo> tag_map;
     std::uint64_t next_tag = 0;
     std::optional<GenerateError> schedule_error;
 
-    LLMClient client(llm_model, config.llm.system_prompt, rate_limit,
-                     config.llm.retry_count, config.llm.retry_initial_backoff_ms);
+    clore::net::LLMClient client(llm_model,
+                                 config.llm.system_prompt,
+                                 rate_limit,
+                                 config.llm.retry_count,
+                                 config.llm.retry_initial_backoff_ms);
 
-    // ── write a completed page immediately ──────────────────────────
-
-    auto write_completed_page = [&](std::size_t state_idx)
-        -> std::expected<void, GenerateError> {
+    auto write_completed_page = [&](std::size_t state_idx) -> std::expected<void, GenerateError> {
         auto& state = states[state_idx];
         auto& plan = plan_set.plans[state.plan_index];
+        const auto& prompt_requests = prompt_requests_by_plan[state.plan_index];
 
-        auto page_result = render_single_page(plan, config, model, state.slot_outputs, false, links);
+        if(state.prompt_outputs.size() != state.total_prompts) {
+            return std::unexpected(GenerateError{
+                .message = std::format("page '{}' completed with {} of {} prompt outputs",
+                                       plan.page_id,
+                                       state.prompt_outputs.size(),
+                                       state.total_prompts),
+            });
+        }
+
+        auto page_result = render_generated_pages(plan, config, model, state.prompt_outputs, links);
         if(!page_result.has_value()) {
             return std::unexpected(std::move(page_result.error()));
         }
 
-        auto write_r = write_page(*page_result, output_root);
-        if(!write_r.has_value()) {
-            return std::unexpected(GenerateError{.message = write_r.error().message});
+        for(const auto& page: *page_result) {
+            auto write_result = write_page(page, output_root);
+            if(!write_result.has_value()) {
+                return std::unexpected(GenerateError{
+                    .message = write_result.error().message,
+                });
+            }
+            logging::info("  written {}", page.relative_path);
         }
 
         state.written = true;
-        ++written_count;
-        logging::info("  written {}", page_result->relative_path);
+        written_count += page_result->size();
 
-        // Extract summary for dependent pages
-        for(auto& [kind, content] : state.slot_outputs) {
-            if(kind == "type_overview" || kind == "module_summary" ||
-               kind == "namespace_summary") {
-                if(!plan.owner_keys.empty()) {
-                    summaries[plan.owner_keys[0]] = extract_summary_from_slot_output(content);
-                }
-            }
-        }
+        update_summary_cache(summaries, plan, prompt_requests, state.prompt_outputs);
 
-        // Unlock dependents
         auto dep_it = dependents.find(plan.page_id);
         if(dep_it != dependents.end()) {
-            for(auto dep_state_idx : dep_it->second) {
+            for(auto dep_state_idx: dep_it->second) {
                 if(states[dep_state_idx].unsatisfied_deps > 0) {
                     states[dep_state_idx].unsatisfied_deps--;
                 }
@@ -398,8 +559,6 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
         return {};
     };
 
-    // ── submit ready pages (deterministic pages written inline) ─────
-
     auto submit_ready_pages = [&]() -> bool {
         bool submitted_any_llm = false;
         bool changed = true;
@@ -408,69 +567,64 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
             changed = false;
             for(std::size_t i = 0; i < states.size(); ++i) {
                 auto& state = states[i];
-                if(state.submitted || state.unsatisfied_deps > 0) continue;
+                if(state.submitted || state.unsatisfied_deps > 0) {
+                    continue;
+                }
                 state.submitted = true;
 
-                auto& plan = plan_set.plans[state.plan_index];
+                const auto& plan = plan_set.plans[state.plan_index];
+                const auto& prompt_requests = prompt_requests_by_plan[state.plan_index];
 
-                if(state.total_slots == 0) {
-                    // Deterministic page: render + write immediately
-                    auto r = write_completed_page(i);
-                    if(!r.has_value()) {
-                        schedule_error = std::move(r.error());
+                if(state.total_prompts == 0) {
+                    auto write_result = write_completed_page(i);
+                    if(!write_result.has_value()) {
+                        schedule_error = std::move(write_result.error());
                         return submitted_any_llm;
                     }
-                    changed = true;  // might unlock more pages
+                    changed = true;
                     continue;
                 }
 
-                // LLM page: build evidence + prompts, submit to client
-                for(auto& slot : plan.slot_plans) {
-                    auto evidence = build_evidence_for_slot(
-                        slot, plan, model, config, summaries);
-
-                    auto tmpl_it = prompt_tmpl_cache.find(slot.prompt_template_path);
-                    if(tmpl_it == prompt_tmpl_cache.end()) {
-                        auto tmpl_r = load_prompt_template(slot.prompt_template_path);
-                        if(!tmpl_r.has_value()) {
-                            schedule_error = GenerateError{
-                                .message = std::format(
-                                    "failed to load prompt template '{}': {}",
-                                    slot.prompt_template_path, tmpl_r.error().message)};
-                            return submitted_any_llm;
-                        }
-                        tmpl_it = prompt_tmpl_cache.emplace(
-                            slot.prompt_template_path, std::move(*tmpl_r)).first;
-                    }
-
-                    auto prompt = instantiate_prompt(tmpl_it->second, evidence);
-                    if(prompt.empty()) {
+                std::size_t submitted_prompts = 0;
+                for(const auto& request: prompt_requests) {
+                    auto evidence =
+                        build_evidence_for_request(request, plan, model, config, summaries);
+                    auto prompt_result = build_prompt(request.kind, evidence);
+                    if(!prompt_result.has_value()) {
                         schedule_error = GenerateError{
-                            .message = std::format(
-                                "prompt rendering produced empty output for slot '{}' in '{}'",
-                                slot.slot_kind, plan.page_id)};
+                            .message = std::format("failed to build prompt '{}' for '{}': {}",
+                                                   prompt_request_key(request),
+                                                   plan.page_id,
+                                                   prompt_result.error().message),
+                        };
                         return submitted_any_llm;
                     }
 
+                    auto output_key = prompt_request_key(request);
                     auto tag = next_tag++;
-                    tag_map[tag] = TagInfo{.state_index = i, .slot_kind = slot.slot_kind};
-                    auto submit_r = client.submit(tag, std::move(prompt));
-                    if(!submit_r.has_value()) {
-                        schedule_error = GenerateError{.message = submit_r.error().message};
+                    tag_map[tag] = TagInfo{
+                        .state_index = i,
+                        .output_key = output_key,
+                    };
+                    auto submit_result = client.submit(tag, std::move(*prompt_result));
+                    if(!submit_result.has_value()) {
+                        schedule_error = GenerateError{
+                            .message = submit_result.error().message,
+                        };
                         return submitted_any_llm;
                     }
+                    ++submitted_prompts;
                     submitted_any_llm = true;
                 }
 
-                logging::info("submitted LLM for '{}': {} slots",
-                              plan.page_id, plan.slot_plans.size());
+                logging::info("submitted LLM for '{}': {} requests",
+                              plan.page_id,
+                              submitted_prompts);
             }
         }
 
         return submitted_any_llm;
     };
-
-    // ── drive the event loop ────────────────────────────────────────
 
     bool has_llm_work = submit_ready_pages();
     if(schedule_error.has_value()) {
@@ -479,48 +633,81 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
 
     if(has_llm_work) {
         auto run_result = client.run(
-            [&](std::uint64_t tag, std::expected<std::string, LLMError> result) {
-                if(schedule_error.has_value()) return;
-
-                auto tag_it = tag_map.find(tag);
-                if(tag_it == tag_map.end()) return;
-
-                auto state_idx = tag_it->second.state_index;
-                auto& slot_kind = tag_it->second.slot_kind;
-                auto& state = states[state_idx];
-                auto& plan = plan_set.plans[state.plan_index];
-
-                if(result.has_value()) {
-                    auto output_check = validate_output(
-                        *result, config.validation);
-                    if(output_check.has_value()) {
-                        state.slot_outputs[slot_kind] = std::move(*result);
-                    } else {
-                        logging::warn("output validation failed for slot '{}' in '{}': {}",
-                                      slot_kind, plan.page_id,
-                                      output_check.error().message);
-                    }
-                } else {
-                    logging::warn("LLM failed for slot '{}' in '{}': {}",
-                                  slot_kind, plan.page_id, result.error().message);
+            [&](std::uint64_t tag, std::expected<std::string, clore::net::LLMError> result) {
+                if(schedule_error.has_value()) {
+                    return;
                 }
 
-                state.completed_slots++;
+                auto tag_it = tag_map.find(tag);
+                if(tag_it == tag_map.end()) {
+                    return;
+                }
 
-                if(state.completed_slots == state.total_slots) {
-                    auto r = write_completed_page(state_idx);
-                    if(!r.has_value()) {
-                        schedule_error = std::move(r.error());
+                auto tag_info = std::move(tag_it->second);
+                tag_map.erase(tag_it);
+
+                auto& state = states[tag_info.state_index];
+                const auto& plan = plan_set.plans[state.plan_index];
+
+                if(result.has_value()) {
+                    auto normalized_output = normalize_prompt_output(*result);
+                    if(normalized_output != *result && result->find("```") != std::string::npos) {
+                        logging::warn(
+                            "normalized fenced markdown from prompt '{}' in '{}' before validation",
+                            tag_info.output_key,
+                            plan.page_id);
+                    }
+
+                    auto output_check = validate_output(normalized_output);
+                    if(!output_check.has_value()) {
+                        schedule_error = GenerateError{
+                            .message =
+                                std::format("output validation failed for prompt '{}' in '{}': {}",
+                                            tag_info.output_key,
+                                            plan.page_id,
+                                            output_check.error().message),
+                        };
+                        logging::warn(schedule_error->message);
+                        client.request_stop();
                         return;
                     }
+
+                    state.prompt_outputs[tag_info.output_key] = std::move(normalized_output);
+                } else {
+                    schedule_error = GenerateError{
+                        .message = std::format("LLM failed for prompt '{}' in '{}': {}",
+                                               tag_info.output_key,
+                                               plan.page_id,
+                                               result.error().message),
+                    };
+                    logging::warn(schedule_error->message);
+                    client.request_stop();
+                    return;
+                }
+
+                state.completed_prompts++;
+
+                if(state.completed_prompts == state.total_prompts) {
+                    auto write_result = write_completed_page(tag_info.state_index);
+                    if(!write_result.has_value()) {
+                        schedule_error = std::move(write_result.error());
+                        logging::warn(schedule_error->message);
+                        client.request_stop();
+                        return;
+                    }
+
                     submit_ready_pages();
+                    if(schedule_error.has_value()) {
+                        logging::warn(schedule_error->message);
+                        client.request_stop();
+                    }
                 }
             });
 
         if(!run_result.has_value()) {
             return std::unexpected(GenerateError{
-                .message = std::format("LLM event loop error: {}",
-                                       run_result.error().message)});
+                .message = std::format("LLM event loop error: {}", run_result.error().message),
+            });
         }
     }
 
@@ -532,15 +719,22 @@ auto generate_pages(const config::TaskConfig& config, const extract::ProjectMode
         return std::unexpected(GenerateError{.message = "no pages were generated"});
     }
 
+    auto llms_page = build_llms_page(plan_set, config);
+    if(auto result = write_page(llms_page, output_root); !result.has_value()) {
+        return std::unexpected(GenerateError{.message = result.error().message});
+    }
+    logging::info("  written {}", llms_page.relative_path);
+    written_count++;
+
     return written_count;
 }
 
 auto write_pages(const std::vector<GeneratedPage>& pages, std::string_view output_root)
     -> std::expected<void, GenerateError> {
-    for(auto& page : pages) {
-        auto r = write_page(page, output_root);
-        if(!r.has_value()) {
-            return std::unexpected(GenerateError{.message = r.error().message});
+    for(const auto& page: pages) {
+        auto result = write_page(page, output_root);
+        if(!result.has_value()) {
+            return std::unexpected(GenerateError{.message = result.error().message});
         }
     }
     return {};

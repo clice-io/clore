@@ -6,7 +6,7 @@
 #include <format>
 #include <fstream>
 
-#include "extract/compdb_test_utils.h"
+#include "extract/compdb.h"
 
 import config;
 import extract;
@@ -130,6 +130,7 @@ void Widget::set_value(int v) { value_ = v; }
         task_config.compile_commands_path = (temp_dir / "compile_commands.json").string();
         task_config.project_root = temp_dir.string();
         task_config.output_root = (temp_dir / "docs").string();
+        task_config.workspace_root = temp_dir.string();
         task_config.extract.max_snippet_bytes = 2048;
 
         auto result = extract::extract_project(task_config);
@@ -155,6 +156,57 @@ void Widget::set_value(int v) { value_ = v; }
         EXPECT_TRUE(found_widget);
 
         fs::remove_all(temp_dir);
+    }
+
+    TEST_CASE(writes_extract_cache_under_clice_cache_root) {
+        namespace fs = std::filesystem;
+
+        auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
+        auto root = fs::temp_directory_path() /
+                    std::format("clore_extract_cache_test_{}", ticks);
+        fs::create_directories(root / "src");
+
+        {
+            std::ofstream f(root / "src" / "math.cpp");
+            f << R"(
+int add(int lhs, int rhs) {
+    return lhs + rhs;
+}
+)";
+        }
+
+        clore::testing::write_compile_commands(
+            root / "compile_commands.json",
+            {{
+                .directory = root / "src",
+                .file = root / "src" / "math.cpp",
+                .arguments = {
+                    "clang++",
+                    "-std=c++23",
+                    "-c",
+                    "math.cpp",
+                    "-o",
+                    "math.o",
+                },
+            }});
+
+        config::TaskConfig cfg;
+        cfg.compile_commands_path = (root / "compile_commands.json").string();
+        cfg.project_root = root.string();
+        cfg.output_root = (root / "out").string();
+        cfg.workspace_root = root.string();
+        cfg.extract.max_snippet_bytes = 512;
+
+        auto first = extract::extract_project(cfg);
+        ASSERT_TRUE(first.has_value());
+
+        auto cache_path = root / ".clice" / "cache" / "clore" / "extract" / "cache.json";
+        EXPECT_TRUE(fs::exists(cache_path));
+
+        auto second = extract::extract_project(cfg);
+        ASSERT_TRUE(second.has_value());
+
+        fs::remove_all(root);
     }
 
     TEST_CASE(detects_distinct_module_units_in_project_model) {
@@ -328,6 +380,7 @@ TEST_SUITE(extract_filter_security) {
         cfg.compile_commands_path = (root / "compile_commands.json").string();
         cfg.project_root = root.string();
         cfg.output_root = (root / "out").string();
+        cfg.workspace_root = root.string();
         cfg.extract.max_snippet_bytes = 512;
 
         auto result = extract::extract_project(cfg);

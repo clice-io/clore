@@ -5,6 +5,7 @@ module;
 #include <filesystem>
 #include <limits>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -13,21 +14,9 @@ export module generate:evidence;
 import :model;
 import config;
 import extract;
+import support;
 
 export namespace clore::generate {
-
-auto build_evidence_for_type_overview(
-    const extract::SymbolInfo& target,
-    const extract::ProjectModel& model,
-    const config::EvidenceRulesConfig& rules,
-    const PageSummaryCache& summaries,
-    std::string_view project_root) -> EvidencePack;
-
-auto build_evidence_for_type_usage_notes(
-    const extract::SymbolInfo& target,
-    const extract::ProjectModel& model,
-    const config::EvidenceRulesConfig& rules,
-    std::string_view project_root) -> EvidencePack;
 
 auto build_evidence_for_namespace_summary(
     const extract::NamespaceInfo& ns,
@@ -50,10 +39,36 @@ auto build_evidence_for_module_architecture(
     const PageSummaryCache& summaries,
     std::string_view project_root) -> EvidencePack;
 
-auto build_evidence_for_repository_overview(
+auto build_evidence_for_index_overview(
     const extract::ProjectModel& model,
     const config::EvidenceRulesConfig& rules,
     const PageSummaryCache& summaries) -> EvidencePack;
+
+auto build_evidence_for_function_declaration_summary(
+    const extract::SymbolInfo& target,
+    const extract::ProjectModel& model,
+    const config::EvidenceRulesConfig& rules,
+    const PageSummaryCache& summaries,
+    std::string_view project_root) -> EvidencePack;
+
+auto build_evidence_for_function_implementation_summary(
+    const extract::SymbolInfo& target,
+    const extract::ProjectModel& model,
+    const config::EvidenceRulesConfig& rules,
+    std::string_view project_root) -> EvidencePack;
+
+auto build_evidence_for_type_declaration_summary(
+    const extract::SymbolInfo& target,
+    const extract::ProjectModel& model,
+    const config::EvidenceRulesConfig& rules,
+    const PageSummaryCache& summaries,
+    std::string_view project_root) -> EvidencePack;
+
+auto build_evidence_for_type_implementation_summary(
+    const extract::SymbolInfo& target,
+    const extract::ProjectModel& model,
+    const config::EvidenceRulesConfig& rules,
+    std::string_view project_root) -> EvidencePack;
 
 auto format_evidence_text(const EvidencePack& pack) -> std::string;
 
@@ -68,16 +83,6 @@ namespace clore::generate {
 
 namespace {
 
-auto make_source_relative(const std::string& path, const std::string& project_root) -> std::string {
-    namespace fs = std::filesystem;
-    if(path.empty() || project_root.empty()) return path;
-    auto abs = fs::path(path).lexically_normal();
-    auto root = fs::path(project_root).lexically_normal();
-    auto rel = abs.lexically_relative(root);
-    if(rel.empty() || rel.string().starts_with("..")) return path;
-    return rel.generic_string();
-}
-
 auto to_symbol_fact(const extract::SymbolInfo& sym, const std::string& project_root) -> SymbolFact {
     return SymbolFact{
         .id = sym.id,
@@ -87,7 +92,7 @@ auto to_symbol_fact(const extract::SymbolInfo& sym, const std::string& project_r
         .access = sym.access,
         .is_template = sym.is_template,
         .template_params = sym.template_params,
-        .declaration_file = make_source_relative(sym.declaration_location.file, project_root),
+        .declaration_file = clore::generate::make_source_relative(sym.declaration_location.file, project_root),
         .declaration_line = sym.declaration_location.line,
         .doc_comment = sym.doc_comment,
     };
@@ -95,8 +100,7 @@ auto to_symbol_fact(const extract::SymbolInfo& sym, const std::string& project_r
 
 auto lookup(const extract::ProjectModel& model, extract::SymbolID id)
     -> const extract::SymbolInfo* {
-    auto it = model.symbols.find(id);
-    return it != model.symbols.end() ? &it->second : nullptr;
+    return clore::generate::lookup_sym(model, id);
 }
 
 auto collect_facts(const extract::ProjectModel& model,
@@ -130,8 +134,9 @@ auto collect_summaries(const PageSummaryCache& cache,
 }
 
 auto truncate_snippet(const std::string& snippet, std::uint32_t max_bytes) -> std::string {
-    if(snippet.size() <= max_bytes) return snippet;
-    return snippet.substr(0, max_bytes) + "\n// ... truncated";
+    auto normalized = clore::support::ensure_utf8(snippet);
+    if(normalized.size() <= max_bytes) return normalized;
+    return clore::support::truncate_utf8(normalized, max_bytes) + "\n// ... truncated";
 }
 
 auto render_detailed_fact(const SymbolFact& fact) -> std::string {
@@ -215,105 +220,6 @@ auto append_section_bounded(std::string& text, std::string_view title,
 
 }  // namespace
 
-auto build_evidence_for_type_overview(
-    const extract::SymbolInfo& target,
-    const extract::ProjectModel& model,
-    const config::EvidenceRulesConfig& rules,
-    const PageSummaryCache& summaries,
-    std::string_view project_root) -> EvidencePack {
-
-    auto root = std::string(project_root);
-    EvidencePack pack;
-    pack.slot_kind = "type_overview";
-    pack.subject_name = target.qualified_name;
-    pack.subject_kind = std::string(extract::symbol_kind_name(target.kind));
-    pack.target_facts.push_back(to_symbol_fact(target, root));
-
-    // Base types
-    pack.dependency_context = collect_facts(model, target.bases, rules.max_callees, root);
-
-    // Derived types
-    pack.reverse_usage_context = collect_facts(model, target.derived, rules.max_callers, root);
-
-    // Public members as local context
-    std::vector<extract::SymbolID> member_ids;
-    for(auto& child_id : target.children) {
-        if(auto* child = lookup(model, child_id)) {
-            if(child->access.empty() || child->access == "public") {
-                member_ids.push_back(child_id);
-            }
-        }
-    }
-    pack.local_context = collect_facts(model, member_ids, rules.max_siblings, root);
-
-    // Direct callers + callees
-    auto callers = collect_facts(model, target.called_by, rules.max_callers, root);
-    auto callees = collect_facts(model, target.calls, rules.max_callees, root);
-    for(auto& f : callers) pack.reverse_usage_context.push_back(std::move(f));
-    for(auto& f : callees) pack.dependency_context.push_back(std::move(f));
-
-    // Parent namespace
-    if(target.parent.has_value()) {
-        if(auto* parent = lookup(model, *target.parent)) {
-            pack.local_context.push_back(to_symbol_fact(*parent, root));
-        }
-    }
-
-    // Source snippet
-    if(!target.source_snippet.empty()) {
-        pack.source_snippets.push_back(truncate_snippet(target.source_snippet, rules.max_source_bytes));
-    }
-
-    // Doc comment (already in target_facts)
-
-    // Related page summaries
-    std::vector<std::string> summary_keys;
-    for(auto& base_id : target.bases) {
-        if(auto* base = lookup(model, base_id)) {
-            summary_keys.push_back(base->qualified_name);
-        }
-    }
-    pack.related_page_summaries = collect_summaries(summaries, summary_keys, rules.max_related_summaries);
-
-    return pack;
-}
-
-auto build_evidence_for_type_usage_notes(
-    const extract::SymbolInfo& target,
-    const extract::ProjectModel& model,
-    const config::EvidenceRulesConfig& rules,
-    std::string_view project_root) -> EvidencePack {
-
-    auto root = std::string(project_root);
-    EvidencePack pack;
-    pack.slot_kind = "type_usage_notes";
-    pack.subject_name = target.qualified_name;
-    pack.subject_kind = std::string(extract::symbol_kind_name(target.kind));
-    pack.target_facts.push_back(to_symbol_fact(target, root));
-
-    pack.reverse_usage_context = collect_facts(model, target.called_by, rules.max_callers, root);
-    auto refs = collect_facts(model, target.referenced_by, rules.max_callers, root);
-    for(auto& f : refs) pack.reverse_usage_context.push_back(std::move(f));
-
-    // Selected methods
-    std::vector<extract::SymbolID> method_ids;
-    for(auto& child_id : target.children) {
-        if(auto* child = lookup(model, child_id)) {
-            if(child->kind == extract::SymbolKind::Method ||
-               child->kind == extract::SymbolKind::Function) {
-                method_ids.push_back(child_id);
-            }
-        }
-    }
-    pack.local_context = collect_facts(model, method_ids, rules.max_siblings, root);
-
-    if(!target.source_snippet.empty()) {
-        pack.source_snippets.push_back(truncate_snippet(target.source_snippet, rules.max_source_bytes));
-    }
-
-    return pack;
-}
-
 auto build_evidence_for_namespace_summary(
     const extract::NamespaceInfo& ns,
     const extract::ProjectModel& model,
@@ -324,7 +230,7 @@ auto build_evidence_for_namespace_summary(
     auto root = std::string(project_root);
 
     EvidencePack pack;
-    pack.slot_kind = "namespace_summary";
+    pack.prompt_kind = "namespace_summary";
     pack.subject_name = ns.name;
     pack.subject_kind = "namespace";
 
@@ -385,7 +291,7 @@ auto build_evidence_for_module_summary(
 
     auto root = std::string(project_root);
     EvidencePack pack;
-    pack.slot_kind = "module_summary";
+    pack.prompt_kind = "module_summary";
     pack.subject_name = mod.name;
     pack.subject_kind = "module";
 
@@ -414,7 +320,7 @@ auto build_evidence_for_module_architecture(
 
     auto root = std::string(project_root);
     EvidencePack pack;
-    pack.slot_kind = "module_architecture";
+    pack.prompt_kind = "module_architecture";
     pack.subject_name = mod.name;
     pack.subject_kind = "module";
 
@@ -442,15 +348,15 @@ auto build_evidence_for_module_architecture(
     return pack;
 }
 
-auto build_evidence_for_repository_overview(
+auto build_evidence_for_index_overview(
     const extract::ProjectModel& model,
     const config::EvidenceRulesConfig& rules,
     const PageSummaryCache& summaries) -> EvidencePack {
 
     EvidencePack pack;
-    pack.slot_kind = "repository_overview";
-    pack.subject_name = "repository";
-    pack.subject_kind = "repository";
+    pack.prompt_kind = "index_overview";
+    pack.subject_name = "index";
+    pack.subject_kind = "index";
 
     // Top-level modules
     for(auto& [source_file, mod_unit] : model.modules) {
@@ -478,6 +384,184 @@ auto build_evidence_for_repository_overview(
         summary_keys.push_back(fact.qualified_name);
     }
     pack.related_page_summaries = collect_summaries(summaries, summary_keys, rules.max_related_summaries);
+
+    return pack;
+}
+
+auto build_evidence_for_function_declaration_summary(
+    const extract::SymbolInfo& target,
+    const extract::ProjectModel& model,
+    const config::EvidenceRulesConfig& rules,
+    const PageSummaryCache& summaries,
+    std::string_view project_root) -> EvidencePack {
+
+    auto root = std::string(project_root);
+    EvidencePack pack;
+    pack.prompt_kind = "function_declaration_summary";
+    pack.subject_name = target.qualified_name;
+    pack.subject_kind = std::string(extract::symbol_kind_name(target.kind));
+    pack.target_facts.push_back(to_symbol_fact(target, root));
+
+    // Callers — how this function is used
+    pack.reverse_usage_context = collect_facts(model, target.called_by, rules.max_callers, root);
+    auto refs = collect_facts(model, target.referenced_by, rules.max_callers, root);
+    for(auto& f : refs) pack.reverse_usage_context.push_back(std::move(f));
+
+    // Callees — what it delegates to (helps understand contract)
+    pack.dependency_context = collect_facts(model, target.calls, rules.max_callees, root);
+
+    // Sibling functions in the same namespace as local context
+    if(!target.enclosing_namespace.empty()) {
+        auto ns_it = model.namespaces.find(target.enclosing_namespace);
+        if(ns_it != model.namespaces.end()) {
+            std::vector<extract::SymbolID> sibling_ids;
+            for(auto& sym_id : ns_it->second.symbols) {
+                if(sym_id == target.id) continue;
+                if(auto* sym = lookup(model, sym_id)) {
+                    if(is_function_kind(sym->kind)) {
+                        sibling_ids.push_back(sym_id);
+                    }
+                }
+            }
+            pack.local_context = collect_facts(model, sibling_ids, rules.max_siblings, root);
+        }
+    }
+
+    // Related summaries from callers
+    std::vector<std::string> summary_keys;
+    for(auto& f : pack.reverse_usage_context) {
+        summary_keys.push_back(f.qualified_name);
+    }
+    pack.related_page_summaries = collect_summaries(summaries, summary_keys, rules.max_related_summaries);
+
+    return pack;
+}
+
+auto build_evidence_for_function_implementation_summary(
+    const extract::SymbolInfo& target,
+    const extract::ProjectModel& model,
+    const config::EvidenceRulesConfig& rules,
+    std::string_view project_root) -> EvidencePack {
+
+    auto root = std::string(project_root);
+    EvidencePack pack;
+    pack.prompt_kind = "function_implementation_summary";
+    pack.subject_name = target.qualified_name;
+    pack.subject_kind = std::string(extract::symbol_kind_name(target.kind));
+    pack.target_facts.push_back(to_symbol_fact(target, root));
+
+    // Source snippet — the primary evidence for implementation description
+    if(!target.source_snippet.empty()) {
+        pack.source_snippets.push_back(truncate_snippet(target.source_snippet, rules.max_source_bytes));
+    }
+
+    // Callees — what this function delegates to internally
+    pack.dependency_context = collect_facts(model, target.calls, rules.max_callees, root);
+
+    // Local context: other symbols defined in the same file
+    if(target.definition_location.has_value() && !target.definition_location->file.empty()) {
+        auto file_it = model.files.find(target.definition_location->file);
+        if(file_it != model.files.end()) {
+            std::vector<extract::SymbolID> local_ids;
+            for(auto& sym_id : file_it->second.symbols) {
+                if(sym_id == target.id) continue;
+                local_ids.push_back(sym_id);
+            }
+            pack.local_context = collect_facts(model, local_ids, rules.max_siblings, root);
+        }
+    }
+
+    return pack;
+}
+
+auto build_evidence_for_type_declaration_summary(
+    const extract::SymbolInfo& target,
+    const extract::ProjectModel& model,
+    const config::EvidenceRulesConfig& rules,
+    const PageSummaryCache& summaries,
+    std::string_view project_root) -> EvidencePack {
+
+    auto root = std::string(project_root);
+    EvidencePack pack;
+    pack.prompt_kind = "type_declaration_summary";
+    pack.subject_name = target.qualified_name;
+    pack.subject_kind = std::string(extract::symbol_kind_name(target.kind));
+    pack.target_facts.push_back(to_symbol_fact(target, root));
+
+    // Callers / references — how this type is used
+    pack.reverse_usage_context = collect_facts(model, target.called_by, rules.max_callers, root);
+    auto refs = collect_facts(model, target.referenced_by, rules.max_callers, root);
+    for(auto& f : refs) pack.reverse_usage_context.push_back(std::move(f));
+
+    // Base types and derived types
+    pack.dependency_context = collect_facts(model, target.bases, rules.max_callees, root);
+    auto derived = collect_facts(model, target.derived, rules.max_callers, root);
+    for(auto& f : derived) pack.reverse_usage_context.push_back(std::move(f));
+
+    // Sibling types as local context
+    if(!target.enclosing_namespace.empty()) {
+        auto ns_it = model.namespaces.find(target.enclosing_namespace);
+        if(ns_it != model.namespaces.end()) {
+            std::vector<extract::SymbolID> sibling_ids;
+            for(auto& sym_id : ns_it->second.symbols) {
+                if(sym_id == target.id) continue;
+                if(auto* sym = lookup(model, sym_id)) {
+                    if(is_type_kind(sym->kind)) {
+                        sibling_ids.push_back(sym_id);
+                    }
+                }
+            }
+            pack.local_context = collect_facts(model, sibling_ids, rules.max_siblings, root);
+        }
+    }
+
+    // Related summaries
+    std::vector<std::string> summary_keys;
+    for(auto& f : pack.dependency_context) {
+        summary_keys.push_back(f.qualified_name);
+    }
+    pack.related_page_summaries = collect_summaries(summaries, summary_keys, rules.max_related_summaries);
+
+    return pack;
+}
+
+auto build_evidence_for_type_implementation_summary(
+    const extract::SymbolInfo& target,
+    const extract::ProjectModel& model,
+    const config::EvidenceRulesConfig& rules,
+    std::string_view project_root) -> EvidencePack {
+
+    auto root = std::string(project_root);
+    EvidencePack pack;
+    pack.prompt_kind = "type_implementation_summary";
+    pack.subject_name = target.qualified_name;
+    pack.subject_kind = std::string(extract::symbol_kind_name(target.kind));
+    pack.target_facts.push_back(to_symbol_fact(target, root));
+
+    // Source snippet — primary evidence for implementation
+    if(!target.source_snippet.empty()) {
+        pack.source_snippets.push_back(truncate_snippet(target.source_snippet, rules.max_source_bytes));
+    }
+
+    // Members as local context
+    std::vector<extract::SymbolID> member_ids;
+    for(auto& child_id : target.children) {
+        member_ids.push_back(child_id);
+    }
+    pack.local_context = collect_facts(model, member_ids, rules.max_siblings, root);
+
+    // Base types as dependencies
+    pack.dependency_context = collect_facts(model, target.bases, rules.max_callees, root);
+
+    // Methods' callees as further dependency context
+    for(auto& child_id : target.children) {
+        if(auto* child = lookup(model, child_id)) {
+            if(is_function_kind(child->kind)) {
+                auto child_callees = collect_facts(model, child->calls, rules.max_callees, root);
+                for(auto& f : child_callees) pack.dependency_context.push_back(std::move(f));
+            }
+        }
+    }
 
     return pack;
 }
