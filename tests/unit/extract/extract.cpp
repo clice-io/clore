@@ -211,12 +211,18 @@ int add(int lhs, int rhs) {
 
         auto first = extract::extract_project(cfg);
         ASSERT_TRUE(first.has_value());
+        auto first_symbols = first->symbols.size();
+        auto first_files = first->files.size();
 
         auto cache_path = root / ".clice" / "cache" / "clore" / "extract" / "cache.json";
         EXPECT_TRUE(fs::exists(cache_path));
 
         auto second = extract::extract_project(cfg);
         ASSERT_TRUE(second.has_value());
+
+        // Verify the cache was used by comparing results
+        EXPECT_EQ(second->symbols.size(), first_symbols);
+        EXPECT_EQ(second->files.size(), first_files);
 
         fs::remove_all(root);
     }

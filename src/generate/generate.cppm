@@ -99,7 +99,8 @@ auto build_evidence_for_request(const PromptRequest& request,
                                 const PagePlan& plan,
                                 const extract::ProjectModel& model,
                                 const config::TaskConfig& config,
-                                const PageSummaryCache& summaries) -> EvidencePack {
+                                const PageSummaryCache& summaries)
+    -> std::expected<EvidencePack, GenerateError> {
     const auto& rules = config.evidence_rules;
 
     switch(request.kind) {
@@ -116,8 +117,14 @@ auto build_evidence_for_request(const PromptRequest& request,
                         plan,
                         request);
                 }
+                return std::unexpected(GenerateError{
+                    .message = std::format("namespace '{}' not found",
+                                           plan.owner_keys.front()),
+                });
             }
-            break;
+            return std::unexpected(GenerateError{
+                .message = "namespace summary request missing owner_keys",
+            });
         case PromptKind::ModuleSummary:
             if(!plan.owner_keys.empty()) {
                 if(auto* mod = extract::find_module_by_name(model, plan.owner_keys.front())) {
@@ -130,8 +137,14 @@ auto build_evidence_for_request(const PromptRequest& request,
                         plan,
                         request);
                 }
+                return std::unexpected(GenerateError{
+                    .message = std::format("module '{}' not found",
+                                           plan.owner_keys.front()),
+                });
             }
-            break;
+            return std::unexpected(GenerateError{
+                .message = "module summary request missing owner_keys",
+            });
         case PromptKind::ModuleArchitecture:
             if(!plan.owner_keys.empty()) {
                 if(auto* mod = extract::find_module_by_name(model, plan.owner_keys.front())) {
@@ -144,8 +157,14 @@ auto build_evidence_for_request(const PromptRequest& request,
                         plan,
                         request);
                 }
+                return std::unexpected(GenerateError{
+                    .message = std::format("module '{}' not found",
+                                           plan.owner_keys.front()),
+                });
             }
-            break;
+            return std::unexpected(GenerateError{
+                .message = "module architecture request missing owner_keys",
+            });
         case PromptKind::IndexOverview:
             return set_evidence_metadata(build_evidence_for_index_overview(model, rules, summaries),
                                          plan,
@@ -162,8 +181,14 @@ auto build_evidence_for_request(const PromptRequest& request,
                         plan,
                         request);
                 }
+                return std::unexpected(GenerateError{
+                    .message = std::format("symbol '{}' not found",
+                                           request.target_key),
+                });
             }
-            break;
+            return std::unexpected(GenerateError{
+                .message = "function declaration summary request missing target_key",
+            });
         case PromptKind::FunctionImplementationSummary:
             if(!request.target_key.empty()) {
                 if(auto* sym = find_sym(model, request.target_key)) {
@@ -175,8 +200,14 @@ auto build_evidence_for_request(const PromptRequest& request,
                         plan,
                         request);
                 }
+                return std::unexpected(GenerateError{
+                    .message = std::format("symbol '{}' not found",
+                                           request.target_key),
+                });
             }
-            break;
+            return std::unexpected(GenerateError{
+                .message = "function implementation summary request missing target_key",
+            });
         case PromptKind::TypeDeclarationSummary:
             if(!request.target_key.empty()) {
                 if(auto* sym = find_sym(model, request.target_key)) {
@@ -189,8 +220,14 @@ auto build_evidence_for_request(const PromptRequest& request,
                         plan,
                         request);
                 }
+                return std::unexpected(GenerateError{
+                    .message = std::format("symbol '{}' not found",
+                                           request.target_key),
+                });
             }
-            break;
+            return std::unexpected(GenerateError{
+                .message = "type declaration summary request missing target_key",
+            });
         case PromptKind::TypeImplementationSummary:
             if(!request.target_key.empty()) {
                 if(auto* sym = find_sym(model, request.target_key)) {
@@ -202,11 +239,19 @@ auto build_evidence_for_request(const PromptRequest& request,
                         plan,
                         request);
                 }
+                return std::unexpected(GenerateError{
+                    .message = std::format("symbol '{}' not found",
+                                           request.target_key),
+                });
             }
-            break;
+            return std::unexpected(GenerateError{
+                .message = "type implementation summary request missing target_key",
+            });
     }
 
-    return set_evidence_metadata(EvidencePack{}, plan, request);
+    return std::unexpected(GenerateError{
+        .message = std::format("unknown prompt kind"),
+    });
 }
 
 auto wrap_prompt_output_for_embed(std::string_view request_key, std::string_view prompt)
@@ -431,8 +476,16 @@ auto generate_dry_run(const config::TaskConfig& config, const extract::ProjectMo
         prompt_outputs.reserve(prompt_requests.size());
 
         for(const auto& request: prompt_requests) {
-            auto evidence = build_evidence_for_request(request, plan, model, config, summaries);
-            auto prompt_result = build_prompt(request.kind, evidence);
+            auto evidence_result = build_evidence_for_request(request, plan, model, config, summaries);
+            if(!evidence_result.has_value()) {
+                return std::unexpected(GenerateError{
+                    .message = std::format("failed to build evidence for prompt '{}' in '{}': {}",
+                                           prompt_request_key(request),
+                                           page_id,
+                                           evidence_result.error().message),
+                });
+            }
+            auto prompt_result = build_prompt(request.kind, *evidence_result);
             if(!prompt_result.has_value()) {
                 return std::unexpected(GenerateError{
                     .message = std::format("failed to build prompt '{}' for '{}': {}",
@@ -605,9 +658,18 @@ auto generate_pages(const config::TaskConfig& config,
 
                 std::size_t submitted_prompts = 0;
                 for(const auto& request: prompt_requests) {
-                    auto evidence =
+                    auto evidence_result =
                         build_evidence_for_request(request, plan, model, config, summaries);
-                    auto prompt_result = build_prompt(request.kind, evidence);
+                    if(!evidence_result.has_value()) {
+                        schedule_error = GenerateError{
+                            .message = std::format("failed to build evidence for prompt '{}' in '{}': {}",
+                                                   prompt_request_key(request),
+                                                   plan.page_id,
+                                                   evidence_result.error().message),
+                        };
+                        return submitted_any_llm;
+                    }
+                    auto prompt_result = build_prompt(request.kind, *evidence_result);
                     if(!prompt_result.has_value()) {
                         schedule_error = GenerateError{
                             .message = std::format("failed to build prompt '{}' for '{}': {}",

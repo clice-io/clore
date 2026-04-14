@@ -161,8 +161,12 @@ auto collect_summaries(const PageSummaryCache& cache,
 
 auto truncate_snippet(const std::string& snippet, std::uint32_t max_bytes) -> std::string {
     auto normalized = clore::support::ensure_utf8(snippet);
-    if(normalized.size() <= max_bytes) return normalized;
-    return clore::support::truncate_utf8(normalized, max_bytes) + "\n// ... truncated";
+    constexpr std::string_view suffix = "\n// ... truncated";
+    if(normalized.size() <= max_bytes) {
+        return normalized;
+    }
+    auto truncated_max = (max_bytes > suffix.size()) ? (max_bytes - suffix.size()) : 0;
+    return clore::support::truncate_utf8(normalized, truncated_max) + std::string(suffix);
 }
 
 auto render_detailed_fact(const SymbolFact& fact) -> std::string {
@@ -384,8 +388,11 @@ auto build_evidence_for_index_overview(
     pack.subject_name = "index";
     pack.subject_kind = "index";
 
-    // Top-level modules
+    // Top-level modules (respect configured limit)
     for(auto& [source_file, mod_unit] : model.modules) {
+        if(pack.target_facts.size() >= rules.max_top_modules) {
+            break;
+        }
         if(mod_unit.is_interface && mod_unit.name.find(':') == std::string::npos) {
             SymbolFact fact;
             fact.qualified_name = mod_unit.name;
@@ -394,8 +401,11 @@ auto build_evidence_for_index_overview(
         }
     }
 
-    // Top namespaces
+    // Top namespaces (respect configured limit)
     for(auto& [ns_name, ns_info] : model.namespaces) {
+        if(pack.local_context.size() >= rules.max_top_namespaces) {
+            break;
+        }
         if(ns_name.find("::") == std::string::npos) {
             SymbolFact fact;
             fact.qualified_name = ns_name;

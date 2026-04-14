@@ -168,13 +168,25 @@ auto rebuild_lookup_maps(ProjectModel& model) -> void {
 
     for(auto& [symbol_id, sym] : model.symbols) {
         if(!sym.qualified_name.empty()) {
-            model.symbol_ids_by_qualified_name.insert_or_assign(sym.qualified_name, symbol_id);
+            auto [it, inserted] = model.symbol_ids_by_qualified_name.try_emplace(sym.qualified_name, symbol_id);
+            if(!inserted) {
+                logging::warn("duplicate qualified name '{}' for symbols {} and {}",
+                              sym.qualified_name,
+                              it->second.hash,
+                              symbol_id.hash);
+            }
         }
     }
 
     for(auto& [source_file, mod_unit] : model.modules) {
         if(!mod_unit.name.empty()) {
-            model.module_name_to_source.insert_or_assign(mod_unit.name, source_file);
+            auto [it, inserted] = model.module_name_to_source.try_emplace(mod_unit.name, source_file);
+            if(!inserted) {
+                logging::warn("duplicate module name '{}' from '{}' and '{}'",
+                              mod_unit.name,
+                              it->second,
+                              source_file);
+            }
         }
     }
 }
@@ -241,7 +253,6 @@ auto find_enclosing_namespace(const ProjectModel& model, const SymbolInfo& sym) 
 template <typename T>
 auto merge_symbol_info_impl(SymbolInfo& current, T&& incoming) -> void {
     const auto& incoming_ref = incoming;
-    auto&& forwarded_incoming = std::forward<T>(incoming);
 
     const bool prefer_incoming_definition =
         incoming_ref.definition_location.has_value() && !current.definition_location.has_value();
@@ -251,60 +262,51 @@ auto merge_symbol_info_impl(SymbolInfo& current, T&& incoming) -> void {
          !incoming_ref.source_snippet.empty());
 
     if(current.name.empty() && !incoming_ref.name.empty()) {
-        current.name = std::forward<decltype(forwarded_incoming)>(forwarded_incoming).name;
+        current.name = incoming_ref.name;
     }
     if(current.qualified_name.empty() && !incoming_ref.qualified_name.empty()) {
-        current.qualified_name =
-            std::forward<decltype(forwarded_incoming)>(forwarded_incoming).qualified_name;
+        current.qualified_name = incoming_ref.qualified_name;
     }
     if(current.enclosing_namespace.empty() && !incoming_ref.enclosing_namespace.empty()) {
-        current.enclosing_namespace =
-            std::forward<decltype(forwarded_incoming)>(forwarded_incoming).enclosing_namespace;
+        current.enclosing_namespace = incoming_ref.enclosing_namespace;
     }
     if(!current.declaration_location.is_known() && incoming_ref.declaration_location.is_known()) {
         current.declaration_location = incoming_ref.declaration_location;
     }
     if((!current.definition_location.has_value() && incoming_ref.definition_location.has_value()) ||
        (prefer_incoming_definition && incoming_ref.definition_location.has_value())) {
-        current.definition_location =
-            std::forward<decltype(forwarded_incoming)>(forwarded_incoming).definition_location;
+        current.definition_location = incoming_ref.definition_location;
     }
     if((current.signature.empty() && !incoming_ref.signature.empty()) ||
        (prefer_incoming_definition && !incoming_ref.signature.empty())) {
-        current.signature = std::forward<decltype(forwarded_incoming)>(forwarded_incoming).signature;
+        current.signature = incoming_ref.signature;
     }
     if(current.doc_comment.empty() && !incoming_ref.doc_comment.empty()) {
-        current.doc_comment =
-            std::forward<decltype(forwarded_incoming)>(forwarded_incoming).doc_comment;
+        current.doc_comment = incoming_ref.doc_comment;
     }
     if(prefer_incoming_snippet) {
-        current.source_snippet =
-            std::forward<decltype(forwarded_incoming)>(forwarded_incoming).source_snippet;
+        current.source_snippet = incoming_ref.source_snippet;
     } else if(current.source_snippet.empty() && !incoming_ref.source_snippet.empty()) {
-        current.source_snippet =
-            std::forward<decltype(forwarded_incoming)>(forwarded_incoming).source_snippet;
+        current.source_snippet = incoming_ref.source_snippet;
     }
     if(!current.parent.has_value() && incoming_ref.parent.has_value()) {
-        current.parent = std::forward<decltype(forwarded_incoming)>(forwarded_incoming).parent;
+        current.parent = incoming_ref.parent;
     }
     if(current.lexical_parent_name.empty() && !incoming_ref.lexical_parent_name.empty()) {
-        current.lexical_parent_name =
-            std::forward<decltype(forwarded_incoming)>(forwarded_incoming).lexical_parent_name;
+        current.lexical_parent_name = incoming_ref.lexical_parent_name;
     }
     if(current.lexical_parent_kind == SymbolKind::Unknown &&
        incoming_ref.lexical_parent_kind != SymbolKind::Unknown) {
         current.lexical_parent_kind = incoming_ref.lexical_parent_kind;
     }
     if(current.access.empty() && !incoming_ref.access.empty()) {
-        current.access = std::forward<decltype(forwarded_incoming)>(forwarded_incoming).access;
+        current.access = incoming_ref.access;
     }
     if(!current.is_template && incoming_ref.is_template) {
         current.is_template = true;
-        current.template_params =
-            std::forward<decltype(forwarded_incoming)>(forwarded_incoming).template_params;
+        current.template_params = incoming_ref.template_params;
     } else if(current.template_params.empty() && !incoming_ref.template_params.empty()) {
-        current.template_params =
-            std::forward<decltype(forwarded_incoming)>(forwarded_incoming).template_params;
+        current.template_params = incoming_ref.template_params;
     }
 
     append_unique_range(current.children, incoming_ref.children);

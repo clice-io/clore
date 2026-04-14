@@ -24,6 +24,8 @@ struct EvidenceRulesConfig {
     std::uint32_t max_siblings = 0;
     std::uint32_t max_source_bytes = 0;
     std::uint32_t max_related_summaries = 0;
+    std::uint32_t max_top_modules = 0;
+    std::uint32_t max_top_namespaces = 0;
 };
 
 struct LLMConfig {
