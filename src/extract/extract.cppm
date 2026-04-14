@@ -570,7 +570,7 @@ auto extract_project(const config::TaskConfig& config)
                           ast_data.symbols.size(), ast_data.relations.size(), dt_ast.count());
         }
 
-        auto cached_ast_copy = ast_data;
+        auto& cached_ast_copy = ast_data;
 
         auto cache_key = fs::path(entry.file).lexically_normal().generic_string();
         auto cache_it = scan_cache.find(cache_key);
