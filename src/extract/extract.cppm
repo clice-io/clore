@@ -311,6 +311,79 @@ auto merge_symbol_info(SymbolInfo& current, SymbolInfo&& incoming) -> void {
     deduplicate(current.referenced_by);
 }
 
+auto merge_symbol_info(SymbolInfo& current, const SymbolInfo& incoming) -> void {
+    const bool prefer_incoming_definition =
+        incoming.definition_location.has_value() && !current.definition_location.has_value();
+    const bool prefer_incoming_snippet =
+        prefer_incoming_definition ||
+        (current.source_snippet.size() < incoming.source_snippet.size() &&
+         !incoming.source_snippet.empty());
+
+    if(current.name.empty() && !incoming.name.empty()) {
+        current.name = incoming.name;
+    }
+    if(current.qualified_name.empty() && !incoming.qualified_name.empty()) {
+        current.qualified_name = incoming.qualified_name;
+    }
+    if(current.enclosing_namespace.empty() && !incoming.enclosing_namespace.empty()) {
+        current.enclosing_namespace = incoming.enclosing_namespace;
+    }
+    if(!current.declaration_location.is_known() && incoming.declaration_location.is_known()) {
+        current.declaration_location = incoming.declaration_location;
+    }
+    if((!current.definition_location.has_value() && incoming.definition_location.has_value()) ||
+       (prefer_incoming_definition && incoming.definition_location.has_value())) {
+        current.definition_location = incoming.definition_location;
+    }
+    if((current.signature.empty() && !incoming.signature.empty()) ||
+       (prefer_incoming_definition && !incoming.signature.empty())) {
+        current.signature = incoming.signature;
+    }
+    if(current.doc_comment.empty() && !incoming.doc_comment.empty()) {
+        current.doc_comment = incoming.doc_comment;
+    }
+    if(prefer_incoming_snippet) {
+        current.source_snippet = incoming.source_snippet;
+    } else if(current.source_snippet.empty() && !incoming.source_snippet.empty()) {
+        current.source_snippet = incoming.source_snippet;
+    }
+    if(!current.parent.has_value() && incoming.parent.has_value()) {
+        current.parent = incoming.parent;
+    }
+    if(current.lexical_parent_name.empty() && !incoming.lexical_parent_name.empty()) {
+        current.lexical_parent_name = incoming.lexical_parent_name;
+    }
+    if(current.lexical_parent_kind == SymbolKind::Unknown &&
+       incoming.lexical_parent_kind != SymbolKind::Unknown) {
+        current.lexical_parent_kind = incoming.lexical_parent_kind;
+    }
+    if(current.access.empty() && !incoming.access.empty()) {
+        current.access = incoming.access;
+    }
+    if(!current.is_template && incoming.is_template) {
+        current.is_template = true;
+        current.template_params = incoming.template_params;
+    } else if(current.template_params.empty() && !incoming.template_params.empty()) {
+        current.template_params = incoming.template_params;
+    }
+
+    append_unique_range(current.children, incoming.children);
+    append_unique_range(current.bases, incoming.bases);
+    append_unique_range(current.derived, incoming.derived);
+    append_unique_range(current.calls, incoming.calls);
+    append_unique_range(current.called_by, incoming.called_by);
+    append_unique_range(current.references, incoming.references);
+    append_unique_range(current.referenced_by, incoming.referenced_by);
+
+    deduplicate(current.children);
+    deduplicate(current.bases);
+    deduplicate(current.derived);
+    deduplicate(current.calls);
+    deduplicate(current.called_by);
+    deduplicate(current.references);
+    deduplicate(current.referenced_by);
+}
+
 auto rebuild_model_indexes(const config::TaskConfig& config, ProjectModel& model) -> void {
     namespace fs = std::filesystem;
 
@@ -540,15 +613,17 @@ auto extract_project(const config::TaskConfig& config)
 
         auto t_ast = Clock::now();
         ASTResult ast_data;
+        const ASTResult* ast_view = nullptr;
         cache::DependencySnapshot ast_deps_snapshot;
+        bool using_cached_ast = false;
 
         auto cache_record_it = cache_records.find(normalized);
         if(cache_state_it->second.ast_valid && cache_record_it != cache_records.end()) {
-            ast_data = cache_record_it->second.ast;
-            ast_deps_snapshot = cache_record_it->second.ast_deps;
+            ast_view = &cache_record_it->second.ast;
+            using_cached_ast = true;
             auto dt_ast = std::chrono::duration_cast<Ms>(Clock::now() - t_ast);
             logging::info("  ast cache: {} symbols, {} relations ({}ms)",
-                          ast_data.symbols.size(), ast_data.relations.size(), dt_ast.count());
+                          ast_view->symbols.size(), ast_view->relations.size(), dt_ast.count());
         } else {
             auto ast_result = extract_symbols(entry, *config.extract.max_snippet_bytes);
             if(!ast_result.has_value()) {
@@ -557,6 +632,7 @@ auto extract_project(const config::TaskConfig& config)
                                            entry.file, ast_result.error().message)});
             }
             ast_data = std::move(*ast_result);
+            ast_view = &ast_data;
             auto ast_deps_result = cache::capture_dependency_snapshot(ast_data.dependencies);
             if(!ast_deps_result.has_value()) {
                 logging::warn("failed to capture AST dependency snapshot for {}: {}",
@@ -569,8 +645,6 @@ auto extract_project(const config::TaskConfig& config)
             logging::info("  ast: {} symbols, {} relations ({}ms)",
                           ast_data.symbols.size(), ast_data.relations.size(), dt_ast.count());
         }
-
-        auto& cached_ast_copy = ast_data;
 
         auto cache_key = fs::path(entry.file).lexically_normal().generic_string();
         auto cache_it = scan_cache.find(cache_key);
@@ -606,7 +680,7 @@ auto extract_project(const config::TaskConfig& config)
         }
 
         std::size_t symbols_kept = 0;
-        for(auto& sym : ast_data.symbols) {
+        for(const auto& sym : ast_view->symbols) {
             namespace fs = std::filesystem;
             auto decl_file = fs::path(sym.declaration_location.file);
             if(decl_file.is_relative()) {
@@ -633,15 +707,15 @@ auto extract_project(const config::TaskConfig& config)
 
             auto sym_it = model.symbols.find(symbol_id);
             if(sym_it == model.symbols.end()) {
-                auto [inserted_it, _] = model.symbols.emplace(symbol_id, std::move(sym));
+                auto [inserted_it, _] = model.symbols.emplace(symbol_id, sym);
                 sym_it = inserted_it;
                 ++symbols_kept;
             } else {
-                merge_symbol_info(sym_it->second, std::move(sym));
+                merge_symbol_info(sym_it->second, sym);
             }
         }
 
-        for(const auto& rel : ast_data.relations) {
+        for(const auto& rel : ast_view->relations) {
             auto from_it = model.symbols.find(rel.from);
             if(from_it == model.symbols.end()) continue;
 
@@ -653,13 +727,20 @@ auto extract_project(const config::TaskConfig& config)
         }
 
         if(cache_state_it->second.source_hash.has_value()) {
-            cache_records.insert_or_assign(normalized, cache::CacheRecord{
-                .compile_signature = cache_state_it->second.compile_signature,
-                .source_hash = *cache_state_it->second.source_hash,
-                .ast_deps = std::move(ast_deps_snapshot),
-                .scan = cache_it->second,
-                .ast = std::move(cached_ast_copy),
-            });
+            if(using_cached_ast) {
+                auto& record = cache_record_it->second;
+                record.compile_signature = cache_state_it->second.compile_signature;
+                record.source_hash = *cache_state_it->second.source_hash;
+                record.scan = cache_it->second;
+            } else {
+                cache_records.insert_or_assign(normalized, cache::CacheRecord{
+                    .compile_signature = cache_state_it->second.compile_signature,
+                    .source_hash = *cache_state_it->second.source_hash,
+                    .ast_deps = std::move(ast_deps_snapshot),
+                    .scan = cache_it->second,
+                    .ast = std::move(ast_data),
+                });
+            }
         } else {
             cache_records.erase(normalized);
         }
