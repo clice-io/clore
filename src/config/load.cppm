@@ -47,6 +47,8 @@ struct RawEvidenceRulesConfig {
     std::uint32_t max_siblings = 0;
     std::uint32_t max_source_bytes = 0;
     std::uint32_t max_related_summaries = 0;
+    std::uint32_t max_top_modules = 0;
+    std::uint32_t max_top_namespaces = 0;
 };
 
 struct RawLLMConfig {
@@ -87,6 +89,8 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
     cfg.evidence_rules.max_siblings = raw.evidence_rules->max_siblings;
     cfg.evidence_rules.max_source_bytes = raw.evidence_rules->max_source_bytes;
     cfg.evidence_rules.max_related_summaries = raw.evidence_rules->max_related_summaries;
+    cfg.evidence_rules.max_top_modules = raw.evidence_rules->max_top_modules;
+    cfg.evidence_rules.max_top_namespaces = raw.evidence_rules->max_top_namespaces;
 
     if(!raw.llm.has_value()) {
         return std::unexpected(ConfigError{.message = "missing required section [llm]"});

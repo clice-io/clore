@@ -22,6 +22,7 @@ struct CompileEntry {
     std::string file;
     std::string directory;
     std::vector<std::string> arguments;
+    std::string cache_key;
 };
 
 struct CompilationDatabase {

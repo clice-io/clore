@@ -1,6 +1,7 @@
 module;
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -9,6 +10,7 @@ module;
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -32,6 +34,11 @@ struct CacheError {
     std::string message;
 };
 
+struct CacheKeyParts {
+    std::string path;
+    std::uint64_t compile_signature;
+};
+
 struct DependencySnapshot {
     std::vector<std::string> files;
     std::vector<std::uint64_t> hashes;
@@ -47,6 +54,10 @@ struct CacheRecord {
 };
 
 auto build_compile_signature(const CompileEntry& entry) -> std::uint64_t;
+
+auto build_cache_key(std::string_view normalized_path, std::uint64_t compile_signature) -> std::string;
+
+auto split_cache_key(std::string_view cache_key) -> std::expected<CacheKeyParts, CacheError>;
 
 auto hash_file(std::string_view path) -> std::expected<std::uint64_t, CacheError>;
 
@@ -72,6 +83,7 @@ namespace json = eventide::serde::json;
 namespace {
 
 constexpr std::uint32_t kExtractCacheFormatVersion = 1;
+constexpr char kCacheKeyDelimiter = '\t';
 
 struct CachedPathHash {
     std::uint32_t path = 0;
@@ -185,6 +197,47 @@ auto build_compile_signature(const CompileEntry& entry) -> std::uint64_t {
         payload.push_back('\0');
     }
     return llvm::xxh3_64bits(payload);
+}
+
+auto build_cache_key(std::string_view normalized_path, std::uint64_t compile_signature) -> std::string {
+    std::string key;
+    key.reserve(normalized_path.size() + 1 + 20);
+    key.append(normalized_path);
+    key.push_back(kCacheKeyDelimiter);
+    key.append(std::to_string(compile_signature));
+    return key;
+}
+
+auto split_cache_key(std::string_view cache_key) -> std::expected<CacheKeyParts, CacheError> {
+    auto delimiter_pos = cache_key.rfind(kCacheKeyDelimiter);
+    if(delimiter_pos == std::string_view::npos) {
+        return std::unexpected(CacheError{
+            .message = std::format("invalid cache key (missing delimiter): {}", cache_key),
+        });
+    }
+
+    auto path_part = cache_key.substr(0, delimiter_pos);
+    auto signature_part = cache_key.substr(delimiter_pos + 1);
+    if(path_part.empty() || signature_part.empty()) {
+        return std::unexpected(CacheError{
+            .message = std::format("invalid cache key (empty path or signature): {}", cache_key),
+        });
+    }
+
+    std::uint64_t signature = 0;
+    auto [ptr, ec] = std::from_chars(signature_part.data(),
+                                     signature_part.data() + signature_part.size(),
+                                     signature);
+    if(ec != std::errc{} || ptr != signature_part.data() + signature_part.size()) {
+        return std::unexpected(CacheError{
+            .message = std::format("invalid cache key signature in {}", cache_key),
+        });
+    }
+
+    return CacheKeyParts{
+        .path = std::string(path_part),
+        .compile_signature = signature,
+    };
 }
 
 auto hash_file(std::string_view path) -> std::expected<std::uint64_t, CacheError> {
@@ -323,7 +376,9 @@ auto load_extract_cache(std::string_view workspace_root)
             return std::unexpected(std::move(deps.error()));
         }
 
-        records.emplace(normalize_path_string(data.paths[entry.source_file]), CacheRecord{
+        auto normalized = normalize_path_string(data.paths[entry.source_file]);
+        auto cache_key = build_cache_key(normalized, entry.compile_signature);
+        records.emplace(std::move(cache_key), CacheRecord{
             .compile_signature = entry.compile_signature,
             .source_hash = entry.source_hash,
             .ast_deps = std::move(*deps),
@@ -368,8 +423,18 @@ auto save_extract_cache(std::string_view workspace_root,
 
     data.entries.reserve(records.size());
     for(const auto& [file, record] : records) {
+        auto key_parts = split_cache_key(file);
+        if(!key_parts.has_value()) {
+            return std::unexpected(std::move(key_parts.error()));
+        }
+        if(record.compile_signature != key_parts->compile_signature) {
+            return std::unexpected(CacheError{
+                .message = std::format("cache key signature mismatch for {}", file),
+            });
+        }
+
         data.entries.push_back(SerializedCacheEntry{
-            .source_file = intern_path(file),
+            .source_file = intern_path(key_parts->path),
             .compile_signature = record.compile_signature,
             .source_hash = record.source_hash,
             .ast_deps = encode_dependency_snapshot(record.ast_deps, path_ids, data.paths),

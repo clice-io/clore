@@ -44,7 +44,7 @@ struct ScanResult {
     std::vector<std::string> module_imports;
 };
 
-/// Cache mapping normalized file path -> ScanResult.
+/// Cache mapping compile cache key (path + signature) -> ScanResult.
 using ScanCache = std::unordered_map<std::string, ScanResult>;
 
 auto scan_file(const CompileEntry& entry) -> std::expected<ScanResult, ScanError>;
@@ -303,10 +303,15 @@ auto build_dependency_graph(const CompilationDatabase& db,
     }
 
     for(auto& entry : db.entries) {
-        namespace fs = std::filesystem;
         auto normalized = normalize_entry_file(entry);
 
-        auto cached_it = initial_cache.find(normalized);
+        if(entry.cache_key.empty()) {
+            return std::unexpected(ScanError{
+                .message = std::format("compile entry is missing cache key for {}", normalized)});
+        }
+        auto cache_key = entry.cache_key;
+
+        auto cached_it = initial_cache.find(cache_key);
         ScanResult scan_result;
         if(cached_it != initial_cache.end()) {
             scan_result = cached_it->second;
@@ -331,7 +336,7 @@ auto build_dependency_graph(const CompilationDatabase& db,
             }
         }
 
-        cache.emplace(normalized, std::move(scan_result));
+        cache.emplace(cache_key, std::move(scan_result));
     }
 
     return result;

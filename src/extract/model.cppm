@@ -116,8 +116,8 @@ struct ProjectModel {
         symbol_ids_by_qualified_name;
 
     /// Exact module-name lookup for generation and cross-linking.
-    std::unordered_map<std::string, std::string, TransparentStringHash, std::equal_to<>>
-        module_name_to_source;
+    std::unordered_map<std::string, std::vector<std::string>, TransparentStringHash, std::equal_to<>>
+        module_name_to_sources;
 
     /// True if the project uses C++20 modules (at least one module declaration found).
     bool uses_modules = false;
@@ -154,11 +154,11 @@ auto find_symbol(const ProjectModel& model, std::string_view qualified_name)
 
 auto find_module_by_name(const ProjectModel& model, std::string_view module_name)
     -> const ModuleUnit* {
-    auto it = model.module_name_to_source.find(module_name);
-    if(it == model.module_name_to_source.end()) {
+    auto it = model.module_name_to_sources.find(module_name);
+    if(it == model.module_name_to_sources.end() || it->second.empty()) {
         return nullptr;
     }
-    return find_module_by_source(model, it->second);
+    return find_module_by_source(model, it->second.front());
 }
 
 auto find_module_by_source(const ProjectModel& model, std::string_view source_file)

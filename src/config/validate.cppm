@@ -116,6 +116,8 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
     if(auto r = validate_nonzero(config.evidence_rules.max_siblings, "evidence_rules.max_siblings"); !r) return r;
     if(auto r = validate_nonzero(config.evidence_rules.max_source_bytes, "evidence_rules.max_source_bytes"); !r) return r;
     if(auto r = validate_nonzero(config.evidence_rules.max_related_summaries, "evidence_rules.max_related_summaries"); !r) return r;
+    if(auto r = validate_nonzero(config.evidence_rules.max_top_modules, "evidence_rules.max_top_modules"); !r) return r;
+    if(auto r = validate_nonzero(config.evidence_rules.max_top_namespaces, "evidence_rules.max_top_namespaces"); !r) return r;
 
     // Validate LLM config
     if(auto r = validate_nonempty(config.llm.system_prompt, "llm.system_prompt"); !r) return r;

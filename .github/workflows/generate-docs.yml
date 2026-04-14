@@ -6,7 +6,7 @@ on:
 
 jobs:
   generate:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     permissions:
       contents: read
 
@@ -40,7 +40,7 @@ jobs:
             --model deepseek-chat
 
       - name: Package documentation
-        run: zip -r clore-docs.zip generated
+        run: tar -cvf clore-docs.tar generated
 
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v7

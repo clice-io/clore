@@ -164,7 +164,7 @@ void deduplicate(std::vector<T>& values) {
 
 auto rebuild_lookup_maps(ProjectModel& model) -> void {
     model.symbol_ids_by_qualified_name.clear();
-    model.module_name_to_source.clear();
+    model.module_name_to_sources.clear();
 
     for(auto& [symbol_id, sym] : model.symbols) {
         if(!sym.qualified_name.empty()) {
@@ -180,13 +180,19 @@ auto rebuild_lookup_maps(ProjectModel& model) -> void {
 
     for(auto& [source_file, mod_unit] : model.modules) {
         if(!mod_unit.name.empty()) {
-            auto [it, inserted] = model.module_name_to_source.try_emplace(mod_unit.name, source_file);
-            if(!inserted) {
-                logging::warn("duplicate module name '{}' from '{}' and '{}'",
-                              mod_unit.name,
-                              it->second,
-                              source_file);
-            }
+            auto& sources = model.module_name_to_sources[mod_unit.name];
+            sources.push_back(source_file);
+        }
+    }
+
+    for(auto& [module_name, sources] : model.module_name_to_sources) {
+        std::sort(sources.begin(), sources.end());
+        sources.erase(std::unique(sources.begin(), sources.end()), sources.end());
+        if(sources.size() > 1) {
+            logging::warn("duplicate module name '{}' from '{}' and '{}'",
+                          module_name,
+                          sources.front(),
+                          sources[1]);
         }
     }
 }
@@ -410,15 +416,25 @@ auto rebuild_model_indexes(const config::TaskConfig& config, ProjectModel& model
 }
 
 /// Populate module information from scan cache into the project model.
-auto build_module_info(ProjectModel& model, const ScanCache& scan_cache) -> void {
+auto build_module_info(ProjectModel& model, const ScanCache& scan_cache)
+    -> std::expected<void, ExtractError> {
     namespace fs = std::filesystem;
 
-    for(auto& [file_path, scan_result] : scan_cache) {
+    for(auto& [cache_key, scan_result] : scan_cache) {
         if(scan_result.module_name.empty()) continue;
+
+        auto key_parts = cache::split_cache_key(cache_key);
+        if(!key_parts.has_value()) {
+            return std::unexpected(ExtractError{
+                .message = std::format("invalid scan cache key '{}': {}",
+                                       cache_key,
+                                       key_parts.error().message),
+            });
+        }
 
         model.uses_modules = true;
 
-        auto source_file = fs::path(file_path).lexically_normal().generic_string();
+        auto source_file = fs::path(key_parts->path).lexically_normal().generic_string();
         auto& mod_unit = model.modules[source_file];
         mod_unit.name = scan_result.module_name;
         mod_unit.is_interface = scan_result.is_interface_unit;
@@ -431,6 +447,8 @@ auto build_module_info(ProjectModel& model, const ScanCache& scan_cache) -> void
             mod_unit.symbols = file_it->second.symbols;
         }
     }
+
+    return {};
 }
 
 }  // namespace
@@ -484,9 +502,10 @@ auto extract_project(const config::TaskConfig& config)
     ScanCache seeded_scan_cache;
     std::size_t ast_cache_hits = 0;
 
-    for(const auto& entry : filtered_db.entries) {
+    for(auto& entry : filtered_db.entries) {
         auto normalized = std::filesystem::path(entry.file).lexically_normal().generic_string();
         auto compile_signature = cache::build_compile_signature(entry);
+        entry.cache_key = cache::build_cache_key(normalized, compile_signature);
         auto source_hash = cache::hash_file(normalized);
         if(!source_hash.has_value()) {
             logging::warn("extract cache disabled for {}: {}",
@@ -500,12 +519,12 @@ auto extract_project(const config::TaskConfig& config)
             evaluation.source_hash = *source_hash;
         }
 
-        if(auto cache_it = cache_records.find(normalized); cache_it != cache_records.end()) {
+        if(auto cache_it = cache_records.find(entry.cache_key); cache_it != cache_records.end()) {
             const auto& record = cache_it->second;
             if(evaluation.source_hash.has_value() &&
                record.compile_signature == compile_signature &&
                record.source_hash == *evaluation.source_hash) {
-                seeded_scan_cache.insert_or_assign(normalized, record.scan);
+                seeded_scan_cache.insert_or_assign(entry.cache_key, record.scan);
                 evaluation.scan_valid = true;
 
                 if(!cache::dependencies_changed(record.ast_deps)) {
@@ -515,7 +534,7 @@ auto extract_project(const config::TaskConfig& config)
             }
         }
 
-        cache_evaluations.insert_or_assign(normalized, evaluation);
+        cache_evaluations.insert_or_assign(entry.cache_key, evaluation);
     }
 
     logging::info("extract cache: {} scan hits, {} ast hits",
@@ -552,7 +571,12 @@ auto extract_project(const config::TaskConfig& config)
         auto& entry = filtered_db.entries[idx];
         namespace fs = std::filesystem;
         auto normalized = fs::path(entry.file).lexically_normal().generic_string();
-        auto cache_state_it = cache_evaluations.find(normalized);
+        if(entry.cache_key.empty()) {
+            return std::unexpected(ExtractError{
+                .message = std::format("missing cache key for {}", normalized)});
+        }
+        auto cache_key = entry.cache_key;
+        auto cache_state_it = cache_evaluations.find(cache_key);
         if(cache_state_it == cache_evaluations.end()) {
             return std::unexpected(ExtractError{
                 .message = std::format("missing extract cache evaluation for {}", normalized)});
@@ -567,7 +591,7 @@ auto extract_project(const config::TaskConfig& config)
         cache::DependencySnapshot ast_deps_snapshot;
         bool using_cached_ast = false;
 
-        auto cache_record_it = cache_records.find(normalized);
+        auto cache_record_it = cache_records.find(cache_key);
         if(cache_state_it->second.ast_valid && cache_record_it != cache_records.end()) {
             ast_view = &cache_record_it->second.ast;
             using_cached_ast = true;
@@ -596,7 +620,6 @@ auto extract_project(const config::TaskConfig& config)
                           ast_data.symbols.size(), ast_data.relations.size(), dt_ast.count());
         }
 
-        auto cache_key = fs::path(entry.file).lexically_normal().generic_string();
         auto cache_it = scan_cache.find(cache_key);
 
         auto& current_file_info = model.files[normalized];
@@ -697,7 +720,7 @@ auto extract_project(const config::TaskConfig& config)
                 record.source_hash = *cache_state_it->second.source_hash;
                 record.scan = cache_it->second;
             } else {
-                cache_records.insert_or_assign(normalized, cache::CacheRecord{
+                cache_records.insert_or_assign(cache_key, cache::CacheRecord{
                     .compile_signature = cache_state_it->second.compile_signature,
                     .source_hash = *cache_state_it->second.source_hash,
                     .ast_deps = std::move(ast_deps_snapshot),
@@ -706,7 +729,7 @@ auto extract_project(const config::TaskConfig& config)
                 });
             }
         } else {
-            cache_records.erase(normalized);
+            cache_records.erase(cache_key);
         }
 
         auto dt_file = std::chrono::duration_cast<Ms>(Clock::now() - t_file);
@@ -737,7 +760,9 @@ auto extract_project(const config::TaskConfig& config)
     logging::info("reverse edges done ({}ms)", dt_reverse.count());
 
     // 5. Build module information from scan results
-    build_module_info(model, scan_cache);
+    if(auto module_result = build_module_info(model, scan_cache); !module_result.has_value()) {
+        return std::unexpected(std::move(module_result.error()));
+    }
     rebuild_lookup_maps(model);
     if(model.uses_modules) {
         logging::info("detected {} module units", model.modules.size());
