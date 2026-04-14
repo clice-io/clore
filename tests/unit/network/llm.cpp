@@ -316,6 +316,16 @@ TEST_SUITE(llm) {
         EXPECT_EQ(*result, "第一段。第二段。");
     }
 
+    TEST_CASE(parse_response_ignores_null_refusal) {
+        auto response = protocol::parse_response(
+            R"({"id":"resp_null_refusal","model":"deepseek-chat","choices":[{"finish_reason":"stop","message":{"content":"Generated docs","refusal":null}}]})");
+
+        ASSERT_TRUE(response.has_value());
+        ASSERT_TRUE(response->message.text.has_value());
+        EXPECT_EQ(*response->message.text, "Generated docs");
+        EXPECT_FALSE(response->message.refusal.has_value());
+    }
+
     TEST_CASE(parse_response_supports_tool_calls_and_typed_arguments) {
         auto response = protocol::parse_response(
             R"({"id":"resp_tool","model":"deepseek-chat","choices":[{"finish_reason":"tool_calls","message":{"content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"search_repo","arguments":"{\"query\":\"llm\",\"limit\":2}"}}]}}]})");

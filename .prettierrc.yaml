@@ -13,11 +13,11 @@ arrowParens: "always"
 endOfLine: "lf"
 
 overrides:
-  - files: "*.md"
+  - files: "**/*.md"
     options:
       proseWrap: "preserve"
       tabWidth: 2
 
-  - files: ["*.json", "*.yaml", "*.yml", ".clang-format", ".clang-tidy"]
+  - files: ["**/*.json", "**/*.yaml", "**/*.yml", ".clang-format", ".clang-tidy"]
     options:
       tabWidth: 2

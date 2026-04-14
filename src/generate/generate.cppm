@@ -16,6 +16,7 @@ module;
 
 export module generate;
 
+export import :markdown;
 export import :model;
 export import :path;
 export import :evidence;

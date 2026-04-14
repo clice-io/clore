@@ -72,6 +72,8 @@ struct Options {
 }  // namespace clore
 
 int main(int argc, const char** argv) {
+    clore::support::enable_utf8_console();
+
     auto args = deco::util::argvify(argc, argv);
     auto result = deco::cli::parse<clore::Options>(args);
 
@@ -93,8 +95,6 @@ int main(int argc, const char** argv) {
         std::println("clore version 0.1.0");
         return 0;
     }
-
-    clore::support::enable_utf8_console();
 
     // Configure logging
     if(opts.log_level.has_value()) {

@@ -1059,6 +1059,19 @@ TEST_CASE(render_page_markdown_omits_reading_guide_section_from_index) {
     EXPECT_NE(result->find("## Files\n"), std::string::npos);
 }
 
+TEST_CASE(render_markdown_clamps_heading_levels_and_prefixes_multiline_blockquotes) {
+    MarkdownDocument document;
+    auto section = make_section(SemanticKind::Section, "demo", "Deep Section", 9, false);
+    section->children.push_back(make_blockquote("first line\nsecond line"));
+    document.children.push_back(MarkdownNode{section});
+
+    auto rendered = render_markdown(document);
+
+    EXPECT_NE(rendered.find("###### Deep Section\n\n"), std::string::npos);
+    EXPECT_NE(rendered.find("> first line\n> second line\n\n"), std::string::npos);
+    EXPECT_EQ(rendered.find("####### Deep Section"), std::string::npos);
+}
+
 TEST_CASE(validate_output_rejects_whitespace_only_content) {
     auto result = validate_output("  \r\n\t\n");
 

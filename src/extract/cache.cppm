@@ -204,22 +204,25 @@ auto capture_dependency_snapshot(const std::vector<std::string>& files)
     snapshot.build_at = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
 
-    std::vector<std::string> normalized = files;
+    std::vector<std::string> normalized;
+    normalized.reserve(files.size());
+    for(const auto& file : files) {
+        normalized.push_back(normalize_path_string(file));
+    }
     std::ranges::sort(normalized);
     normalized.erase(std::unique(normalized.begin(), normalized.end()), normalized.end());
 
     snapshot.files.reserve(normalized.size());
     snapshot.hashes.reserve(normalized.size());
     for(const auto& file : normalized) {
-        auto normalized_path = normalize_path_string(file);
-        auto hash = hash_file(normalized_path);
+        auto hash = hash_file(file);
         if(!hash.has_value()) {
             return std::unexpected(CacheError{
                 .message = std::format("failed to hash dependency '{}': {}",
-                                       normalized_path, hash.error().message),
+                                       file, hash.error().message),
             });
         }
-        snapshot.files.push_back(normalized_path);
+        snapshot.files.push_back(file);
         snapshot.hashes.push_back(*hash);
     }
 
@@ -395,22 +398,38 @@ auto save_extract_cache(std::string_view workspace_root,
         });
     }
 
-    std::error_code remove_error;
-    fs::remove(cache_path, remove_error);
-    if(remove_error && remove_error != std::errc::no_such_file_or_directory) {
-        return std::unexpected(CacheError{
-            .message = std::format("failed to replace extract cache {}: {}",
-                                   cache_path.generic_string(), remove_error.message()),
-        });
-    }
-
     std::error_code rename_error;
     fs::rename(tmp_path, cache_path, rename_error);
     if(rename_error) {
-        return std::unexpected(CacheError{
-            .message = std::format("failed to finalize extract cache {}: {}",
-                                   cache_path.generic_string(), rename_error.message()),
-        });
+        auto can_retry_replace = [&](const std::error_code& error) {
+            return error == std::errc::permission_denied ||
+                   error == std::errc::file_exists ||
+                   error == std::errc::operation_not_permitted;
+        };
+        if(!can_retry_replace(rename_error)) {
+            return std::unexpected(CacheError{
+                .message = std::format("failed to finalize extract cache {}: {}",
+                                       cache_path.generic_string(), rename_error.message()),
+            });
+        }
+
+        std::error_code remove_error;
+        fs::remove(cache_path, remove_error);
+        if(remove_error && remove_error != std::errc::no_such_file_or_directory) {
+            return std::unexpected(CacheError{
+                .message = std::format("failed to replace extract cache {}: {}",
+                                       cache_path.generic_string(), remove_error.message()),
+            });
+        }
+
+        rename_error.clear();
+        fs::rename(tmp_path, cache_path, rename_error);
+        if(rename_error) {
+            return std::unexpected(CacheError{
+                .message = std::format("failed to finalize extract cache {}: {}",
+                                       cache_path.generic_string(), rename_error.message()),
+            });
+        }
     }
 
     return {};

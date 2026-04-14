@@ -40,6 +40,17 @@ FetchContent_MakeAvailable(eventide spdlog)
 
 # Prefer libcurl from the active pixi/conda environment to avoid picking up
 # incompatible system libraries from /usr/lib.
+macro(clore_clear_pixi_curl_cache)
+    unset(CURL_LIBRARY)
+    unset(CURL_LIBRARY CACHE)
+    unset(CURL_LIBRARY_RELEASE)
+    unset(CURL_LIBRARY_RELEASE CACHE)
+    unset(CURL_LIBRARY_DEBUG)
+    unset(CURL_LIBRARY_DEBUG CACHE)
+    unset(CURL_INCLUDE_DIR)
+    unset(CURL_INCLUDE_DIR CACHE)
+endmacro()
+
 set(_clore_curl_from_pixi OFF)
 if(DEFINED ENV{CONDA_PREFIX} AND NOT "$ENV{CONDA_PREFIX}" STREQUAL "")
     set(_clore_pixi_prefix "$ENV{CONDA_PREFIX}")
@@ -75,6 +86,8 @@ if(DEFINED ENV{CONDA_PREFIX} AND NOT "$ENV{CONDA_PREFIX}" STREQUAL "")
         set(_clore_curl_from_pixi ON)
         message(STATUS "Using pixi libcurl: ${_clore_pixi_curl_library}")
     else()
+        clore_clear_pixi_curl_cache()
+        set(_clore_curl_from_pixi OFF)
         message(WARNING
             "CONDA_PREFIX is set to '${_clore_pixi_prefix}', but pixi libcurl was not fully resolved. "
             "Falling back to default CMake CURL lookup.")
@@ -85,6 +98,8 @@ if(DEFINED ENV{CONDA_PREFIX} AND NOT "$ENV{CONDA_PREFIX}" STREQUAL "")
     unset(_clore_curl_include_search_paths)
     unset(_clore_pixi_curl_library)
     unset(_clore_pixi_curl_include_dir)
+else()
+    clore_clear_pixi_curl_cache()
 endif()
 
 if(_clore_curl_from_pixi)

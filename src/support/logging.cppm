@@ -1,5 +1,6 @@
 module;
 
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -7,7 +8,6 @@ module;
 #include <format>
 #include <ios>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -259,11 +259,23 @@ auto read_utf8_text_file(const std::filesystem::path& path)
             std::format("failed to open text file: {}", path.generic_string()));
     }
 
-    std::ostringstream buffer;
-    buffer << file.rdbuf();
-    auto content = buffer.str();
+    std::string content;
+    std::error_code size_error;
+    auto size = std::filesystem::file_size(path, size_error);
+    if(!size_error) {
+        content.reserve(static_cast<std::size_t>(size));
+    }
 
-    if(file.bad() || (file.fail() && !file.eof()) || buffer.bad()) {
+    std::array<char, 8192> chunk{};
+    while(file) {
+        file.read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+        auto bytes_read = file.gcount();
+        if(bytes_read > 0) {
+            content.append(chunk.data(), static_cast<std::size_t>(bytes_read));
+        }
+    }
+
+    if(file.bad() || (file.fail() && !file.eof())) {
         return std::unexpected(
             std::format("failed to read text file: {}", path.generic_string()));
     }

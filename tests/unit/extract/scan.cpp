@@ -1,5 +1,6 @@
 #include "eventide/zest/zest.h"
 
+#include <filesystem>
 #include <string>
 
 import extract;
@@ -100,5 +101,39 @@ import support;
         ASSERT_EQ(result.module_imports.size(), 2u);
         EXPECT_EQ(result.module_imports[0], "extract:tooling");
         EXPECT_EQ(result.module_imports[1], "support");
+    }
+
+    TEST_CASE(build_dependency_graph_normalizes_relative_includes_like_entries) {
+        namespace fs = std::filesystem;
+
+        auto root = (fs::temp_directory_path() / "clore_scan_normalization").lexically_normal();
+        auto source = (root / "src" / "main.cpp").lexically_normal().generic_string();
+        auto header = (root / "header.hpp").lexically_normal().generic_string();
+
+        CompilationDatabase db{
+            .entries = {
+                CompileEntry{
+                    .file = "./src/main.cpp",
+                    .directory = root.generic_string(),
+                },
+                CompileEntry{
+                    .file = "include/../header.hpp",
+                    .directory = root.generic_string(),
+                },
+            },
+        };
+
+        ScanCache initial_cache;
+        initial_cache.emplace(source, ScanResult{
+            .includes = {IncludeInfo{.path = "./header.hpp"}},
+        });
+        initial_cache.emplace(header, ScanResult{});
+
+        auto result = build_dependency_graph(db, initial_cache);
+
+        ASSERT_TRUE(result.has_value());
+        ASSERT_EQ(result->graph.edges.size(), 1u);
+        EXPECT_EQ(result->graph.edges[0].from, source);
+        EXPECT_EQ(result->graph.edges[0].to, header);
     }
 };

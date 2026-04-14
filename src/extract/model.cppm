@@ -1,9 +1,10 @@
 module;
 
 #include <cstdint>
-#include <string_view>
+#include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -12,6 +13,22 @@ export module extract:model;
 import :symbol;
 
 export namespace clore::extract {
+
+struct TransparentStringHash {
+    using is_transparent = void;
+
+    [[nodiscard]] auto operator()(std::string_view value) const noexcept -> std::size_t {
+        return std::hash<std::string_view>{}(value);
+    }
+
+    [[nodiscard]] auto operator()(const std::string& value) const noexcept -> std::size_t {
+        return (*this)(std::string_view{value});
+    }
+
+    [[nodiscard]] auto operator()(const char* value) const noexcept -> std::size_t {
+        return (*this)(std::string_view{value});
+    }
+};
 
 struct SourceLocation {
     std::string file;
@@ -92,13 +109,15 @@ struct ProjectModel {
     std::vector<std::string> file_order;
 
     /// Module units indexed by normalized source file path.
-    std::unordered_map<std::string, ModuleUnit> modules;
+    std::unordered_map<std::string, ModuleUnit, TransparentStringHash, std::equal_to<>> modules;
 
     /// Exact qualified-name lookup for generation and evidence building.
-    std::unordered_map<std::string, SymbolID> symbol_ids_by_qualified_name;
+    std::unordered_map<std::string, SymbolID, TransparentStringHash, std::equal_to<>>
+        symbol_ids_by_qualified_name;
 
     /// Exact module-name lookup for generation and cross-linking.
-    std::unordered_map<std::string, std::string> module_name_to_source;
+    std::unordered_map<std::string, std::string, TransparentStringHash, std::equal_to<>>
+        module_name_to_source;
 
     /// True if the project uses C++20 modules (at least one module declaration found).
     bool uses_modules = false;
@@ -126,7 +145,7 @@ auto lookup_symbol(const ProjectModel& model, SymbolID id) -> const SymbolInfo* 
 
 auto find_symbol(const ProjectModel& model, std::string_view qualified_name)
     -> const SymbolInfo* {
-    auto it = model.symbol_ids_by_qualified_name.find(std::string(qualified_name));
+    auto it = model.symbol_ids_by_qualified_name.find(qualified_name);
     if(it == model.symbol_ids_by_qualified_name.end()) {
         return nullptr;
     }
@@ -135,7 +154,7 @@ auto find_symbol(const ProjectModel& model, std::string_view qualified_name)
 
 auto find_module_by_name(const ProjectModel& model, std::string_view module_name)
     -> const ModuleUnit* {
-    auto it = model.module_name_to_source.find(std::string(module_name));
+    auto it = model.module_name_to_source.find(module_name);
     if(it == model.module_name_to_source.end()) {
         return nullptr;
     }
@@ -144,7 +163,7 @@ auto find_module_by_name(const ProjectModel& model, std::string_view module_name
 
 auto find_module_by_source(const ProjectModel& model, std::string_view source_file)
     -> const ModuleUnit* {
-    auto it = model.modules.find(std::string(source_file));
+    auto it = model.modules.find(source_file);
     return it != model.modules.end() ? &it->second : nullptr;
 }
 

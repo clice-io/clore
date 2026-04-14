@@ -98,15 +98,7 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
     return cfg;
 }
 
-auto reject_forbidden_keys(std::string_view toml_content) -> std::expected<void, ConfigError> {
-    auto parsed = toml::parse(std::string{toml_content});
-    if(!parsed) {
-        return std::unexpected(ConfigError{
-            .message = std::format("TOML parse error: {}", parsed.error().description())});
-    }
-
-    auto& table = parsed.table();
-
+auto reject_forbidden_keys(const ::toml::table& table) -> std::expected<void, ConfigError> {
     constexpr std::string_view forbidden_top_level_keys[] = {
         "compile_commands_path",
         "project_root",
@@ -166,16 +158,24 @@ auto load_config(std::string_view path) -> std::expected<TaskConfig, ConfigError
 }
 
 auto load_config_from_string(std::string_view toml_content) -> std::expected<TaskConfig, ConfigError> {
-    namespace toml = eventide::serde::toml;
+    namespace serde_toml = eventide::serde::toml;
 
     auto normalized_toml = clore::support::strip_utf8_bom(toml_content);
 
-    if(auto forbidden = reject_forbidden_keys(normalized_toml); !forbidden.has_value()) {
+    auto parsed = ::toml::parse(std::string{normalized_toml});
+    if(!parsed) {
+        return std::unexpected(ConfigError{
+            .message = std::format("TOML parse error: {}", parsed.error().description())});
+    }
+
+    auto& table = parsed.table();
+
+    if(auto forbidden = reject_forbidden_keys(table); !forbidden.has_value()) {
         return std::unexpected(std::move(forbidden.error()));
     }
 
     RawTaskConfig raw{};
-    auto result = toml::parse(normalized_toml, raw);
+    auto result = serde_toml::from_toml(table, raw);
     if(!result.has_value()) {
         return std::unexpected(ConfigError{
             .message = std::format("TOML parse error: {}", result.error().message())});

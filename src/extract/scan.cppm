@@ -319,7 +319,10 @@ auto build_dependency_graph(const CompilationDatabase& db,
         }
 
         for(auto& inc : scan_result.includes) {
-            auto inc_normalized = fs::path(inc.path).lexically_normal().generic_string();
+            auto inc_normalized = normalize_entry_file(CompileEntry{
+                .file = inc.path,
+                .directory = entry.directory,
+            });
             if(entry_files.contains(inc_normalized)) {
                 graph.edges.push_back(DependencyEdge{
                     .from = normalized,

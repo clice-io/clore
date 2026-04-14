@@ -45,7 +45,9 @@ auto split_top_level_qualified_name(std::string_view qualified_name)
         }
         if(ch == ':' && template_depth == 0 && index + 1 < qualified_name.size() &&
            qualified_name[index + 1] == ':') {
-            parts.push_back(current);
+            if(!current.empty()) {
+                parts.push_back(current);
+            }
             current.clear();
             ++index;
             continue;

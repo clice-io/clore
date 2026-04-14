@@ -1,5 +1,6 @@
 module;
 
+#include <algorithm>
 #include <cstdint>
 #include <format>
 #include <memory>
@@ -137,6 +138,27 @@ auto ensure_double_newline(std::string text) -> std::string {
     return text;
 }
 
+auto prefix_blockquote_lines(std::string_view text) -> std::string {
+    std::string prefixed;
+    prefixed.reserve(text.size() + 2);
+
+    std::size_t line_start = 0;
+    while(true) {
+        auto line_end = text.find('\n', line_start);
+        prefixed += "> ";
+        if(line_end == std::string_view::npos) {
+            prefixed.append(text.substr(line_start));
+            break;
+        }
+
+        prefixed.append(text.substr(line_start, line_end - line_start));
+        prefixed.push_back('\n');
+        line_start = line_end + 1;
+    }
+
+    return prefixed;
+}
+
 auto yaml_quote(std::string_view value) -> std::string {
     std::string out;
     out.reserve(value.size() + 2);
@@ -192,7 +214,8 @@ auto render_section(const SemanticSection& section) -> std::string {
         return {};
     }
 
-    auto heading_prefix = std::string(section.level, '#');
+    auto clamped_level = std::clamp<int>(static_cast<int>(section.level), 1, 6);
+    auto heading_prefix = std::string(static_cast<std::size_t>(clamped_level), '#');
     std::string rendered = std::format("{} {}\n\n", heading_prefix, section.heading);
     rendered += children;
     return rendered;
@@ -247,7 +270,8 @@ auto render_node(const MarkdownNode& node) -> std::string {
                 if(value.fragments.empty()) {
                     return {};
                 }
-                return ensure_double_newline("> " + render_inlines(value.fragments));
+                return ensure_double_newline(
+                    prefix_blockquote_lines(render_inlines(value.fragments)));
             } else if constexpr(std::is_same_v<T, RawMarkdown>) {
                 if(value.markdown.empty()) {
                     return {};

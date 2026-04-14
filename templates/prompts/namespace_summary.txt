@@ -5,9 +5,11 @@ Output:
 - 1 to 2 short paragraphs
 - No heading
 - No YAML
+- Follow the output language requested by the system prompt
 - No code fences or pasted source code
 
 Describe the namespace's responsibility, notable declarations, and architectural role.
 Use only the EVIDENCE section below.
+If the evidence is insufficient, respond with exactly: Insufficient evidence to summarize; provide more EVIDENCE.
 
 {{evidence}})clore"

@@ -555,10 +555,19 @@ auto build_evidence_for_type_implementation_summary(
 
     // Methods' callees as further dependency context
     for(auto& child_id : target.children) {
+        if(pack.dependency_context.size() >= rules.max_callees) {
+            break;
+        }
         if(auto* child = lookup(model, child_id)) {
             if(is_function_kind(child->kind)) {
-                auto child_callees = collect_facts(model, child->calls, rules.max_callees, root);
-                for(auto& f : child_callees) pack.dependency_context.push_back(std::move(f));
+                auto remaining = rules.max_callees - pack.dependency_context.size();
+                auto child_callees = collect_facts(model, child->calls, remaining, root);
+                for(auto& f : child_callees) {
+                    pack.dependency_context.push_back(std::move(f));
+                    if(pack.dependency_context.size() >= rules.max_callees) {
+                        break;
+                    }
+                }
             }
         }
     }

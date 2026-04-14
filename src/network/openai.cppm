@@ -2172,7 +2172,8 @@ auto parse_response(std::string_view json)
 
     AssistantOutput output;
 
-    if(auto refusal_value = message->get("refusal"); refusal_value.has_value()) {
+    if(auto refusal_value = message->get("refusal");
+       refusal_value.has_value() && !refusal_value->is_null()) {
         auto refusal = detail::expect_string(*refusal_value, "choices[0].message.refusal");
         if(!refusal.has_value()) {
             return std::unexpected(std::move(refusal.error()));

@@ -1,40 +1,43 @@
 name: Build
 
 on:
-    push:
-        branches: ["main"]
-    pull_request:
+  push:
+    branches: ["main"]
+  pull_request:
 
 jobs:
-    build:
-        runs-on: ["windows-latest", "ubuntu-latest", "macos-latest"]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v6
+  build:
+    strategy:
+      matrix:
+        os: ["windows-latest", "ubuntu-latest", "macos-latest"]
+    runs-on: "${{ matrix.os }}"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
 
-            - name: Setup pixi
-              uses: prefix-dev/setup-pixi@v0.9.4
-              with:
-                pixi-version: v0.67.0
-                activate-environment: true
-                cache: true
+      - name: Setup pixi
+        uses: prefix-dev/setup-pixi@v0.9.4
+        with:
+          pixi-version: v0.67.0
+          activate-environment: true
+          cache: true
 
-            - name: Restore build directory cache
-              id: restore-build-cache
-              uses: actions/cache/restore@v5
-              with:
-                path: build/Debug/
-                key: ${{ runner.os }}-${{ hashFiles('pixi.lock', 'pixi.toml', '**/CMakeLists.txt', 'cmake/**/*.cmake') }}
+      - name: Restore build directory cache
+        id: restore-build-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: build/Debug/
+          key: ${{ runner.os }}-${{ hashFiles('pixi.lock', 'pixi.toml', '**/CMakeLists.txt', 'cmake/**/*.cmake') }}
 
-            - name: Configure
-              run: pixi run cmake-config Debug
+      - name: Configure
+        run: pixi run cmake-config Debug
 
-            - name: Save build directory cache
-              if: steps.restore-build-cache.outputs.cache-hit != 'true'
-              uses: actions/cache/save@v5
-              with:
-                path: build/Debug/
-                key: ${{ steps.restore-build-cache.outputs.cache-primary-key }}
+      - name: Save build directory cache
+        if: steps.restore-build-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: build/Debug/
+          key: ${{ steps.restore-build-cache.outputs.cache-primary-key }}
 
-            - name: Build
-              run: pixi run cmake-build Debug
+      - name: Build
+        run: pixi run cmake-build Debug
