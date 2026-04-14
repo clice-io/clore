@@ -115,19 +115,21 @@ import support;
                 CompileEntry{
                     .file = "./src/main.cpp",
                     .directory = root.generic_string(),
+                    .cache_key = source + "\t1",
                 },
                 CompileEntry{
                     .file = "include/../header.hpp",
                     .directory = root.generic_string(),
+                    .cache_key = header + "\t2",
                 },
             },
         };
 
         ScanCache initial_cache;
-        initial_cache.emplace(source, ScanResult{
+        initial_cache.emplace(source + "\t1", ScanResult{
             .includes = {IncludeInfo{.path = "./header.hpp"}},
         });
-        initial_cache.emplace(header, ScanResult{});
+        initial_cache.emplace(header + "\t2", ScanResult{});
 
         auto result = build_dependency_graph(db, initial_cache);
 

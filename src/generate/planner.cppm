@@ -177,11 +177,11 @@ auto enumerate_namespace_pages(PlanBuilder& builder) -> std::expected<void, Plan
                 if(is_type_kind(sym->kind)) {
                     plan.prompt_requests.push_back(
                         builder.make_symbol_prompt(PromptKind::TypeDeclarationSummary,
-                                                   sym->qualified_name));
+                                                   make_symbol_target_key(*sym)));
                 } else if(is_function_kind(sym->kind)) {
                     plan.prompt_requests.push_back(
                         builder.make_symbol_prompt(PromptKind::FunctionDeclarationSummary,
-                                                   sym->qualified_name));
+                                                   make_symbol_target_key(*sym)));
                 }
             }
         }
@@ -249,11 +249,11 @@ auto enumerate_module_pages(PlanBuilder& builder) -> std::expected<void, PlanErr
                 if(is_type_kind(sym->kind)) {
                     plan.prompt_requests.push_back(
                         builder.make_symbol_prompt(PromptKind::TypeImplementationSummary,
-                                                   sym->qualified_name));
+                                                   make_symbol_target_key(*sym)));
                 } else if(is_function_kind(sym->kind)) {
                     plan.prompt_requests.push_back(
                         builder.make_symbol_prompt(PromptKind::FunctionImplementationSummary,
-                                                   sym->qualified_name));
+                                                   make_symbol_target_key(*sym)));
                 }
             }
         }
@@ -320,11 +320,11 @@ auto enumerate_file_pages(PlanBuilder& builder) -> std::expected<void, PlanError
                 if(is_type_kind(sym->kind)) {
                     plan.prompt_requests.push_back(
                         builder.make_symbol_prompt(PromptKind::TypeImplementationSummary,
-                                                   sym->qualified_name));
+                                                   make_symbol_target_key(*sym)));
                 } else if(is_function_kind(sym->kind)) {
                     plan.prompt_requests.push_back(
                         builder.make_symbol_prompt(PromptKind::FunctionImplementationSummary,
-                                                   sym->qualified_name));
+                                                   make_symbol_target_key(*sym)));
                 }
             }
         }

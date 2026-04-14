@@ -427,7 +427,7 @@ auto collect_implementation_symbols(const PagePlan& plan,
 
     for(const auto& key: plan.owner_keys) {
         if(plan.page_type == PageType::Module) {
-            if(auto* module = extract::find_module_by_name(model, key)) {
+            for(auto* module : extract::find_modules_by_name(model, key)) {
                 for(auto sym_id: module->symbols) {
                     if(!seen.insert(sym_id).second) {
                         continue;
@@ -1324,7 +1324,7 @@ auto render_symbol_overview_page(const SymbolDocPlan& doc_plan,
     auto view = detail_view_for(owner_plan, *doc_plan.symbol);
     const std::string* output = nullptr;
     if(auto kind = prompt_kind_for_symbol(owner_plan, *doc_plan.symbol); kind.has_value()) {
-        output = prompt_output_of(outputs, *kind, doc_plan.symbol->qualified_name);
+        output = prompt_output_of(outputs, *kind, make_symbol_target_key(*doc_plan.symbol));
     }
 
     auto heading = "`" + doc_plan.symbol->qualified_name + "`";
@@ -1399,7 +1399,7 @@ auto render_symbol_detail_page(const SymbolDocPlan& doc_plan,
     auto view = detail_view_for(owner_plan, *doc_plan.symbol);
     const std::string* output = nullptr;
     if(auto kind = prompt_kind_for_symbol(owner_plan, *doc_plan.symbol); kind.has_value()) {
-        output = prompt_output_of(outputs, *kind, doc_plan.symbol->qualified_name);
+        output = prompt_output_of(outputs, *kind, make_symbol_target_key(*doc_plan.symbol));
     }
 
     auto heading = std::format("`{}` {}", doc_plan.symbol->qualified_name, doc_label(view));
@@ -1608,7 +1608,7 @@ auto build_namespace_page_root(const PagePlan& plan,
                                  detail_view_for(plan, *sym));
             if(prompt_kind.has_value()) {
                 add_prompt_output(entity->children,
-                                  prompt_output_of(outputs, *prompt_kind, sym->qualified_name));
+                                  prompt_output_of(outputs, *prompt_kind, make_symbol_target_key(*sym)));
             }
             if(is_type_kind(sym->kind) && !has_doc_page) {
                 append_type_structure_sections(entity->children,
@@ -1710,7 +1710,7 @@ auto build_module_page_root(const PagePlan& plan,
                                  detail_view_for(plan, *sym));
             if(prompt_kind.has_value()) {
                 add_prompt_output(entity->children,
-                                  prompt_output_of(outputs, *prompt_kind, sym->qualified_name));
+                                  prompt_output_of(outputs, *prompt_kind, make_symbol_target_key(*sym)));
             }
             if(is_type_kind(sym->kind) && !has_doc_page) {
                 append_type_structure_sections(entity->children,
@@ -1802,7 +1802,7 @@ auto build_file_page_root(const PagePlan& plan,
                                          find_declaration_page(*sym, links, plan.relative_path));
             if(prompt_kind.has_value()) {
                 add_prompt_output(entity->children,
-                                  prompt_output_of(outputs, *prompt_kind, sym->qualified_name));
+                                  prompt_output_of(outputs, *prompt_kind, make_symbol_target_key(*sym)));
             }
             if(is_type_kind(sym->kind)) {
                 append_type_structure_sections(entity->children,
@@ -2074,10 +2074,16 @@ auto build_link_resolver_impl(PagePlanSet plan_set, const extract::ProjectModel*
                 case PromptKind::TypeDeclarationSummary:
                 case PromptKind::FunctionDeclarationSummary:
                     register_preferred_path(request.target_key, plan.relative_path, true);
+                    register_preferred_path(parse_symbol_target_key(request.target_key).qualified_name,
+                                            plan.relative_path,
+                                            true);
                     break;
                 case PromptKind::TypeImplementationSummary:
                 case PromptKind::FunctionImplementationSummary:
                     register_preferred_path(request.target_key, plan.relative_path, false);
+                    register_preferred_path(parse_symbol_target_key(request.target_key).qualified_name,
+                                            plan.relative_path,
+                                            false);
                     break;
                 default: break;
             }

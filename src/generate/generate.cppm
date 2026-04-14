@@ -87,7 +87,7 @@ auto set_evidence_metadata(EvidencePack pack, const PagePlan& plan, const Prompt
     pack.prompt_kind = std::string(prompt_kind_name(request.kind));
     if(pack.subject_name.empty()) {
         if(!request.target_key.empty()) {
-            pack.subject_name = request.target_key;
+            pack.subject_name = std::string(parse_symbol_target_key(request.target_key).qualified_name);
         } else if(!plan.owner_keys.empty()) {
             pack.subject_name = plan.owner_keys.front();
         }
@@ -102,6 +102,7 @@ auto build_evidence_for_request(const PromptRequest& request,
                                 const PageSummaryCache& summaries)
     -> std::expected<EvidencePack, GenerateError> {
     const auto& rules = config.evidence_rules;
+    auto target_name = std::string(parse_symbol_target_key(request.target_key).qualified_name);
 
     switch(request.kind) {
         case PromptKind::NamespaceSummary:
@@ -183,7 +184,7 @@ auto build_evidence_for_request(const PromptRequest& request,
                 }
                 return std::unexpected(GenerateError{
                     .message = std::format("symbol '{}' not found",
-                                           request.target_key),
+                                           target_name),
                 });
             }
             return std::unexpected(GenerateError{
@@ -202,7 +203,7 @@ auto build_evidence_for_request(const PromptRequest& request,
                 }
                 return std::unexpected(GenerateError{
                     .message = std::format("symbol '{}' not found",
-                                           request.target_key),
+                                           target_name),
                 });
             }
             return std::unexpected(GenerateError{
@@ -222,7 +223,7 @@ auto build_evidence_for_request(const PromptRequest& request,
                 }
                 return std::unexpected(GenerateError{
                     .message = std::format("symbol '{}' not found",
-                                           request.target_key),
+                                           target_name),
                 });
             }
             return std::unexpected(GenerateError{
@@ -241,7 +242,7 @@ auto build_evidence_for_request(const PromptRequest& request,
                 }
                 return std::unexpected(GenerateError{
                     .message = std::format("symbol '{}' not found",
-                                           request.target_key),
+                                           target_name),
                 });
             }
             return std::unexpected(GenerateError{
@@ -305,7 +306,7 @@ auto summary_cache_key_for_request(const PagePlan& plan, const PromptRequest& re
         case PromptKind::FunctionDeclarationSummary:
         case PromptKind::TypeDeclarationSummary:
             if(!request.target_key.empty()) {
-                return request.target_key;
+                return std::string(parse_symbol_target_key(request.target_key).qualified_name);
             }
             return std::nullopt;
         default: return std::nullopt;

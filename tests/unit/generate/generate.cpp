@@ -128,7 +128,7 @@ auto add_symbol(extract::ProjectModel& model, extract::SymbolInfo symbol) -> voi
         model.file_order.push_back(file);
     }
 
-    model.symbol_ids_by_qualified_name[qualified_name] = symbol_id;
+    model.symbol_ids_by_qualified_name[qualified_name].push_back(symbol_id);
     model.symbols.emplace(symbol_id, std::move(symbol));
 }
 
@@ -146,7 +146,7 @@ auto add_namespace(extract::ProjectModel& model,
 
 auto add_module(extract::ProjectModel& model, extract::ModuleUnit module) -> void {
     model.uses_modules = true;
-    model.module_name_to_source[module.name] = module.source_file;
+    model.module_name_to_sources[module.name].push_back(module.source_file);
     model.modules.emplace(module.source_file, std::move(module));
 }
 
@@ -237,7 +237,7 @@ TEST_CASE(build_page_plan_set_creates_index_and_file_pages_by_default) {
     }));
     EXPECT_TRUE(std::ranges::any_of(file_plan->prompt_requests, [](const PromptRequest& request) {
         return request.kind == PromptKind::FunctionImplementationSummary &&
-               request.target_key == "math::add";
+               parse_symbol_target_key(request.target_key).qualified_name == "math::add";
     }));
 }
 
@@ -389,12 +389,12 @@ TEST_CASE(build_page_plan_set_keeps_nested_types_on_their_owner_page) {
     EXPECT_TRUE(
         std::ranges::any_of(namespace_plan->prompt_requests, [](const PromptRequest& request) {
             return request.kind == PromptKind::TypeDeclarationSummary &&
-                   request.target_key == "demo::Outer";
+                   parse_symbol_target_key(request.target_key).qualified_name == "demo::Outer";
         }));
     EXPECT_FALSE(
         std::ranges::any_of(namespace_plan->prompt_requests, [](const PromptRequest& request) {
             return request.kind == PromptKind::TypeDeclarationSummary &&
-                   request.target_key == "demo::Outer::Inner";
+                   parse_symbol_target_key(request.target_key).qualified_name == "demo::Outer::Inner";
         }));
 }
 
@@ -431,12 +431,12 @@ TEST_CASE(build_page_plan_set_skips_function_local_types_from_page_entries) {
     EXPECT_TRUE(
         std::ranges::any_of(namespace_plan->prompt_requests, [](const PromptRequest& request) {
             return request.kind == PromptKind::TypeDeclarationSummary &&
-                   request.target_key == "demo::Client";
+                   parse_symbol_target_key(request.target_key).qualified_name == "demo::Client";
         }));
     EXPECT_FALSE(
         std::ranges::any_of(namespace_plan->prompt_requests, [](const PromptRequest& request) {
             return request.kind == PromptKind::TypeDeclarationSummary &&
-                   request.target_key == "ActiveRunReset";
+                   parse_symbol_target_key(request.target_key).qualified_name == "ActiveRunReset";
         }));
 }
 
@@ -595,6 +595,7 @@ TEST_CASE(render_page_markdown_links_type_declarations_and_implementations_bidir
     auto file = (temp.path / "src" / "math.cppm").generic_string();
     auto widget = make_type_symbol(400, "Widget", "demo::Widget", file, "Widget type.", "demo");
     auto widget_id = widget.id;
+    auto widget_key = make_symbol_target_key(widget);
     add_symbol(model, std::move(widget));
     add_module(model,
                extract::ModuleUnit{
@@ -615,7 +616,7 @@ TEST_CASE(render_page_markdown_links_type_declarations_and_implementations_bidir
             {
                        PromptRequest{.kind = PromptKind::NamespaceSummary},
                        PromptRequest{.kind = PromptKind::TypeDeclarationSummary,
-                              .target_key = "demo::Widget"},
+                              .target_key = widget_key},
                        },
     };
     PagePlan module_plan{
@@ -629,19 +630,19 @@ TEST_CASE(render_page_markdown_links_type_declarations_and_implementations_bidir
                        PromptRequest{.kind = PromptKind::ModuleSummary},
                        PromptRequest{.kind = PromptKind::ModuleArchitecture},
                        PromptRequest{.kind = PromptKind::TypeImplementationSummary,
-                              .target_key = "demo::Widget"},
+                              .target_key = widget_key},
                        },
     };
 
     auto outputs = std::unordered_map<std::string, std::string>{
         {prompt_request_key(PromptRequest{.kind = PromptKind::NamespaceSummary}),   "Summary"     },
         {prompt_request_key(PromptRequest{.kind = PromptKind::TypeDeclarationSummary,
-                                          .target_key = "demo::Widget"}),
+                                          .target_key = widget_key}),
          "Declaration"                                                                            },
         {prompt_request_key(PromptRequest{.kind = PromptKind::ModuleSummary}),      "Summary"     },
         {prompt_request_key(PromptRequest{.kind = PromptKind::ModuleArchitecture}), "Architecture"},
         {prompt_request_key(PromptRequest{.kind = PromptKind::TypeImplementationSummary,
-                                          .target_key = "demo::Widget"}),
+                                          .target_key = widget_key}),
          "Implementation"                                                                         },
     };
     PagePlanSet plan_set{
@@ -736,6 +737,7 @@ TEST_CASE(render_page_bundle_places_complex_type_members_in_nested_doc_page_with
     auto file = (temp.path / "src" / "widget.cppm").generic_string();
 
     auto widget = make_type_symbol(500, "Widget", "demo::Widget", file, "Widget type.", "demo");
+    auto widget_key = make_symbol_target_key(widget);
     auto nested =
         make_type_symbol(501, "Options", "demo::Widget::Options", file, "Nested options.", "demo");
     nested.access = "public";
@@ -779,14 +781,14 @@ TEST_CASE(render_page_bundle_places_complex_type_members_in_nested_doc_page_with
             {
                        PromptRequest{.kind = PromptKind::NamespaceSummary},
                        PromptRequest{.kind = PromptKind::TypeDeclarationSummary,
-                              .target_key = "demo::Widget"},
+                              .target_key = widget_key},
                        },
     };
 
     auto outputs = std::unordered_map<std::string, std::string>{
         {prompt_request_key(PromptRequest{.kind = PromptKind::NamespaceSummary}),  "Summary"},
         {prompt_request_key(PromptRequest{.kind = PromptKind::TypeDeclarationSummary,
-                                          .target_key = "demo::Widget"}),
+                                          .target_key = widget_key}),
          "Declaration"                                                                      },
     };
 
@@ -961,6 +963,7 @@ TEST_CASE(render_page_markdown_strips_prompt_code_fence_markers) {
     extract::ProjectModel model;
     auto file = (temp.path / "src" / "math.cppm").generic_string();
     auto sym = make_function_symbol(700, "run", "demo::run", "void run()", file, "demo");
+    auto run_key = make_symbol_target_key(sym);
     auto sym_id = sym.id;
     add_symbol(model, std::move(sym));
     add_module(model,
@@ -982,7 +985,7 @@ TEST_CASE(render_page_markdown_strips_prompt_code_fence_markers) {
                        PromptRequest{.kind = PromptKind::ModuleSummary},
                        PromptRequest{.kind = PromptKind::ModuleArchitecture},
                        PromptRequest{.kind = PromptKind::FunctionImplementationSummary,
-                              .target_key = "demo::run"},
+                              .target_key = run_key},
                        },
     };
 
@@ -990,7 +993,7 @@ TEST_CASE(render_page_markdown_strips_prompt_code_fence_markers) {
         {prompt_request_key(PromptRequest{.kind = PromptKind::ModuleSummary}),      "Summary"     },
         {prompt_request_key(PromptRequest{.kind = PromptKind::ModuleArchitecture}), "Architecture"},
         {prompt_request_key(PromptRequest{.kind = PromptKind::FunctionImplementationSummary,
-                                          .target_key = "demo::run"}),
+                                          .target_key = run_key}),
          "Algorithm note with inline marker ```helper```.\n\n```cpp\nstep();\n```"                 },
     };
 
@@ -1038,6 +1041,7 @@ TEST_CASE(render_page_bundle_emits_nested_symbol_docs_for_complex_module_types) 
     widget.children = {options.id, state.id, run.id};
 
     auto widget_id = widget.id;
+    auto widget_key = make_symbol_target_key(widget);
     add_symbol(model, std::move(widget));
     add_symbol(model, std::move(options));
     add_symbol(model, std::move(state));
@@ -1061,7 +1065,7 @@ TEST_CASE(render_page_bundle_emits_nested_symbol_docs_for_complex_module_types) 
                        PromptRequest{.kind = PromptKind::ModuleSummary},
                        PromptRequest{.kind = PromptKind::ModuleArchitecture},
                        PromptRequest{.kind = PromptKind::TypeImplementationSummary,
-                              .target_key = "demo::Widget"},
+                              .target_key = widget_key},
                        },
     };
 
@@ -1069,7 +1073,7 @@ TEST_CASE(render_page_bundle_emits_nested_symbol_docs_for_complex_module_types) 
         {prompt_request_key(PromptRequest{.kind = PromptKind::ModuleSummary}),      "Summary"     },
         {prompt_request_key(PromptRequest{.kind = PromptKind::ModuleArchitecture}), "Architecture"},
         {prompt_request_key(PromptRequest{.kind = PromptKind::TypeImplementationSummary,
-                                          .target_key = "demo::Widget"}),
+                                          .target_key = widget_key}),
          "Implementation summary."                                                                },
     };
 

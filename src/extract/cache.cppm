@@ -19,6 +19,7 @@ module;
 #include "eventide/serde/json/serializer.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/xxhash.h"
 
 export module extract:cache;
@@ -42,6 +43,7 @@ struct CacheKeyParts {
 struct DependencySnapshot {
     std::vector<std::string> files;
     std::vector<std::uint64_t> hashes;
+    std::vector<std::int64_t> mtimes;
     std::int64_t build_at = 0;
 };
 
@@ -88,6 +90,7 @@ constexpr char kCacheKeyDelimiter = '\t';
 struct CachedPathHash {
     std::uint32_t path = 0;
     std::uint64_t hash = 0;
+    std::int64_t mtime = 0;
 };
 
 struct SerializedDependencySnapshot {
@@ -141,6 +144,7 @@ auto decode_dependency_snapshot(const SerializedDependencySnapshot& serialized,
     snapshot.build_at = serialized.build_at;
     snapshot.files.reserve(serialized.deps.size());
     snapshot.hashes.reserve(serialized.deps.size());
+    snapshot.mtimes.reserve(serialized.deps.size());
 
     for(const auto& dep : serialized.deps) {
         if(dep.path >= paths.size()) {
@@ -150,6 +154,7 @@ auto decode_dependency_snapshot(const SerializedDependencySnapshot& serialized,
         }
         snapshot.files.push_back(paths[dep.path]);
         snapshot.hashes.push_back(dep.hash);
+        snapshot.mtimes.push_back(dep.mtime);
     }
 
     return snapshot;
@@ -174,9 +179,12 @@ auto encode_dependency_snapshot(const DependencySnapshot& snapshot,
     serialized.deps.reserve(snapshot.files.size());
 
     for(std::size_t index = 0; index < snapshot.files.size(); ++index) {
+        auto hash = index < snapshot.hashes.size() ? snapshot.hashes[index] : 0;
+        auto mtime = index < snapshot.mtimes.size() ? snapshot.mtimes[index] : 0;
         serialized.deps.push_back(CachedPathHash{
             .path = intern_path(snapshot.files[index]),
-            .hash = snapshot.hashes[index],
+            .hash = hash,
+            .mtime = mtime,
         });
     }
 
@@ -267,7 +275,15 @@ auto capture_dependency_snapshot(const std::vector<std::string>& files)
 
     snapshot.files.reserve(normalized.size());
     snapshot.hashes.reserve(normalized.size());
+    snapshot.mtimes.reserve(normalized.size());
     for(const auto& file : normalized) {
+        std::int64_t mtime = 0;
+        llvm::sys::fs::file_status status;
+        if(!llvm::sys::fs::status(file, status)) {
+            mtime = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                status.getLastModificationTime().time_since_epoch()).count();
+        }
+
         auto hash = hash_file(file);
         if(!hash.has_value()) {
             return std::unexpected(CacheError{
@@ -277,6 +293,7 @@ auto capture_dependency_snapshot(const std::vector<std::string>& files)
         }
         snapshot.files.push_back(file);
         snapshot.hashes.push_back(*hash);
+        snapshot.mtimes.push_back(mtime);
     }
 
     return snapshot;
@@ -293,9 +310,16 @@ auto dependencies_changed(const DependencySnapshot& snapshot) -> bool {
 
     for(std::size_t index = 0; index < snapshot.files.size(); ++index) {
         const auto& file = snapshot.files[index];
+        auto stored_hash = snapshot.hashes[index];
+        auto stored_mtime = index < snapshot.mtimes.size() ? snapshot.mtimes[index] : 0;
+
         llvm::sys::fs::file_status status;
         if(auto ec = llvm::sys::fs::status(file, status)) {
-            if(snapshot.hashes[index] != 0) {
+            if(stored_hash == 0) {
+                return true;
+            }
+            auto hash = hash_file(file);
+            if(!hash.has_value() || *hash != stored_hash) {
                 return true;
             }
             continue;
@@ -303,13 +327,21 @@ auto dependencies_changed(const DependencySnapshot& snapshot) -> bool {
 
         auto current_mtime = std::chrono::duration_cast<std::chrono::nanoseconds>(
             status.getLastModificationTime().time_since_epoch()).count();
-        if(current_mtime <= snapshot.build_at) {
-            continue;
+        if(stored_mtime > 0 && current_mtime > stored_mtime) {
+            return true;
+        }
+
+        if(stored_hash == 0) {
+            return true;
         }
 
         auto hash = hash_file(file);
-        if(!hash.has_value() || *hash != snapshot.hashes[index]) {
+        if(!hash.has_value() || *hash != stored_hash) {
             return true;
+        }
+
+        if(stored_mtime > 0 && current_mtime <= stored_mtime) {
+            continue;
         }
     }
 
@@ -452,8 +484,43 @@ auto save_extract_cache(std::string_view workspace_root,
     }
 
     auto cache_path = *cache_root / "cache.json";
-    auto tmp_path = cache_path;
-    tmp_path += ".tmp";
+    auto make_unique_tmp_path = [&](std::uint64_t attempt) -> fs::path {
+        auto timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        auto pid = llvm::sys::Process::getProcessId();
+        auto nonce = llvm::xxh3_64bits(std::format("{}:{}:{}:{}",
+                                                   cache_path.generic_string(),
+                                                   pid,
+                                                   timestamp,
+                                                   attempt));
+
+        auto candidate = cache_path;
+        candidate += std::format(".tmp.{}.{}.{}", pid, timestamp, nonce);
+        return candidate;
+    };
+
+    fs::path tmp_path;
+    for(std::uint64_t attempt = 0; attempt < 32; ++attempt) {
+        auto candidate = make_unique_tmp_path(attempt);
+        std::error_code exists_error;
+        auto exists = fs::exists(candidate, exists_error);
+        if(exists_error) {
+            return std::unexpected(CacheError{
+                .message = std::format("failed to prepare extract cache temp file {}: {}",
+                                       candidate.generic_string(), exists_error.message()),
+            });
+        }
+        if(!exists) {
+            tmp_path = std::move(candidate);
+            break;
+        }
+    }
+    if(tmp_path.empty()) {
+        return std::unexpected(CacheError{
+            .message = std::format("failed to allocate a unique temp file path near {}",
+                                   cache_path.generic_string()),
+        });
+    }
 
     auto write_result = clore::support::write_utf8_text_file(tmp_path, *encoded);
     if(!write_result.has_value()) {

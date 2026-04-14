@@ -40,6 +40,11 @@ struct PromptRequest {
     std::string target_key;
 };
 
+struct SymbolTargetKeyView {
+    std::string_view qualified_name;
+    std::string_view signature;
+};
+
 struct PagePlan {
     std::string page_id;
     PageType page_type = PageType::File;
@@ -126,7 +131,11 @@ struct LinkResolver {
 auto lookup_sym(const extract::ProjectModel& model, extract::SymbolID id)
     -> const extract::SymbolInfo*;
 
-auto find_sym(const extract::ProjectModel& model, std::string_view qualified_name)
+auto make_symbol_target_key(const extract::SymbolInfo& symbol) -> std::string;
+
+auto parse_symbol_target_key(std::string_view target_key) -> SymbolTargetKeyView;
+
+auto find_sym(const extract::ProjectModel& model, std::string_view symbol_target_key)
     -> const extract::SymbolInfo*;
 
 auto is_type_kind(extract::SymbolKind kind) -> bool;
@@ -177,9 +186,31 @@ auto lookup_sym(const extract::ProjectModel& model, extract::SymbolID id)
     return extract::lookup_symbol(model, id);
 }
 
-auto find_sym(const extract::ProjectModel& model, std::string_view qualified_name)
+auto make_symbol_target_key(const extract::SymbolInfo& symbol) -> std::string {
+    if(symbol.signature.empty()) {
+        return symbol.qualified_name;
+    }
+    return symbol.qualified_name + "\t" + symbol.signature;
+}
+
+auto parse_symbol_target_key(std::string_view target_key) -> SymbolTargetKeyView {
+    auto delimiter = target_key.rfind('\t');
+    if(delimiter == std::string_view::npos) {
+        return SymbolTargetKeyView{
+            .qualified_name = target_key,
+            .signature = {},
+        };
+    }
+    return SymbolTargetKeyView{
+        .qualified_name = target_key.substr(0, delimiter),
+        .signature = target_key.substr(delimiter + 1),
+    };
+}
+
+auto find_sym(const extract::ProjectModel& model, std::string_view symbol_target_key)
     -> const extract::SymbolInfo* {
-    return extract::find_symbol(model, qualified_name);
+    auto target = parse_symbol_target_key(symbol_target_key);
+    return extract::find_symbol(model, target.qualified_name, target.signature);
 }
 
 auto is_type_kind(extract::SymbolKind kind) -> bool {

@@ -168,13 +168,17 @@ auto rebuild_lookup_maps(ProjectModel& model) -> void {
 
     for(auto& [symbol_id, sym] : model.symbols) {
         if(!sym.qualified_name.empty()) {
-            auto [it, inserted] = model.symbol_ids_by_qualified_name.try_emplace(sym.qualified_name, symbol_id);
-            if(!inserted) {
-                logging::warn("duplicate qualified name '{}' for symbols {} and {}",
-                              sym.qualified_name,
-                              it->second.hash,
-                              symbol_id.hash);
-            }
+            model.symbol_ids_by_qualified_name[sym.qualified_name].push_back(symbol_id);
+        }
+    }
+
+    for(auto& [qualified_name, symbol_ids] : model.symbol_ids_by_qualified_name) {
+        std::sort(symbol_ids.begin(), symbol_ids.end());
+        symbol_ids.erase(std::unique(symbol_ids.begin(), symbol_ids.end()), symbol_ids.end());
+        if(symbol_ids.size() > 1) {
+            logging::info("qualified name '{}' has {} overload candidates",
+                          qualified_name,
+                          symbol_ids.size());
         }
     }
 
