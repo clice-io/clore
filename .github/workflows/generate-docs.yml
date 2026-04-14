@@ -21,17 +21,39 @@ jobs:
           activate-environment: true
           cache: true
 
+      - name: Restore build cache
+        id: restore-build-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/Debug/
+          key: ${{ runner.os }}-debug-build-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'cmake/**/*.cmake', 'pixi.toml', 'pixi.lock', 'clore.toml', 'config/llvm-manifest.json') }}
+          restore-keys: |
+            ${{ runner.os }}-debug-build-
+
       - name: Configure
         run: pixi run cmake-config Debug
 
       - name: Build
         run: pixi run cmake-build Debug
 
+      - name: Save build cache
+        if: ${{ always() && steps.restore-build-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: build/Debug/
+          key: ${{ steps.restore-build-cache.outputs.cache-primary-key }}
+
       - name: Generate documentation
+        timeout-minutes: 10
         env:
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          if [[ -z "${OPENAI_API_KEY}" || -z "${OPENAI_BASE_URL}" ]]; then
+            echo "OPENAI_API_KEY and OPENAI_BASE_URL must be set to generate documentation." >&2
+            exit 1
+          fi
+
           ./build/Debug/bin/clore \
             --compile-commands build/Debug/compile_commands.json \
             --source-dir src \
@@ -40,11 +62,11 @@ jobs:
             --model deepseek-chat
 
       - name: Package documentation
-        run: tar -cvf clore-docs.tar generated
+        run: tar -czvf clore-docs.tar.gz generated
 
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v7
         with:
           name: clore-docs
-          path: clore-docs.tar
+          path: clore-docs.tar.gz
           retention-days: 30
