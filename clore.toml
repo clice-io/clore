@@ -5,52 +5,16 @@ exclude = []
 [extract]
 max_snippet_bytes = 8192
 
-[page_types]
-index = true
-module_page = true
-namespace_page = true
-type_page = true
-file_page = false
-
-[path_rules]
-index_path = "index.md"
-module_prefix = "modules"
-namespace_prefix = "namespaces"
-type_prefix = "types"
-file_prefix = "files"
-name_normalize = "lowercase"
-
-[prompt_templates]
-type_overview = "templates/prompts/type_overview.txt"
-type_usage_notes = "templates/prompts/type_usage_notes.txt"
-namespace_summary = "templates/prompts/namespace_summary.txt"
-module_summary = "templates/prompts/module_summary.txt"
-module_architecture = "templates/prompts/module_architecture.txt"
-repository_overview = "templates/prompts/repository_overview.txt"
-reading_guide = "templates/prompts/reading_guide.txt"
-
-[page_templates]
-index = "templates/pages/index.md"
-module_page = "templates/pages/module.md"
-namespace_page = "templates/pages/namespace.md"
-type_page = "templates/pages/type.md"
-file_page = "templates/pages/file.md"
-
 [evidence_rules]
 max_callers = 5
 max_callees = 5
 max_siblings = 8
 max_source_bytes = 4096
 max_related_summaries = 3
+max_top_modules = 8
+max_top_namespaces = 8
 
 [llm]
-system_prompt = "You are a C++ documentation writer. Generate concise, accurate documentation for C++ code elements. Focus on purpose, design intent, and role in the codebase. Output only Markdown text suitable for embedding in a documentation page."
+system_prompt = "您是一名 C++ 文档编写员。请为 C++ 代码元素生成简洁准确的文档。重点关注代码元素的用途、设计意图及其在代码库中的作用。输出的文档必须为 Markdown 格式，且适合嵌入到文档页面中。使用中文生成。"
 retry_count = 3
 retry_initial_backoff_ms = 250
-
-[validation]
-fail_on_empty_section = true
-fail_on_h1_in_output = true
-
-[navigation]
-consume_dependency_summaries = true

@@ -46,12 +46,6 @@ struct Options {
     <std::string> log_level;
 
     DecoKV(style = KVStyle::JoinedOrSeparate,
-           names = {"--max-snippet-bytes", "--max-snippet-bytes="},
-           help = "Maximum bytes of source captured per symbol snippet",
-           required = false)
-    <std::uint32_t> max_snippet_bytes;
-
-    DecoKV(style = KVStyle::JoinedOrSeparate,
             names = {"--model", "--model="},
             help = "Model name for generation",
             required = false)
@@ -78,6 +72,8 @@ struct Options {
 }  // namespace clore
 
 int main(int argc, const char** argv) {
+    clore::support::enable_utf8_console();
+
     auto args = deco::util::argvify(argc, argv);
     auto result = deco::cli::parse<clore::Options>(args);
 
@@ -100,11 +96,7 @@ int main(int argc, const char** argv) {
         return 0;
     }
 
-    // Configure logging
-    if(opts.log_level.has_value()) {
-        auto level = spdlog::level::from_str(*opts.log_level);
-        clore::logging::options.level = level;
-    }
+    // Initialize logger early so config/validation failures are visible.
     clore::logging::stderr_logger("clore");
 
     if(prompt_dry_run == has_model) {
@@ -126,6 +118,26 @@ int main(int argc, const char** argv) {
         task_config.workspace_root = fs::path(config_path).parent_path().string();
     }
 
+    auto set_log_level = [](std::string_view value, std::string_view source) {
+        auto level = spdlog::level::from_str(std::string(value));
+        if(level == spdlog::level::off && value != "off") {
+            clore::logging::warn("invalid {} log level '{}', keeping current level",
+                                 source,
+                                 value);
+            return;
+        }
+        clore::logging::options.level = level;
+        spdlog::set_level(level);
+    };
+
+    // Logging precedence: clore.toml -> CLI override.
+    if(task_config.log_level.has_value()) {
+        set_log_level(*task_config.log_level, "config");
+    }
+    if(opts.log_level.has_value()) {
+        set_log_level(*opts.log_level, "CLI");
+    }
+
     if(!opts.compile_commands.has_value()) {
         clore::logging::err("--compile-commands is required");
         return 1;
@@ -142,9 +154,6 @@ int main(int argc, const char** argv) {
     task_config.compile_commands_path = *opts.compile_commands;
     task_config.project_root = *opts.source_dir;
     task_config.output_root = *opts.output_dir;
-    if(opts.max_snippet_bytes.has_value()) {
-        task_config.extract.max_snippet_bytes = *opts.max_snippet_bytes;
-    }
     if(task_config.workspace_root.empty()) {
         task_config.workspace_root = fs::current_path().string();
     }

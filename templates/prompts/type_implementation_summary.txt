@@ -1,0 +1,15 @@
+R"clore(Write an implementation summary for the {{target_kind}} `{{target_name}}`.
+
+Context: this summary appears on an implementation page. Focus on internal structure, invariants, and important member implementations.
+
+Output:
+- Markdown fragment only
+- 1 to 2 short paragraphs
+- No heading
+- No YAML
+- No code fences or pasted source code
+
+Do not restate the public API contract.
+Use only the EVIDENCE section below.
+
+{{evidence}})clore"

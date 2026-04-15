@@ -2,6 +2,8 @@
 
 #include <filesystem>
 #include <fstream>
+#include <ranges>
+#include <string>
 
 import extract;
 
@@ -140,6 +142,12 @@ template <typename T, int N>
 struct Array {
     T data[N];
 };
+
+template <typename T>
+struct Box {};
+
+template <typename T>
+struct Box<T*> {};
 )";
         }
 
@@ -153,6 +161,71 @@ struct Array {
 
         auto& symbols = result->symbols;
         EXPECT_GT(symbols.size(), 0u);
+
+        auto identity_template_count = 0u;
+        auto array_type_count = 0u;
+        auto box_type_count = 0u;
+        auto template_wrapper_count = 0u;
+        for(auto& sym : symbols) {
+            if(sym.name == "identity" && sym.kind == SymbolKind::Function) {
+                if(sym.is_template && sym.template_params.find("typename T") != std::string::npos) {
+                    ++identity_template_count;
+                }
+            }
+            if(sym.name == "Array" && sym.kind == SymbolKind::Struct) {
+                if(sym.is_template && sym.template_params.find("int N") != std::string::npos) {
+                    ++array_type_count;
+                }
+            }
+            if(sym.name == "Box" && sym.kind == SymbolKind::Struct) {
+                ++box_type_count;
+            }
+            if(sym.kind == SymbolKind::Template) {
+                ++template_wrapper_count;
+            }
+        }
+        EXPECT_EQ(identity_template_count, 1u);
+        EXPECT_EQ(array_type_count, 1u);
+        EXPECT_EQ(box_type_count, 1u);
+        EXPECT_EQ(template_wrapper_count, 0u);
+
+        fs::remove_all(temp_dir);
+    }
+
+    TEST_CASE(extract_relations_from_calls_and_references) {
+        namespace fs = std::filesystem;
+
+        auto temp_dir = fs::temp_directory_path() / "clore_test_ast_relations";
+        fs::create_directories(temp_dir);
+        auto source_path = temp_dir / "relations.cpp";
+
+        {
+            std::ofstream f(source_path);
+            f << R"(
+int sink(int value) {
+    return value;
+}
+
+int source(int input) {
+    auto local = sink(input);
+    return local;
+}
+)";
+        }
+
+        CompileEntry entry;
+        entry.file = source_path.string();
+        entry.directory = temp_dir.string();
+        entry.arguments = {"clang++", "-std=c++23", "-c", source_path.string()};
+
+        auto result = extract_symbols(entry, 2048);
+        ASSERT_TRUE(result.has_value());
+        EXPECT_TRUE(std::ranges::any_of(result->relations, [](const ExtractedRelation& rel) {
+            return rel.is_call;
+        }));
+        EXPECT_TRUE(std::ranges::any_of(result->relations, [](const ExtractedRelation& rel) {
+            return !rel.is_call;
+        }));
 
         fs::remove_all(temp_dir);
     }

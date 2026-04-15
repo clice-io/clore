@@ -1,6 +1,7 @@
 module;
 
 #include <algorithm>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -11,6 +12,7 @@ module;
 #include "clang/Tooling/CompilationDatabase.h"
 #include "clang/Tooling/JSONCompilationDatabase.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/xxhash.h"
 
 export module extract:compdb;
 
@@ -22,6 +24,7 @@ struct CompileEntry {
     std::string file;
     std::string directory;
     std::vector<std::string> arguments;
+    std::string cache_key;
 };
 
 struct CompilationDatabase {
@@ -48,11 +51,61 @@ auto sanitize_driver_arguments(const CompileEntry& entry) -> std::vector<std::st
 
 auto sanitize_tool_arguments(const CompileEntry& entry) -> std::vector<std::string>;
 
+auto ensure_cache_key(CompileEntry& entry) -> void;
+
 }  // namespace clore::extract
 
 // ── implementation ──────────────────────────────────────────────────
 
 namespace clore::extract {
+
+namespace {
+
+auto normalize_path_string(std::string_view path) -> std::string {
+    return std::filesystem::path(path).lexically_normal().generic_string();
+}
+
+auto normalize_entry_file(const CompileEntry& entry) -> std::string {
+    namespace fs = std::filesystem;
+    auto path = fs::path(entry.file);
+    if(path.is_relative()) {
+        path = fs::path(entry.directory) / path;
+    }
+    std::error_code ec;
+    auto absolute = fs::absolute(path, ec);
+    if(!ec) {
+        path = std::move(absolute);
+    }
+    path = path.lexically_normal();
+    auto canonical = fs::weakly_canonical(path, ec);
+    if(!ec) {
+        return canonical.generic_string();
+    }
+    return path.generic_string();
+}
+
+auto build_compile_signature(const CompileEntry& entry, std::string_view normalized_file)
+    -> std::uint64_t {
+    std::string payload;
+    payload.reserve(entry.directory.size() + normalized_file.size() + entry.arguments.size() * 16);
+    payload.append(normalize_path_string(entry.directory));
+    payload.push_back('\0');
+    payload.append(normalized_file);
+    payload.push_back('\0');
+    for(const auto& argument : entry.arguments) {
+        payload.append(argument);
+        payload.push_back('\0');
+    }
+    return llvm::xxh3_64bits(payload);
+}
+
+auto ensure_cache_key_impl(CompileEntry& entry) -> void {
+    auto normalized_file = normalize_entry_file(entry);
+    auto signature = build_compile_signature(entry, normalized_file);
+    entry.cache_key = normalized_file + "\t" + std::to_string(signature);
+}
+
+}  // namespace
 
 auto load_compdb(std::string_view path) -> std::expected<CompilationDatabase, CompDbError> {
     namespace fs = std::filesystem;
@@ -81,6 +134,7 @@ auto load_compdb(std::string_view path) -> std::expected<CompilationDatabase, Co
         for(auto& arg : cmd.CommandLine) {
             entry.arguments.push_back(arg);
         }
+        ensure_cache_key(entry);
         db.entries.push_back(std::move(entry));
     }
 
@@ -117,7 +171,17 @@ auto normalize_argument_path(std::string_view path, std::string_view directory)
     if(normalized.is_relative()) {
         normalized = std::filesystem::path(directory) / normalized;
     }
-    return normalized.lexically_normal();
+    std::error_code ec;
+    auto absolute = std::filesystem::absolute(normalized, ec);
+    if(!ec) {
+        normalized = std::move(absolute);
+    }
+    normalized = normalized.lexically_normal();
+    auto canonical = std::filesystem::weakly_canonical(normalized, ec);
+    if(!ec) {
+        return canonical;
+    }
+    return normalized;
 }
 
 auto sanitize_driver_arguments(const CompileEntry& entry) -> std::vector<std::string> {
@@ -136,6 +200,10 @@ auto sanitize_driver_arguments(const CompileEntry& entry) -> std::vector<std::st
 
 auto sanitize_tool_arguments(const CompileEntry& entry) -> std::vector<std::string> {
     return strip_compiler_path(sanitize_driver_arguments(entry));
+}
+
+auto ensure_cache_key(CompileEntry& entry) -> void {
+    ensure_cache_key_impl(entry);
 }
 
 }  // namespace clore::extract

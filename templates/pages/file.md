@@ -4,13 +4,13 @@
 
 {{block:includes}}
 
-## Declared Symbols
+## Types
 
-{{block:declared_symbols}}
+{{block:types_implementations}}
 
-## Defined Symbols
+## Functions
 
-{{block:defined_symbols}}
+{{block:functions_implementations}}
 
 ## Module Information
 

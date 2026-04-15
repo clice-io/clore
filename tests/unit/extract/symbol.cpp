@@ -45,4 +45,13 @@ TEST_SUITE(symbol) {
         EXPECT_LT(a, b);
         EXPECT_GT(b, a);
     }
+
+    TEST_CASE(split_top_level_qualified_name_ignores_leading_global_qualifier) {
+        auto parts = split_top_level_qualified_name("::demo::Widget");
+
+        ASSERT_EQ(parts.size(), 2u);
+        EXPECT_EQ(parts[0], "demo");
+        EXPECT_EQ(parts[1], "Widget");
+        EXPECT_EQ(namespace_prefix_from_qualified_name("::demo::Widget"), "demo");
+    }
 };

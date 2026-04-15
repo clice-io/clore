@@ -8,6 +8,10 @@
 
 {{block:declaration}}
 
+## Diagram
+
+{{block:type_diagram}}
+
 ## Template Parameters
 
 {{block:template_parameters}}

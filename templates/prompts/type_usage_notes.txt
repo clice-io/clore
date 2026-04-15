@@ -5,6 +5,7 @@ Output:
 - 1 to 3 short paragraphs
 - No heading
 - No YAML
+- Follow the output language requested by the system prompt
 
 Must explain:
 - how this type is typically used by callers

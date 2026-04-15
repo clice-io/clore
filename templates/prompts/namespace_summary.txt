@@ -1,22 +1,15 @@
-Write a Summary for the namespace `{{target_name}}`.
+R"clore(Write a summary for the namespace `{{target_name}}`.
 
 Output:
 - Markdown fragment only
 - 1 to 2 short paragraphs
 - No heading
 - No YAML
+- Follow the output language requested by the system prompt
+- No code fences or pasted source code
 
-Must explain:
-- what this namespace groups together
-- the role it plays in the project architecture
-- its relationship to sibling and parent namespaces
-
-Must not repeat:
-- type lists
-- function lists
-- source locations
-
+Describe the namespace's responsibility, notable declarations, and architectural role.
 Use only the EVIDENCE section below.
-If evidence is insufficient, explicitly explain what key evidence is missing.
+If the evidence is insufficient, respond with exactly: Insufficient evidence to summarize; provide more EVIDENCE.
 
-{{evidence}}
+{{evidence}})clore"

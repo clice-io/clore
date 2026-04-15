@@ -17,6 +17,14 @@ option(CLORE_ENABLE_LTO "Enable ThinLTO for all targets" ON)
 option(CLORE_OFFLINE_BUILD "Disable network downloads during configuration" OFF)
 option(CLORE_ENABLE_TEST "Build unit tests" ON)
 
+if(WIN32 AND (MSVC OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND
+                      (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" OR
+                       CMAKE_CXX_COMPILER_LINKER_FRONTEND_VARIANT STREQUAL "MSVC"))))
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL" CACHE STRING
+        "Use the release CRT to stay ABI-compatible with the bundled Windows LLVM artifacts."
+        FORCE)
+endif()
+
 # Global flags that apply to all targets (including FetchContent dependencies).
 if(NOT MSVC)
     add_compile_options(-ffunction-sections -fdata-sections)

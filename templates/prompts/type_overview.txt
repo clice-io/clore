@@ -6,6 +6,7 @@ Output:
 - No heading
 - No YAML
 - No bullet list unless evidence naturally requires enumeration
+- Follow the output language requested by the system prompt
 
 Must explain:
 - what this type represents

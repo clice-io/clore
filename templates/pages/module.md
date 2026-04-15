@@ -8,9 +8,17 @@
 
 {{block:imports}}
 
-## Public Types
+## Dependency Diagram
 
-{{block:types_index}}
+{{block:import_diagram}}
+
+## Types
+
+{{block:types_implementations}}
+
+## Functions
+
+{{block:functions_implementations}}
 
 ## Internal Structure
 

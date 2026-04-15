@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <fstream>
 
-#include "extract/compdb_test_utils.h"
+#include "extract/compdb.h"
 
 import extract;
 
