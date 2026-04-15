@@ -718,15 +718,7 @@ auto generate_pages(const config::TaskConfig &config,
           const auto &plan = plan_set.plans[state.plan_index];
 
           if (result.has_value()) {
-            auto normalized_output = normalize_prompt_output(*result);
-            if (normalized_output != *result &&
-                result->find("```") != std::string::npos) {
-              logging::warn("normalized fenced markdown from prompt '{}' in "
-                            "'{}' before validation",
-                            tag_info.output_key, plan.page_id);
-            }
-
-            auto output_check = validate_output(normalized_output);
+            auto output_check = validate_output(*result);
             if (!output_check.has_value()) {
               schedule_error = GenerateError{
                   .message = std::format(
@@ -739,6 +731,7 @@ auto generate_pages(const config::TaskConfig &config,
               return;
             }
 
+            auto normalized_output = normalize_prompt_output(*result);
             state.prompt_outputs[tag_info.output_key] =
                 std::move(normalized_output);
           } else {

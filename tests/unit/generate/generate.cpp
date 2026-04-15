@@ -1093,7 +1093,7 @@ TEST_CASE(compute_page_path_flattens_module_partition_pages) {
   EXPECT_EQ(*result, "modules/demo/math/internal.md");
 }
 
-TEST_CASE(render_page_markdown_strips_prompt_code_fence_markers) {
+TEST_CASE(render_page_markdown_preserves_prompt_code_fence_markers) {
   ScopedTempDir temp("strip_prompt_code_fence_markers");
   fs::create_directories(temp.path / "src");
 
@@ -1146,7 +1146,8 @@ TEST_CASE(render_page_markdown_strips_prompt_code_fence_markers) {
       render_page_markdown(module_plan, config, model, outputs, links);
 
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->find("```"), std::string::npos);
+  EXPECT_NE(result->find("```helper```"), std::string::npos);
+  EXPECT_NE(result->find("```cpp\nstep();\n```"), std::string::npos);
   EXPECT_NE(result->find("helper"), std::string::npos);
   EXPECT_NE(result->find("step();"), std::string::npos);
 }
@@ -1312,6 +1313,20 @@ TEST_CASE(validate_output_rejects_whitespace_only_content) {
 
   EXPECT_FALSE(result.has_value());
   EXPECT_EQ(result.error().message, "LLM output contains only whitespace");
+}
+
+TEST_CASE(validate_output_rejects_code_fence_content) {
+  auto result = validate_output("Summary:\n```cpp\nint x = 1;\n```\n");
+
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().message, "LLM output contains code fence");
+}
+
+TEST_CASE(normalize_prompt_output_preserves_raw_content) {
+  auto content = std::string("```cpp\nint x = 1;\n```\n");
+  auto normalized = normalize_prompt_output(content);
+
+  EXPECT_EQ(normalized, content);
 }
 }
 ; // TEST_SUITE(generate)

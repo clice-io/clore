@@ -2105,37 +2105,7 @@ auto build_link_resolver(const PagePlanSet& plan_set, const extract::ProjectMode
 }
 
 auto normalize_prompt_output(std::string_view content) -> std::string {
-    if(content.find("```") == std::string_view::npos) {
-        return std::string(content);
-    }
-
-    std::istringstream stream{std::string(content)};
-    std::string line;
-    std::string normalized;
-    bool first = true;
-    while(std::getline(stream, line)) {
-        if(line.ends_with('\r')) {
-            line.pop_back();
-        }
-        if(trim_ascii(line).starts_with("```")) {
-            continue;
-        }
-        if(!first) {
-            normalized.push_back('\n');
-        }
-        normalized += line;
-        first = false;
-    }
-
-    // Defensive fallback: strip any remaining inline triple-backtick markers.
-    // Some LLM outputs place fences inline (e.g. "... ```code``` ..."), which the
-    // line-based filter above cannot fully remove.
-    std::size_t fence = 0;
-    while((fence = normalized.find("```", fence)) != std::string::npos) {
-        normalized.erase(fence, 3);
-    }
-
-    return normalized;
+    return std::string(content);
 }
 
 auto render_page_markdown(const PagePlan& plan,
