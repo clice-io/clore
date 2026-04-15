@@ -21,6 +21,8 @@ max_callees = 5
 max_siblings = 8
 max_source_bytes = 4096
 max_related_summaries = 3
+max_top_modules = 8
+max_top_namespaces = 8
 
 [llm]
 system_prompt = "You are a documentation writer."
@@ -68,6 +70,8 @@ TEST_SUITE(config_load) {
         EXPECT_EQ(config.llm.retry_initial_backoff_ms, 250u);
         EXPECT_EQ(config.evidence_rules.max_callers, 5u);
         EXPECT_EQ(config.evidence_rules.max_related_summaries, 3u);
+        EXPECT_EQ(config.evidence_rules.max_top_modules, 8u);
+        EXPECT_EQ(config.evidence_rules.max_top_namespaces, 8u);
     }
 
     TEST_CASE(load_requires_required_sections) {

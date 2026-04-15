@@ -58,6 +58,8 @@ auto make_config(const fs::path &project_root) -> config::TaskConfig {
   config.evidence_rules.max_siblings = 8;
   config.evidence_rules.max_source_bytes = 4096;
   config.evidence_rules.max_related_summaries = 3;
+  config.evidence_rules.max_top_modules = 8;
+  config.evidence_rules.max_top_namespaces = 8;
 
   config.llm.system_prompt = "You are a writer.";
   config.llm.retry_count = 3;
@@ -933,6 +935,29 @@ TEST_CASE(type_declaration_evidence_uses_signature_aware_related_summaries) {
 
   ASSERT_EQ(evidence.related_page_summaries.size(), 1u);
   EXPECT_EQ(evidence.related_page_summaries[0], "base type summary");
+}
+
+TEST_CASE(function_implementation_snippet_truncation_respects_small_budget) {
+  ScopedTempDir temp("snippet_truncation_budget");
+  fs::create_directories(temp.path / "src");
+
+  auto config = make_config(temp.path);
+  config.evidence_rules.max_source_bytes = 3;
+
+  extract::ProjectModel model;
+  auto file = (temp.path / "src" / "trim.cpp").generic_string();
+  auto target = make_function_symbol(720, "trim", "demo::trim", "void trim()",
+                                     file, "demo");
+  target.source_snippet = "int trim() { return 0; }";
+
+  add_symbol(model, target);
+  add_namespace(model, "demo", {target.id});
+
+  auto evidence = build_evidence_for_function_implementation_summary(
+      target, model, config.evidence_rules, config.project_root);
+
+  ASSERT_EQ(evidence.source_snippets.size(), 1u);
+  EXPECT_LE(evidence.source_snippets[0].size(), 3u);
 }
 
 TEST_CASE(namespace_summary_prompt_uses_namespace_subject) {

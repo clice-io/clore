@@ -47,8 +47,17 @@ bool path_prefix_matches(std::string_view relative, std::string_view pattern) {
   if (pattern.empty())
     return false;
 
+  while (!pattern.empty() && pattern.back() == '/') {
+    pattern.remove_suffix(1);
+  }
+  if (pattern.empty())
+    return false;
+
   if (pattern.find('/') != std::string_view::npos) {
-    return relative.starts_with(pattern);
+    if (!relative.starts_with(pattern))
+      return false;
+    return relative.size() == pattern.size() ||
+           relative[pattern.size()] == '/';
   }
 
   if (relative == pattern)
@@ -98,12 +107,33 @@ auto resolve_path_under_directory(const std::string &path,
   return p.lexically_normal();
 }
 
+auto canonical_graph_path(const std::filesystem::path &path) -> std::string {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  auto absolute = fs::absolute(path, ec);
+  if (!ec) {
+    auto canonical = fs::weakly_canonical(absolute.lexically_normal(), ec);
+    if (!ec) {
+      return canonical.generic_string();
+    }
+    return absolute.lexically_normal().generic_string();
+  }
+
+  auto normalized = path.lexically_normal();
+  auto canonical = fs::weakly_canonical(normalized, ec);
+  if (!ec) {
+    return canonical.generic_string();
+  }
+
+  return normalized.generic_string();
+}
+
 bool matches_filter(const std::string &file, const config::FilterRule &filter,
                     const std::filesystem::path &filter_root) {
   namespace fs = std::filesystem;
 
-  auto file_path = fs::path(file).lexically_normal();
-  auto root_path = filter_root.lexically_normal();
+  auto file_path = fs::path(canonical_graph_path(fs::path(file)));
+  auto root_path = fs::path(canonical_graph_path(filter_root));
 
   auto rel_opt = project_relative_path(file_path, root_path);
   if (!rel_opt.has_value())
@@ -577,13 +607,13 @@ auto extract_project(const config::TaskConfig &config)
   std::size_t ast_cache_hits = 0;
 
   for (auto &entry : filtered_db.entries) {
-    auto normalized =
-        std::filesystem::path(entry.file).lexically_normal().generic_string();
+    auto canonical = canonical_graph_path(std::filesystem::path(entry.file));
+    entry.file = canonical;
     auto compile_signature = cache::build_compile_signature(entry);
-    entry.cache_key = cache::build_cache_key(normalized, compile_signature);
-    auto source_hash = cache::hash_file(normalized);
+    entry.cache_key = cache::build_cache_key(canonical, compile_signature);
+    auto source_hash = cache::hash_file(canonical);
     if (!source_hash.has_value()) {
-      logging::warn("extract cache disabled for {}: {}", normalized,
+      logging::warn("extract cache disabled for {}: {}", canonical,
                     source_hash.error().message);
     }
 
@@ -647,7 +677,7 @@ auto extract_project(const config::TaskConfig &config)
   for (std::size_t idx = 0; idx < filtered_db.entries.size(); ++idx) {
     auto &entry = filtered_db.entries[idx];
     namespace fs = std::filesystem;
-    auto normalized = fs::path(entry.file).lexically_normal().generic_string();
+    auto normalized = entry.file;
     if (entry.cache_key.empty()) {
       return std::unexpected(ExtractError{
           .message = std::format("missing cache key for {}", normalized)});

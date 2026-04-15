@@ -752,7 +752,7 @@ cfg.project_root = project_src.string();
 cfg.output_root = (root / "out").string();
 cfg.workspace_root = root.string();
 cfg.extract.max_snippet_bytes = 512;
-cfg.filter.include = {"src/"};
+cfg.filter.include = {"src"};
 
 auto result = extract::extract_project(cfg);
 ASSERT_TRUE(result.has_value());

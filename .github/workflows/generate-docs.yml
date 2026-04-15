@@ -26,7 +26,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: build/Debug/
-          key: ${{ runner.os }}-debug-build-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'cmake/**/*.cmake', 'pixi.toml', 'pixi.lock', 'clore.toml', 'config/llvm-manifest.json') }}
+          key: ${{ runner.os }}-debug-build-${{ hashFiles('pixi.lock', 'pixi.toml', '**/CMakeLists.txt', 'cmake/**/*.cmake') }}
           restore-keys: |
             ${{ runner.os }}-debug-build-
 
@@ -37,7 +37,7 @@ jobs:
         run: pixi run cmake-build Debug
 
       - name: Save build cache
-        if: ${{ always() && steps.restore-build-cache.outputs.cache-hit != 'true' }}
+        if: ${{ success() && steps.restore-build-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: build/Debug/

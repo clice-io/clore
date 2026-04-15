@@ -27,7 +27,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: build/Debug/
-          key: ${{ runner.os }}-${{ hashFiles('pixi.lock', 'pixi.toml', '**/CMakeLists.txt', 'cmake/**/*.cmake') }}
+          key: ${{ runner.os }}-debug-build-${{ hashFiles('pixi.lock', 'pixi.toml', '**/CMakeLists.txt', 'cmake/**/*.cmake') }}
+          restore-keys: |
+            ${{ runner.os }}-debug-build-
 
       - name: Configure
         run: pixi run cmake-config Debug

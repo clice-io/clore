@@ -51,6 +51,8 @@ auto sanitize_driver_arguments(const CompileEntry& entry) -> std::vector<std::st
 
 auto sanitize_tool_arguments(const CompileEntry& entry) -> std::vector<std::string>;
 
+auto ensure_cache_key(CompileEntry& entry) -> void;
+
 }  // namespace clore::extract
 
 // ── implementation ──────────────────────────────────────────────────
@@ -69,7 +71,17 @@ auto normalize_entry_file(const CompileEntry& entry) -> std::string {
     if(path.is_relative()) {
         path = fs::path(entry.directory) / path;
     }
-    return path.lexically_normal().generic_string();
+    std::error_code ec;
+    auto absolute = fs::absolute(path, ec);
+    if(!ec) {
+        path = std::move(absolute);
+    }
+    path = path.lexically_normal();
+    auto canonical = fs::weakly_canonical(path, ec);
+    if(!ec) {
+        return canonical.generic_string();
+    }
+    return path.generic_string();
 }
 
 auto build_compile_signature(const CompileEntry& entry, std::string_view normalized_file)
@@ -87,7 +99,7 @@ auto build_compile_signature(const CompileEntry& entry, std::string_view normali
     return llvm::xxh3_64bits(payload);
 }
 
-auto ensure_cache_key(CompileEntry& entry) -> void {
+auto ensure_cache_key_impl(CompileEntry& entry) -> void {
     auto normalized_file = normalize_entry_file(entry);
     auto signature = build_compile_signature(entry, normalized_file);
     entry.cache_key = normalized_file + "\t" + std::to_string(signature);
@@ -159,7 +171,17 @@ auto normalize_argument_path(std::string_view path, std::string_view directory)
     if(normalized.is_relative()) {
         normalized = std::filesystem::path(directory) / normalized;
     }
-    return normalized.lexically_normal();
+    std::error_code ec;
+    auto absolute = std::filesystem::absolute(normalized, ec);
+    if(!ec) {
+        normalized = std::move(absolute);
+    }
+    normalized = normalized.lexically_normal();
+    auto canonical = std::filesystem::weakly_canonical(normalized, ec);
+    if(!ec) {
+        return canonical;
+    }
+    return normalized;
 }
 
 auto sanitize_driver_arguments(const CompileEntry& entry) -> std::vector<std::string> {
@@ -178,6 +200,10 @@ auto sanitize_driver_arguments(const CompileEntry& entry) -> std::vector<std::st
 
 auto sanitize_tool_arguments(const CompileEntry& entry) -> std::vector<std::string> {
     return strip_compiler_path(sanitize_driver_arguments(entry));
+}
+
+auto ensure_cache_key(CompileEntry& entry) -> void {
+    ensure_cache_key_impl(entry);
 }
 
 }  // namespace clore::extract

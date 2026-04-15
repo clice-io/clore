@@ -174,6 +174,9 @@ auto truncate_snippet(const std::string &snippet, std::uint32_t max_bytes)
   if (normalized.size() <= max_bytes) {
     return normalized;
   }
+  if (max_bytes <= suffix.size()) {
+    return clore::support::truncate_utf8(std::string(suffix), max_bytes);
+  }
   auto truncated_max =
       (max_bytes > suffix.size()) ? (max_bytes - suffix.size()) : 0;
   return clore::support::truncate_utf8(normalized, truncated_max) +

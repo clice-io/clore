@@ -288,12 +288,25 @@ auto scan_file(const CompileEntry &entry)
 auto build_dependency_graph(const CompilationDatabase &db)
     -> std::expected<DependencyResult, ScanError> {
   static const ScanCache empty_cache;
-  return build_dependency_graph(db, empty_cache);
+  CompilationDatabase normalized_db = db;
+  for (auto &entry : normalized_db.entries) {
+    if (entry.cache_key.empty()) {
+      ensure_cache_key(entry);
+    }
+  }
+  return build_dependency_graph(normalized_db, empty_cache);
 }
 
 auto build_dependency_graph(const CompilationDatabase &db,
                             const ScanCache &initial_cache)
     -> std::expected<DependencyResult, ScanError> {
+  CompilationDatabase normalized_db = db;
+  for (auto &entry : normalized_db.entries) {
+    if (entry.cache_key.empty()) {
+      ensure_cache_key(entry);
+    }
+  }
+
   DependencyResult result;
   auto &graph = result.graph;
   auto &cache = result.cache;
@@ -323,21 +336,15 @@ auto build_dependency_graph(const CompilationDatabase &db,
     return path.generic_string();
   };
 
-  for (auto &entry : db.entries) {
+  for (auto &entry : normalized_db.entries) {
     auto normalized = normalize_entry_file(entry);
     entry_files.insert(normalized);
     if (file_set.insert(normalized).second)
       graph.files.push_back(normalized);
   }
 
-  for (auto &entry : db.entries) {
+  for (auto &entry : normalized_db.entries) {
     auto normalized = normalize_entry_file(entry);
-
-    if (entry.cache_key.empty()) {
-      return std::unexpected(ScanError{
-          .message = std::format("compile entry is missing cache key for {}",
-                                 normalized)});
-    }
     auto cache_key = entry.cache_key;
 
     auto cached_it = initial_cache.find(cache_key);

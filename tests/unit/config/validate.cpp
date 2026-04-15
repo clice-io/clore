@@ -19,6 +19,8 @@ auto fill_required_generation_fields(TaskConfig& config) -> void {
     config.evidence_rules.max_siblings = 2;
     config.evidence_rules.max_source_bytes = 1024;
     config.evidence_rules.max_related_summaries = 2;
+    config.evidence_rules.max_top_modules = 2;
+    config.evidence_rules.max_top_namespaces = 2;
 
     config.llm.system_prompt = "system";
     config.llm.retry_count = 1;

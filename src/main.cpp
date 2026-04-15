@@ -96,11 +96,7 @@ int main(int argc, const char** argv) {
         return 0;
     }
 
-    // Configure logging
-    if(opts.log_level.has_value()) {
-        auto level = spdlog::level::from_str(*opts.log_level);
-        clore::logging::options.level = level;
-    }
+    // Initialize logger early so config/validation failures are visible.
     clore::logging::stderr_logger("clore");
 
     if(prompt_dry_run == has_model) {
@@ -120,6 +116,26 @@ int main(int argc, const char** argv) {
 
     if(task_config.workspace_root.empty()) {
         task_config.workspace_root = fs::path(config_path).parent_path().string();
+    }
+
+    auto set_log_level = [](std::string_view value, std::string_view source) {
+        auto level = spdlog::level::from_str(std::string(value));
+        if(level == spdlog::level::off && value != "off") {
+            clore::logging::warn("invalid {} log level '{}', keeping current level",
+                                 source,
+                                 value);
+            return;
+        }
+        clore::logging::options.level = level;
+        spdlog::set_level(level);
+    };
+
+    // Logging precedence: clore.toml -> CLI override.
+    if(task_config.log_level.has_value()) {
+        set_log_level(*task_config.log_level, "config");
+    }
+    if(opts.log_level.has_value()) {
+        set_log_level(*opts.log_level, "CLI");
     }
 
     if(!opts.compile_commands.has_value()) {

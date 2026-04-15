@@ -113,6 +113,112 @@ TEST_CASE(topological_order_diamond) {
   EXPECT_LT(pos_right, pos_top);
 }
 
+TEST_CASE(build_dependency_graph_mints_missing_cache_keys) {
+  namespace fs = std::filesystem;
+
+  auto root = (fs::temp_directory_path() / "clore_scan_missing_cache_key")
+                  .lexically_normal();
+  std::error_code ec;
+  fs::remove_all(root, ec);
+  fs::create_directories(root / "src");
+
+  {
+    std::ofstream source_file(root / "src" / "main.cpp");
+    source_file << "int main() { return 0; }\n";
+  }
+
+  auto source = canonical_test_path(root / "src" / "main.cpp");
+
+  CompilationDatabase db{
+      .entries =
+          {
+              CompileEntry{
+                  .file = source,
+                  .directory = root.generic_string(),
+                  .arguments = {"clang++", "-std=c++23", "-c", source,
+                                "-o", (root / "src" / "main.o").generic_string()},
+              },
+          },
+  };
+
+  auto source_entry = db.entries[0];
+  ensure_cache_key(source_entry);
+
+  ScanCache initial_cache;
+  initial_cache.emplace(source_entry.cache_key, ScanResult{});
+
+  auto result = build_dependency_graph(db);
+
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->graph.files.size(), 1u);
+  EXPECT_TRUE(std::ranges::find(result->graph.files, source) !=
+              result->graph.files.end());
+  EXPECT_EQ(result->cache.size(), 1u);
+
+  fs::remove_all(root, ec);
+}
+
+TEST_CASE(build_dependency_graph_with_initial_cache_mints_missing_cache_keys) {
+  namespace fs = std::filesystem;
+
+  auto root = (fs::temp_directory_path() / "clore_scan_missing_cache_key_seed")
+                  .lexically_normal();
+  std::error_code ec;
+  fs::remove_all(root, ec);
+  fs::create_directories(root / "src");
+  fs::create_directories(root / "include");
+
+  {
+    std::ofstream source_file(root / "src" / "main.cpp");
+    source_file << "#include \"../include/header.hpp\"\nint main() { return 0; }\n";
+  }
+  {
+    std::ofstream header_file(root / "include" / "header.hpp");
+    header_file << "#pragma once\n";
+  }
+
+  auto source = canonical_test_path(root / "src" / "main.cpp");
+  auto header = canonical_test_path(root / "include" / "header.hpp");
+
+  CompilationDatabase db{
+      .entries =
+          {
+              CompileEntry{
+                  .file = "src/main.cpp",
+                  .directory = root.generic_string(),
+              },
+              CompileEntry{
+                  .file = "include/header.hpp",
+                  .directory = root.generic_string(),
+              },
+          },
+  };
+
+  auto source_entry = db.entries[0];
+  auto header_entry = db.entries[1];
+  ensure_cache_key(source_entry);
+  ensure_cache_key(header_entry);
+
+  ScanCache initial_cache;
+  initial_cache.emplace(source_entry.cache_key,
+                        ScanResult{
+                            .includes = {IncludeInfo{.path = header}},
+                        });
+  initial_cache.emplace(header_entry.cache_key, ScanResult{});
+
+  auto result = build_dependency_graph(db, initial_cache);
+
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->graph.files.size(), 2u);
+  EXPECT_TRUE(std::ranges::find(result->graph.files, source) !=
+              result->graph.files.end());
+  EXPECT_TRUE(std::ranges::find(result->graph.files, header) !=
+              result->graph.files.end());
+  EXPECT_EQ(result->cache.size(), 2u);
+
+  fs::remove_all(root, ec);
+}
+
 TEST_CASE(scan_module_decl_normalizes_partition_imports_and_deduplicates) {
   ScanResult result;
 
