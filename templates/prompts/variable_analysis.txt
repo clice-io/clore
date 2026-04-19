@@ -1,0 +1,18 @@
+R"clore(Analyze the {{target_kind}} `{{target_name}}` and return a JSON object that matches the provided schema.
+
+This analysis will be cached and reused across namespace, module, file, and symbol documentation pages.
+Use only the EVIDENCE section below.
+
+Field requirements:
+- `overview_markdown`: 1 short paragraph for declaration and overview contexts.
+- `details_markdown`: 1 short paragraph focused on the variable's role, how it is read, and how it participates in surrounding logic.
+- `is_mutated`: true when the evidence suggests the variable is reassigned or updated after initialization.
+- `mutation_sources`: short phrases describing what code paths, functions, or contexts mutate it.
+- `usage_patterns`: short phrases describing how the variable is consumed or referenced.
+
+Constraints:
+- Stay conservative and evidence-grounded.
+- Do not invent initialization details, mutations, or usage that are not supported by the evidence.
+- Markdown fields must be fragments only, with no headings and no code fences.
+
+{{evidence}})clore"

@@ -2,7 +2,7 @@
 
 ![C++ Standard](https://img.shields.io/badge/C++-23-blue.svg)
 [![GitHub license](https://img.shields.io/github/license/clice-io/clore)](https://github.com/clice-io/clore/blob/main/LICENSE)
-[![generate-docs](https://github.com/clice-io/clore/actions/workflows/generate-docs.yml/badge.svg)](https://github.com/clice-io/clore/actions/workflows/generate-docs.yml)
+[![Build](https://github.com/clice-io/clore/actions/workflows/verify-build.yml/badge.svg)](https://github.com/clice-io/clore/actions/workflows/verify-build.yml)
 [![Documentation](https://img.shields.io/badge/view-documentation-blue)](https://docs.clice.io/clore/)
 
 clore is a document generator for humans and agents that combines LLVM and LLM technologies and is written in modern C++.
@@ -10,6 +10,26 @@ clore is a document generator for humans and agents that combines LLVM and LLM t
 ## How to build
 
 Run `pixi run build`. If you don't have pixi installed, install it first.
+
+The default build path now installs third-party dependencies via Conan before CMake configure.
+
+```bash
+pixi run build --type Debug
+```
+
+If you want to run the Conan step explicitly:
+
+```bash
+pixi run -e conan conan-install --type Debug
+pixi run cmake-config --type Debug
+pixi run cmake-build --type Debug
+```
+
+Current Conan-managed third-party dependencies are `spdlog`, `libcurl`, `simdjson`, and `kotatsu`.
+
+LLVM remains on the existing managed artifact flow (`scripts/setup-llvm.py` + `config/llvm-manifest.json`) for gradual migration.
+
+Your Conan profile should match the compiler/toolchain selected by `pixi`, because the project still configures CMake through `cmake/toolchain.cmake`.
 
 ## CLI usage
 
@@ -36,26 +56,12 @@ clore \
 ## `clore.toml`
 
 ```toml
-# Optional. Can be overridden by --log-level.
-# log_level = "info"
-
 [filter]
 include = ["src/"]
 exclude = []
 
-[extract]
-max_snippet_bytes = 8192
-
-[evidence_rules]
-max_callers = 5
-max_callees = 5
-max_siblings = 8
-max_source_bytes = 4096
-max_related_summaries = 3
-max_top_modules = 8
-max_top_namespaces = 8
-
 [llm]
+provider = "openai"
 system_prompt = "You are a C++ documentation writer."
 retry_count = 3
 retry_initial_backoff_ms = 250

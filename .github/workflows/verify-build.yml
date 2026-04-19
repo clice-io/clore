@@ -2,14 +2,15 @@ name: Build
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   pull_request:
 
 jobs:
   build:
     strategy:
       matrix:
-        os: ["windows-latest", "ubuntu-latest", "macos-latest"]
+        os: [ "windows-latest", "ubuntu-latest", "macos-latest" ]
+
     runs-on: "${{ matrix.os }}"
     steps:
       - name: Checkout
@@ -22,24 +23,29 @@ jobs:
           activate-environment: true
           cache: true
 
-      - name: Restore build directory cache
-        id: restore-build-cache
-        uses: actions/cache/restore@v5
+      - name: Cache Conan
+        uses: actions/cache@v5
         with:
-          path: build/Debug/
-          key: ${{ runner.os }}-debug-build-${{ hashFiles('pixi.lock', 'pixi.toml', '**/CMakeLists.txt', 'cmake/**/*.cmake') }}
-          restore-keys: |
-            ${{ runner.os }}-debug-build-
+          path: '[".conan/", "build/subprojects/"]'
+          key: ${{ runner.os }}-deps-${{ hashFiles('pixi.toml', 'conanfile.py') }}
+
+      - name: Install
+        run: pixi run install
+
+      - name: Cache Cmake
+        uses: actions/cache@v5
+        with:
+          path: build/Debug
+          key: ${{ runner.os }}-cfg-${{ hashFiles('pixi.toml', 'conanfile.py', '**/CMakeLists.txt') }}
 
       - name: Configure
-        run: pixi run cmake-config Debug
+        run: pixi run config
 
-      - name: Save build directory cache
-        if: steps.restore-build-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: build/Debug/
-          key: ${{ steps.restore-build-cache.outputs.cache-primary-key }}
+      - name: Check
+        run: pixi run check
 
       - name: Build
-        run: pixi run cmake-build Debug
+        run: pixi run build
+
+      - name: Test
+        run: pixi run test

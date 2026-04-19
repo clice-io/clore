@@ -1,13 +1,8 @@
 module;
 
-#include <expected>
-#include <filesystem>
-#include <format>
-#include <optional>
-#include <string>
-
 export module config:normalize;
 
+import std;
 import :schema;
 
 export namespace clore::config {
@@ -29,8 +24,8 @@ auto normalize(TaskConfig& config) -> std::expected<void, NormalizeError> {
 
     auto make_absolute = [](std::string& path,
                             std::string_view field,
-                            const std::optional<fs::path>& base = std::nullopt)
-        -> std::expected<void, NormalizeError> {
+                            const std::optional<fs::path>& base =
+                                std::nullopt) -> std::expected<void, NormalizeError> {
         if(path.empty()) {
             return std::unexpected(
                 NormalizeError{.message = std::format("{} must not be empty", field)});
@@ -63,7 +58,7 @@ auto normalize(TaskConfig& config) -> std::expected<void, NormalizeError> {
     }
 
     auto normalize_separators = [](std::string& path) {
-        for(auto& c : path) {
+        for(auto& c: path) {
             if(c == '\\') {
                 c = '/';
             }
@@ -74,8 +69,14 @@ auto normalize(TaskConfig& config) -> std::expected<void, NormalizeError> {
     normalize_separators(config.project_root);
     normalize_separators(config.output_root);
     normalize_separators(config.workspace_root);
-    for(auto& p : config.filter.include) normalize_separators(p);
-    for(auto& p : config.filter.exclude) normalize_separators(p);
+    for(auto& p: config.filter.include)
+        normalize_separators(p);
+    for(auto& p: config.filter.exclude)
+        normalize_separators(p);
+
+    for(auto& ch: config.llm.provider) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
 
     return {};
 }

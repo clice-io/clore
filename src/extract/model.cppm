@@ -1,35 +1,65 @@
-module;
-
-#include <algorithm>
-#include <cstdint>
-#include <functional>
-#include <optional>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <vector>
-
 export module extract:model;
 
-import :symbol;
+import std;
+import support;
 
 export namespace clore::extract {
 
-struct TransparentStringHash {
-    using is_transparent = void;
+enum class SymbolKind : std::uint8_t {
+    Namespace,
+    Class,
+    Struct,
+    Union,
+    Enum,
+    EnumMember,
+    Function,
+    Method,
+    Variable,
+    Field,
+    TypeAlias,
+    Macro,
+    Template,
+    Concept,
+    Unknown,
+};
 
-    [[nodiscard]] auto operator()(std::string_view value) const noexcept -> std::size_t {
-        return std::hash<std::string_view>{}(value);
+auto symbol_kind_name(SymbolKind kind) -> std::string_view;
+
+struct SymbolID {
+    /// A hash of 0 is the invalid/null sentinel.  Valid IDs are always non-zero.
+    std::uint64_t hash = 0;
+    /// Additional signature derived from the same USR source, used to
+    /// disambiguate the astronomically unlikely case of a 64-bit hash collision.
+    std::uint32_t signature = 0;
+
+    [[nodiscard]] bool is_valid() const noexcept {
+        return hash != 0;
     }
 
-    [[nodiscard]] auto operator()(const std::string& value) const noexcept -> std::size_t {
-        return (*this)(std::string_view{value});
-    }
+    bool operator==(const SymbolID&) const = default;
+    auto operator<=>(const SymbolID&) const = default;
+};
 
-    [[nodiscard]] auto operator()(const char* value) const noexcept -> std::size_t {
-        return (*this)(std::string_view{value});
+}  // namespace clore::extract
+
+export template <>
+struct std::hash<clore::extract::SymbolID> {
+    std::size_t operator()(const clore::extract::SymbolID& id) const noexcept {
+        // Combine the 64-bit hash with the 32-bit signature into a single
+        // std::size_t hash value.  Using the full 96 bits means the chance
+        // of an undetected collision is negligible (2^-96).
+        return std::hash<std::uint64_t>{}(id.hash) ^ (static_cast<std::size_t>(id.signature) << 1);
     }
 };
+
+export namespace clore::extract {
+
+auto split_top_level_qualified_name(std::string_view qualified_name) -> std::vector<std::string>;
+
+auto join_qualified_name_parts(const std::vector<std::string>& parts, std::size_t count)
+    -> std::string;
+
+auto namespace_prefix_from_qualified_name(std::string_view qualified_name) -> std::string;
 
 struct SourceLocation {
     std::string file;
@@ -37,7 +67,9 @@ struct SourceLocation {
     std::uint32_t line = 0;
     std::uint32_t column = 0;
 
-    [[nodiscard]] bool is_known() const noexcept { return line != 0; }
+    [[nodiscard]] bool is_known() const noexcept {
+        return line != 0;
+    }
 };
 
 struct SourceRange {
@@ -58,6 +90,12 @@ struct SymbolInfo {
 
     std::string doc_comment;
     std::string source_snippet;
+
+    /// When source_snippet is empty, these fields reference the raw source
+    /// text in declaration_location.file so the snippet can be resolved
+    /// on demand instead of being stored in memory for every symbol.
+    std::uint32_t source_snippet_offset = 0;
+    std::uint32_t source_snippet_length = 0;
 
     std::optional<SymbolID> parent;
     std::string lexical_parent_name;
@@ -91,13 +129,11 @@ struct NamespaceInfo {
     std::vector<std::string> children;
 };
 
-// ── module information ──────────────────────────────────────────────
-
 /// Represents a single C++20 module unit (interface or partition).
 struct ModuleUnit {
-    std::string name;              ///< Full module name, e.g. "foo" or "foo:bar"
-    bool is_interface = false;     ///< true for `export module`, false for `module`
-    std::string source_file;       ///< Normalized path to the source file
+    std::string name;                  ///< Full module name, e.g. "foo" or "foo:bar"
+    bool is_interface = false;         ///< true for `export module`, false for `module`
+    std::string source_file;           ///< Normalized path to the source file
     std::vector<std::string> imports;  ///< Module imports
     std::vector<SymbolID> symbols;     ///< Symbols declared in this module unit
 };
@@ -110,30 +146,39 @@ struct ProjectModel {
     std::vector<std::string> file_order;
 
     /// Module units indexed by normalized source file path.
-    std::unordered_map<std::string, ModuleUnit, TransparentStringHash, std::equal_to<>> modules;
+    std::unordered_map<std::string,
+                       ModuleUnit,
+                       clore::support::TransparentStringHash,
+                       clore::support::TransparentStringEqual>
+        modules;
 
     /// Exact qualified-name lookup for generation and evidence building.
     /// A qualified name can map to multiple SymbolIDs when overloads exist.
-    std::unordered_map<std::string, std::vector<SymbolID>, TransparentStringHash, std::equal_to<>>
+    std::unordered_map<std::string,
+                       std::vector<SymbolID>,
+                       clore::support::TransparentStringHash,
+                       clore::support::TransparentStringEqual>
         symbol_ids_by_qualified_name;
 
     /// Exact module-name lookup for generation and cross-linking.
-    std::unordered_map<std::string, std::vector<std::string>, TransparentStringHash, std::equal_to<>>
+    std::unordered_map<std::string,
+                       std::vector<std::string>,
+                       clore::support::TransparentStringHash,
+                       clore::support::TransparentStringEqual>
         module_name_to_sources;
 
-    /// True if the project uses C++20 modules (at least one module declaration found).
+    /// True if the project uses C++20 modules (at least one module declaration
+    /// found).
     bool uses_modules = false;
 };
 
 auto lookup_symbol(const ProjectModel& model, SymbolID id) -> const SymbolInfo*;
 
-auto find_symbol(const ProjectModel& model, std::string_view qualified_name)
-    -> const SymbolInfo*;
+auto find_symbol(const ProjectModel& model, std::string_view qualified_name) -> const SymbolInfo*;
 
 auto find_symbol(const ProjectModel& model,
                  std::string_view qualified_name,
-                 std::string_view signature)
-    -> const SymbolInfo*;
+                 std::string_view signature) -> const SymbolInfo*;
 
 auto find_symbols(const ProjectModel& model, std::string_view qualified_name)
     -> std::vector<const SymbolInfo*>;
@@ -147,9 +192,134 @@ auto find_modules_by_name(const ProjectModel& model, std::string_view module_nam
 auto find_module_by_source(const ProjectModel& model, std::string_view source_file)
     -> const ModuleUnit*;
 
+/// Populate source_snippet from the on-disk file using the recorded
+/// source_snippet_offset / source_snippet_length fields.  Returns true
+/// if the snippet was successfully resolved (or already cached).
+auto resolve_source_snippet(SymbolInfo& sym) -> bool;
+
 }  // namespace clore::extract
 
 namespace clore::extract {
+
+namespace {
+
+struct SplitQualifiedNameCache {
+    std::shared_mutex mutex;
+    std::unordered_map<std::string,
+                       std::vector<std::string>,
+                       clore::support::TransparentStringHash,
+                       clore::support::TransparentStringEqual>
+        parts_by_qualified_name;
+};
+
+auto split_qualified_name_cache() -> SplitQualifiedNameCache& {
+    static SplitQualifiedNameCache cache;
+    return cache;
+}
+
+}  // namespace
+
+auto symbol_kind_name(SymbolKind kind) -> std::string_view {
+    switch(kind) {
+        case SymbolKind::Namespace: return "namespace";
+        case SymbolKind::Class: return "class";
+        case SymbolKind::Struct: return "struct";
+        case SymbolKind::Union: return "union";
+        case SymbolKind::Enum: return "enum";
+        case SymbolKind::EnumMember: return "enum_member";
+        case SymbolKind::Function: return "function";
+        case SymbolKind::Method: return "method";
+        case SymbolKind::Variable: return "variable";
+        case SymbolKind::Field: return "field";
+        case SymbolKind::TypeAlias: return "type_alias";
+        case SymbolKind::Macro: return "macro";
+        case SymbolKind::Template: return "template";
+        case SymbolKind::Concept: return "concept";
+        case SymbolKind::Unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+auto split_top_level_qualified_name(std::string_view qualified_name) -> std::vector<std::string> {
+    if(qualified_name.empty()) {
+        return {};
+    }
+
+    auto& cache = split_qualified_name_cache();
+    {
+        std::shared_lock lock(cache.mutex);
+        auto it = cache.parts_by_qualified_name.find(qualified_name);
+        if(it != cache.parts_by_qualified_name.end()) {
+            return it->second;
+        }
+    }
+
+    std::vector<std::string> parts;
+    std::string current;
+    current.reserve(qualified_name.size());
+
+    std::size_t template_depth = 0;
+    for(std::size_t index = 0; index < qualified_name.size(); ++index) {
+        auto ch = qualified_name[index];
+        if(ch == '<') {
+            template_depth++;
+            current.push_back(ch);
+            continue;
+        }
+        if(ch == '>') {
+            if(template_depth > 0) {
+                template_depth--;
+            }
+            current.push_back(ch);
+            continue;
+        }
+        if(ch == ':' && template_depth == 0 && index + 1 < qualified_name.size() &&
+           qualified_name[index + 1] == ':') {
+            if(!current.empty()) {
+                parts.push_back(current);
+            }
+            current.clear();
+            ++index;
+            continue;
+        }
+        current.push_back(ch);
+    }
+
+    if(!current.empty()) {
+        parts.push_back(std::move(current));
+    }
+
+    if(!parts.empty() && parts.front().empty()) {
+        parts.erase(parts.begin());
+    }
+
+    {
+        std::unique_lock lock(cache.mutex);
+        cache.parts_by_qualified_name.insert_or_assign(std::string(qualified_name), parts);
+    }
+    return parts;
+}
+
+auto join_qualified_name_parts(const std::vector<std::string>& parts, std::size_t count)
+    -> std::string {
+    std::string joined;
+    auto safe_count = count < parts.size() ? count : parts.size();
+    for(std::size_t index = 0; index < safe_count; ++index) {
+        if(index > 0) {
+            joined += "::";
+        }
+        joined += parts[index];
+    }
+    return joined;
+}
+
+auto namespace_prefix_from_qualified_name(std::string_view qualified_name) -> std::string {
+    auto parts = split_top_level_qualified_name(qualified_name);
+    if(parts.size() <= 1) {
+        return {};
+    }
+    return join_qualified_name_parts(parts, parts.size() - 1);
+}
 
 auto lookup_symbol(const ProjectModel& model, SymbolID id) -> const SymbolInfo* {
     auto it = model.symbols.find(id);
@@ -165,30 +335,15 @@ auto find_symbols(const ProjectModel& model, std::string_view qualified_name)
     }
 
     matches.reserve(it->second.size());
-    for(auto symbol_id : it->second) {
+    for(auto symbol_id: it->second) {
         if(auto* symbol = lookup_symbol(model, symbol_id)) {
             matches.push_back(symbol);
         }
     }
-
-    std::sort(matches.begin(), matches.end(), [](const SymbolInfo* lhs, const SymbolInfo* rhs) {
-        if(lhs->signature != rhs->signature) {
-            return lhs->signature < rhs->signature;
-        }
-        if(lhs->declaration_location.file != rhs->declaration_location.file) {
-            return lhs->declaration_location.file < rhs->declaration_location.file;
-        }
-        if(lhs->declaration_location.line != rhs->declaration_location.line) {
-            return lhs->declaration_location.line < rhs->declaration_location.line;
-        }
-        return lhs->id < rhs->id;
-    });
-
     return matches;
 }
 
-auto find_symbol(const ProjectModel& model, std::string_view qualified_name)
-    -> const SymbolInfo* {
+auto find_symbol(const ProjectModel& model, std::string_view qualified_name) -> const SymbolInfo* {
     auto matches = find_symbols(model, qualified_name);
     if(matches.size() != 1) {
         return nullptr;
@@ -198,14 +353,13 @@ auto find_symbol(const ProjectModel& model, std::string_view qualified_name)
 
 auto find_symbol(const ProjectModel& model,
                  std::string_view qualified_name,
-                 std::string_view signature)
-    -> const SymbolInfo* {
+                 std::string_view signature) -> const SymbolInfo* {
     if(signature.empty()) {
         return find_symbol(model, qualified_name);
     }
 
     auto matches = find_symbols(model, qualified_name);
-    for(auto* symbol : matches) {
+    for(auto* symbol: matches) {
         if(symbol->signature == signature) {
             return symbol;
         }
@@ -222,7 +376,7 @@ auto find_modules_by_name(const ProjectModel& model, std::string_view module_nam
     }
 
     modules.reserve(it->second.size());
-    for(const auto& source : it->second) {
+    for(const auto& source: it->second) {
         if(auto* module = find_module_by_source(model, source)) {
             modules.push_back(module);
         }
@@ -246,7 +400,7 @@ auto find_module_by_name(const ProjectModel& model, std::string_view module_name
 
     const ModuleUnit* single_interface = nullptr;
     std::size_t interface_count = 0;
-    for(auto* module : modules) {
+    for(auto* module: modules) {
         if(module->is_interface) {
             single_interface = module;
             ++interface_count;
@@ -255,7 +409,15 @@ auto find_module_by_name(const ProjectModel& model, std::string_view module_name
     if(interface_count == 1) {
         return single_interface;
     }
+    if(interface_count == 0) {
+        logging::warn(
+            "module '{}' has {} implementation units but no interface unit; " "using first unit as fallback",
+            module_name,
+            modules.size());
+        return modules.front();
+    }
 
+    logging::warn("module '{}' is ambiguous: {} interface units", module_name, interface_count);
     return nullptr;
 }
 
@@ -263,6 +425,49 @@ auto find_module_by_source(const ProjectModel& model, std::string_view source_fi
     -> const ModuleUnit* {
     auto it = model.modules.find(source_file);
     return it != model.modules.end() ? &it->second : nullptr;
+}
+
+auto resolve_source_snippet(SymbolInfo& sym) -> bool {
+    if(!sym.source_snippet.empty()) {
+        return true;
+    }
+    if(sym.source_snippet_length == 0 || sym.declaration_location.file.empty()) {
+        return false;
+    }
+
+    namespace fs = std::filesystem;
+    auto file_size = fs::file_size(sym.declaration_location.file);
+    auto offset = static_cast<std::size_t>(sym.source_snippet_offset);
+    auto length = static_cast<std::size_t>(sym.source_snippet_length);
+
+    if(offset + length > file_size) {
+        return false;
+    }
+
+    std::ifstream file(sym.declaration_location.file, std::ios::binary);
+    if(!file) {
+        return false;
+    }
+
+    file.seekg(static_cast<std::streamoff>(offset));
+    std::string result(length, '\0');
+    file.read(result.data(), static_cast<std::streamsize>(length));
+    if(!file) {
+        return false;
+    }
+
+    // Normalize \r\n to \n
+    std::string normalized;
+    normalized.reserve(result.size());
+    for(std::size_t i = 0; i < result.size(); ++i) {
+        if(result[i] == '\r' && i + 1 < result.size() && result[i + 1] == '\n') {
+            continue;
+        }
+        normalized += result[i];
+    }
+
+    sym.source_snippet = std::move(normalized);
+    return true;
 }
 
 }  // namespace clore::extract

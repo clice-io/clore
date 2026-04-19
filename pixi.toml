@@ -1,5 +1,3 @@
-# tombi: format.rules.table-keys-order.disabled = true
-
 [workspace]
 name = "clore"
 version = "0.1.0"
@@ -10,100 +8,100 @@ repository = "https://github.com/clice-io/clore"
 channels = ["conda-forge"]
 platforms = ["win-64", "linux-64", "osx-arm64"]
 
-[environments]
-default = ["build"]
-format = ["format"]
+[dependencies]
+python = "==3.14"
+cmake = "==4.3.1"
+conan = "==2.27.1"
+ninja = "==1.13.2"
+sccache = "==0.14.0"
+cppcheck = "==2.20.1"
+fd-find = "==10.4.2"
 
-# ============================================================================== #
-#                                  DEPENDENCIES                                  #
-# ============================================================================== #
-[feature.build.dependencies]
-python = ">=3.13"
-cmake = ">=3.30"
-ninja = "*"
-libcurl = "*"
-clang = "==20.1.8"
-clangxx = "==20.1.8"
-clang-tools = "==20.1.8"
-lld = "==20.1.8"
-llvm-tools = "==20.1.8"
-compiler-rt = "==20.1.8"
+clang = "==22.1.3"
+clangdev = "==22.1.3"
+clangxx = "==22.1.3"
+clang-tools = "==22.1.3"
+llvmdev = "==22.1.3"
+llvm-tools = "==22.1.3"
+compiler-rt = "==22.1.3"
 
-[feature.build.target.win-64.dependencies]
-sccache = "*"
+[activation.env]
+CMAKE_C_COMPILER_LAUNCHER = "sccache"
+CMAKE_CXX_COMPILER_LAUNCHER = "sccache"
+CONAN_HOME = "${PIXI_PROJECT_ROOT}/.conan"
 
-[feature.build.target.linux-64.dependencies]
-sysroot_linux-64 = "==2.17"
-gcc = "==14.2.0"
-gxx = "==14.2.0"
-ccache = "*"
+[target.linux-64.dependencies]
+sysroot_linux-64 = "==2.39"
+mold = "==2.40.4"
+libstdcxx = "==15.2.0"
+libstdcxx-devel_linux-64 = "==15.2.0"
+libgcc-devel_linux-64 = "==15.2.0"
 
-[feature.build.target.osx-arm64.dependencies]
-ccache = "*"
+[target.linux-64.activation.env]
+CC = "clang"
+CXX = "clang++"
+CXXFLAGS = "-stdlib=libstdc++"
+LDFLAGS = "-stdlib=libstdc++ -fuse-ld=mold"
 
-[feature.build.target.linux-64.activation]
-scripts = ["scripts/activate_linux.sh"]
+[target.win-64.dependencies]
+lld = "==22.1.3"
 
-[feature.build.target.win-64.activation]
-scripts = ["scripts/activate_asan.bat"]
+[target.win-64.activation.env]
+CXXFLAGS = "/Z7 /Gw /Gy"
+LDFLAGS = "-fuse-ld=lld"
 
+[tasks.install]
+args = [{ arg = "type", default = "Debug" }]
+cmd = """
+conan profile detect --force && \
+conan source . && \
+conan install . -s build_type={{ type }} -s:h compiler.cppstd=23 --build=missing
+"""
+inputs = ["conanfile.py"]
+outputs = ["build/{{ type }}/generators/conan_toolchain.cmake"]
 
-# ============================================================================== #
-#                                   CMAKE                                        #
-# ============================================================================== #
-[feature.build.tasks.cmake-config]
-args = [{ arg = "type", default = "RelWithDebInfo" }]
+[tasks.config]
+args = [{ arg = "type", default = "Debug" }]
 cmd = """
 cmake -B build/{{ type }} -G Ninja \
     -DCMAKE_BUILD_TYPE={{ type }} \
-    -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain.cmake \
-    -DCLORE_ENABLE_TEST=ON
+    -DCMAKE_TOOLCHAIN_FILE=build/{{ type }}/generators/conan_toolchain.cmake \
+    -DCMAKE_EXPERIMENTAL_CXX_IMPORT_STD=451f2fe2-a8a2-47c3-bc32-94786d8fc91b
+"""
+inputs = ["CMakeLists.txt", "src/CMakeLists.txt"]
+outputs = ["build/{{ type }}/CMakeCache.txt"]
+depends-on = ["install"]
+
+[tasks.format]
+cmd = """
+fd -e h -e cpp -e cppm -t f . src tests -x clang-format -i
 """
 
-[feature.build.tasks.cmake-build]
-args = [{ arg = "type", default = "RelWithDebInfo" }]
+[tasks.check]
+args = [{ arg = "type", default = "Debug" }]
+cmd = "cppcheck -j8 --quiet --std=c++23 src tests"
+
+[tasks.build]
+args = [{ arg = "type", default = "Debug" }]
 cmd = "cmake --build build/{{ type }} --parallel"
+inputs = ["src/", "tests/", "build/{{ type }}/CMakeCache.txt"]
+depends-on = ["config"]
 
-[feature.build.tasks.build]
-args = [{ arg = "type", default = "RelWithDebInfo" }]
-depends-on = [
-    { task = "cmake-config", args = [
-        "{{ type }}",
-    ] },
-    { task = "cmake-build", args = [
-        "{{ type }}",
-    ] },
+[tasks.test]
+args = [{ arg = "type", default = "Debug" }]
+cmd = "./build/{{ type }}/tests/unit_tests"
+depends-on = ["build"]
+
+[tasks.generate]
+args = [
+    { arg = "lang", default = "zh" },
+    { arg = "type", default = "Debug" },
 ]
-
-[feature.build.tasks.test]
-args = [{ arg = "type", default = "RelWithDebInfo" }]
-cmd = "./build/{{ type }}/bin/unit_tests"
-
-# ============================================================================== #
-#                                    FORMAT                                      #
-# ============================================================================== #
-[feature.format.dependencies]
-ruff = "*"
-tombi = "*"
-fd-find = "*"
-prettier = "*"
-clang-format = "==21.1.7"
-
-[feature.format.tasks]
-format-cpp = "fd -H -e cpp -e h -e cc -e hpp -e cppm -x clang-format -i"
-format-python = "ruff format ."
-format-markdown = "fd -H -e md -x prettier --write"
-format-json = "fd -H -e json -x prettier --write"
-format-toml = "fd -H -e toml -x tombi format"
-format-yaml = """
-fd -H -e yaml -e yml -x prettier --write && \
-fd -H "^\\.clang-(format|tidy)$" -x prettier --write --parser yaml
+cmd = """
+./build/{{ type }}/src/clore \
+--config clore.{{ lang }}.toml \
+--compile-commands build/{{ type }}/compile_commands.json \
+--source-dir src --output-dir docs/{{ lang }} \
+--log-level debug --model deepseek-chat
 """
-format = { depends-on = [
-    "format-cpp",
-    "format-python",
-    "format-markdown",
-    "format-json",
-    "format-toml",
-    "format-yaml",
-] }
+depends-on = ["build"]

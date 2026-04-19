@@ -1,16 +1,6 @@
 module;
 
-#include <algorithm>
-#include <cstdint>
-#include <expected>
-#include <filesystem>
-#include <format>
-#include <memory>
-#include <optional>
-#include <string>
-#include <unordered_set>
-#include <vector>
-
+#include "llvm/Support/Error.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/Comment.h"
 #include "clang/AST/DeclCXX.h"
@@ -22,14 +12,12 @@ module;
 #include "clang/Frontend/FrontendAction.h"
 #include "clang/Index/USRGeneration.h"
 #include "clang/Lex/Lexer.h"
-#include "llvm/Support/Error.h"
 
 export module extract:ast;
 
-import :compdb;
+import std;
+import :compiler;
 import :model;
-import :symbol;
-import :tooling;
 import support;
 
 export namespace clore::extract {
@@ -41,7 +29,8 @@ struct ASTError {
 struct ExtractedRelation {
     SymbolID from;
     SymbolID to;
-    bool is_call;  ///< true = call edge, false = reference edge
+    bool is_call = false;         ///< true = call edge
+    bool is_inheritance = false;  ///< true = inheritance edge (from=derived, to=base)
 };
 
 struct ASTResult {
@@ -50,8 +39,7 @@ struct ASTResult {
     std::vector<std::string> dependencies;
 };
 
-auto extract_symbols(const CompileEntry& entry, std::uint32_t max_snippet_bytes)
-    -> std::expected<ASTResult, ASTError>;
+auto extract_symbols(const CompileEntry& entry) -> std::expected<ASTResult, ASTError>;
 
 }  // namespace clore::extract
 
@@ -67,29 +55,46 @@ auto compute_symbol_id(const clang::Decl* decl) -> SymbolID {
         return SymbolID{.hash = 0};
     }
     std::uint64_t hash = llvm::xxHash64(usr);
-    return SymbolID{.hash = hash};
+    // Use xxh3 (a different algorithm) so the signature provides independent
+    // entropy for collision disambiguation instead of being a truncated copy
+    // of the xxHash64 hash.
+    std::uint32_t signature = static_cast<std::uint32_t>(llvm::xxh3_64bits(usr));
+    return SymbolID{.hash = hash, .signature = signature};
 }
 
 auto classify_decl(const clang::NamedDecl* decl) -> SymbolKind {
-    if(llvm::isa<clang::NamespaceDecl>(decl)) return SymbolKind::Namespace;
+    if(llvm::isa<clang::NamespaceDecl>(decl))
+        return SymbolKind::Namespace;
     if(llvm::isa<clang::CXXRecordDecl>(decl)) {
         auto* record = llvm::cast<clang::CXXRecordDecl>(decl);
-        if(record->isClass()) return SymbolKind::Class;
-        if(record->isStruct()) return SymbolKind::Struct;
-        if(record->isUnion()) return SymbolKind::Union;
+        if(record->isClass())
+            return SymbolKind::Class;
+        if(record->isStruct())
+            return SymbolKind::Struct;
+        if(record->isUnion())
+            return SymbolKind::Union;
         return SymbolKind::Class;
     }
-    if(llvm::isa<clang::RecordDecl>(decl)) return SymbolKind::Struct;
-    if(llvm::isa<clang::EnumDecl>(decl)) return SymbolKind::Enum;
-    if(llvm::isa<clang::EnumConstantDecl>(decl)) return SymbolKind::EnumMember;
-    if(llvm::isa<clang::CXXMethodDecl>(decl)) return SymbolKind::Method;
-    if(llvm::isa<clang::FunctionDecl>(decl)) return SymbolKind::Function;
-    if(llvm::isa<clang::VarDecl>(decl)) return SymbolKind::Variable;
-    if(llvm::isa<clang::FieldDecl>(decl)) return SymbolKind::Field;
+    if(llvm::isa<clang::RecordDecl>(decl))
+        return SymbolKind::Struct;
+    if(llvm::isa<clang::EnumDecl>(decl))
+        return SymbolKind::Enum;
+    if(llvm::isa<clang::EnumConstantDecl>(decl))
+        return SymbolKind::EnumMember;
+    if(llvm::isa<clang::CXXMethodDecl>(decl))
+        return SymbolKind::Method;
+    if(llvm::isa<clang::FunctionDecl>(decl))
+        return SymbolKind::Function;
+    if(llvm::isa<clang::VarDecl>(decl))
+        return SymbolKind::Variable;
+    if(llvm::isa<clang::FieldDecl>(decl))
+        return SymbolKind::Field;
     if(llvm::isa<clang::TypeAliasDecl>(decl) || llvm::isa<clang::TypedefDecl>(decl))
         return SymbolKind::TypeAlias;
-    if(llvm::isa<clang::ConceptDecl>(decl)) return SymbolKind::Concept;
-    if(llvm::isa<clang::TemplateDecl>(decl)) return SymbolKind::Template;
+    if(llvm::isa<clang::ConceptDecl>(decl))
+        return SymbolKind::Concept;
+    if(llvm::isa<clang::TemplateDecl>(decl))
+        return SymbolKind::Template;
     return SymbolKind::Unknown;
 }
 
@@ -104,14 +109,16 @@ auto get_access_string(clang::AccessSpecifier access) -> std::string {
 
 auto print_template_parameters(const clang::TemplateParameterList* params,
                                const clang::PrintingPolicy& policy) -> std::string {
-    if(params == nullptr) return {};
+    if(params == nullptr)
+        return {};
 
     std::string param_str;
     llvm::raw_string_ostream os(param_str);
     os << "<";
     bool first = true;
-    for(auto* param : *params) {
-        if(!first) os << ", ";
+    for(auto* param: *params) {
+        if(!first)
+            os << ", ";
         first = false;
         param->print(os, policy);
     }
@@ -152,69 +159,90 @@ auto apply_described_template_info(const clang::NamedDecl* decl,
 
 auto get_doc_comment(const clang::ASTContext& ctx, const clang::Decl* decl) -> std::string {
     auto* comment = ctx.getRawCommentForDeclNoCache(decl);
-    if(!comment) return "";
-    return clore::support::ensure_utf8(
-        comment->getRawText(ctx.getSourceManager()).str());
+    if(!comment)
+        return "";
+    return clore::support::ensure_utf8(comment->getRawText(ctx.getSourceManager()).str());
 }
 
-auto get_source_snippet(const clang::ASTContext& ctx, const clang::Decl* decl,
-                        std::uint32_t max_bytes) -> std::string {
+struct SourceSnippetBounds {
+    std::uint32_t offset = 0;
+    std::uint32_t length = 0;
+};
+
+auto get_source_snippet_bounds(const clang::ASTContext& ctx, const clang::Decl* decl)
+    -> SourceSnippetBounds {
     auto& sm = ctx.getSourceManager();
     auto range = decl->getSourceRange();
-    if(range.isInvalid()) return "";
-
-    auto begin = sm.getPresumedLoc(range.getBegin());
-    auto end = sm.getPresumedLoc(range.getEnd());
-    if(begin.isInvalid() || end.isInvalid()) return "";
+    if(range.isInvalid())
+        return {};
 
     auto begin_offset = sm.getFileOffset(range.getBegin());
 
     // getSourceRange().getEnd() points to the start of the last token.
     // Advance past the last token so we capture closing braces, semicolons, etc.
-    auto end_loc = clang::Lexer::getLocForEndOfToken(
-        range.getEnd(), 0, sm, ctx.getLangOpts());
+    auto end_loc = clang::Lexer::getLocForEndOfToken(range.getEnd(), 0, sm, ctx.getLangOpts());
     auto end_offset = sm.getFileOffset(end_loc);
 
     if(end_offset <= begin_offset) {
-        // Fallback: use original end
         end_offset = sm.getFileOffset(range.getEnd());
-    }
-
-    constexpr std::size_t utf8_slack_bytes = 4;
-    const auto max_excerpt_bytes = static_cast<std::size_t>(max_bytes) + utf8_slack_bytes;
-    if(static_cast<std::size_t>(end_offset - begin_offset) > max_excerpt_bytes) {
-        end_offset = begin_offset + static_cast<decltype(end_offset)>(max_excerpt_bytes);
     }
 
     auto file_id = sm.getFileID(range.getBegin());
     auto buffer = sm.getBufferData(file_id);
-    if(buffer.empty()) return "";
+    if(buffer.empty())
+        return {};
 
-    if(begin_offset >= buffer.size()) return "";
+    if(begin_offset >= buffer.size())
+        return {};
     if(end_offset > buffer.size()) {
         end_offset = buffer.size();
     }
 
-    std::string result(buffer.substr(begin_offset, end_offset - begin_offset));
+    auto length = end_offset - begin_offset;
+    if(length > std::numeric_limits<std::uint32_t>::max()) {
+        length = std::numeric_limits<std::uint32_t>::max();
+    }
 
-    // Normalize \r\n to \n to avoid double-spaced lines in markdown
+    return SourceSnippetBounds{
+        .offset = static_cast<std::uint32_t>(begin_offset),
+        .length = static_cast<std::uint32_t>(length),
+    };
+}
+
+auto get_source_snippet(const clang::ASTContext& ctx, const clang::Decl* decl) -> std::string {
+    auto bounds = get_source_snippet_bounds(ctx, decl);
+    if(bounds.length == 0)
+        return "";
+
+    auto& sm = ctx.getSourceManager();
+    auto range = decl->getSourceRange();
+    auto file_id = sm.getFileID(range.getBegin());
+    auto buffer = sm.getBufferData(file_id);
+    if(buffer.empty() || bounds.offset >= buffer.size())
+        return "";
+
+    auto end = std::min(static_cast<std::uint32_t>(buffer.size()), bounds.offset + bounds.length);
+    std::string result(buffer.substr(bounds.offset, end - bounds.offset).str());
+
     std::string normalized;
     normalized.reserve(result.size());
     for(std::size_t i = 0; i < result.size(); ++i) {
         if(result[i] == '\r' && i + 1 < result.size() && result[i + 1] == '\n') {
-            continue;  // skip \r before \n
+            continue;
         }
         normalized += result[i];
     }
 
-    return clore::support::truncate_utf8(normalized, max_bytes);
+    return normalized;
 }
 
 auto make_source_location(const clang::SourceManager& sm, clang::SourceLocation loc)
     -> SourceLocation {
-    if(loc.isInvalid()) return {};
+    if(loc.isInvalid())
+        return {};
     auto presumed = sm.getPresumedLoc(loc);
-    if(presumed.isInvalid()) return {};
+    if(presumed.isInvalid())
+        return {};
     return SourceLocation{
         .file = presumed.getFilename(),
         .line = presumed.getLine(),
@@ -230,7 +258,8 @@ struct LexicalContextInfo {
 };
 
 auto join_qualified_segments(const std::vector<std::string>& segments) -> std::string {
-    if(segments.empty()) return {};
+    if(segments.empty())
+        return {};
 
     std::string joined;
     for(std::size_t index = 0; index < segments.size(); ++index) {
@@ -242,13 +271,11 @@ auto join_qualified_segments(const std::vector<std::string>& segments) -> std::s
     return joined;
 }
 
-auto describe_lexical_context(const clang::DeclContext* decl_context)
-    -> LexicalContextInfo {
+auto describe_lexical_context(const clang::DeclContext* decl_context) -> LexicalContextInfo {
     LexicalContextInfo info;
     std::vector<std::string> namespace_segments;
 
-    for(auto* current = decl_context;
-        current != nullptr && !current->isTranslationUnit();
+    for(auto* current = decl_context; current != nullptr && !current->isTranslationUnit();
         current = current->getParent()) {
         if(auto* namespace_decl = llvm::dyn_cast<clang::NamespaceDecl>(current)) {
             if(info.parent_name.empty()) {
@@ -312,6 +339,16 @@ auto collect_dependency_files(const clang::SourceManager& source_manager)
             continue;
         }
 
+        // Skip system headers: they bloat the dependency snapshot and
+        // trigger unnecessary cache invalidation on system updates.
+        auto file_id = source_manager.translateFile(&file_ref.getFileEntry());
+        if(file_id.isValid()) {
+            auto loc = source_manager.getLocForStartOfFile(file_id);
+            if(source_manager.isInSystemHeader(loc)) {
+                continue;
+            }
+        }
+
         auto normalized = std::filesystem::path(path).lexically_normal().generic_string();
         if(seen.insert(normalized).second) {
             files.push_back(std::move(normalized));
@@ -322,7 +359,7 @@ auto collect_dependency_files(const clang::SourceManager& source_manager)
     return files;
 }
 
-enum class RelationKind : std::uint8_t { Call, Reference };
+enum class RelationKind : std::uint8_t { Call, Reference, Inheritance };
 
 struct RelationEdge {
     SymbolID from;
@@ -333,7 +370,8 @@ struct RelationEdge {
 auto edge_hash(SymbolID from, SymbolID to, RelationKind kind) -> std::uint64_t {
     auto h = std::hash<std::uint64_t>{}(from.hash);
     h ^= std::hash<std::uint64_t>{}(to.hash) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
-    h ^= std::hash<std::uint8_t>{}(static_cast<std::uint8_t>(kind)) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+    h ^= std::hash<std::uint8_t>{}(static_cast<std::uint8_t>(kind)) + 0x9e3779b97f4a7c15ULL +
+         (h << 6) + (h >> 2);
     return h;
 }
 
@@ -343,42 +381,52 @@ public:
     std::vector<SymbolInfo>& symbols;
     std::vector<RelationEdge>& relations;
     std::string main_file;
-    std::uint32_t max_snippet_bytes;
 
     std::vector<SymbolID> enclosing_stack;
     std::unordered_set<std::uint64_t> seen_edges;
 
-    SymbolExtractorVisitor(clang::ASTContext& ctx, std::vector<SymbolInfo>& syms,
+    SymbolExtractorVisitor(clang::ASTContext& ctx,
+                           std::vector<SymbolInfo>& syms,
                            std::vector<RelationEdge>& rels,
-                           std::string main_file, std::uint32_t max_bytes)
-        : context(ctx), symbols(syms), relations(rels),
-          main_file(std::move(main_file)), max_snippet_bytes(max_bytes) {}
+                           std::string main_file) :
+        context(ctx), symbols(syms), relations(rels), main_file(std::move(main_file)) {}
 
-    bool shouldVisitImplicitCode() const { return false; }
-    bool shouldVisitTemplateInstantiations() const { return false; }
+    bool shouldVisitImplicitCode() const {
+        return false;
+    }
+
+    bool shouldVisitTemplateInstantiations() const {
+        return false;
+    }
 
     bool VisitNamedDecl(clang::NamedDecl* decl) {
-        if(decl->isImplicit()) return true;
+        if(decl->isImplicit())
+            return true;
 
         auto& sm = context.getSourceManager();
         auto loc = decl->getLocation();
-        if(loc.isInvalid()) return true;
+        if(loc.isInvalid())
+            return true;
 
-        if(sm.isInSystemHeader(loc)) return true;
+        if(sm.isInSystemHeader(loc))
+            return true;
 
         auto kind = classify_decl(decl);
-        if(kind == SymbolKind::Unknown) return true;
+        if(kind == SymbolKind::Unknown)
+            return true;
 
-        if(decl->getDeclName().isEmpty()) return true;
+        if(decl->getDeclName().isEmpty())
+            return true;
 
-        if(llvm::isa<clang::TemplateDecl>(decl) &&
-           !llvm::isa<clang::ConceptDecl>(decl)) {
+        if(llvm::isa<clang::TemplateDecl>(decl) && !llvm::isa<clang::ConceptDecl>(decl)) {
             return true;
         }
-        if(llvm::isa<clang::ClassTemplateSpecializationDecl>(decl)) return true;
+        if(llvm::isa<clang::ClassTemplateSpecializationDecl>(decl))
+            return true;
 
         auto id = compute_symbol_id(decl);
-        if(!id.is_valid()) return true;
+        if(!id.is_valid())
+            return true;
 
         SymbolInfo info;
         info.id = id;
@@ -393,19 +441,27 @@ public:
             if(func->isThisDeclarationADefinition()) {
                 info.definition_location = make_source_location(sm, func->getLocation());
             }
-            std::string sig;
-            llvm::raw_string_ostream os(sig);
-            func->print(os, context.getPrintingPolicy());
-            info.signature = std::move(sig);
+            info.signature = func->getType().getAsString(context.getPrintingPolicy());
+            if(info.signature.empty()) {
+                info.signature = info.qualified_name;
+            }
         } else if(auto* record = llvm::dyn_cast<clang::CXXRecordDecl>(decl)) {
             if(record->isThisDeclarationADefinition()) {
                 info.definition_location = make_source_location(sm, record->getLocation());
-                for(auto& base : record->bases()) {
+                for(auto& base: record->bases()) {
                     auto* base_type = base.getType()->getAsCXXRecordDecl();
                     if(base_type) {
                         auto base_id = compute_symbol_id(base_type);
                         if(base_id.is_valid()) {
                             info.bases.push_back(base_id);
+                            auto h = edge_hash(id, base_id, RelationKind::Inheritance);
+                            if(seen_edges.insert(h).second) {
+                                relations.push_back(RelationEdge{
+                                    .from = id,
+                                    .to = base_id,
+                                    .kind = RelationKind::Inheritance,
+                                });
+                            }
                         }
                     }
                 }
@@ -418,7 +474,13 @@ public:
 
         info.access = get_access_string(decl->getAccess());
         info.doc_comment = get_doc_comment(context, decl);
-        info.source_snippet = get_source_snippet(context, decl, max_snippet_bytes);
+        {
+            auto bounds = get_source_snippet_bounds(context, decl);
+            info.source_snippet_offset = bounds.offset;
+            info.source_snippet_length = bounds.length;
+            // Do not eagerly copy the full text into memory; it will be resolved
+            // on demand via resolve_source_snippet() during evidence building.
+        }
         apply_described_template_info(decl, context.getPrintingPolicy(), info);
 
         info.lexical_parent_name = std::move(lexical_context.parent_name);
@@ -433,17 +495,23 @@ public:
 
     bool TraverseFunctionDecl(clang::FunctionDecl* decl) {
         auto id = compute_symbol_id(decl);
-        if(id.is_valid()) enclosing_stack.push_back(id);
-        bool result = clang::RecursiveASTVisitor<SymbolExtractorVisitor>::TraverseFunctionDecl(decl);
-        if(id.is_valid()) enclosing_stack.pop_back();
+        if(id.is_valid())
+            enclosing_stack.push_back(id);
+        bool result =
+            clang::RecursiveASTVisitor<SymbolExtractorVisitor>::TraverseFunctionDecl(decl);
+        if(id.is_valid())
+            enclosing_stack.pop_back();
         return result;
     }
 
     bool TraverseCXXMethodDecl(clang::CXXMethodDecl* decl) {
         auto id = compute_symbol_id(decl);
-        if(id.is_valid()) enclosing_stack.push_back(id);
-        bool result = clang::RecursiveASTVisitor<SymbolExtractorVisitor>::TraverseCXXMethodDecl(decl);
-        if(id.is_valid()) enclosing_stack.pop_back();
+        if(id.is_valid())
+            enclosing_stack.push_back(id);
+        bool result =
+            clang::RecursiveASTVisitor<SymbolExtractorVisitor>::TraverseCXXMethodDecl(decl);
+        if(id.is_valid())
+            enclosing_stack.pop_back();
         return result;
     }
 
@@ -479,7 +547,8 @@ public:
 
     bool VisitCallExpr(clang::CallExpr* expr) {
         auto* callee = expr->getDirectCallee();
-        if(!callee) return true;
+        if(!callee)
+            return true;
 
         auto callee_id = compute_symbol_id(callee);
         return try_record_relation(expr->getBeginLoc(), callee_id, RelationKind::Call);
@@ -487,9 +556,11 @@ public:
 
     bool VisitDeclRefExpr(clang::DeclRefExpr* expr) {
         auto* referenced = llvm::dyn_cast<clang::NamedDecl>(expr->getDecl());
-        if(!referenced) return true;
+        if(!referenced)
+            return true;
 
-        if(llvm::isa<clang::FunctionDecl>(referenced)) return true;
+        if(llvm::isa<clang::FunctionDecl>(referenced))
+            return true;
 
         auto ref_id = compute_symbol_id(referenced);
         return try_record_relation(expr->getBeginLoc(), ref_id, RelationKind::Reference);
@@ -497,9 +568,11 @@ public:
 
     bool VisitMemberExpr(clang::MemberExpr* expr) {
         auto* member = expr->getMemberDecl();
-        if(!member) return true;
+        if(!member)
+            return true;
 
-        if(llvm::isa<clang::FunctionDecl>(member)) return true;
+        if(llvm::isa<clang::FunctionDecl>(member))
+            return true;
 
         auto member_id = compute_symbol_id(member);
         return try_record_relation(expr->getBeginLoc(), member_id, RelationKind::Reference);
@@ -511,15 +584,14 @@ public:
     std::vector<SymbolInfo>& symbols;
     std::vector<RelationEdge>& relations;
     std::string main_file;
-    std::uint32_t max_snippet_bytes;
 
-    SymbolExtractorConsumer(std::vector<SymbolInfo>& syms, std::vector<RelationEdge>& rels,
-                            std::string main_file, std::uint32_t max_bytes)
-        : symbols(syms), relations(rels), main_file(std::move(main_file)),
-          max_snippet_bytes(max_bytes) {}
+    SymbolExtractorConsumer(std::vector<SymbolInfo>& syms,
+                            std::vector<RelationEdge>& rels,
+                            std::string main_file) :
+        symbols(syms), relations(rels), main_file(std::move(main_file)) {}
 
     void HandleTranslationUnit(clang::ASTContext& context) override {
-        SymbolExtractorVisitor visitor(context, symbols, relations, main_file, max_snippet_bytes);
+        SymbolExtractorVisitor visitor(context, symbols, relations, main_file);
         visitor.TraverseDecl(context.getTranslationUnitDecl());
     }
 };
@@ -528,26 +600,22 @@ class SymbolExtractorAction : public clang::ASTFrontendAction {
 public:
     std::vector<SymbolInfo>& symbols;
     std::vector<RelationEdge>& relations;
-    std::uint32_t max_snippet_bytes;
 
-    SymbolExtractorAction(std::vector<SymbolInfo>& syms, std::vector<RelationEdge>& rels,
-                          std::uint32_t max_bytes)
-        : symbols(syms), relations(rels), max_snippet_bytes(max_bytes) {}
+    SymbolExtractorAction(std::vector<SymbolInfo>& syms, std::vector<RelationEdge>& rels) :
+        symbols(syms), relations(rels) {}
 
-    std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance& ci,
+    std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance&,
                                                           llvm::StringRef file) override {
-        return std::make_unique<SymbolExtractorConsumer>(symbols, relations, file.str(),
-                                                         max_snippet_bytes);
+        return std::make_unique<SymbolExtractorConsumer>(symbols, relations, file.str());
     }
 };
 
 }  // namespace
 
-auto extract_symbols(const CompileEntry& entry, std::uint32_t max_snippet_bytes)
-    -> std::expected<ASTResult, ASTError> {
+auto extract_symbols(const CompileEntry& entry) -> std::expected<ASTResult, ASTError> {
     if(entry.arguments.empty()) {
-        return std::unexpected(ASTError{
-            .message = std::format("empty argument list for file: {}", entry.file)});
+        return std::unexpected(
+            ASTError{.message = std::format("empty argument list for file: {}", entry.file)});
     }
 
     ASTResult result;
@@ -556,39 +624,38 @@ auto extract_symbols(const CompileEntry& entry, std::uint32_t max_snippet_bytes)
     auto instance = create_compiler_instance(entry);
     if(!instance) {
         return std::unexpected(ASTError{
-            .message = std::format("failed to create compiler instance for file: {}",
-                                   entry.file)});
+            .message = std::format("failed to create compiler instance for file: {}", entry.file)});
     }
 
-    // Force extraction-only mode so compile commands that normally emit objects/PCMs
-    // are treated as pure semantic analysis.
+    // Force extraction-only mode so compile commands that normally emit
+    // objects/PCMs are treated as pure semantic analysis.
     auto& frontend_opts = instance->getInvocation().getFrontendOpts();
     frontend_opts.ProgramAction = clang::frontend::ParseSyntaxOnly;
     frontend_opts.OutputFile.clear();
 
-    SymbolExtractorAction action(result.symbols, raw_relations, max_snippet_bytes);
+    SymbolExtractorAction action(result.symbols, raw_relations);
     if(!action.BeginSourceFile(*instance, instance->getFrontendOpts().Inputs[0])) {
         return std::unexpected(ASTError{
-            .message = std::format("failed to begin AST extraction for file: {}",
-                                   entry.file)});
+            .message = std::format("failed to begin AST extraction for file: {}", entry.file)});
     }
 
     if(auto error = action.Execute()) {
         llvm::consumeError(std::move(error));
         action.EndSourceFile();
-        return std::unexpected(ASTError{
-            .message = std::format("AST extraction failed for file: {}", entry.file)});
+        return std::unexpected(
+            ASTError{.message = std::format("AST extraction failed for file: {}", entry.file)});
     }
 
     action.EndSourceFile();
     result.dependencies = collect_dependency_files(instance->getSourceManager());
 
     result.relations.reserve(raw_relations.size());
-    for(auto& edge : raw_relations) {
+    for(auto& edge: raw_relations) {
         result.relations.push_back(ExtractedRelation{
             .from = edge.from,
             .to = edge.to,
             .is_call = (edge.kind == RelationKind::Call),
+            .is_inheritance = (edge.kind == RelationKind::Inheritance),
         });
     }
 

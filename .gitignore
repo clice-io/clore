@@ -1,3 +1,5 @@
+**/.DS_Store
+
 # Prerequisites
 *.d
 
@@ -43,10 +45,11 @@ __pycache__/
 # pixi environments
 .env
 .pixi/
-!.pixi/config.toml
 
-.codex/
+.codex
 .claude/
-dist/
-docs/
+
+CMakePresets.json
+CMakeUserPresets.json
+.conan/
 .clice/

@@ -1,150 +1,81 @@
 module;
 
-#include <expected>
-#include <format>
-#include <string>
-#include <string_view>
+#include "kota/codec/json/json.h"
 
 export module generate:prompt;
 
+import std;
 import :model;
-import :evidence;
-
-export namespace clore::generate {
-
-struct PromptError {
-    std::string message;
-};
-
-auto build_prompt(PromptKind kind, const EvidencePack& evidence)
-    -> std::expected<std::string, PromptError>;
-
-}  // namespace clore::generate
-
-// ── implementation ──────────────────────────────────────────────────
+import support;
 
 namespace clore::generate {
 
+namespace json = kota::codec::json;
+
+}  // namespace clore::generate
+
+export namespace clore::generate {
+
+template <typename T>
+auto parse_structured_response(std::string_view raw, std::string_view context)
+    -> std::expected<T, GenerateError>;
+
+auto normalize_markdown_fragment(std::string_view raw, std::string_view context)
+    -> std::expected<std::string, GenerateError>;
+
+auto parse_markdown_prompt_output(std::string_view raw, std::string_view context)
+    -> std::expected<std::string, GenerateError>;
+
+}  // namespace clore::generate
+
+namespace clore::generate {
+
+template <typename T>
+auto parse_structured_response(std::string_view raw, std::string_view context)
+    -> std::expected<T, GenerateError> {
+    auto parsed = json::from_json<T>(raw);
+    if(!parsed.has_value()) {
+        return std::unexpected(GenerateError{
+            .message = std::format("failed to parse structured response for {}: {}",
+                                   context,
+                                   parsed.error().to_string()),
+        });
+    }
+    return *parsed;
+}
+
 namespace {
 
-constexpr std::string_view kNamespaceSummaryPrompt =
-#include "../../templates/prompts/namespace_summary.txt"
-    ;
-
-constexpr std::string_view kModuleSummaryPrompt =
-#include "../../templates/prompts/module_summary.txt"
-    ;
-
-constexpr std::string_view kModuleArchitecturePrompt =
-#include "../../templates/prompts/module_architecture.txt"
-    ;
-
-constexpr std::string_view kIndexOverviewPrompt =
-#include "../../templates/prompts/index_overview.txt"
-    ;
-
-constexpr std::string_view kFunctionDeclarationSummaryPrompt =
-#include "../../templates/prompts/function_declaration_summary.txt"
-    ;
-
-constexpr std::string_view kFunctionImplementationSummaryPrompt =
-#include "../../templates/prompts/function_implementation_summary.txt"
-    ;
-
-constexpr std::string_view kTypeDeclarationSummaryPrompt =
-#include "../../templates/prompts/type_declaration_summary.txt"
-    ;
-
-constexpr std::string_view kTypeImplementationSummaryPrompt =
-#include "../../templates/prompts/type_implementation_summary.txt"
-    ;
-
-auto prompt_template_of(PromptKind kind) -> std::string_view {
-    switch(kind) {
-        case PromptKind::NamespaceSummary: return kNamespaceSummaryPrompt;
-        case PromptKind::ModuleSummary: return kModuleSummaryPrompt;
-        case PromptKind::ModuleArchitecture: return kModuleArchitecturePrompt;
-        case PromptKind::IndexOverview: return kIndexOverviewPrompt;
-        case PromptKind::FunctionDeclarationSummary: return kFunctionDeclarationSummaryPrompt;
-        case PromptKind::FunctionImplementationSummary: return kFunctionImplementationSummaryPrompt;
-        case PromptKind::TypeDeclarationSummary: return kTypeDeclarationSummaryPrompt;
-        case PromptKind::TypeImplementationSummary: return kTypeImplementationSummaryPrompt;
+auto trim_trailing_ascii_whitespace(std::string& text) -> void {
+    while(!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) {
+        text.pop_back();
     }
-    return {};
 }
 
-auto target_name_of(const EvidencePack& evidence) -> std::string_view {
-    if(!evidence.subject_name.empty()) {
-        return evidence.subject_name;
-    }
-    if(!evidence.target_facts.empty()) {
-        return evidence.target_facts[0].qualified_name;
-    }
-    return {};
-}
-
-auto target_kind_of(const EvidencePack& evidence) -> std::string_view {
-    if(!evidence.subject_kind.empty()) {
-        return evidence.subject_kind;
-    }
-    if(!evidence.target_facts.empty()) {
-        return evidence.target_facts[0].kind_label;
-    }
-    return {};
-}
-
-auto instantiate_prompt_with_evidence(const std::string& tmpl,
-                                      const EvidencePack& evidence,
-                                      std::string_view evidence_text) -> std::string {
-    std::string result;
-    result.reserve(tmpl.size() + 4096);
-
-    std::size_t pos = 0;
-    while(pos < tmpl.size()) {
-        auto marker_start = tmpl.find("{{", pos);
-        if(marker_start == std::string::npos) {
-            result.append(tmpl, pos, tmpl.size() - pos);
-            break;
-        }
-        result.append(tmpl, pos, marker_start - pos);
-
-        auto marker_end = tmpl.find("}}", marker_start);
-        if(marker_end == std::string::npos) {
-            result.append(tmpl, marker_start, tmpl.size() - marker_start);
-            break;
-        }
-
-        auto var_name = tmpl.substr(marker_start + 2, marker_end - marker_start - 2);
-        if(var_name == "evidence") {
-            result.append(evidence_text);
-        } else if(var_name == "target_name") {
-            result.append(target_name_of(evidence));
-        } else if(var_name == "target_kind") {
-            result.append(target_kind_of(evidence));
-        } else {
-            result.append("{{");
-            result.append(var_name);
-            result.append("}}");
-        }
-
-        pos = marker_end + 2;
-    }
-
-    return result;
+auto contains_non_whitespace(std::string_view text) -> bool {
+    return std::ranges::any_of(text, [](char ch) {
+        return std::isspace(static_cast<unsigned char>(ch)) == 0;
+    });
 }
 
 }  // namespace
 
-auto build_prompt(PromptKind kind, const EvidencePack& evidence)
-    -> std::expected<std::string, PromptError> {
-    auto tmpl = prompt_template_of(kind);
-    if(tmpl.empty()) {
-        return std::unexpected(PromptError{
-            .message = std::format("unsupported prompt kind: {}", prompt_kind_name(kind))});
+auto normalize_markdown_fragment(std::string_view raw, std::string_view context)
+    -> std::expected<std::string, GenerateError> {
+    auto normalized = clore::support::ensure_utf8(raw);
+    normalized = std::string(clore::support::strip_utf8_bom(normalized));
+    trim_trailing_ascii_whitespace(normalized);
+    if(!contains_non_whitespace(normalized)) {
+        return std::unexpected(GenerateError{
+            .message = std::format("empty markdown fragment for {}", context),
+        });
     }
-    return instantiate_prompt_with_evidence(std::string(tmpl),
-                                            evidence,
-                                            format_evidence_text(evidence));
+    return normalized;
+}
+
+auto parse_markdown_prompt_output(std::string_view raw, std::string_view context)
+    -> std::expected<std::string, GenerateError> {
+    return normalize_markdown_fragment(raw, context);
 }
 
 }  // namespace clore::generate

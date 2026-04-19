@@ -1,103 +1,61 @@
-cmake_minimum_required(VERSION 3.30)
-
-project(clore LANGUAGES C CXX)
+cmake_minimum_required(VERSION 4.3.0)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+set(CMAKE_CXX_MODULE_STD ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-include(GNUInstallDirs)
-include(CheckIPOSupported)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib")
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+set(KOTA_ENABLE_ASYNC ON)
+set(KOTA_ENABLE_OPTION ON)
+set(KOTA_ENABLE_DECO ON)
+set(KOTA_ENABLE_ZEST ON)
+set(KOTA_CODEC_ENABLE_SIMDJSON ON)
+set(KOTA_CODEC_ENABLE_YYJSON ON)
+set(KOTA_CODEC_ENABLE_FLATBUFFERS OFF)
+set(KOTA_CODEC_ENABLE_TOML ON)
+set(KOTA_ENABLE_EXCEPTIONS ON)
+set(KOTA_ENABLE_RTTI ON)
+set(KOTA_ENABLE_CCACHE OFF)
 
-option(CLORE_ENABLE_LTO "Enable ThinLTO for all targets" ON)
-option(CLORE_OFFLINE_BUILD "Disable network downloads during configuration" OFF)
-option(CLORE_ENABLE_TEST "Build unit tests" ON)
+project(clore LANGUAGES C CXX)
 
-if(WIN32 AND (MSVC OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND
-                      (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" OR
-                       CMAKE_CXX_COMPILER_LINKER_FRONTEND_VARIANT STREQUAL "MSVC"))))
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL" CACHE STRING
-        "Use the release CRT to stay ABI-compatible with the bundled Windows LLVM artifacts."
-        FORCE)
-endif()
-
-# Global flags that apply to all targets (including FetchContent dependencies).
-if(NOT MSVC)
-    add_compile_options(-ffunction-sections -fdata-sections)
-endif()
-
-if(APPLE)
-    # https://conda-forge.org/docs/maintainer/knowledge_base/#newer-c-features-with-old-sdk
-    add_compile_definitions(_LIBCPP_DISABLE_AVAILABILITY=1)
-endif()
-
-if(MSVC OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND
-            (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" OR
-             CMAKE_CXX_COMPILER_LINKER_FRONTEND_VARIANT STREQUAL "MSVC")))
-    string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,/OPT:REF")
-    string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,/OPT:REF")
-elseif(APPLE)
-    string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,-dead_strip")
-    string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,-dead_strip")
-else()
-    string(APPEND CMAKE_EXE_LINKER_FLAGS " -static-libstdc++ -static-libgcc -Wl,--gc-sections")
-    string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,--gc-sections")
-endif()
-
-set(CLORE_ENABLE_IPO OFF)
-set(CLORE_USE_LTO_ARTIFACT OFF)
-if(CLORE_ENABLE_LTO)
-    if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-        check_ipo_supported(RESULT CLORE_IPO_SUPPORTED OUTPUT CLORE_IPO_ERROR LANGUAGES C CXX)
-        if(CLORE_IPO_SUPPORTED)
-            set(CLORE_ENABLE_IPO ON)
-            set(CLORE_USE_LTO_ARTIFACT ON)
-            message(STATUS "Interprocedural optimization enabled for ${CMAKE_BUILD_TYPE} builds.")
-        else()
-            message(WARNING "LTO requested but IPO is not supported by the active toolchain: ${CLORE_IPO_ERROR}")
-        endif()
-    else()
-        message(STATUS "Interprocedural optimization disabled for non-RelWithDebInfo builds.")
-    endif()
-endif()
+include(CheckCXXCompilerFlag)
+include(CheckLinkerFlag)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    if(WIN32)
-        message(STATUS "AddressSanitizer disabled on Windows Debug builds: the current MSVC-targeting clang toolchain and prebuilt LLVM static libraries are not ASan-safe in this repo.")
-    else()
-        add_compile_options(-fsanitize=address)
-        string(APPEND CMAKE_EXE_LINKER_FLAGS " -fsanitize=address")
-        string(APPEND CMAKE_SHARED_LINKER_FLAGS " -fsanitize=address")
+    add_compile_options(-fno-omit-frame-pointer)
+    add_compile_options(-ftrivial-auto-var-init=pattern)
+    add_compile_options(-fsanitize=address,undefined)
+    add_compile_options(-fno-sanitize-recover=undefined)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT lto_supported OUTPUT lto_error LANGUAGES CXX)
+
+    if(lto_supported)
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            add_compile_options(-flto=auto)
+            add_link_options(-flto=auto)
+            add_compile_options(-ffat-lto-objects)
+            add_compile_options(-fdevirtualize-at-ltrans)
+        elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            add_compile_options(-flto=full)
+            add_link_options(-flto=full)
+        elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+            add_compile_options(/GL)
+            add_link_options(/LTCG)
+        endif()
     endif()
 endif()
 
-include("${PROJECT_SOURCE_DIR}/cmake/package.cmake")
+find_package(spdlog REQUIRED)
+find_package(CURL REQUIRED)
+find_package(simdjson REQUIRED)
 
-# Project-specific options (not applied to third-party deps).
-add_library(clore_options INTERFACE)
-
-if(MSVC OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND
-         CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC"))
-    target_compile_options(clore_options INTERFACE /GR- /EHs-c- /Zc:preprocessor)
-else()
-    target_compile_options(clore_options INTERFACE
-        -fno-rtti
-        -fno-exceptions
-        -Wno-deprecated-declarations
-        $<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>:-Wno-undefined-inline>
-    )
-endif()
-
-if(WIN32)
-    target_link_libraries(clore_options INTERFACE version ntdll)
-endif()
-
-if(CLORE_ENABLE_TEST)
-    target_compile_definitions(clore_options INTERFACE CLORE_ENABLE_TEST=1)
-endif()
-
+add_subdirectory(${KOTATSU})
 add_subdirectory(src)
+add_subdirectory(tests)
