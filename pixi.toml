@@ -35,7 +35,7 @@ lld = "==22.1.3"
 [target.win-64.activation.env]
 CXXFLAGS = "/Z7 /Gw /Gy"
 LDFLAGS = "-fuse-ld=lld"
-CONAN_HOME = "${PIXI_PROJECT_ROOT}/.conan"
+CONAN_HOME = "%PIXI_PROJECT_ROOT%\\.conan"
 
 [target.linux-64.dependencies]
 sysroot_linux-64 = "==2.39"
@@ -49,10 +49,10 @@ CC = "clang"
 CXX = "clang++"
 CXXFLAGS = "-stdlib=libstdc++"
 LDFLAGS = "-stdlib=libstdc++ -fuse-ld=mold"
-CONAN_HOME = "${PIXI_PROJECT_ROOT}\\.conan"
+CONAN_HOME = "$PIXI_PROJECT_ROOT/.conan"
 
 [target.osx-arm64.activation.env]
-CONAN_HOME = "${PIXI_PROJECT_ROOT}/.conan"
+CONAN_HOME = "$PIXI_PROJECT_ROOT/.conan"
 
 [tasks.install]
 args = [{ arg = "type", default = "Debug" }]
