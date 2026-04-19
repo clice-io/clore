@@ -436,11 +436,16 @@ auto resolve_source_snippet(SymbolInfo& sym) -> bool {
     }
 
     namespace fs = std::filesystem;
-    auto file_size = fs::file_size(sym.declaration_location.file);
+    std::error_code file_size_error;
+    auto file_size = fs::file_size(sym.declaration_location.file, file_size_error);
+    if(file_size_error) {
+        return false;
+    }
+    auto file_size_value = static_cast<std::size_t>(file_size);
     auto offset = static_cast<std::size_t>(sym.source_snippet_offset);
     auto length = static_cast<std::size_t>(sym.source_snippet_length);
 
-    if(offset + length > file_size) {
+    if(offset + length > file_size_value) {
         return false;
     }
 

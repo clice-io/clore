@@ -361,9 +361,6 @@ auto load_cache_index_async(std::string workspace_root, kota::event_loop& loop)
                              },
                              loop)
                              .catch_cancel();
-    if(queued_result.is_cancelled()) {
-        co_await kota::fail(CacheError{.message = "prompt response cache load cancelled"});
-    }
     if(queued_result.has_error()) {
         co_await kota::fail(CacheError{
             .message = std::format("prompt response cache load task failed: {}",
@@ -388,9 +385,6 @@ auto save_cache_entry_async(std::string workspace_root,
                              },
                              loop)
                              .catch_cancel();
-    if(queued_result.is_cancelled()) {
-        co_await kota::fail(CacheError{.message = "prompt response cache save cancelled"});
-    }
     if(queued_result.has_error()) {
         co_await kota::fail(CacheError{
             .message = std::format("prompt response cache save task failed: {}",
@@ -400,6 +394,7 @@ auto save_cache_entry_async(std::string workspace_root,
     if(!queued_result->has_value()) {
         co_await kota::fail(std::move(queued_result->error()));
     }
+    co_return;
 }
 
 }  // namespace clore::generate::cache

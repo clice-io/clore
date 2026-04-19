@@ -11,7 +11,6 @@ export import :evidence;
 export import :markdown;
 export import :model;
 export import :planner;
-export import :prompt;
 export import :diagram;
 export import :page;
 export import :symbol;
@@ -40,8 +39,7 @@ auto generate_pages_async(const config::TaskConfig& config,
                           std::string_view llm_model,
                           std::uint32_t rate_limit,
                           std::string_view output_root,
-                          kota::event_loop& loop)
-    -> kota::task<GenerationSummary, GenerateError>;
+                          kota::event_loop& loop) -> kota::task<GenerationSummary, GenerateError>;
 
 auto write_pages(const std::vector<GeneratedPage>& pages, std::string_view output_root)
     -> std::expected<void, GenerateError>;

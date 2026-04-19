@@ -12,7 +12,6 @@ namespace {
 namespace fs = std::filesystem;
 
 auto fill_required_llm_fields(TaskConfig& config) -> void {
-    config.llm.provider = "openai";
     config.llm.system_prompt = "system";
     config.llm.retry_count = 1;
     config.llm.retry_initial_backoff_ms = 1;

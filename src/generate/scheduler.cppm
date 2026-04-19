@@ -6,13 +6,11 @@ export module generate:scheduler;
 
 import std;
 import :analysis;
-import :bridge;
 import :dryrun;
 import :evidence;
 import :markdown;
 import :model;
 import :planner;
-import :prompt;
 import :diagram;
 import :page;
 import :symbol;
@@ -20,6 +18,7 @@ import config;
 import extract;
 import :cache;
 import http;
+import network;
 import protocol;
 import support;
 
@@ -31,6 +30,21 @@ namespace fs = std::filesystem;
 
 auto make_generate_error(cache::CacheError error) -> GenerateError {
     return GenerateError{.message = std::move(error.message)};
+}
+
+auto request_llm_async(std::string_view model,
+                       std::string_view system_prompt,
+                       clore::net::PromptRequest request,
+                       std::uint32_t retry_count,
+                       std::uint32_t retry_initial_backoff_ms,
+                       kota::event_loop& loop) -> kota::task<std::string, clore::net::LLMError> {
+    co_return co_await clore::net::call_llm_async(model,
+                                                  system_prompt,
+                                                  std::move(request),
+                                                  retry_count,
+                                                  retry_initial_backoff_ms,
+                                                  loop)
+        .or_fail();
 }
 
 struct PreparedSymbolAnalysisTarget {
@@ -1215,8 +1229,7 @@ private:
             logging::info("generation prompt #{}: {}", issued, owner);
         }
 
-        auto result = co_await request_llm_async(config_.llm.provider,
-                                                 model_version_,
+        auto result = co_await request_llm_async(model_version_,
                                                  config_.llm.system_prompt,
                                                  std::move(request),
                                                  config_.llm.retry_count,
@@ -1227,8 +1240,10 @@ private:
         auto completed = llm_requests_completed_.fetch_add(1, std::memory_order_relaxed) + 1;
         auto expected_after = expected_llm_requests_.load(std::memory_order_relaxed);
         if(expected_after > 0) {
-            logging::info(
-                "completed generation prompt ({}/{}): {}", completed, expected_after, owner);
+            logging::info("completed generation prompt ({}/{}): {}",
+                          completed,
+                          expected_after,
+                          owner);
         }
 
         if(result.is_cancelled()) {

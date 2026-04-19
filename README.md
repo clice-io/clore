@@ -9,51 +9,75 @@ clore is a document generator for humans and agents that combines LLVM and LLM t
 
 ## How to build
 
-Run `pixi run build`. If you don't have pixi installed, install it first.
+Run `pixi run build`. If you don't have pixi installed, [install it first](https://pixi.sh/).
 
-The default build path now installs third-party dependencies via Conan before CMake configure.
-
-```bash
-pixi run build --type Debug
-```
-
-If you want to run the Conan step explicitly:
+The default build path installs third-party dependencies via Conan before CMake configure.
 
 ```bash
-pixi run -e conan conan-install --type Debug
-pixi run cmake-config --type Debug
-pixi run cmake-build --type Debug
+pixi run build --type RelWithDebInfo
 ```
 
-Current Conan-managed third-party dependencies are `spdlog`, `libcurl`, `simdjson`, and `kotatsu`.
+If you want to run each step explicitly:
 
-LLVM remains on the existing managed artifact flow (`scripts/setup-llvm.py` + `config/llvm-manifest.json`) for gradual migration.
+```bash
+pixi run install --type RelWithDebInfo
+pixi run config --type RelWithDebInfo
+pixi run check --type RelWithDebInfo
+pixi run format --type RelWithDebInfo
+pixi run build --type RelWithDebInfo
+```
 
-Your Conan profile should match the compiler/toolchain selected by `pixi`, because the project still configures CMake through `cmake/toolchain.cmake`.
+Conan-managed dependencies are `spdlog`, `libcurl`, and `simdjson`.
+
+LLVM and Clang are provided by the `pixi` environment (conda-forge packages: `clang`, `clangdev`, `llvmdev`, etc.).
 
 ## CLI usage
 
+### Standard mode
+
+Generate documentation from a compilation database:
+
 ```bash
 clore \
-  --config clore.toml \
+  --config clore.en.toml \
   --compile-commands build/compile_commands.json \
   --source-dir . \
   --output-dir docs/api \
   --dry-run
 ```
 
+### Agent mode
+
+Enable autonomous codebase exploration and guide generation:
+
+```bash
+clore \
+  --config clore.en.toml \
+  --source-dir . \
+  --output-dir docs/guides \
+  --experimental-agent-mode \
+  --model gpt-4o
+```
+
 ### Arguments
 
-- `--config`: path to config file (default: `clore.toml`)
-- `--compile-commands`: path to `compile_commands.json` (required)
-- `--source-dir`: source root directory (required)
-- `--output-dir`: output root directory (required)
-- `--dry-run`: generate prompt-assembled docs without LLM calls
-- `--model`: model name for online generation (mutually exclusive with `--dry-run`)
-- `--rate-limit`: max concurrent LLM requests when `--model` is used (default: `16`)
-- `--log-level`: override log level (`trace|debug|info|warn|error|off`)
+| Flag | Description |
+| --- | --- |
+| `--config` | Path to config file (default: `clore.toml`) |
+| `--compile-commands` | Path to `compile_commands.json` |
+| `--source-dir` | Source root directory for relative output paths |
+| `--output-dir` | Output root directory |
+| `--dry-run` | Write assembled prompts to `--output-dir` and skip LLM calls |
+| `--model` | Model name for online generation (e.g. `gpt-4o`, `claude-3-5-sonnet-20241022`) |
+| `--rate-limit` | Max concurrent LLM requests when `--model` is used (default: `16`) |
+| `--experimental-agent-mode` | Enable agent-driven autonomous exploration and guide generation |
+| `--log-level` | Override log level (`trace\|debug\|info\|warn\|error\|off`) |
 
-## `clore.toml`
+## Configuration
+
+Configuration files support localization. Use `clore.en.toml` or `clore.zh.toml` as a starting point.
+
+### `clore.en.toml`
 
 ```toml
 [filter]
@@ -61,8 +85,14 @@ include = ["src/"]
 exclude = []
 
 [llm]
-provider = "openai"
-system_prompt = "You are a C++ documentation writer."
-retry_count = 3
-retry_initial_backoff_ms = 250
+system_prompt = "You are a C++ documentation writer. Please generate concise and accurate documentation for C++ code elements. Focus on the purpose, design intent, and role of each element within the codebase. The output documentation must be in Markdown format and suitable for embedding within a document page. Use English in the generated documentation."
+retry_count = 10
+retry_initial_backoff_ms = 5000
 ```
+
+### LLM provider selection
+
+Provider selection is automatic at the network layer:
+
+- use Anthropic when both `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` are set
+- otherwise use OpenAI when both `OPENAI_BASE_URL` and `OPENAI_API_KEY` are set

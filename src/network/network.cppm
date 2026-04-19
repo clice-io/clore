@@ -14,8 +14,7 @@ export import schema;
 
 export namespace clore::net {
 
-auto call_llm_async(std::string_view provider,
-                    std::string_view model,
+auto call_llm_async(std::string_view model,
                     std::string_view system_prompt,
                     PromptRequest request,
                     std::uint32_t retry_count,
@@ -23,8 +22,7 @@ auto call_llm_async(std::string_view provider,
                     kota::event_loop& loop = kota::event_loop::current())
     -> kota::task<std::string, LLMError>;
 
-auto call_completion_async(std::string_view provider,
-                           CompletionRequest request,
+auto call_completion_async(CompletionRequest request,
                            kota::event_loop& loop = kota::event_loop::current())
     -> kota::task<CompletionResponse, LLMError>;
 
@@ -34,8 +32,24 @@ namespace clore::net {
 
 namespace {
 
-auto unsupported_provider_error(std::string_view provider) -> LLMError {
-    return LLMError(std::format("unsupported llm provider '{}'", provider));
+enum class Provider {
+    Anthropic,
+    OpenAI,
+};
+
+constexpr std::string_view kAnthropicBaseUrlEnv = "ANTHROPIC_BASE_URL";
+constexpr std::string_view kAnthropicApiKeyEnv = "ANTHROPIC_API_KEY";
+constexpr std::string_view kOpenAIBaseUrlEnv = "OPENAI_BASE_URL";
+constexpr std::string_view kOpenAIApiKeyEnv = "OPENAI_API_KEY";
+
+auto has_nonempty_env(std::string_view name) -> bool {
+    auto key = std::string(name);
+    auto* value = std::getenv(key.c_str());
+    return value != nullptr && value[0] != '\0';
+}
+
+auto has_provider_env(std::string_view base_env, std::string_view key_env) -> bool {
+    return has_nonempty_env(base_env) && has_nonempty_env(key_env);
 }
 
 template <typename CompletionRequester>
@@ -81,50 +95,58 @@ auto request_provider_text_async(std::string_view provider_label,
 
 namespace {
 
-auto dispatch_completion(std::string_view provider,
-                         CompletionRequest request,
-                         kota::event_loop& loop)
-    -> std::optional<kota::task<CompletionResponse, LLMError>> {
-    if(provider == "openai") {
-        return clore::net::call_completion_async(std::move(request), loop);
+auto detect_provider_from_environment() -> std::expected<Provider, LLMError> {
+    if(has_provider_env(kAnthropicBaseUrlEnv, kAnthropicApiKeyEnv)) {
+        return Provider::Anthropic;
     }
-    if(provider == "anthropic") {
-        return clore::net::anthropic::call_completion_async(std::move(request), loop);
+    if(has_provider_env(kOpenAIBaseUrlEnv, kOpenAIApiKeyEnv)) {
+        return Provider::OpenAI;
     }
-    return std::nullopt;
+
+    return std::unexpected(LLMError(
+        "no supported llm provider environment found; set ANTHROPIC_BASE_URL and " "ANTHROPIC_API_KEY, or OPENAI_BASE_URL and OPENAI_API_KEY"));
 }
 
-auto provider_label(std::string_view provider) -> std::string_view {
-    if(provider == "openai")
-        return "OpenAI";
-    if(provider == "anthropic")
-        return "Anthropic";
-    return provider;
+auto dispatch_completion(Provider provider, CompletionRequest request, kota::event_loop& loop)
+    -> kota::task<CompletionResponse, LLMError> {
+    switch(provider) {
+        case Provider::OpenAI:
+            co_return co_await clore::net::openai::call_completion_async(std::move(request), loop)
+                .or_fail();
+        case Provider::Anthropic:
+            co_return co_await clore::net::anthropic::call_completion_async(std::move(request),
+                                                                            loop)
+                .or_fail();
+    }
+}
+
+auto provider_label(Provider provider) -> std::string_view {
+    switch(provider) {
+        case Provider::OpenAI: return "OpenAI";
+        case Provider::Anthropic: return "Anthropic";
+    }
 }
 
 }  // namespace
 
-auto call_llm_async(std::string_view provider,
-                    std::string_view model,
+auto call_llm_async(std::string_view model,
                     std::string_view system_prompt,
                     PromptRequest request,
                     std::uint32_t retry_count,
                     std::uint32_t retry_initial_backoff_ms,
                     kota::event_loop& loop) -> kota::task<std::string, LLMError> {
-    // Validate provider early before entering retry machinery.
-    if(!dispatch_completion(provider, CompletionRequest{}, loop).has_value()) {
-        co_await kota::fail(unsupported_provider_error(provider));
+    auto provider_result = detect_provider_from_environment();
+    if(!provider_result.has_value()) {
+        co_await kota::fail(std::move(provider_result.error()));
     }
+    auto provider = std::move(*provider_result);
+
     auto label = provider_label(provider);
     co_return co_await request_provider_text_async(
         label,
         [provider](CompletionRequest req,
                    kota::event_loop& req_loop) -> kota::task<CompletionResponse, LLMError> {
-            auto task = dispatch_completion(provider, std::move(req), req_loop);
-            if(!task.has_value()) {
-                co_await kota::fail(unsupported_provider_error(provider));
-            }
-            co_return co_await std::move(*task).or_fail();
+            co_return co_await dispatch_completion(provider, std::move(req), req_loop).or_fail();
         },
         model,
         system_prompt,
@@ -135,15 +157,17 @@ auto call_llm_async(std::string_view provider,
         .or_fail();
 }
 
-auto call_completion_async(std::string_view provider,
-                           CompletionRequest request,
-                           kota::event_loop& loop) -> kota::task<CompletionResponse, LLMError> {
-    auto task = dispatch_completion(provider, std::move(request), loop);
-    if(!task.has_value()) {
-        co_await kota::fail(unsupported_provider_error(provider));
+auto call_completion_async(CompletionRequest request, kota::event_loop& loop)
+    -> kota::task<CompletionResponse, LLMError> {
+    auto provider_result = detect_provider_from_environment();
+    if(!provider_result.has_value()) {
+        co_await kota::fail(std::move(provider_result.error()));
     }
-    co_return co_await detail::unwrap_caught_result(co_await std::move(*task).catch_cancel(),
-                                                    "LLM completion request cancelled");
+    auto provider = std::move(*provider_result);
+
+    co_return co_await detail::unwrap_caught_result(
+        co_await dispatch_completion(provider, std::move(request), loop).catch_cancel(),
+        "LLM completion request cancelled");
 }
 
 }  // namespace clore::net

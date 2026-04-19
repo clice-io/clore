@@ -119,6 +119,48 @@ TEST_CASE(save_and_load_extract_cache_roundtrip) {
     fs::remove_all(temp_dir, ec);
 }
 
+TEST_CASE(save_and_load_clice_cache_roundtrip) {
+    auto temp_dir = fs::temp_directory_path() /
+                    std::format("clore_clice_cache_{}",
+                                std::chrono::steady_clock::now().time_since_epoch().count());
+    fs::create_directories(temp_dir);
+
+    CliceCacheData data{
+        .paths = {"src/demo.cpp", "build/demo.pch", "build/demo.pcm"},
+        .pch = {CliceCachePCHEntry{
+            .filename = "demo.pch",
+            .source_file = 0,
+            .hash = 11,
+            .bound = 22,
+            .build_at = 33,
+            .deps = {CliceCacheDepEntry{.path = 0, .hash = 44}},
+        }},
+        .pcm = {CliceCachePCMEntry{
+            .filename = "demo.pcm",
+            .source_file = 0,
+            .module_name = "demo.core",
+            .build_at = 55,
+            .deps = {CliceCacheDepEntry{.path = 0, .hash = 66}},
+        }},
+    };
+
+    auto save_result = save_clice_cache(temp_dir.generic_string(), data);
+    ASSERT_TRUE(save_result.has_value());
+
+    auto load_result = load_clice_cache(temp_dir.generic_string());
+    ASSERT_TRUE(load_result.has_value());
+    EXPECT_EQ(load_result->paths, data.paths);
+    ASSERT_EQ(load_result->pch.size(), 1u);
+    EXPECT_EQ(load_result->pch[0].filename, "demo.pch");
+    EXPECT_EQ(load_result->pch[0].deps[0].hash, 44u);
+    ASSERT_EQ(load_result->pcm.size(), 1u);
+    EXPECT_EQ(load_result->pcm[0].module_name, "demo.core");
+    EXPECT_EQ(load_result->pcm[0].deps[0].hash, 66u);
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
 TEST_CASE(load_extract_cache_rejects_missing_workspace) {
     auto result = load_extract_cache("");
     EXPECT_FALSE(result.has_value());

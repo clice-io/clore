@@ -1,6 +1,7 @@
 module;
 
 #include "llvm/Support/Error.h"
+#include "llvm/Support/xxhash.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/Comment.h"
 #include "clang/AST/DeclCXX.h"

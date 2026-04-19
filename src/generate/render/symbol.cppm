@@ -146,6 +146,9 @@ auto collect_documentable_children(const extract::ProjectModel& model,
 
 auto should_render_symbol_subpage(const extract::ProjectModel& model,
                                   const extract::SymbolInfo& sym) -> bool {
+    if(is_function_kind(sym.kind) || is_variable_kind(sym.kind)) {
+        return true;
+    }
     if(!is_type_kind(sym.kind)) {
         return false;
     }
@@ -173,7 +176,7 @@ auto default_symbol_slug(const extract::SymbolInfo& sym) -> std::string {
     return sanitize_doc_slug(base);
 }
 
-auto build_symbol_doc_plans(const PagePlan&,
+auto build_symbol_doc_plans(const PagePlan& plan,
                             const extract::ProjectModel& model,
                             const std::vector<const extract::SymbolInfo*>& symbols,
                             std::string_view base_dir) -> std::vector<SymbolDocPlan> {
@@ -193,11 +196,13 @@ auto build_symbol_doc_plans(const PagePlan&,
 
         auto slug = count == 1 ? base_slug : std::format("{}-{}", base_slug, count);
         auto group_dir = join_relative_paths(base_dir, symbol_doc_group(*sym));
+        auto detail_slug = sanitize_doc_slug(doc_label(symbol_doc_view_for(plan, *sym)));
 
         SymbolDocPlan doc{
             .symbol = sym,
             .index_path = join_relative_paths(group_dir, slug + ".md"),
-            .detail_path = {},
+            .detail_path =
+                join_relative_paths(group_dir, std::format("{}-{}.md", slug, detail_slug)),
             .children = {},
         };
         plans.push_back(std::move(doc));

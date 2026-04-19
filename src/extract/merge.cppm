@@ -103,10 +103,10 @@ auto ensure_namespace_hierarchy(ProjectModel& model, std::string_view namespace_
     return current_name;
 }
 
-auto find_enclosing_namespace(
-    const ProjectModel& model,
-    const SymbolInfo& sym,
-    const std::unordered_set<std::string>& known_namespace_names) -> std::string {
+auto find_enclosing_namespace(const ProjectModel& model,
+                              const SymbolInfo& sym,
+                              const std::unordered_set<std::string>& known_namespace_names)
+    -> std::string {
     if(!sym.enclosing_namespace.empty()) {
         return sym.enclosing_namespace;
     }

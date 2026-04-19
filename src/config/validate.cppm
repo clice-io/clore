@@ -19,10 +19,6 @@ namespace clore::config {
 
 namespace {
 
-auto is_supported_provider(std::string_view provider) -> bool {
-    return provider == "openai" || provider == "anthropic";
-}
-
 auto validate_nonempty(const std::string& value, std::string_view field)
     -> std::expected<void, ValidationError> {
     if(value.empty()) {
@@ -82,13 +78,6 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
     }
 
     // Validate LLM config
-    if(auto r = validate_nonempty(config.llm.provider, "llm.provider"); !r)
-        return r;
-    if(!is_supported_provider(config.llm.provider)) {
-        return std::unexpected(ValidationError{
-            .message = std::format("llm.provider must be one of: openai, anthropic (got '{}')",
-                                   config.llm.provider)});
-    }
     if(auto r = validate_nonempty(config.llm.system_prompt, "llm.system_prompt"); !r)
         return r;
     if(auto r = validate_nonzero(config.llm.retry_count, "llm.retry_count"); !r)

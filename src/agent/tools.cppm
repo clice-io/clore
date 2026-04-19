@@ -71,8 +71,13 @@ auto normalize_guide_filename(std::string_view name) -> std::expected<std::strin
 auto write_guide(std::string_view output_root,
                  std::string_view name,
                  std::string_view title,
-                 std::string_view content) -> std::expected<void, ToolError> {
+                 std::string_view content) -> std::expected<std::string, ToolError> {
     namespace fs = std::filesystem;
+    auto normalized_name = normalize_guide_filename(name);
+    if(!normalized_name.has_value()) {
+        return std::unexpected(std::move(normalized_name.error()));
+    }
+
     auto guides_dir = fs::path(std::string(output_root)) / "guides";
     std::error_code ec;
     fs::create_directories(guides_dir, ec);
@@ -81,17 +86,7 @@ auto write_guide(std::string_view output_root,
             .message = std::format("failed to create guides directory: {}", ec.message())});
     }
 
-    std::string safe_name(name);
-    for(auto& ch: safe_name) {
-        if(ch == '/' || ch == '\\' || ch == '.') {
-            ch = '-';
-        }
-    }
-    if(safe_name.empty()) {
-        safe_name = "untitled";
-    }
-
-    auto file_path = guides_dir / (safe_name + ".md");
+    auto file_path = guides_dir / *normalized_name;
 
     clore::generate::MarkdownDocument doc;
     doc.frontmatter = clore::generate::Frontmatter{
@@ -103,13 +98,13 @@ auto write_guide(std::string_view output_root,
 
     auto write_result = clore::support::write_utf8_text_file(file_path, rendered);
     if(!write_result.has_value()) {
-        return std::unexpected(ToolError{
-            .message =
-                std::format("failed to write guide '{}': {}", safe_name, write_result.error())});
+        return std::unexpected(ToolError{.message = std::format("failed to write guide '{}': {}",
+                                                                *normalized_name,
+                                                                write_result.error())});
     }
 
-    logging::info("  written guide: guides/{}.md", safe_name);
-    return {};
+    logging::info("  written guide: guides/{}", *normalized_name);
+    return std::move(*normalized_name);
 }
 
 auto read_guide(std::string_view output_root, std::string_view name)
@@ -137,23 +132,22 @@ auto read_guide(std::string_view output_root, std::string_view name)
             ToolError{.message = std::format("guide '{}' does not exist", *normalized_name)});
     }
 
-    auto guides_prefix = canonical_guides.native();
-    auto file_native = canonical_file.native();
-    if(!file_native.starts_with(guides_prefix)) {
-        return std::unexpected(
-            ToolError{.message = "guide path escapes the guides directory"});
+    auto relative = canonical_file.lexically_relative(canonical_guides);
+    auto relative_string = relative.generic_string();
+    if(relative.empty() || relative_string.empty() || relative_string == "." ||
+       relative_string.starts_with("..")) {
+        return std::unexpected(ToolError{.message = "guide path escapes the guides directory"});
     }
     if(canonical_file.extension() != ".md") {
-        return std::unexpected(ToolError{.message = "only markdown files under guides/ may be read"});
+        return std::unexpected(
+            ToolError{.message = "only markdown files under guides/ may be read"});
     }
 
     auto read_result = clore::support::read_utf8_text_file(canonical_file);
     if(!read_result.has_value()) {
-        return std::unexpected(
-            ToolError{.message =
-                          std::format("failed to read guide '{}': {}",
-                                      *normalized_name,
-                                      read_result.error())});
+        return std::unexpected(ToolError{.message = std::format("failed to read guide '{}': {}",
+                                                                *normalized_name,
+                                                                read_result.error())});
     }
 
     return std::format("Guide: guides/{}\n\n{}", *normalized_name, *read_result);
@@ -242,8 +236,15 @@ auto format_symbol_detail(const extract::SymbolInfo& sym,
     if(!sym.doc_comment.empty()) {
         result += std::format("doc_comment: {}\n", sym.doc_comment);
     }
-    if(!sym.source_snippet.empty()) {
-        result += std::format("source:\n```cpp\n{}\n```\n", sym.source_snippet);
+    std::string source_snippet = sym.source_snippet;
+    if(source_snippet.empty() && sym.source_snippet_length > 0) {
+        auto resolved = sym;
+        if(extract::resolve_source_snippet(resolved)) {
+            source_snippet = std::move(resolved.source_snippet);
+        }
+    }
+    if(!source_snippet.empty()) {
+        result += std::format("source:\n```cpp\n{}\n```\n", source_snippet);
     }
 
     append_symbol_list("bases", sym.bases);
@@ -822,9 +823,9 @@ struct CreateGuideTool {
         if(!write_result.has_value()) {
             return std::unexpected(std::move(write_result.error()));
         }
-        return std::format("Guide '{}' created successfully at guides/{}.md",
+        return std::format("Guide '{}' created successfully at guides/{}",
                            args.title,
-                           args.name);
+                           *write_result);
     }
 };
 
@@ -833,8 +834,7 @@ struct ReadGuideTool {
     constexpr static std::string_view name = "read_guide";
     constexpr static bool cacheable = false;
     constexpr static std::string_view description =
-        "Read an existing markdown guide file under guides/. Only direct .md files in that "
-        "directory are allowed. Pass the filename, for example 'architecture-overview.md'.";
+        "Read an existing markdown guide file under guides/. Only direct .md files in that " "directory are allowed. Pass the filename, for example 'architecture-overview.md'.";
 
     static auto run(const Args& args, const ToolContext& context)
         -> std::expected<std::string, ToolError> {

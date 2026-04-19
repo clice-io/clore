@@ -24,7 +24,8 @@ project(clore LANGUAGES C CXX)
 include(CheckCXXCompilerFlag)
 include(CheckLinkerFlag)
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND
+    (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
     add_compile_options(-fno-omit-frame-pointer)
     add_compile_options(-ftrivial-auto-var-init=pattern)
     add_compile_options(-fsanitize=address,undefined)

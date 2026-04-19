@@ -352,11 +352,9 @@ auto run_agent_loop(const config::TaskConfig& config,
 
     auto existing_guides = list_existing_guide_filenames(output_root);
     std::string initial_prompt =
-        "Explore the codebase and create architectural guide documents. Start by calling "
-        "project_overview.";
+        "Explore the codebase and create architectural guide documents. Start by calling " "project_overview.";
     if(existing_guides.empty()) {
-        initial_prompt +=
-            "\n\nThere are currently no existing guide files under guides/.";
+        initial_prompt += "\n\nThere are currently no existing guide files under guides/.";
     } else {
         initial_prompt +=
             "\n\nExisting guide files already present under guides/ are listed below. Treat "
@@ -398,10 +396,8 @@ auto run_agent_loop(const config::TaskConfig& config,
                 .tool_choice = clore::net::ToolChoiceAuto{},
             };
 
-            auto response_result = co_await clore::net::call_completion_async(config.llm.provider,
-                                                                              std::move(request),
-                                                                              loop)
-                                       .catch_cancel();
+            auto response_result =
+                co_await clore::net::call_completion_async(std::move(request), loop).catch_cancel();
 
             if(response_result.is_cancelled()) {
                 co_await kota::fail(AgentError{.message = "agent LLM request cancelled"});
@@ -511,7 +507,8 @@ auto run_agent(const config::TaskConfig& config,
                std::string_view llm_model,
                std::string output_root) -> std::expected<std::size_t, AgentError> {
     kota::event_loop loop;
-    auto task = run_agent_async(config, model, std::string(llm_model), std::move(output_root), loop);
+    auto task =
+        run_agent_async(config, model, std::string(llm_model), std::move(output_root), loop);
     loop.schedule(task);
     loop.run();
 

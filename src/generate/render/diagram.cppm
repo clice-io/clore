@@ -44,22 +44,8 @@ auto diagram_render_cache() -> DiagramRenderCache& {
 
 template <typename RenderFn>
 auto render_cached_diagram(std::string key, RenderFn&& render_fn) -> std::string {
-    auto& cache = diagram_render_cache();
-    {
-        std::shared_lock lock(cache.mutex);
-        auto it = cache.diagram_by_key.find(key);
-        if(it != cache.diagram_by_key.end()) {
-            return it->second;
-        }
-    }
-
-    auto rendered = render_fn();
-
-    {
-        std::unique_lock lock(cache.mutex);
-        cache.diagram_by_key.insert_or_assign(std::move(key), rendered);
-    }
-    return rendered;
+    static_cast<void>(key);
+    return render_fn();
 }
 
 auto is_std_name(std::string_view name) -> bool {

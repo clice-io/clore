@@ -91,6 +91,7 @@ auto log_generation_summary(const generate::GenerationSummary& summary) -> void 
 
 int main(int argc, const char** argv) {
     clore::support::enable_utf8_console();
+
     struct HttpRuntimeShutdownGuard {
         ~HttpRuntimeShutdownGuard() {
             clore::net::shutdown_http_runtime();

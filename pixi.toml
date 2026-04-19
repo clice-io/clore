@@ -28,6 +28,13 @@ compiler-rt = "==22.1.3"
 [activation.env]
 CMAKE_C_COMPILER_LAUNCHER = "sccache"
 CMAKE_CXX_COMPILER_LAUNCHER = "sccache"
+
+[target.win-64.dependencies]
+lld = "==22.1.3"
+
+[target.win-64.activation.env]
+CXXFLAGS = "/Z7 /Gw /Gy"
+LDFLAGS = "-fuse-ld=lld"
 CONAN_HOME = "${PIXI_PROJECT_ROOT}/.conan"
 
 [target.linux-64.dependencies]
@@ -42,13 +49,10 @@ CC = "clang"
 CXX = "clang++"
 CXXFLAGS = "-stdlib=libstdc++"
 LDFLAGS = "-stdlib=libstdc++ -fuse-ld=mold"
+CONAN_HOME = "${PIXI_PROJECT_ROOT}\\.conan"
 
-[target.win-64.dependencies]
-lld = "==22.1.3"
-
-[target.win-64.activation.env]
-CXXFLAGS = "/Z7 /Gw /Gy"
-LDFLAGS = "-fuse-ld=lld"
+[target.osx-arm64.activation.env]
+CONAN_HOME = "${PIXI_PROJECT_ROOT}/.conan"
 
 [tasks.install]
 args = [{ arg = "type", default = "Debug" }]

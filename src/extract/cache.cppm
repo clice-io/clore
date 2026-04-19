@@ -743,8 +743,42 @@ auto save_clice_cache(std::string_view workspace_root, const CliceCacheData& dat
         });
     }
 
-    auto tmp_path = *cache_path;
-    tmp_path += ".tmp";
+    auto make_unique_tmp_path = [&](std::uint64_t attempt) -> fs::path {
+        auto timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::system_clock::now().time_since_epoch())
+                             .count();
+        auto pid = llvm::sys::Process::getProcessId();
+        auto nonce = llvm::xxh3_64bits(
+            std::format("{}:{}:{}:{}", cache_path->generic_string(), pid, timestamp, attempt));
+
+        auto candidate = *cache_path;
+        candidate += std::format(".tmp.{}.{}.{}", pid, timestamp, nonce);
+        return candidate;
+    };
+
+    fs::path tmp_path;
+    for(std::uint64_t attempt = 0; attempt < 32; ++attempt) {
+        auto candidate = make_unique_tmp_path(attempt);
+        std::error_code exists_error;
+        auto exists = fs::exists(candidate, exists_error);
+        if(exists_error) {
+            return std::unexpected(CacheError{
+                .message = std::format("failed to prepare clice cache temp file {}: {}",
+                                       candidate.generic_string(),
+                                       exists_error.message()),
+            });
+        }
+        if(!exists) {
+            tmp_path = std::move(candidate);
+            break;
+        }
+    }
+    if(tmp_path.empty()) {
+        return std::unexpected(CacheError{
+            .message = std::format("failed to allocate a unique temp file path near {}",
+                                   cache_path->generic_string()),
+        });
+    }
 
     auto write_result = clore::support::write_utf8_text_file(tmp_path, *encoded);
     if(!write_result.has_value()) {
@@ -757,6 +791,21 @@ auto save_clice_cache(std::string_view workspace_root, const CliceCacheData& dat
 
     std::error_code rename_error;
     fs::rename(tmp_path, *cache_path, rename_error);
+    if(rename_error == std::errc::permission_denied || rename_error == std::errc::file_exists ||
+       rename_error == std::errc::operation_not_permitted) {
+        std::error_code remove_error;
+        fs::remove(*cache_path, remove_error);
+        if(remove_error && remove_error != std::errc::no_such_file_or_directory) {
+            return std::unexpected(CacheError{
+                .message = std::format("failed to replace clice cache {}: {}",
+                                       cache_path->generic_string(),
+                                       remove_error.message()),
+            });
+        }
+
+        rename_error.clear();
+        fs::rename(tmp_path, *cache_path, rename_error);
+    }
     if(rename_error) {
         return std::unexpected(CacheError{
             .message = std::format("failed to finalize clice cache {}: {}",

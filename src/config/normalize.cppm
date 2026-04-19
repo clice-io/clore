@@ -74,10 +74,6 @@ auto normalize(TaskConfig& config) -> std::expected<void, NormalizeError> {
     for(auto& p: config.filter.exclude)
         normalize_separators(p);
 
-    for(auto& ch: config.llm.provider) {
-        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-    }
-
     return {};
 }
 

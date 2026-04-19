@@ -13,7 +13,6 @@ namespace {
 
 constexpr auto kMinimalValidConfig = R"(
 [llm]
-provider = "openai"
 system_prompt = "You are a documentation writer."
 retry_count = 3
 retry_initial_backoff_ms = 250

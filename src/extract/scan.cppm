@@ -146,6 +146,16 @@ auto scan_module_decl(std::string_view file_content, ScanResult& result) -> void
     }
 
     namespace dds = clang::dependency_directives_scan;
+    auto is_whitespace_only = [](std::string_view text) -> bool {
+        return !text.empty() && std::ranges::all_of(text, [](char ch) {
+            return std::isspace(static_cast<unsigned char>(ch)) != 0;
+        });
+    };
+    auto is_punctuation_only = [](std::string_view text) -> bool {
+        return !text.empty() && std::ranges::all_of(text, [](char ch) {
+            return std::ispunct(static_cast<unsigned char>(ch)) != 0;
+        });
+    };
 
     for(auto& dir: directives) {
         if(dir.Kind == dds::cxx_export_module_decl || dir.Kind == dds::cxx_module_decl) {
@@ -154,14 +164,28 @@ auto scan_module_decl(std::string_view file_content, ScanResult& result) -> void
 
             // Skip 'export' and 'module' keywords
             bool past_module_keyword = false;
+            bool saw_first_name_token = false;
+            bool is_fragment = false;
             for(auto& tok: dir.Tokens) {
                 auto tok_text = file_content.substr(tok.Offset, tok.Length);
+                if(is_whitespace_only(tok_text)) {
+                    continue;
+                }
 
                 if(!past_module_keyword) {
                     if(tok_text == "module") {
                         past_module_keyword = true;
                     }
                     continue;
+                }
+
+                if(!saw_first_name_token) {
+                    saw_first_name_token = true;
+                    if(tok_text == ";" || tok_text == ":" || tok_text.starts_with(':') ||
+                       is_punctuation_only(tok_text)) {
+                        is_fragment = true;
+                        break;
+                    }
                 }
 
                 // Stop at semicolon or end
@@ -171,7 +195,7 @@ auto scan_module_decl(std::string_view file_content, ScanResult& result) -> void
                 module_name += tok_text;
             }
 
-            if(!module_name.empty()) {
+            if(!is_fragment && !module_name.empty()) {
                 result.module_name = std::move(module_name);
                 result.is_interface_unit = (dir.Kind == dds::cxx_export_module_decl);
             }

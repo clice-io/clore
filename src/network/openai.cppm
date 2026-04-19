@@ -948,7 +948,7 @@ struct Protocol {
 
 }  // namespace clore::net::openai_detail
 
-export namespace clore::net {
+export namespace clore::net::openai {
 
 auto call_completion_async(CompletionRequest request,
                            kota::event_loop& loop = kota::event_loop::current())
@@ -973,9 +973,9 @@ auto call_structured_async(std::string_view model,
                            kota::event_loop& loop = kota::event_loop::current())
     -> kota::task<T, LLMError>;
 
-}  // namespace clore::net
+}  // namespace clore::net::openai
 
-namespace clore::net {
+namespace clore::net::openai {
 
 auto call_completion_async(CompletionRequest request, kota::event_loop& loop)
     -> kota::task<CompletionResponse, LLMError> {
@@ -1019,4 +1019,4 @@ auto call_structured_async(std::string_view model,
         .or_fail();
 }
 
-}  // namespace clore::net
+}  // namespace clore::net::openai

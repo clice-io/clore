@@ -138,6 +138,47 @@ TEST_CASE(dispatch_tool_call_reports_symbol_relationships) {
     EXPECT_NE(deps->find("demo::callee"), std::string::npos);
 }
 
+TEST_CASE(dispatch_tool_call_get_symbol_resolves_deferred_source_snippet) {
+    ScopedTempDir temp("agent_tools_deferred_snippet");
+    fs::create_directories(temp.path / "src");
+
+    extract::ProjectModel model;
+    auto file_path = temp.path / "src" / "snippet.cpp";
+    auto snippet = std::string{"int compute() { return 42; }\n"};
+
+    {
+        std::ofstream file(file_path);
+        file << snippet;
+    }
+
+    auto symbol = make_function_symbol(420,
+                                       "compute",
+                                       "demo::compute",
+                                       "int compute()",
+                                       file_path.generic_string(),
+                                       "demo");
+    symbol.source_snippet.clear();
+    symbol.source_snippet_offset = 0;
+    symbol.source_snippet_length = static_cast<std::uint32_t>(snippet.size());
+    auto symbol_id = symbol.id;
+
+    add_symbol(model, std::move(symbol));
+    add_namespace(model, "demo", {symbol_id});
+
+    auto args = parse_json_value(R"({"name":"demo::compute"})");
+    ASSERT_TRUE(args.has_value());
+
+    auto result = clore::agent::dispatch_tool_call("get_symbol",
+                                                   *args,
+                                                   model,
+                                                   temp.path.generic_string(),
+                                                   temp.path.generic_string());
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->find("source:\n```cpp\nint compute() { return 42; }\n\n```"),
+              std::string::npos);
+}
+
 TEST_CASE(dispatch_tool_call_get_dependencies_requires_signature_for_overloads) {
     ScopedTempDir temp("agent_tools_overload_dependencies");
     fs::create_directories(temp.path / "src");
@@ -211,7 +252,7 @@ TEST_CASE(create_guide_dispatch_writes_file) {
     ScopedTempDir temp("agent_tools_guide");
 
     auto args = parse_json_value(
-        R"({"name":"architecture-overview","title":"Architecture","content":"# Guide"})");
+        R"({"name":"guides/architecture.overview","title":"Architecture","content":"# Guide"})");
     ASSERT_TRUE(args.has_value());
 
     auto result = clore::agent::dispatch_tool_call("create_guide",
@@ -222,8 +263,9 @@ TEST_CASE(create_guide_dispatch_writes_file) {
 
     ASSERT_TRUE(result.has_value());
     EXPECT_NE(result->find("Guide 'Architecture' created successfully"), std::string::npos);
+    EXPECT_NE(result->find("guides/architecture.overview.md"), std::string::npos);
 
-    auto guide_path = temp.path / "guides" / "architecture-overview.md";
+    auto guide_path = temp.path / "guides" / "architecture.overview.md";
     EXPECT_TRUE(fs::exists(guide_path));
 }
 

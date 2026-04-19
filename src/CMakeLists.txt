@@ -1,5 +1,5 @@
 file(GLOB_RECURSE CLORE_MODULE_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/**/*.cppm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.cppm"
 )
 
 add_library(clore-core STATIC)
@@ -10,9 +10,9 @@ target_sources(clore-core
 target_compile_features(clore-core PUBLIC cxx_std_23)
 target_include_directories(clore-core
     PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
     PRIVATE
-        "${CLORE_LLVM_INCLUDE_DIR}"
+    "${CLORE_LLVM_INCLUDE_DIR}"
 )
 target_link_libraries(clore-core PUBLIC
     "${CLORE_CLANG_CPP_LIBRARY}"

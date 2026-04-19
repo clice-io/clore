@@ -38,7 +38,6 @@ class Clore(ConanFile):
                 "missing required llvm/clang libraries in pixi environment: "
                 + ", ".join(missing)
             )
-
         tc.variables["CLORE_LLVM_INCLUDE_DIR"] = include_dir.as_posix()
         tc.variables["CLORE_LLVM_LIBRARY_DIR"] = library_dir.as_posix()
         tc.variables["CLORE_LLVM_SHARED_LIBRARY"] = llvm_shared_library

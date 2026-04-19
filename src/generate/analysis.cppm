@@ -1,14 +1,27 @@
+module;
+
+#include "kota/codec/json/json.h"
+
 export module generate:analysis;
 
 import std;
 import :evidence;
 import :model;
-import :prompt;
 import config;
 import extract;
 import support;
 
 export namespace clore::generate {
+
+template <typename T>
+auto parse_structured_response(std::string_view raw, std::string_view context)
+    -> std::expected<T, GenerateError>;
+
+auto normalize_markdown_fragment(std::string_view raw, std::string_view context)
+    -> std::expected<std::string, GenerateError>;
+
+auto parse_markdown_prompt_output(std::string_view raw, std::string_view context)
+    -> std::expected<std::string, GenerateError>;
 
 auto analysis_prompt_kind_for_symbol(const extract::SymbolInfo& sym) -> std::optional<PromptKind>;
 
@@ -40,7 +53,21 @@ auto build_symbol_analysis_prompt(const extract::SymbolInfo& sym,
 
 namespace clore::generate {
 
+namespace json = kota::codec::json;
+
 namespace {
+
+auto trim_trailing_ascii_whitespace(std::string& text) -> void {
+    while(!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) {
+        text.pop_back();
+    }
+}
+
+auto contains_non_whitespace(std::string_view text) -> bool {
+    return std::ranges::any_of(text, [](char ch) {
+        return std::isspace(static_cast<unsigned char>(ch)) == 0;
+    });
+}
 
 auto fallback_overview_markdown(const extract::SymbolInfo& sym) -> std::string {
     if(auto doc = clore::support::extract_first_plain_paragraph(sym.doc_comment); !doc.empty()) {
@@ -183,6 +210,38 @@ auto parse_variable_analysis_lenient(std::string_view raw, std::string_view cont
 }
 
 }  // namespace
+
+template <typename T>
+auto parse_structured_response(std::string_view raw, std::string_view context)
+    -> std::expected<T, GenerateError> {
+    auto parsed = json::from_json<T>(raw);
+    if(!parsed.has_value()) {
+        return std::unexpected(GenerateError{
+            .message = std::format("failed to parse structured response for {}: {}",
+                                   context,
+                                   parsed.error().to_string()),
+        });
+    }
+    return *parsed;
+}
+
+auto normalize_markdown_fragment(std::string_view raw, std::string_view context)
+    -> std::expected<std::string, GenerateError> {
+    auto normalized = clore::support::ensure_utf8(raw);
+    normalized = std::string(clore::support::strip_utf8_bom(normalized));
+    trim_trailing_ascii_whitespace(normalized);
+    if(!contains_non_whitespace(normalized)) {
+        return std::unexpected(GenerateError{
+            .message = std::format("empty markdown fragment for {}", context),
+        });
+    }
+    return normalized;
+}
+
+auto parse_markdown_prompt_output(std::string_view raw, std::string_view context)
+    -> std::expected<std::string, GenerateError> {
+    return normalize_markdown_fragment(raw, context);
+}
 
 auto analysis_prompt_kind_for_symbol(const extract::SymbolInfo& sym) -> std::optional<PromptKind> {
     if(is_function_kind(sym.kind)) {

@@ -328,6 +328,30 @@ import support;
     EXPECT_EQ(result.module_imports[1], "support");
 }
 
+TEST_CASE(scan_module_decl_ignores_module_fragments) {
+    ScanResult global_fragment;
+    scan_module_decl(R"(
+module;
+export module demo.core;
+)",
+                     global_fragment);
+
+    EXPECT_EQ(global_fragment.module_name, "demo.core");
+    EXPECT_TRUE(global_fragment.is_interface_unit);
+
+    ScanResult private_fragment;
+    scan_module_decl(R"(
+module :private;
+import :detail;
+)",
+                     private_fragment);
+
+    EXPECT_TRUE(private_fragment.module_name.empty());
+    EXPECT_FALSE(private_fragment.is_interface_unit);
+    ASSERT_EQ(private_fragment.module_imports.size(), 1u);
+    EXPECT_EQ(private_fragment.module_imports[0], ":detail");
+}
+
 TEST_CASE(build_dependency_graph_normalizes_relative_includes_like_entries) {
     namespace fs = std::filesystem;
 

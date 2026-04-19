@@ -2,6 +2,7 @@
 #include <array>
 #include <coroutine>
 #include <cstdint>
+#include <cstdlib>
 #include <expected>
 #include <functional>
 #include <optional>
@@ -632,14 +633,20 @@ TEST_CASE(append_tool_outputs_builds_follow_up_history) {
 }
 
 TEST_CASE(call_completion_async_rejects_unknown_provider) {
+    ::unsetenv("ANTHROPIC_BASE_URL");
+    ::unsetenv("ANTHROPIC_API_KEY");
+    ::unsetenv("OPENAI_BASE_URL");
+    ::unsetenv("OPENAI_API_KEY");
+
     CompletionRequest request{};
     request.messages.push_back(UserMessage{.content = "ping"});
 
     auto result = detail::run_task_sync<CompletionResponse>(
-        [&](auto& loop) { return call_completion_async("invalid", request, loop); });
+        [&](auto& loop) { return call_completion_async(request, loop); });
 
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().message, "unsupported llm provider 'invalid'");
+    EXPECT_NE(result.error().message.find("no supported llm provider environment found"),
+              std::string::npos);
 }
 
 };  // TEST_SUITE(llm)

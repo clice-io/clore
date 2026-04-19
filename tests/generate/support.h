@@ -35,7 +35,6 @@ struct ScopedTempDir {
     config.output_root = (project_root / "docs").generic_string();
     config.workspace_root = project_root.generic_string();
 
-    config.llm.provider = "openai";
     config.llm.system_prompt = "You are a writer.";
     config.llm.retry_count = 3;
     config.llm.retry_initial_backoff_ms = 250;

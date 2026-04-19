@@ -56,4 +56,13 @@ TEST_CASE(split_top_level_qualified_name_ignores_leading_global_qualifier) {
     EXPECT_EQ(namespace_prefix_from_qualified_name("::demo::Widget"), "demo");
 }
 
+TEST_CASE(resolve_source_snippet_returns_false_for_missing_files) {
+    SymbolInfo symbol;
+    symbol.declaration_location.file = "/path/that/does/not/exist.cpp";
+    symbol.source_snippet_offset = 0;
+    symbol.source_snippet_length = 32;
+
+    EXPECT_FALSE(resolve_source_snippet(symbol));
+}
+
 };  // TEST_SUITE(model)

@@ -14,7 +14,6 @@ TEST_CASE(default_construction) {
     EXPECT_TRUE(config.workspace_root.empty());
     EXPECT_TRUE(config.filter.include.empty());
     EXPECT_TRUE(config.filter.exclude.empty());
-    EXPECT_TRUE(config.llm.provider.empty());
     EXPECT_FALSE(config.log_level.has_value());
 }
 

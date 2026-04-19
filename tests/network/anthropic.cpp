@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <string>
 
 #include "kota/codec/json/json.h"
@@ -88,10 +89,14 @@ TEST_CASE(parse_response_supports_tool_use_blocks) {
     EXPECT_EQ(response->message.tool_calls[0].arguments_json, R"({"query":"llm","limit":1})");
 }
 
-TEST_CASE(call_llm_async_rejects_unknown_provider) {
+TEST_CASE(call_llm_async_rejects_missing_provider_environment) {
+    ::unsetenv("ANTHROPIC_BASE_URL");
+    ::unsetenv("ANTHROPIC_API_KEY");
+    ::unsetenv("OPENAI_BASE_URL");
+    ::unsetenv("OPENAI_API_KEY");
+
     auto result = detail::run_task_sync<std::string>([](auto& loop) {
-        return call_llm_async("invalid",
-                              "claude-sonnet-4-5",
+        return call_llm_async("claude-sonnet-4-5",
                               "system",
                               PromptRequest{
                                   .prompt = "ping",
@@ -104,7 +109,8 @@ TEST_CASE(call_llm_async_rejects_unknown_provider) {
     });
 
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().message, "unsupported llm provider 'invalid'");
+    EXPECT_NE(result.error().message.find("no supported llm provider environment found"),
+              std::string::npos);
 }
 
 };  // TEST_SUITE(anthropic_llm)
