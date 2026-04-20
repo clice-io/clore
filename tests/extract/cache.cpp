@@ -80,6 +80,35 @@ TEST_CASE(dependencies_changed_mismatched_sizes) {
     EXPECT_TRUE(dependencies_changed(snapshot));
 }
 
+TEST_CASE(dependencies_changed_rechecks_hash_when_mtime_is_restored) {
+    auto temp_path = fs::temp_directory_path() /
+                     std::format("clore_test_dependency_snapshot_{}",
+                                 std::chrono::steady_clock::now().time_since_epoch().count());
+    {
+        std::ofstream f(temp_path, std::ios::binary);
+        f << "alpha";
+    }
+
+    auto snapshot = capture_dependency_snapshot({temp_path.generic_string()});
+    ASSERT_TRUE(snapshot.has_value());
+
+    std::error_code time_error;
+    auto original_time = fs::last_write_time(temp_path, time_error);
+    ASSERT_FALSE(static_cast<bool>(time_error));
+
+    {
+        std::ofstream f(temp_path, std::ios::binary | std::ios::trunc);
+        f << "bravo";
+    }
+    fs::last_write_time(temp_path, original_time, time_error);
+    ASSERT_FALSE(static_cast<bool>(time_error));
+
+    EXPECT_TRUE(dependencies_changed(*snapshot));
+
+    std::error_code ec;
+    fs::remove(temp_path, ec);
+}
+
 TEST_CASE(save_and_load_extract_cache_roundtrip) {
     auto temp_dir = fs::temp_directory_path() /
                     std::format("clore_extract_cache_{}",
@@ -156,6 +185,27 @@ TEST_CASE(save_and_load_clice_cache_roundtrip) {
     ASSERT_EQ(load_result->pcm.size(), 1u);
     EXPECT_EQ(load_result->pcm[0].module_name, "demo.core");
     EXPECT_EQ(load_result->pcm[0].deps[0].hash, 66u);
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST_CASE(load_clice_cache_treats_malformed_json_as_stale) {
+    auto temp_dir = fs::temp_directory_path() /
+                    std::format("clore_clice_cache_stale_{}",
+                                std::chrono::steady_clock::now().time_since_epoch().count());
+    fs::create_directories(temp_dir / ".clice" / "cache");
+
+    {
+        std::ofstream f(temp_dir / ".clice" / "cache" / "cache.json", std::ios::binary);
+        f << "{ malformed json";
+    }
+
+    auto load_result = load_clice_cache(temp_dir.generic_string());
+    ASSERT_TRUE(load_result.has_value());
+    EXPECT_TRUE(load_result->paths.empty());
+    EXPECT_TRUE(load_result->pch.empty());
+    EXPECT_TRUE(load_result->pcm.empty());
 
     std::error_code ec;
     fs::remove_all(temp_dir, ec);

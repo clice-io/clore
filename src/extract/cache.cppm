@@ -378,7 +378,6 @@ namespace {
 auto check_single_dependency(const DependencySnapshot& snapshot, std::size_t index) -> bool {
     const auto& file = snapshot.files[index];
     auto stored_hash = snapshot.hashes[index];
-    auto stored_mtime = snapshot.mtimes[index];
 
     if(stored_hash == 0) {
         return true;
@@ -387,14 +386,6 @@ auto check_single_dependency(const DependencySnapshot& snapshot, std::size_t ind
     llvm::sys::fs::file_status status;
     if(llvm::sys::fs::status(file, status)) {
         return true;
-    }
-
-    auto current_mtime = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                             status.getLastModificationTime().time_since_epoch())
-                             .count();
-
-    if(stored_mtime > 0 && current_mtime == stored_mtime) {
-        return false;
     }
 
     auto hash = hash_file(file);
@@ -707,11 +698,10 @@ auto load_clice_cache(std::string_view workspace_root)
     CliceCacheData data;
     auto status = json::from_json(*content, data);
     if(!status.has_value()) {
-        return std::unexpected(CacheError{
-            .message = std::format("failed to parse clice cache {}: {}",
-                                   cache_path->generic_string(),
-                                   status.error().to_string()),
-        });
+        logging::warn("ignoring stale clice cache {}: {}",
+                      cache_path->generic_string(),
+                      status.error().to_string());
+        return CliceCacheData{};
     }
 
     return data;

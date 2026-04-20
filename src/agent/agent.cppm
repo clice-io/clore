@@ -125,7 +125,7 @@ auto hash_messages(const std::vector<clore::net::Message>& messages) -> std::uin
                     concat += m.content;
                     concat += '\0';
                 } else if constexpr(std::same_as<T, clore::net::AssistantToolCallMessage>) {
-                    concat += 'A';
+                    concat += 'C';
                     if(m.content.has_value()) {
                         concat += *m.content;
                     }
@@ -192,11 +192,8 @@ auto serialize_completion_response(const clore::net::CompletionResponse& respons
                !status.has_value()) {
                 return std::unexpected(clore::net::LLMError("failed to serialize tool call name"));
             }
-            auto parsed_args = kota::codec::json::Value::parse(call.arguments_json);
-            if(!parsed_args.has_value()) {
-                return std::unexpected(clore::net::LLMError("failed to parse tool call arguments"));
-            }
-            if(auto status = call_obj->insert("a", std::move(*parsed_args)); !status.has_value()) {
+            if(auto status = call_obj->insert("a", std::string_view(call.arguments_json));
+               !status.has_value()) {
                 return std::unexpected(
                     clore::net::LLMError("failed to insert tool call arguments"));
             }
@@ -268,6 +265,23 @@ auto deserialize_completion_response(std::string_view raw_json)
             if(!args_value.has_value()) {
                 return std::unexpected(clore::net::LLMError("missing tool_call.arguments"));
             }
+            auto args_text = args_value->get_string();
+            if(args_text.has_value()) {
+                auto parsed_args = kota::codec::json::Value::parse(*args_text);
+                if(!parsed_args.has_value()) {
+                    return std::unexpected(
+                        clore::net::LLMError("failed to parse tool_call.arguments"));
+                }
+
+                output.tool_calls.push_back(clore::net::ToolCall{
+                    .id = std::string(*id),
+                    .name = std::string(*name),
+                    .arguments_json = std::string(*args_text),
+                    .arguments = std::move(*parsed_args),
+                });
+                continue;
+            }
+
             auto args_copy = kota::codec::json::Value::copy_of(*args_value);
             if(!args_copy.has_value()) {
                 return std::unexpected(clore::net::LLMError("failed to copy tool_call.arguments"));
@@ -429,6 +443,10 @@ auto run_agent_loop(const config::TaskConfig& config,
                     cache_index.entries.insert_or_assign(std::move(cache_key),
                                                          std::string(*serialized));
                 }
+            } else {
+                logging::warn("agent cache serialization failed for turn {}: {}",
+                              turn,
+                              serialized.error().message);
             }
         }
 

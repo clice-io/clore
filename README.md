@@ -14,17 +14,17 @@ Run `pixi run build`. If you don't have pixi installed, [install it first](https
 The default build path installs third-party dependencies via Conan before CMake configure.
 
 ```bash
-pixi run build --type RelWithDebInfo
+pixi run build RelWithDebInfo
 ```
 
 If you want to run each step explicitly:
 
 ```bash
-pixi run install --type RelWithDebInfo
-pixi run config --type RelWithDebInfo
-pixi run check --type RelWithDebInfo
-pixi run format --type RelWithDebInfo
-pixi run build --type RelWithDebInfo
+pixi run install RelWithDebInfo
+pixi run config RelWithDebInfo
+pixi run check RelWithDebInfo
+pixi run format
+pixi run build RelWithDebInfo
 ```
 
 Conan-managed dependencies are `spdlog`, `libcurl`, and `simdjson`.
@@ -40,7 +40,7 @@ Generate documentation from a compilation database:
 ```bash
 clore \
   --config clore.en.toml \
-  --compile-commands build/compile_commands.json \
+  --compile-commands build/{{ type }}/compile_commands.json \
   --source-dir . \
   --output-dir docs/api \
   --dry-run
@@ -63,7 +63,7 @@ clore \
 
 | Flag | Description |
 | --- | --- |
-| `--config` | Path to config file (default: `clore.toml`) |
+| `--config` | Path to config file (default: `clore.toml`; for typical use, start from `clore.en.toml` or `clore.zh.toml` and pass that path here) |
 | `--compile-commands` | Path to `compile_commands.json` |
 | `--source-dir` | Source root directory for relative output paths |
 | `--output-dir` | Output root directory |

@@ -263,6 +263,54 @@ auto invocation_cache()
     return cache;
 }
 
+auto parse_compiler_invocation(const std::vector<std::string>& driver_args,
+                               std::string_view input_file,
+                               const llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem>& vfs,
+                               clang::DiagnosticsEngine& diagnostics)
+    -> std::shared_ptr<clang::CompilerInvocation> {
+    llvm::SmallVector<const char*> argv;
+    argv.reserve(driver_args.size() + 1);
+    for(auto& arg: driver_args) {
+        argv.push_back(arg.c_str());
+    }
+
+    auto input = std::string(input_file);
+    argv.push_back(input.c_str());
+
+    const bool is_cc1 = argv.size() >= 2 && llvm::StringRef(argv[1]) == "-cc1";
+    if(is_cc1) {
+        auto invocation = std::make_shared<clang::CompilerInvocation>();
+        if(!clang::CompilerInvocation::CreateFromArgs(*invocation,
+                                                      llvm::ArrayRef(argv).drop_front(2),
+                                                      diagnostics,
+                                                      argv[0])) {
+            return nullptr;
+        }
+        return invocation;
+    }
+
+    clang::CreateInvocationOptions options{
+        .Diags = &diagnostics,
+        .VFS = vfs,
+        .ProbePrecompiled = false,
+    };
+    auto unique_invocation = clang::createInvocation(argv, options);
+    if(!unique_invocation) {
+        return nullptr;
+    }
+    return std::shared_ptr<clang::CompilerInvocation>(std::move(unique_invocation));
+}
+
+auto warm_up_clang_invocation_parsing(const std::vector<std::string>& driver_args,
+                                      std::string_view input_file,
+                                      const llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem>& vfs,
+                                      clang::DiagnosticsEngine& diagnostics) -> void {
+    static std::once_flag once;
+    std::call_once(once, [&] {
+        static_cast<void>(parse_compiler_invocation(driver_args, input_file, vfs, diagnostics));
+    });
+}
+
 }  // namespace
 
 auto create_compiler_instance(const CompileEntry& entry)
@@ -283,6 +331,8 @@ auto create_compiler_instance(const CompileEntry& entry)
         return nullptr;
     }
 
+    warm_up_clang_invocation_parsing(driver_args, entry.file, vfs, *diagnostics);
+
     std::shared_ptr<clang::CompilerInvocation> invocation;
 
     // Try to reuse a cached invocation for the same compile signature.
@@ -298,38 +348,9 @@ auto create_compiler_instance(const CompileEntry& entry)
     }
 
     if(!invocation) {
-        // Parse invocation from command-line arguments.
-        llvm::SmallVector<const char*> argv;
-        argv.reserve(driver_args.size() + 1);
-        for(auto& arg: driver_args) {
-            argv.push_back(arg.c_str());
-        }
-        // Append a placeholder input; the real input is set later.
-        argv.push_back(entry.file.c_str());
-
-        const bool is_cc1 = argv.size() >= 2 && llvm::StringRef(argv[1]) == "-cc1";
-        if(is_cc1) {
-            invocation = std::make_shared<clang::CompilerInvocation>();
-            if(!clang::CompilerInvocation::CreateFromArgs(*invocation,
-                                                          llvm::ArrayRef(argv).drop_front(2),
-                                                          *diagnostics,
-                                                          argv[0])) {
-                return nullptr;
-            }
-        } else {
-            clang::CreateInvocationOptions options{
-                .Diags = diagnostics,
-                .VFS = vfs,
-                .ProbePrecompiled = false,
-            };
-            auto unique_invocation = clang::createInvocation(argv, options);
-            if(!unique_invocation) {
-                return nullptr;
-            }
-            invocation = std::shared_ptr<clang::CompilerInvocation>(std::move(unique_invocation));
-            if(!invocation) {
-                return nullptr;
-            }
+        invocation = parse_compiler_invocation(driver_args, entry.file, vfs, *diagnostics);
+        if(!invocation) {
+            return nullptr;
         }
 
         invocation->getFrontendOpts().DisableFree = false;

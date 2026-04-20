@@ -72,9 +72,9 @@ cmake -B build/{{ type }} -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE=build/{{ type }}/generators/conan_toolchain.cmake \
     -DCMAKE_EXPERIMENTAL_CXX_IMPORT_STD=451f2fe2-a8a2-47c3-bc32-94786d8fc91b
 """
-inputs = ["CMakeLists.txt", "src/CMakeLists.txt"]
+inputs = ["CMakeLists.txt", "src/CMakeLists.txt", "tests/CMakeLists.txt"]
 outputs = ["build/{{ type }}/CMakeCache.txt"]
-depends-on = ["install"]
+depends-on = [{ task = "install", args = ["{{ type }}"] }]
 
 [tasks.format]
 cmd = """
@@ -89,18 +89,15 @@ cmd = "cppcheck -j8 --quiet --std=c++23 src tests"
 args = [{ arg = "type", default = "Debug" }]
 cmd = "cmake --build build/{{ type }} --parallel"
 inputs = ["src/", "tests/", "build/{{ type }}/CMakeCache.txt"]
-depends-on = ["config"]
+depends-on = [{ task = "config", args = ["{{ type }}"] }]
 
 [tasks.test]
 args = [{ arg = "type", default = "Debug" }]
 cmd = "./build/{{ type }}/tests/unit_tests"
-depends-on = ["build"]
+depends-on = [{ task = "build", args = ["{{ type }}"] }]
 
 [tasks.generate]
-args = [
-    { arg = "lang", default = "zh" },
-    { arg = "type", default = "Debug" },
-]
+args = [{ arg = "lang", default = "zh" }, { arg = "type", default = "Debug" }]
 cmd = """
 ./build/{{ type }}/src/clore \
 --config clore.{{ lang }}.toml \
@@ -108,4 +105,4 @@ cmd = """
 --source-dir src --output-dir docs/{{ lang }} \
 --log-level debug --model deepseek-chat
 """
-depends-on = ["build"]
+depends-on = [{ task = "build", args = ["{{ type }}"] }]

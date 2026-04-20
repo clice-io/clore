@@ -32,19 +32,8 @@ namespace {
 constexpr std::size_t kMermaidMinNodes = 4;
 constexpr std::size_t kMermaidMinEdges = 3;
 
-struct DiagramRenderCache {
-    std::shared_mutex mutex;
-    std::unordered_map<std::string, std::string> diagram_by_key;
-};
-
-auto diagram_render_cache() -> DiagramRenderCache& {
-    static DiagramRenderCache cache;
-    return cache;
-}
-
 template <typename RenderFn>
-auto render_cached_diagram(std::string key, RenderFn&& render_fn) -> std::string {
-    static_cast<void>(key);
+auto render_cached_diagram(RenderFn&& render_fn) -> std::string {
     return render_fn();
 }
 
@@ -133,8 +122,7 @@ auto escape_mermaid_label(std::string_view text) -> std::string {
 }
 
 auto render_import_diagram_code(const extract::ModuleUnit& mod_unit) -> std::string {
-    auto key = std::format("import:{}:{}", mod_unit.source_file, mod_unit.name);
-    return render_cached_diagram(std::move(key), [&]() {
+    return render_cached_diagram([&]() {
         if(mod_unit.imports.empty()) {
             return std::string{};
         }
@@ -179,8 +167,7 @@ auto render_import_diagram_code(const extract::ModuleUnit& mod_unit) -> std::str
 
 auto render_namespace_diagram_code(const extract::ProjectModel& model,
                                    std::string_view namespace_name) -> std::string {
-    auto key = std::format("namespace:{}", namespace_name);
-    return render_cached_diagram(std::move(key), [&]() {
+    return render_cached_diagram([&]() {
         auto ns_it = model.namespaces.find(std::string(namespace_name));
         if(ns_it == model.namespaces.end()) {
             return std::string{};
@@ -239,8 +226,7 @@ auto render_file_dependency_diagram_code(const PagePlan& plan,
         return {};
     }
 
-    auto key = std::format("file:{}:{}", plan.owner_keys.front(), config.project_root);
-    return render_cached_diagram(std::move(key), [&]() {
+    return render_cached_diagram([&]() {
         auto file_it = model.files.find(plan.owner_keys.front());
         if(file_it == model.files.end()) {
             return std::string{};
@@ -301,7 +287,7 @@ auto render_file_dependency_diagram_code(const PagePlan& plan,
 }
 
 auto render_module_dependency_diagram_code(const extract::ProjectModel& model) -> std::string {
-    return render_cached_diagram("module_dependency", [&]() {
+    return render_cached_diagram([&]() {
         auto top_module = [](std::string_view name) -> std::string {
             auto colon = name.find(':');
             return std::string(colon == std::string_view::npos ? name : name.substr(0, colon));

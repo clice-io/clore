@@ -245,6 +245,58 @@ TEST_CASE(build_dependency_graph_with_initial_cache_mints_missing_cache_keys) {
     fs::remove_all(root, ec);
 }
 
+TEST_CASE(build_dependency_graph_clears_preexisting_graph_state) {
+    namespace fs = std::filesystem;
+
+    auto root = (fs::temp_directory_path() / "clore_scan_graph_reset").lexically_normal();
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root / "src");
+
+    {
+        std::ofstream source_file(root / "src" / "main.cpp");
+        source_file << "int main() { return 0; }\n";
+    }
+
+    auto source = canonical_test_path(root / "src" / "main.cpp");
+
+    CompilationDatabase db{
+        .entries =
+            {
+                      CompileEntry{
+                    .file = source,
+                    .directory = root.generic_string(),
+                    .arguments = {},
+                    .cache_key = source + "\t1",
+                }, },
+        .toolchain_cache = {},
+    };
+
+    ScanCache initial_cache;
+    initial_cache.scan_results.emplace(source + "\t1",
+                                       ScanResult{
+                                           .module_name = {},
+                                           .is_interface_unit = false,
+                                           .includes = {},
+                                           .module_imports = {},
+                                       });
+
+    DependencyGraph graph;
+    graph.files = {"stale.cpp"};
+    graph.edges = {
+        {.from = "stale.cpp", .to = "stale.hpp"}
+    };
+
+    auto result = build_dependency_graph(db, graph, &initial_cache);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(graph.files.size(), 1u);
+    EXPECT_EQ(graph.files[0], source);
+    EXPECT_TRUE(graph.edges.empty());
+
+    fs::remove_all(root, ec);
+}
+
 TEST_CASE(build_dependency_graph_scans_uncached_entries_and_populates_cache) {
     namespace fs = std::filesystem;
 
@@ -306,6 +358,81 @@ TEST_CASE(build_dependency_graph_scans_uncached_entries_and_populates_cache) {
     EXPECT_TRUE(std::ranges::all_of(cache.scan_results, [](const auto& item) {
         return item.second.module_name.empty();
     }));
+
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE(build_dependency_graph_deduplicates_duplicate_sources_and_cache_writes) {
+    namespace fs = std::filesystem;
+
+    auto root = (fs::temp_directory_path() / "clore_scan_duplicate_sources").lexically_normal();
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root / "src");
+
+    {
+        std::ofstream source_file(root / "src" / "main.cpp");
+        source_file << "#include \"lib.cpp\"\nint main() { return answer(); }\n";
+    }
+    {
+        std::ofstream source_file(root / "src" / "lib.cpp");
+        source_file << "int answer() { return 42; }\n";
+    }
+
+    auto main_source = canonical_test_path(root / "src" / "main.cpp");
+    auto lib_source = canonical_test_path(root / "src" / "lib.cpp");
+
+    CompilationDatabase db{
+        .entries =
+            {
+                      CompileEntry{
+                    .file = main_source,
+                    .directory = root.generic_string(),
+                    .arguments = {"clang++",
+                                  "-std=c++23",
+                                  "-c",
+                                  main_source,
+                                  "-o",
+                                  (root / "src" / "main.o").generic_string()},
+                    .cache_key = main_source + "\t1",
+                }, CompileEntry{
+                    .file = main_source,
+                    .directory = root.generic_string(),
+                    .arguments = {"clang++",
+                                  "-std=c++23",
+                                  "-c",
+                                  main_source,
+                                  "-o",
+                                  (root / "src" / "main-dup.o").generic_string()},
+                    .cache_key = main_source + "\t2",
+                }, CompileEntry{
+                    .file = lib_source,
+                    .directory = root.generic_string(),
+                    .arguments = {"clang++",
+                                  "-std=c++23",
+                                  "-c",
+                                  lib_source,
+                                  "-o",
+                                  (root / "src" / "lib.o").generic_string()},
+                    .cache_key = lib_source + "\t3",
+                }, },
+        .toolchain_cache = {},
+    };
+
+    DependencyGraph graph;
+    ScanCache cache;
+
+    auto result = build_dependency_graph(db, graph, &cache);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(graph.files.size(), 2u);
+    ASSERT_EQ(graph.edges.size(), 1u);
+    EXPECT_EQ(graph.edges[0].from, main_source);
+    EXPECT_EQ(graph.edges[0].to, lib_source);
+    EXPECT_EQ(cache.scan_results.size(), 2u);
+    EXPECT_TRUE(cache.scan_results.contains(main_source + "\t1"));
+    EXPECT_FALSE(cache.scan_results.contains(main_source + "\t2"));
+    EXPECT_TRUE(cache.scan_results.contains(lib_source + "\t3"));
 
     fs::remove_all(root, ec);
 }

@@ -297,6 +297,9 @@ struct MissingScanTask {
 
 auto build_dependency_graph(const CompilationDatabase& db, DependencyGraph& graph, ScanCache* cache)
     -> std::expected<void, ScanError> {
+    graph.files.clear();
+    graph.edges.clear();
+
     CompilationDatabase normalized_db = db;
     for(auto& entry: normalized_db.entries) {
         if(entry.cache_key.empty()) {
@@ -406,10 +409,19 @@ auto build_dependency_graph(const CompilationDatabase& db, DependencyGraph& grap
         }
     }
 
+    std::unordered_set<std::string> seen_files;
+    seen_files.reserve(normalized_db.entries.size());
+    std::unordered_set<std::string> emitted_edges;
+    emitted_edges.reserve(normalized_db.entries.size());
+
     for(std::size_t idx = 0; idx < normalized_db.entries.size(); ++idx) {
         auto& entry = normalized_db.entries[idx];
         const auto& normalized = prepared_entries[idx].normalized_file;
         const auto& cache_key = prepared_entries[idx].cache_key;
+
+        if(!seen_files.insert(normalized).second) {
+            continue;
+        }
 
         const ScanResult* scan_result = nullptr;
         if(cached_results[idx].has_value()) {
@@ -429,10 +441,15 @@ auto build_dependency_graph(const CompilationDatabase& db, DependencyGraph& grap
             auto inc_normalized =
                 normalize_argument_path(inc.path, entry.directory).generic_string();
             if(entry_files.contains(inc_normalized)) {
-                graph.edges.push_back(DependencyEdge{
-                    .from = normalized,
-                    .to = inc_normalized,
-                });
+                auto edge_key = normalized;
+                edge_key.push_back('\0');
+                edge_key += inc_normalized;
+                if(emitted_edges.insert(std::move(edge_key)).second) {
+                    graph.edges.push_back(DependencyEdge{
+                        .from = normalized,
+                        .to = inc_normalized,
+                    });
+                }
             }
         }
 

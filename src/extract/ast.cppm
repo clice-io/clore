@@ -168,7 +168,21 @@ auto get_doc_comment(const clang::ASTContext& ctx, const clang::Decl* decl) -> s
 struct SourceSnippetBounds {
     std::uint32_t offset = 0;
     std::uint32_t length = 0;
+    std::uint64_t file_size = 0;
+    std::uint64_t content_hash = 0;
 };
+
+constexpr std::uint64_t kSourceSnippetHashOffsetBasis = 14695981039346656037ULL;
+constexpr std::uint64_t kSourceSnippetHashPrime = 1099511628211ULL;
+
+auto hash_source_snippet_bytes(std::string_view bytes) -> std::uint64_t {
+    auto hash = kSourceSnippetHashOffsetBasis;
+    for(auto ch: bytes) {
+        hash ^= static_cast<std::uint64_t>(static_cast<unsigned char>(ch));
+        hash *= kSourceSnippetHashPrime;
+    }
+    return hash;
+}
 
 auto get_source_snippet_bounds(const clang::ASTContext& ctx, const clang::Decl* decl)
     -> SourceSnippetBounds {
@@ -207,6 +221,9 @@ auto get_source_snippet_bounds(const clang::ASTContext& ctx, const clang::Decl* 
     return SourceSnippetBounds{
         .offset = static_cast<std::uint32_t>(begin_offset),
         .length = static_cast<std::uint32_t>(length),
+        .file_size = static_cast<std::uint64_t>(buffer.size()),
+        .content_hash =
+            hash_source_snippet_bytes(std::string_view(buffer.data() + begin_offset, length)),
     };
 }
 
@@ -369,10 +386,16 @@ struct RelationEdge {
 };
 
 auto edge_hash(SymbolID from, SymbolID to, RelationKind kind) -> std::uint64_t {
+    auto mix = [](std::uint64_t& hash, auto value) {
+        hash ^= std::hash<std::remove_cvref_t<decltype(value)>>{}(value) + 0x9e3779b97f4a7c15ULL +
+                (hash << 6) + (hash >> 2);
+    };
+
     auto h = std::hash<std::uint64_t>{}(from.hash);
-    h ^= std::hash<std::uint64_t>{}(to.hash) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
-    h ^= std::hash<std::uint8_t>{}(static_cast<std::uint8_t>(kind)) + 0x9e3779b97f4a7c15ULL +
-         (h << 6) + (h >> 2);
+    mix(h, from.signature);
+    mix(h, to.hash);
+    mix(h, to.signature);
+    mix(h, static_cast<std::uint8_t>(kind));
     return h;
 }
 
@@ -479,6 +502,8 @@ public:
             auto bounds = get_source_snippet_bounds(context, decl);
             info.source_snippet_offset = bounds.offset;
             info.source_snippet_length = bounds.length;
+            info.source_snippet_file_size = bounds.file_size;
+            info.source_snippet_hash = bounds.content_hash;
             // Do not eagerly copy the full text into memory; it will be resolved
             // on demand via resolve_source_snippet() during evidence building.
         }

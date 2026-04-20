@@ -168,10 +168,14 @@ auto merge_symbol_info_impl(SymbolInfo& current, T&& incoming) -> void {
         current.source_snippet = incoming_ref.source_snippet;
         current.source_snippet_offset = incoming_ref.source_snippet_offset;
         current.source_snippet_length = incoming_ref.source_snippet_length;
+        current.source_snippet_file_size = incoming_ref.source_snippet_file_size;
+        current.source_snippet_hash = incoming_ref.source_snippet_hash;
     } else if(current.source_snippet_length == 0 && incoming_ref.source_snippet_length > 0) {
         current.source_snippet = incoming_ref.source_snippet;
         current.source_snippet_offset = incoming_ref.source_snippet_offset;
         current.source_snippet_length = incoming_ref.source_snippet_length;
+        current.source_snippet_file_size = incoming_ref.source_snippet_file_size;
+        current.source_snippet_hash = incoming_ref.source_snippet_hash;
     }
     if(!current.parent.has_value() && incoming_ref.parent.has_value()) {
         current.parent = incoming_ref.parent;

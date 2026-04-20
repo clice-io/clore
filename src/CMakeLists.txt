@@ -12,17 +12,16 @@ target_include_directories(clore-core
     PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
     PRIVATE
-    "${CLORE_LLVM_INCLUDE_DIR}"
+    "${LLVM_INCLUDE_DIRS}"
 )
 target_link_libraries(clore-core PUBLIC
-    "${CLORE_CLANG_CPP_LIBRARY}"
-    "${CLORE_LLVM_SHARED_LIBRARY}"
+    clang-cpp
+    LLVM
     CURL::libcurl
     spdlog::spdlog
     kota::async
     kota::codec::toml
     kota::codec::json
-    simdjson::simdjson
 )
 
 add_executable(clore "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")

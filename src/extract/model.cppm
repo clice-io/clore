@@ -96,6 +96,8 @@ struct SymbolInfo {
     /// on demand instead of being stored in memory for every symbol.
     std::uint32_t source_snippet_offset = 0;
     std::uint32_t source_snippet_length = 0;
+    std::uint64_t source_snippet_file_size = 0;
+    std::uint64_t source_snippet_hash = 0;
 
     std::optional<SymbolID> parent;
     std::string lexical_parent_name;
@@ -203,6 +205,10 @@ namespace clore::extract {
 
 namespace {
 
+constexpr std::size_t kSplitQualifiedNameCacheMaxEntries = 10'000;
+constexpr std::uint64_t kSourceSnippetHashOffsetBasis = 14695981039346656037ULL;
+constexpr std::uint64_t kSourceSnippetHashPrime = 1099511628211ULL;
+
 struct SplitQualifiedNameCache {
     std::shared_mutex mutex;
     std::unordered_map<std::string,
@@ -215,6 +221,15 @@ struct SplitQualifiedNameCache {
 auto split_qualified_name_cache() -> SplitQualifiedNameCache& {
     static SplitQualifiedNameCache cache;
     return cache;
+}
+
+auto hash_source_snippet_bytes(std::string_view bytes) -> std::uint64_t {
+    auto hash = kSourceSnippetHashOffsetBasis;
+    for(auto ch: bytes) {
+        hash ^= static_cast<std::uint64_t>(static_cast<unsigned char>(ch));
+        hash *= kSourceSnippetHashPrime;
+    }
+    return hash;
 }
 
 }  // namespace
@@ -295,6 +310,9 @@ auto split_top_level_qualified_name(std::string_view qualified_name) -> std::vec
 
     {
         std::unique_lock lock(cache.mutex);
+        if(cache.parts_by_qualified_name.size() >= kSplitQualifiedNameCacheMaxEntries) {
+            cache.parts_by_qualified_name.clear();
+        }
         cache.parts_by_qualified_name.insert_or_assign(std::string(qualified_name), parts);
     }
     return parts;
@@ -445,7 +463,11 @@ auto resolve_source_snippet(SymbolInfo& sym) -> bool {
     auto offset = static_cast<std::size_t>(sym.source_snippet_offset);
     auto length = static_cast<std::size_t>(sym.source_snippet_length);
 
-    if(offset + length > file_size_value) {
+    if(sym.source_snippet_file_size != 0 && sym.source_snippet_file_size != file_size_value) {
+        return false;
+    }
+
+    if(offset > file_size_value || length > file_size_value - offset) {
         return false;
     }
 
@@ -458,6 +480,11 @@ auto resolve_source_snippet(SymbolInfo& sym) -> bool {
     std::string result(length, '\0');
     file.read(result.data(), static_cast<std::streamsize>(length));
     if(!file) {
+        return false;
+    }
+
+    if(sym.source_snippet_hash != 0 &&
+       hash_source_snippet_bytes(result) != sym.source_snippet_hash) {
         return false;
     }
 
