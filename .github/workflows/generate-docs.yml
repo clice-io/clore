@@ -23,7 +23,7 @@ jobs:
 
       - name: Restore build cache
         id: restore-build-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: build/Debug/
           key: ${{ runner.os }}-debug-build-${{ hashFiles('pixi.lock', 'pixi.toml', '**/CMakeLists.txt', 'cmake/**/*.cmake') }}
@@ -38,7 +38,7 @@ jobs:
 
       - name: Save build cache
         if: ${{ success() && steps.restore-build-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: build/Debug/
           key: ${{ steps.restore-build-cache.outputs.cache-primary-key }}
