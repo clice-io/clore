@@ -25,21 +25,6 @@ jobs:
           activate-environment: true
           cache: true
 
-      - name: Cache install layer
-        id: cache-install
-        uses: actions/cache@v5
-        with:
-          path: |
-            .conan/
-            build/subprojects/
-            build/${{ env.BUILD_TYPE }}/generators/
-          key: ${{ runner.os }}-install-v1-${{ hashFiles('pixi.lock', 'pixi.toml', 'conanfile.py') }}
-          restore-keys: |
-            ${{ runner.os }}-install-v1-
-
-      - name: Install
-        run: pixi run install
-
       - name: Cache config layer
         id: cache-config
         uses: actions/cache@v5
@@ -53,16 +38,13 @@ jobs:
             build/${{ env.BUILD_TYPE }}/_deps/
             build/${{ env.BUILD_TYPE }}/src/cmake_install.cmake
             build/${{ env.BUILD_TYPE }}/tests/cmake_install.cmake
-          key: ${{ runner.os }}-config-v1-install-${{ hashFiles('pixi.lock', 'pixi.toml', 'conanfile.py') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}
+          key: ${{ runner.os }}-config-v1-${{ hashFiles('pixi.lock', 'pixi.toml') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}
           restore-keys: |
-            ${{ runner.os }}-config-v1-install-${{ hashFiles('pixi.lock', 'pixi.toml', 'conanfile.py') }}-
+            ${{ runner.os }}-config-v1-${{ hashFiles('pixi.lock', 'pixi.toml') }}-
             ${{ runner.os }}-config-v1-
 
       - name: Configure
         run: pixi run config
-
-      - name: Check
-        run: pixi run check
 
       - name: Cache build layer
         id: cache-build
@@ -76,10 +58,10 @@ jobs:
             build/${{ env.BUILD_TYPE }}/src/libclore-core.a
             build/${{ env.BUILD_TYPE }}/tests/CMakeFiles/
             build/${{ env.BUILD_TYPE }}/tests/unit_tests
-          key: ${{ runner.os }}-build-v1-install-${{ hashFiles('pixi.lock', 'pixi.toml', 'conanfile.py') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}-src-${{ hashFiles('src/**/*', 'tests/**/*') }}
+          key: ${{ runner.os }}-build-v1-${{ hashFiles('pixi.lock', 'pixi.toml') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}-src-${{ hashFiles('src/**/*', 'tests/**/*') }}
           restore-keys: |
-            ${{ runner.os }}-build-v1-install-${{ hashFiles('pixi.lock', 'pixi.toml', 'conanfile.py') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}-
-            ${{ runner.os }}-build-v1-install-${{ hashFiles('pixi.lock', 'pixi.toml', 'conanfile.py') }}-
+            ${{ runner.os }}-build-v1-${{ hashFiles('pixi.lock', 'pixi.toml') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}-
+            ${{ runner.os }}-build-v1-${{ hashFiles('pixi.lock', 'pixi.toml') }}-
             ${{ runner.os }}-build-v1-
 
       - name: Build

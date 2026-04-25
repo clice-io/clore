@@ -58,7 +58,7 @@ struct DependencyGraph {
     std::vector<DependencyEdge> edges{};
 };
 
-auto build_dependency_graph_async(CompilationDatabase db,
+auto build_dependency_graph_async(const CompilationDatabase& db,
                                   DependencyGraph& graph,
                                   ScanCache* cache,
                                   kota::event_loop& loop) -> kota::task<void, ScanError>;
@@ -296,6 +296,26 @@ struct PreparedScanEntry {
     std::string cache_key{};
 };
 
+auto prepare_scan_entry(const CompileEntry& entry) -> PreparedScanEntry {
+    auto normalized_file =
+        entry.normalized_file.empty() ? normalize_entry_file(entry) : entry.normalized_file;
+    auto cache_key = entry.cache_key;
+    if(cache_key.empty()) {
+        auto compile_signature =
+            entry.compile_signature != 0
+                ? entry.compile_signature
+                : clore::support::build_compile_signature(entry.directory,
+                                                          normalized_file,
+                                                          entry.arguments);
+        cache_key = clore::support::build_cache_key(normalized_file, compile_signature);
+    }
+
+    return PreparedScanEntry{
+        .normalized_file = std::move(normalized_file),
+        .cache_key = std::move(cache_key),
+    };
+}
+
 struct MissingScanTask {
     const CompileEntry* entry = nullptr;
 };
@@ -348,47 +368,37 @@ auto run_scan_task(MissingScanTask task, kota::event_loop& loop)
 
 }  // namespace
 
-auto build_dependency_graph_async(CompilationDatabase normalized_db,
+auto build_dependency_graph_async(const CompilationDatabase& db,
                                   DependencyGraph& graph,
                                   ScanCache* cache,
                                   kota::event_loop& loop) -> kota::task<void, ScanError> {
     graph.files.clear();
     graph.edges.clear();
 
-    for(auto& entry: normalized_db.entries) {
-        if(entry.cache_key.empty()) {
-            ensure_cache_key(entry);
-        }
-    }
-
     std::unordered_set<std::string> entry_files;
     std::unordered_set<std::string> file_set;
     std::vector<PreparedScanEntry> prepared_entries;
-    prepared_entries.reserve(normalized_db.entries.size());
+    prepared_entries.reserve(db.entries.size());
 
-    for(auto& entry: normalized_db.entries) {
-        auto normalized =
-            entry.normalized_file.empty() ? normalize_entry_file(entry) : entry.normalized_file;
-        entry_files.insert(normalized);
-        if(file_set.insert(normalized).second)
-            graph.files.push_back(normalized);
-        prepared_entries.push_back(PreparedScanEntry{
-            .normalized_file = std::move(normalized),
-            .cache_key = entry.cache_key,
-        });
+    for(const auto& entry: db.entries) {
+        auto prepared = prepare_scan_entry(entry);
+        entry_files.insert(prepared.normalized_file);
+        if(file_set.insert(prepared.normalized_file).second)
+            graph.files.push_back(prepared.normalized_file);
+        prepared_entries.push_back(std::move(prepared));
     }
 
     auto* scan_results = cache ? &cache->scan_results : nullptr;
-    std::vector<std::optional<ScanResult>> cached_results(normalized_db.entries.size());
-    std::vector<std::size_t> missing_task_indices(normalized_db.entries.size(),
+    std::vector<std::optional<ScanResult>> cached_results(db.entries.size());
+    std::vector<std::size_t> missing_task_indices(db.entries.size(),
                                                   std::numeric_limits<std::size_t>::max());
     std::unordered_map<std::string, std::size_t> missing_task_by_cache_key;
-    missing_task_by_cache_key.reserve(normalized_db.entries.size());
+    missing_task_by_cache_key.reserve(db.entries.size());
     std::vector<MissingScanTask> missing_tasks;
-    missing_tasks.reserve(normalized_db.entries.size());
+    missing_tasks.reserve(db.entries.size());
 
-    for(std::size_t idx = 0; idx < normalized_db.entries.size(); ++idx) {
-        auto& entry = normalized_db.entries[idx];
+    for(std::size_t idx = 0; idx < db.entries.size(); ++idx) {
+        const auto& entry = db.entries[idx];
         const auto& cache_key = prepared_entries[idx].cache_key;
 
         if(scan_results) {
@@ -434,12 +444,12 @@ auto build_dependency_graph_async(CompilationDatabase normalized_db,
     }
 
     std::unordered_set<std::string> seen_files;
-    seen_files.reserve(normalized_db.entries.size());
+    seen_files.reserve(db.entries.size());
     std::unordered_set<std::string> emitted_edges;
-    emitted_edges.reserve(normalized_db.entries.size());
+    emitted_edges.reserve(db.entries.size());
 
-    for(std::size_t idx = 0; idx < normalized_db.entries.size(); ++idx) {
-        auto& entry = normalized_db.entries[idx];
+    for(std::size_t idx = 0; idx < db.entries.size(); ++idx) {
+        const auto& entry = db.entries[idx];
         const auto& normalized = prepared_entries[idx].normalized_file;
         const auto& cache_key = prepared_entries[idx].cache_key;
 

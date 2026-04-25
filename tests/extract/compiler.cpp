@@ -106,10 +106,15 @@ TEST_CASE(lookup_resolves_relative_file_against_entry_directory) {
         .cache_key = {},
     });
 
-    auto results = lookup(db, source_path.generic_string());
-    ASSERT_EQ(results.size(), 1u);
-    EXPECT_EQ(results.front()->file, "src/main.cpp");
-    EXPECT_EQ(results.front()->directory, project_dir.generic_string());
+    auto absolute_results = lookup(db, source_path.generic_string());
+    ASSERT_EQ(absolute_results.size(), 1u);
+    EXPECT_EQ(absolute_results.front()->file, "src/main.cpp");
+    EXPECT_EQ(absolute_results.front()->directory, project_dir.generic_string());
+
+    auto relative_results = lookup(db, "src/main.cpp");
+    ASSERT_EQ(relative_results.size(), 1u);
+    EXPECT_EQ(relative_results.front()->file, "src/main.cpp");
+    EXPECT_EQ(relative_results.front()->directory, project_dir.generic_string());
 }
 
 TEST_CASE(toolchain_cache_records_sanitized_arguments) {

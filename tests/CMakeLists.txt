@@ -17,4 +17,3 @@ add_custom_command(TARGET unit_tests POST_BUILD
     $<TARGET_FILE_DIR:unit_tests>
     COMMAND_EXPAND_LISTS
 )
-add_test(NAME unit_tests COMMAND unit_tests)

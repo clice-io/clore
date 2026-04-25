@@ -297,33 +297,6 @@ auto get_source_snippet_bounds(const clang::ASTContext& ctx, const clang::Decl* 
     };
 }
 
-auto get_source_snippet(const clang::ASTContext& ctx, const clang::Decl* decl) -> std::string {
-    auto bounds = get_source_snippet_bounds(ctx, decl);
-    if(bounds.length == 0)
-        return "";
-
-    auto& sm = ctx.getSourceManager();
-    auto range = decl->getSourceRange();
-    auto file_id = sm.getFileID(range.getBegin());
-    auto buffer = sm.getBufferDataOrNone(file_id);
-    if(!buffer.has_value() || buffer->empty() || bounds.offset >= buffer->size())
-        return "";
-
-    auto end = std::min(static_cast<std::uint32_t>(buffer->size()), bounds.offset + bounds.length);
-    std::string result(buffer->substr(bounds.offset, end - bounds.offset).str());
-
-    std::string normalized;
-    normalized.reserve(result.size());
-    for(std::size_t i = 0; i < result.size(); ++i) {
-        if(result[i] == '\r' && i + 1 < result.size() && result[i + 1] == '\n') {
-            continue;
-        }
-        normalized += result[i];
-    }
-
-    return normalized;
-}
-
 auto make_source_location(const clang::SourceManager& sm, clang::SourceLocation loc)
     -> SourceLocation {
     if(loc.isInvalid())

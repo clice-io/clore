@@ -33,7 +33,6 @@ set(KOTA_CODEC_ENABLE_TOML ON)
 set(KOTA_CODEC_ENABLE_FLATBUFFERS OFF)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    enable_testing()
     add_compile_options(-fno-omit-frame-pointer)
     add_compile_options(-ftrivial-auto-var-init=pattern)
     if(NOT WIN32)

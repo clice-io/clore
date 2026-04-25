@@ -73,85 +73,84 @@ auto make_unknown_exception_error(std::string_view context) -> ExtractError {
     return ExtractError{.message = std::format("{} threw unknown exception", context)};
 }
 
-auto load_extract_cache_async(std::string workspace_root, kota::event_loop& loop)
-    -> kota::task<std::unordered_map<std::string, cache::CacheRecord>, ExtractError> {
-    auto queued = co_await kota::queue(
-                      [workspace_root = std::move(workspace_root)]()
-                          -> std::expected<std::unordered_map<std::string, cache::CacheRecord>,
-                                           ExtractError> {
-                          try {
-                              auto result = cache::load_extract_cache(workspace_root);
-                              if(!result.has_value()) {
-                                  return unexpected_extract_value<
-                                      std::unordered_map<std::string, cache::CacheRecord>>(
-                                      std::format("failed to load extract cache: {}",
-                                                  result.error().message));
-                              }
-                              return std::move(*result);
-                          } catch(const std::exception& ex) {
-                              return unexpected_extract_value<
-                                  std::unordered_map<std::string, cache::CacheRecord>>(
-                                  make_exception_error("extract cache load", ex).message);
-                          } catch(...) {
-                              return unexpected_extract_value<
-                                  std::unordered_map<std::string, cache::CacheRecord>>(
-                                  make_unknown_exception_error("extract cache load").message);
-                          }
-                      },
-                      loop)
-                      .catch_cancel();
+template <typename Value, typename Callable>
+auto run_cache_io_async(Callable&& callable,
+                        std::string_view operation_name,
+                        kota::event_loop& loop) -> kota::task<Value, ExtractError> {
+    auto queued = co_await kota::queue(std::forward<Callable>(callable), loop).catch_cancel();
 
     if(queued.is_cancelled()) {
-        co_await kota::fail(ExtractError{.message = "extract cache load cancelled"});
+        co_await kota::fail(
+            ExtractError{.message = std::format("{} cancelled", operation_name)});
     }
     if(queued.has_error()) {
         co_await kota::fail(ExtractError{
             .message =
-                std::format("extract cache load worker failed: {}", queued.error().message()),
+                std::format("{} worker failed: {}", operation_name, queued.error().message()),
         });
     }
-    if(!queued->has_value()) {
-        co_await kota::fail(std::move(queued->error()));
+
+    auto result = std::move(*queued);
+    if(!result.has_value()) {
+        co_await kota::fail(std::move(result.error()));
     }
-    co_return std::move(**queued);
+
+    if constexpr(std::is_void_v<Value>) {
+        co_return;
+    } else {
+        co_return std::move(*result);
+    }
+}
+
+auto load_extract_cache_async(std::string workspace_root, kota::event_loop& loop)
+    -> kota::task<std::unordered_map<std::string, cache::CacheRecord>, ExtractError> {
+    return run_cache_io_async<std::unordered_map<std::string, cache::CacheRecord>>(
+        [workspace_root = std::move(workspace_root)]()
+            -> std::expected<std::unordered_map<std::string, cache::CacheRecord>, ExtractError> {
+            try {
+                auto result = cache::load_extract_cache(workspace_root);
+                if(!result.has_value()) {
+                    return unexpected_extract_value<
+                        std::unordered_map<std::string, cache::CacheRecord>>(
+                        std::format("failed to load extract cache: {}", result.error().message));
+                }
+                return std::move(*result);
+            } catch(const std::exception& ex) {
+                return unexpected_extract_value<std::unordered_map<std::string,
+                                                                   cache::CacheRecord>>(
+                    make_exception_error("extract cache load", ex).message);
+            } catch(...) {
+                return unexpected_extract_value<std::unordered_map<std::string,
+                                                                   cache::CacheRecord>>(
+                    make_unknown_exception_error("extract cache load").message);
+            }
+        },
+        "extract cache load",
+        loop);
 }
 
 auto load_clice_cache_async(std::string workspace_root, kota::event_loop& loop)
     -> kota::task<cache::CliceCacheData, ExtractError> {
-    auto queued =
-        co_await kota::queue(
-            [workspace_root = std::move(
-                 workspace_root)]() -> std::expected<cache::CliceCacheData, ExtractError> {
-                try {
-                    auto result = cache::load_clice_cache(workspace_root);
-                    if(!result.has_value()) {
-                        return unexpected_extract_value<cache::CliceCacheData>(
-                            std::format("failed to load clice cache: {}", result.error().message));
-                    }
-                    return std::move(*result);
-                } catch(const std::exception& ex) {
+    return run_cache_io_async<cache::CliceCacheData>(
+        [workspace_root = std::move(workspace_root)]()
+            -> std::expected<cache::CliceCacheData, ExtractError> {
+            try {
+                auto result = cache::load_clice_cache(workspace_root);
+                if(!result.has_value()) {
                     return unexpected_extract_value<cache::CliceCacheData>(
-                        make_exception_error("clice cache load", ex).message);
-                } catch(...) {
-                    return unexpected_extract_value<cache::CliceCacheData>(
-                        make_unknown_exception_error("clice cache load").message);
+                        std::format("failed to load clice cache: {}", result.error().message));
                 }
-            },
-            loop)
-            .catch_cancel();
-
-    if(queued.is_cancelled()) {
-        co_await kota::fail(ExtractError{.message = "clice cache load cancelled"});
-    }
-    if(queued.has_error()) {
-        co_await kota::fail(ExtractError{
-            .message = std::format("clice cache load worker failed: {}", queued.error().message()),
-        });
-    }
-    if(!queued->has_value()) {
-        co_await kota::fail(std::move(queued->error()));
-    }
-    co_return std::move(**queued);
+                return std::move(*result);
+            } catch(const std::exception& ex) {
+                return unexpected_extract_value<cache::CliceCacheData>(
+                    make_exception_error("clice cache load", ex).message);
+            } catch(...) {
+                return unexpected_extract_value<cache::CliceCacheData>(
+                    make_unknown_exception_error("clice cache load").message);
+            }
+        },
+        "clice cache load",
+        loop);
 }
 
 auto load_caches_async(std::string workspace_root, kota::event_loop& loop)
@@ -174,80 +173,51 @@ auto load_caches_async(std::string workspace_root, kota::event_loop& loop)
 auto save_extract_cache_async(std::string workspace_root,
                               std::unordered_map<std::string, cache::CacheRecord> records,
                               kota::event_loop& loop) -> kota::task<void, ExtractError> {
-    auto queued = co_await kota::queue(
-                      [workspace_root = std::move(workspace_root),
-                       records = std::move(records)]() -> std::expected<void, ExtractError> {
-                          try {
-                              auto result = cache::save_extract_cache(workspace_root, records);
-                              if(!result.has_value()) {
-                                  return unexpected_extract_error(
-                                      std::format("failed to save extract cache: {}",
-                                                  result.error().message));
-                              }
-                              return {};
-                          } catch(const std::exception& ex) {
-                              return unexpected_extract_error(
-                                  make_exception_error("extract cache save", ex).message);
-                          } catch(...) {
-                              return unexpected_extract_error(
-                                  make_unknown_exception_error("extract cache save").message);
-                          }
-                      },
-                      loop)
-                      .catch_cancel();
-
-    if(queued.is_cancelled()) {
-        co_await kota::fail(ExtractError{.message = "extract cache save cancelled"});
-    }
-    if(queued.has_error()) {
-        co_await kota::fail(ExtractError{
-            .message =
-                std::format("extract cache save worker failed: {}", queued.error().message()),
-        });
-    }
-    if(!queued->has_value()) {
-        co_await kota::fail(std::move(queued->error()));
-    }
-    co_return;
+    return run_cache_io_async<void>(
+        [workspace_root = std::move(workspace_root),
+         records = std::move(records)]() -> std::expected<void, ExtractError> {
+            try {
+                auto result = cache::save_extract_cache(workspace_root, records);
+                if(!result.has_value()) {
+                    return unexpected_extract_error(
+                        std::format("failed to save extract cache: {}", result.error().message));
+                }
+                return {};
+            } catch(const std::exception& ex) {
+                return unexpected_extract_error(
+                    make_exception_error("extract cache save", ex).message);
+            } catch(...) {
+                return unexpected_extract_error(
+                    make_unknown_exception_error("extract cache save").message);
+            }
+        },
+        "extract cache save",
+        loop);
 }
 
 auto save_clice_cache_async(std::string workspace_root,
                             cache::CliceCacheData data,
                             kota::event_loop& loop) -> kota::task<void, ExtractError> {
-    auto queued =
-        co_await kota::queue(
-            [workspace_root = std::move(workspace_root),
-             data = std::move(data)]() -> std::expected<void, ExtractError> {
-                try {
-                    auto result = cache::save_clice_cache(workspace_root, data);
-                    if(!result.has_value()) {
-                        return unexpected_extract_error(
-                            std::format("failed to save clice cache: {}", result.error().message));
-                    }
-                    return {};
-                } catch(const std::exception& ex) {
+    return run_cache_io_async<void>(
+        [workspace_root = std::move(workspace_root),
+         data = std::move(data)]() -> std::expected<void, ExtractError> {
+            try {
+                auto result = cache::save_clice_cache(workspace_root, data);
+                if(!result.has_value()) {
                     return unexpected_extract_error(
-                        make_exception_error("clice cache save", ex).message);
-                } catch(...) {
-                    return unexpected_extract_error(
-                        make_unknown_exception_error("clice cache save").message);
+                        std::format("failed to save clice cache: {}", result.error().message));
                 }
-            },
-            loop)
-            .catch_cancel();
-
-    if(queued.is_cancelled()) {
-        co_await kota::fail(ExtractError{.message = "clice cache save cancelled"});
-    }
-    if(queued.has_error()) {
-        co_await kota::fail(ExtractError{
-            .message = std::format("clice cache save worker failed: {}", queued.error().message()),
-        });
-    }
-    if(!queued->has_value()) {
-        co_await kota::fail(std::move(queued->error()));
-    }
-    co_return;
+                return {};
+            } catch(const std::exception& ex) {
+                return unexpected_extract_error(
+                    make_exception_error("clice cache save", ex).message);
+            } catch(...) {
+                return unexpected_extract_error(
+                    make_unknown_exception_error("clice cache save").message);
+            }
+        },
+        "clice cache save",
+        loop);
 }
 
 auto save_caches_async(std::string workspace_root,

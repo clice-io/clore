@@ -166,11 +166,17 @@ auto lookup(const CompilationDatabase& db, std::string_view file)
     std::vector<const CompileEntry*> results;
 
     namespace fs = std::filesystem;
-    auto target = fs::path(file).lexically_normal();
+    for(const auto& entry: db.entries) {
+        auto candidate = fs::path(file);
+        if(candidate.is_relative()) {
+            candidate = (fs::path(entry.directory) / candidate).lexically_normal();
+        } else {
+            candidate = candidate.lexically_normal();
+        }
 
-    for(auto& entry: db.entries) {
-        auto entry_path = (fs::path(entry.directory) / entry.file).lexically_normal();
-        if(entry_path == target) {
+        auto normalized_entry =
+            entry.normalized_file.empty() ? normalize_entry_file(entry) : entry.normalized_file;
+        if(fs::path(normalized_entry) == candidate) {
             results.push_back(&entry);
         }
     }

@@ -61,9 +61,6 @@ auto normalize_guide_filename(std::string_view name) -> std::expected<std::strin
     if(!normalized.ends_with(".md")) {
         normalized += ".md";
     }
-    if(!normalized.ends_with(".md")) {
-        return std::unexpected(ToolError{.message = "guide filename must end with .md"});
-    }
 
     return normalized;
 }

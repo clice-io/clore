@@ -29,11 +29,11 @@ auto canonical_test_path(const std::filesystem::path& path) -> std::string {
     return canonical.generic_string();
 }
 
-auto run_build_dependency_graph_async(CompilationDatabase db,
+auto run_build_dependency_graph_async(const CompilationDatabase& db,
                                       DependencyGraph& graph,
                                       ScanCache& cache) -> std::expected<void, ScanError> {
     kota::event_loop loop;
-    auto task = build_dependency_graph_async(std::move(db), graph, &cache, loop);
+    auto task = build_dependency_graph_async(db, graph, &cache, loop);
     loop.schedule(task);
     loop.run();
 
@@ -177,11 +177,14 @@ TEST_CASE(build_dependency_graph_mints_missing_cache_keys) {
                                        });
     DependencyGraph graph;
 
-    auto result = run_build_dependency_graph_async(std::move(db), graph, initial_cache);
+    auto result = run_build_dependency_graph_async(db, graph, initial_cache);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(graph.files.size(), 1u);
     EXPECT_TRUE(std::ranges::find(graph.files, source) != graph.files.end());
+    EXPECT_TRUE(db.entries[0].cache_key.empty());
+    EXPECT_TRUE(db.entries[0].normalized_file.empty());
+    EXPECT_EQ(db.entries[0].compile_signature, 0u);
     EXPECT_EQ(initial_cache.scan_results.size(), 1u);
     EXPECT_TRUE(initial_cache.scan_results.contains(source_entry.cache_key));
     EXPECT_EQ(initial_cache.scan_results.at(source_entry.cache_key).module_name, "seeded.module");
@@ -250,7 +253,7 @@ TEST_CASE(build_dependency_graph_with_initial_cache_mints_missing_cache_keys) {
                                        });
     DependencyGraph graph;
 
-    auto result = run_build_dependency_graph_async(std::move(db), graph, initial_cache);
+    auto result = run_build_dependency_graph_async(db, graph, initial_cache);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(graph.files.size(), 2u);
@@ -303,7 +306,7 @@ TEST_CASE(build_dependency_graph_clears_preexisting_graph_state) {
         {.from = "stale.cpp", .to = "stale.hpp"}
     };
 
-    auto result = run_build_dependency_graph_async(std::move(db), graph, initial_cache);
+    auto result = run_build_dependency_graph_async(db, graph, initial_cache);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(graph.files.size(), 1u);
@@ -363,7 +366,7 @@ TEST_CASE(build_dependency_graph_scans_uncached_entries_and_populates_cache) {
     DependencyGraph graph;
     ScanCache cache;
 
-    auto result = run_build_dependency_graph_async(std::move(db), graph, cache);
+    auto result = run_build_dependency_graph_async(db, graph, cache);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(graph.files.size(), 2u);
@@ -438,7 +441,7 @@ TEST_CASE(build_dependency_graph_deduplicates_duplicate_sources_and_cache_writes
     DependencyGraph graph;
     ScanCache cache;
 
-    auto result = run_build_dependency_graph_async(std::move(db), graph, cache);
+    auto result = run_build_dependency_graph_async(db, graph, cache);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(graph.files.size(), 2u);
@@ -536,7 +539,7 @@ TEST_CASE(build_dependency_graph_normalizes_relative_includes_like_entries) {
                                        });
     DependencyGraph graph;
 
-    auto result = run_build_dependency_graph_async(std::move(db), graph, initial_cache);
+    auto result = run_build_dependency_graph_async(db, graph, initial_cache);
 
     ASSERT_TRUE(result.has_value());
     ASSERT_EQ(graph.edges.size(), 1u);
@@ -603,7 +606,7 @@ TEST_CASE(build_dependency_graph_canonicalizes_symlinked_entries_and_includes) {
                                        });
     DependencyGraph graph;
 
-    auto result = run_build_dependency_graph_async(std::move(db), graph, initial_cache);
+    auto result = run_build_dependency_graph_async(db, graph, initial_cache);
 
     ASSERT_TRUE(result.has_value());
     ASSERT_EQ(graph.edges.size(), 1u);

@@ -49,6 +49,14 @@ struct RequestEstimate {
     std::size_t variable_analysis_requests = 0;
 };
 
+auto project_name_from_config(const config::TaskConfig& config) -> std::string {
+    auto project_name = std::filesystem::path(config.project_root).filename().generic_string();
+    if(project_name.empty()) {
+        return "project";
+    }
+    return project_name;
+}
+
 auto estimate_request_count(const PagePlanSet& plan_set, const extract::ProjectModel& model)
     -> RequestEstimate {
     RequestEstimate estimate;
@@ -130,10 +138,7 @@ auto build_request_estimate_page(const PagePlanSet& plan_set,
                                  const extract::ProjectModel& model,
                                  const config::TaskConfig& config) -> GeneratedPage {
     auto estimate = estimate_request_count(plan_set, model);
-    auto project_name = std::filesystem::path(config.project_root).filename().generic_string();
-    if(project_name.empty()) {
-        project_name = "project";
-    }
+    auto project_name = project_name_from_config(config);
 
     std::string content;
     content.reserve(2048);
@@ -201,7 +206,15 @@ auto page_summary_cache_key_for_request(const PagePlan& plan, const PromptReques
                 return plan.owner_keys.front();
             }
             return std::nullopt;
-        default: return std::nullopt;
+        case PromptKind::ModuleArchitecture:
+        case PromptKind::IndexOverview:
+        case PromptKind::FunctionAnalysis:
+        case PromptKind::TypeAnalysis:
+        case PromptKind::VariableAnalysis:
+        case PromptKind::FunctionDeclarationSummary:
+        case PromptKind::FunctionImplementationSummary:
+        case PromptKind::TypeDeclarationSummary:
+        case PromptKind::TypeImplementationSummary: return std::nullopt;
     }
 }
 
@@ -222,7 +235,15 @@ auto fallback_page_summary_for_request(const PagePlan& plan, const PromptRequest
                     plan.owner_keys.front());
             }
             return {};
-        default: return {};
+        case PromptKind::ModuleArchitecture:
+        case PromptKind::IndexOverview:
+        case PromptKind::FunctionAnalysis:
+        case PromptKind::TypeAnalysis:
+        case PromptKind::VariableAnalysis:
+        case PromptKind::FunctionDeclarationSummary:
+        case PromptKind::FunctionImplementationSummary:
+        case PromptKind::TypeDeclarationSummary:
+        case PromptKind::TypeImplementationSummary: return {};
     }
 }
 
@@ -249,34 +270,40 @@ auto append_llms_section(std::string& content,
                          const PagePlanSet& plan_set,
                          PageType page_type,
                          const config::TaskConfig& config) -> void {
-    std::vector<const PagePlan*> pages;
+    struct LabeledPage {
+        std::string label;
+        const PagePlan* plan = nullptr;
+    };
+
+    std::vector<LabeledPage> pages;
     pages.reserve(plan_set.plans.size());
     for(const auto& plan: plan_set.plans) {
         if(plan.page_type == page_type) {
-            pages.push_back(&plan);
+            pages.push_back(LabeledPage{
+                .label = llms_entry_label(plan, config),
+                .plan = &plan,
+            });
         }
     }
     if(pages.empty()) {
         return;
     }
 
-    std::sort(pages.begin(), pages.end(), [&](const PagePlan* lhs, const PagePlan* rhs) {
-        auto lhs_label = llms_entry_label(*lhs, config);
-        auto rhs_label = llms_entry_label(*rhs, config);
-        if(lhs_label != rhs_label) {
-            return lhs_label < rhs_label;
+    std::sort(pages.begin(), pages.end(), [](const LabeledPage& lhs, const LabeledPage& rhs) {
+        if(lhs.label != rhs.label) {
+            return lhs.label < rhs.label;
         }
-        return lhs->relative_path < rhs->relative_path;
+        return lhs.plan->relative_path < rhs.plan->relative_path;
     });
 
     content += "## ";
     content += heading;
     content += "\n\n";
-    for(const auto* plan: pages) {
+    for(const auto& page: pages) {
         content += "- [";
-        content += llms_entry_label(*plan, config);
+        content += page.label;
         content += "](";
-        content += plan->relative_path;
+        content += page.plan->relative_path;
         content += ")\n";
     }
     content += "\n";
@@ -302,12 +329,7 @@ auto build_dry_run_page_summary_texts(const PagePlan& plan,
 auto build_llms_page(const PagePlanSet& plan_set,
                      const config::TaskConfig& config,
                      std::string_view request_estimate_path) -> GeneratedPage {
-    namespace fs = std::filesystem;
-
-    auto project_name = fs::path(config.project_root).filename().generic_string();
-    if(project_name.empty()) {
-        project_name = "project";
-    }
+    auto project_name = project_name_from_config(config);
 
     std::string content;
     content.reserve(2048);

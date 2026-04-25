@@ -125,6 +125,7 @@ auto select_primary_description_source_page(
         case PageType::Index:
             if(auto text = from_prompt(PromptKind::IndexOverview); !text.empty())
                 return text;
+            break;
         case PageType::File: break;
     }
 
