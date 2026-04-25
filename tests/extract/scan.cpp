@@ -448,10 +448,12 @@ TEST_CASE(build_dependency_graph_deduplicates_duplicate_sources_and_cache_writes
     ASSERT_EQ(graph.edges.size(), 1u);
     EXPECT_EQ(graph.edges[0].from, main_source);
     EXPECT_EQ(graph.edges[0].to, lib_source);
-    EXPECT_EQ(cache.scan_results.size(), 2u);
+    EXPECT_EQ(cache.scan_results.size(), 3u);
     EXPECT_TRUE(cache.scan_results.contains(main_source + "\t1"));
-    EXPECT_FALSE(cache.scan_results.contains(main_source + "\t2"));
+    EXPECT_TRUE(cache.scan_results.contains(main_source + "\t2"));
     EXPECT_TRUE(cache.scan_results.contains(lib_source + "\t3"));
+    EXPECT_EQ(cache.scan_results.at(main_source + "\t1").includes.size(),
+              cache.scan_results.at(main_source + "\t2").includes.size());
 
     fs::remove_all(root, ec);
 }

@@ -37,7 +37,7 @@ Generate documentation from a compilation database. In standard mode, exactly on
 ```bash
 clore \
   --config clore.en.toml \
-  --compile-commands build/{{ type }}/compile_commands.json \
+  --compile-commands build/RelWithDebInfo/compile_commands.json \
   --source-dir . \
   --output-dir docs/en \
   --model deepseek-chat \
@@ -52,7 +52,7 @@ Enable autonomous codebase exploration and guide generation:
 clore \
   --config clore.en.toml \
   --experimental-agent-mode \
-  --compile-commands build/{{ type }}/compile_commands.json \
+  --compile-commands build/RelWithDebInfo/compile_commands.json \
   --source-dir . \
   --output-dir docs/en \
   --model deepseek-chat \

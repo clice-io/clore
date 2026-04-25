@@ -80,8 +80,7 @@ auto run_cache_io_async(Callable&& callable,
     auto queued = co_await kota::queue(std::forward<Callable>(callable), loop).catch_cancel();
 
     if(queued.is_cancelled()) {
-        co_await kota::fail(
-            ExtractError{.message = std::format("{} cancelled", operation_name)});
+        co_await kota::fail(ExtractError{.message = std::format("{} cancelled", operation_name)});
     }
     if(queued.has_error()) {
         co_await kota::fail(ExtractError{
@@ -116,12 +115,12 @@ auto load_extract_cache_async(std::string workspace_root, kota::event_loop& loop
                 }
                 return std::move(*result);
             } catch(const std::exception& ex) {
-                return unexpected_extract_value<std::unordered_map<std::string,
-                                                                   cache::CacheRecord>>(
+                return unexpected_extract_value<
+                    std::unordered_map<std::string, cache::CacheRecord>>(
                     make_exception_error("extract cache load", ex).message);
             } catch(...) {
-                return unexpected_extract_value<std::unordered_map<std::string,
-                                                                   cache::CacheRecord>>(
+                return unexpected_extract_value<
+                    std::unordered_map<std::string, cache::CacheRecord>>(
                     make_unknown_exception_error("extract cache load").message);
             }
         },
@@ -132,8 +131,8 @@ auto load_extract_cache_async(std::string workspace_root, kota::event_loop& loop
 auto load_clice_cache_async(std::string workspace_root, kota::event_loop& loop)
     -> kota::task<cache::CliceCacheData, ExtractError> {
     return run_cache_io_async<cache::CliceCacheData>(
-        [workspace_root = std::move(workspace_root)]()
-            -> std::expected<cache::CliceCacheData, ExtractError> {
+        [workspace_root =
+             std::move(workspace_root)]() -> std::expected<cache::CliceCacheData, ExtractError> {
             try {
                 auto result = cache::load_clice_cache(workspace_root);
                 if(!result.has_value()) {
@@ -328,45 +327,47 @@ auto extract_ast_batch_async(
         ++pending_dependencies[edge.from];
     }
 
-    std::deque<std::string> ready;
+    std::size_t completed_files = 0;
+    std::unordered_map<std::string, std::unique_ptr<kota::event>> ready_events;
+    ready_events.reserve(dep_graph.files.size());
     for(const auto& file: dep_graph.files) {
-        if(pending_dependencies.at(file) == 0) {
-            ready.push_back(file);
-        }
+        ready_events.try_emplace(file,
+                                 std::make_unique<kota::event>(pending_dependencies.at(file) == 0));
     }
 
-    std::size_t completed_files = 0;
-    while(!ready.empty()) {
-        std::vector<std::string> batch;
-        batch.reserve(ready.size());
-        while(!ready.empty()) {
-            batch.push_back(std::move(ready.front()));
-            ready.pop_front();
+    auto process_file = [&](std::string file) -> kota::task<void, ExtractError> {
+        auto ready_it = ready_events.find(file);
+        if(ready_it == ready_events.end()) {
+            co_await kota::fail(ExtractError{
+                .message = std::format("missing readiness gate for {}", file),
+            });
+        }
+
+        co_await ready_it->second->wait();
+
+        auto indices_it = indices_by_file.find(file);
+        if(indices_it == indices_by_file.end()) {
+            co_await kota::fail(ExtractError{
+                .message =
+                    std::format("dependency graph references unknown compile entry: {}", file),
+            });
         }
 
         std::vector<kota::task<std::expected<ParallelASTResult, ExtractError>, kota::error>> tasks;
         std::vector<std::size_t> task_indices;
+        tasks.reserve(indices_it->second.size());
+        task_indices.reserve(indices_it->second.size());
 
-        for(const auto& file: batch) {
-            auto indices_it = indices_by_file.find(file);
-            if(indices_it == indices_by_file.end()) {
-                co_await kota::fail(ExtractError{
-                    .message =
-                        std::format("dependency graph references unknown compile entry: {}", file),
-                });
+        for(auto idx: indices_it->second) {
+            if(!miss_indices.contains(idx)) {
+                continue;
             }
 
-            for(auto idx: indices_it->second) {
-                if(!miss_indices.contains(idx)) {
-                    continue;
-                }
-
-                logging::debug("submitting AST extraction for {}",
-                               prepared_entries[idx].normalized_file);
-                task_indices.push_back(idx);
-                tasks.push_back(
-                    kota::queue([entry = entries[idx]] { return extract_ast_entry(entry); }, loop));
-            }
+            logging::debug("submitting AST extraction for {}",
+                           prepared_entries[idx].normalized_file);
+            task_indices.push_back(idx);
+            tasks.push_back(
+                kota::queue([entry = entries[idx]] { return extract_ast_entry(entry); }, loop));
         }
 
         if(!tasks.empty()) {
@@ -395,24 +396,39 @@ auto extract_ast_batch_async(
             }
         }
 
-        for(const auto& file: batch) {
-            ++completed_files;
-            if(auto dependents_it = dependents.find(file); dependents_it != dependents.end()) {
-                for(const auto& dependent: dependents_it->second) {
-                    auto pending_it = pending_dependencies.find(dependent);
-                    if(pending_it == pending_dependencies.end() || pending_it->second == 0) {
+        ++completed_files;
+        if(auto dependents_it = dependents.find(file); dependents_it != dependents.end()) {
+            for(const auto& dependent: dependents_it->second) {
+                auto pending_it = pending_dependencies.find(dependent);
+                if(pending_it == pending_dependencies.end() || pending_it->second == 0) {
+                    co_await kota::fail(ExtractError{
+                        .message = std::format("invalid dependency accounting for {}", dependent),
+                    });
+                }
+                --pending_it->second;
+                if(pending_it->second == 0) {
+                    auto dependent_ready_it = ready_events.find(dependent);
+                    if(dependent_ready_it == ready_events.end()) {
                         co_await kota::fail(ExtractError{
-                            .message =
-                                std::format("invalid dependency accounting for {}", dependent),
+                            .message = std::format("missing readiness gate for {}", dependent),
                         });
                     }
-                    --pending_it->second;
-                    if(pending_it->second == 0) {
-                        ready.push_back(dependent);
-                    }
+                    dependent_ready_it->second->set();
                 }
             }
         }
+
+        co_return;
+    };
+
+    kota::async_scope<ExtractError> scope;
+    for(const auto& file: dep_graph.files) {
+        scope.spawn(process_file(file));
+    }
+
+    auto scope_result = co_await scope;
+    if(scope_result.has_error()) {
+        co_await kota::fail(std::move(scope_result.error()));
     }
 
     if(completed_files != dep_graph.files.size()) {
@@ -555,14 +571,15 @@ auto extract_project_async(const config::TaskConfig& config, kota::event_loop& l
                   clice_cache.pcm.size());
 
     auto fail_after_persist = [&](ExtractError error) -> kota::task<ProjectModel, ExtractError> {
-        auto persist_result =
-            co_await save_caches_async(config.workspace_root, cache_records, clice_cache, loop);
+        auto persist_result = co_await save_caches_async(config.workspace_root,
+                                                         std::move(cache_records),
+                                                         std::move(clice_cache),
+                                                         loop);
         if(persist_result.has_error()) {
             co_await kota::fail(std::move(persist_result.error()));
         }
         co_await kota::fail(std::move(error));
     };
-
     std::unordered_map<std::string, CacheEvaluation> cache_evaluations;
     cache_evaluations.reserve(filtered_db.entries.size());
     std::vector<PreparedEntryState> prepared_entries;
@@ -962,7 +979,11 @@ auto extract_project_async(const config::TaskConfig& config, kota::event_loop& l
         }
     }
 
-    co_await save_caches_async(config.workspace_root, cache_records, clice_cache, loop).or_fail();
+    co_await save_caches_async(config.workspace_root,
+                               std::move(cache_records),
+                               std::move(clice_cache),
+                               loop)
+        .or_fail();
 
     std::size_t total_calls = 0;
     std::size_t total_refs = 0;

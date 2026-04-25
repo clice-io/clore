@@ -132,6 +132,99 @@ auto estimate_request_count(const PagePlanSet& plan_set, const extract::ProjectM
     return estimate;
 }
 
+auto fallback_page_summary_for_request(const PagePlan& plan, const PromptRequest& request)
+    -> std::string {
+    switch(request.kind) {
+        case PromptKind::NamespaceSummary:
+            if(!plan.owner_keys.empty()) {
+                return std::format(
+                    "Namespace `{}` groups related declarations " "documented in this reference.",
+                    plan.owner_keys.front());
+            }
+            return {};
+        case PromptKind::ModuleSummary:
+            if(!plan.owner_keys.empty()) {
+                return std::format(
+                    "Module `{}` exposes the APIs and relationships " "documented on its page.",
+                    plan.owner_keys.front());
+            }
+            return {};
+        case PromptKind::ModuleArchitecture:
+        case PromptKind::IndexOverview:
+        case PromptKind::FunctionAnalysis:
+        case PromptKind::TypeAnalysis:
+        case PromptKind::VariableAnalysis:
+        case PromptKind::FunctionDeclarationSummary:
+        case PromptKind::FunctionImplementationSummary:
+        case PromptKind::TypeDeclarationSummary:
+        case PromptKind::TypeImplementationSummary: return {};
+    }
+
+    return {};
+}
+
+auto llms_entry_label(const PagePlan& plan, const config::TaskConfig& config) -> std::string {
+    switch(plan.page_type) {
+        case PageType::Module:
+        case PageType::Namespace:
+            if(!plan.owner_keys.empty()) {
+                return plan.owner_keys.front();
+            }
+            break;
+        case PageType::File:
+            if(!plan.owner_keys.empty()) {
+                return make_source_relative(plan.owner_keys.front(), config.project_root);
+            }
+            break;
+        case PageType::Index: return plan.title;
+    }
+    return plan.title;
+}
+
+auto append_llms_section(std::string& content,
+                         std::string_view heading,
+                         const PagePlanSet& plan_set,
+                         PageType page_type,
+                         const config::TaskConfig& config) -> void {
+    struct LabeledPage {
+        std::string label;
+        const PagePlan* plan = nullptr;
+    };
+
+    std::vector<LabeledPage> pages;
+    pages.reserve(plan_set.plans.size());
+    for(const auto& plan: plan_set.plans) {
+        if(plan.page_type == page_type) {
+            pages.push_back(LabeledPage{
+                .label = llms_entry_label(plan, config),
+                .plan = &plan,
+            });
+        }
+    }
+    if(pages.empty()) {
+        return;
+    }
+
+    std::sort(pages.begin(), pages.end(), [](const LabeledPage& lhs, const LabeledPage& rhs) {
+        if(lhs.label != rhs.label) {
+            return lhs.label < rhs.label;
+        }
+        return lhs.plan->relative_path < rhs.plan->relative_path;
+    });
+
+    content += "## ";
+    content += heading;
+    content += "\n\n";
+    for(const auto& page: pages) {
+        content += "- [";
+        content += page.label;
+        content += "](";
+        content += page.plan->relative_path;
+        content += ")\n";
+    }
+    content += "\n";
+}
+
 }  // namespace
 
 auto build_request_estimate_page(const PagePlanSet& plan_set,
@@ -216,97 +309,8 @@ auto page_summary_cache_key_for_request(const PagePlan& plan, const PromptReques
         case PromptKind::TypeDeclarationSummary:
         case PromptKind::TypeImplementationSummary: return std::nullopt;
     }
-}
 
-auto fallback_page_summary_for_request(const PagePlan& plan, const PromptRequest& request)
-    -> std::string {
-    switch(request.kind) {
-        case PromptKind::NamespaceSummary:
-            if(!plan.owner_keys.empty()) {
-                return std::format(
-                    "Namespace `{}` groups related declarations " "documented in this reference.",
-                    plan.owner_keys.front());
-            }
-            return {};
-        case PromptKind::ModuleSummary:
-            if(!plan.owner_keys.empty()) {
-                return std::format(
-                    "Module `{}` exposes the APIs and relationships " "documented on its page.",
-                    plan.owner_keys.front());
-            }
-            return {};
-        case PromptKind::ModuleArchitecture:
-        case PromptKind::IndexOverview:
-        case PromptKind::FunctionAnalysis:
-        case PromptKind::TypeAnalysis:
-        case PromptKind::VariableAnalysis:
-        case PromptKind::FunctionDeclarationSummary:
-        case PromptKind::FunctionImplementationSummary:
-        case PromptKind::TypeDeclarationSummary:
-        case PromptKind::TypeImplementationSummary: return {};
-    }
-}
-
-auto llms_entry_label(const PagePlan& plan, const config::TaskConfig& config) -> std::string {
-    switch(plan.page_type) {
-        case PageType::Module:
-        case PageType::Namespace:
-            if(!plan.owner_keys.empty()) {
-                return plan.owner_keys.front();
-            }
-            break;
-        case PageType::File:
-            if(!plan.owner_keys.empty()) {
-                return make_source_relative(plan.owner_keys.front(), config.project_root);
-            }
-            break;
-        case PageType::Index: return plan.title;
-    }
-    return plan.title;
-}
-
-auto append_llms_section(std::string& content,
-                         std::string_view heading,
-                         const PagePlanSet& plan_set,
-                         PageType page_type,
-                         const config::TaskConfig& config) -> void {
-    struct LabeledPage {
-        std::string label;
-        const PagePlan* plan = nullptr;
-    };
-
-    std::vector<LabeledPage> pages;
-    pages.reserve(plan_set.plans.size());
-    for(const auto& plan: plan_set.plans) {
-        if(plan.page_type == page_type) {
-            pages.push_back(LabeledPage{
-                .label = llms_entry_label(plan, config),
-                .plan = &plan,
-            });
-        }
-    }
-    if(pages.empty()) {
-        return;
-    }
-
-    std::sort(pages.begin(), pages.end(), [](const LabeledPage& lhs, const LabeledPage& rhs) {
-        if(lhs.label != rhs.label) {
-            return lhs.label < rhs.label;
-        }
-        return lhs.plan->relative_path < rhs.plan->relative_path;
-    });
-
-    content += "## ";
-    content += heading;
-    content += "\n\n";
-    for(const auto& page: pages) {
-        content += "- [";
-        content += page.label;
-        content += "](";
-        content += page.plan->relative_path;
-        content += ")\n";
-    }
-    content += "\n";
+    return std::nullopt;
 }
 
 auto build_dry_run_page_summary_texts(const PagePlan& plan,

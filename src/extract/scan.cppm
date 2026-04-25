@@ -301,12 +301,11 @@ auto prepare_scan_entry(const CompileEntry& entry) -> PreparedScanEntry {
         entry.normalized_file.empty() ? normalize_entry_file(entry) : entry.normalized_file;
     auto cache_key = entry.cache_key;
     if(cache_key.empty()) {
-        auto compile_signature =
-            entry.compile_signature != 0
-                ? entry.compile_signature
-                : clore::support::build_compile_signature(entry.directory,
-                                                          normalized_file,
-                                                          entry.arguments);
+        auto compile_signature = entry.compile_signature != 0
+                                     ? entry.compile_signature
+                                     : clore::support::build_compile_signature(entry.directory,
+                                                                               normalized_file,
+                                                                               entry.arguments);
         cache_key = clore::support::build_cache_key(normalized_file, compile_signature);
     }
 
@@ -453,10 +452,6 @@ auto build_dependency_graph_async(const CompilationDatabase& db,
         const auto& normalized = prepared_entries[idx].normalized_file;
         const auto& cache_key = prepared_entries[idx].cache_key;
 
-        if(!seen_files.insert(normalized).second) {
-            continue;
-        }
-
         const ScanResult* scan_result = nullptr;
         if(cached_results[idx].has_value()) {
             scan_result = &*cached_results[idx];
@@ -471,18 +466,20 @@ auto build_dependency_graph_async(const CompilationDatabase& db,
             scan_result = &scanned_results[task_index];
         }
 
-        for(auto& inc: scan_result->includes) {
-            auto inc_normalized =
-                normalize_argument_path(inc.path, entry.directory).generic_string();
-            if(entry_files.contains(inc_normalized)) {
-                auto edge_key = normalized;
-                edge_key.push_back('\0');
-                edge_key += inc_normalized;
-                if(emitted_edges.insert(std::move(edge_key)).second) {
-                    graph.edges.push_back(DependencyEdge{
-                        .from = normalized,
-                        .to = inc_normalized,
-                    });
+        if(seen_files.insert(normalized).second) {
+            for(auto& inc: scan_result->includes) {
+                auto inc_normalized =
+                    normalize_argument_path(inc.path, entry.directory).generic_string();
+                if(entry_files.contains(inc_normalized)) {
+                    auto edge_key = normalized;
+                    edge_key.push_back('\0');
+                    edge_key += inc_normalized;
+                    if(emitted_edges.insert(std::move(edge_key)).second) {
+                        graph.edges.push_back(DependencyEdge{
+                            .from = normalized,
+                            .to = inc_normalized,
+                        });
+                    }
                 }
             }
         }
