@@ -135,24 +135,6 @@ auto parse_rejected_feature_from_error(std::string_view error_message)
 
 }  // namespace clore::net
 
-// ── json utilities ─────────────────────────────────────────────────────────
-namespace clore::net::json_detail {
-
-namespace json = kota::codec::json;
-
-auto append_cloned_value(json::Document& document,
-                         json::Array& target,
-                         json::ValueRef source,
-                         std::string_view context) -> std::expected<void, LLMError>;
-
-auto insert_cloned_value(json::Document& document,
-                         json::Object& target,
-                         std::string_view key,
-                         json::ValueRef source,
-                         std::string_view context) -> std::expected<void, LLMError>;
-
-}  // namespace clore::net::json_detail
-
 namespace clore::net {
 
 auto make_markdown_fragment_request(std::string prompt) -> PromptRequest {
@@ -167,13 +149,61 @@ auto make_markdown_fragment_request(std::string prompt) -> PromptRequest {
 
 export namespace clore::net::detail {
 
-template <typename T>
-using remove_cvref_t = std::remove_cvref_t<T>;
+struct ObjectView {
+    const kota::codec::json::Object* value = nullptr;
 
-auto unexpected_json_error(std::string_view context, yyjson_write_code err)
-    -> std::unexpected<LLMError>;
+    auto get(std::string_view key) const -> std::optional<kota::codec::json::Cursor>;
 
-auto unexpected_json_error(std::string_view context, kota::codec::json::error_kind err)
+    auto begin() const noexcept {
+        return value->begin();
+    }
+
+    auto end() const noexcept {
+        return value->end();
+    }
+
+    auto operator->() const noexcept -> const kota::codec::json::Object* {
+        return value;
+    }
+
+    auto operator*() const noexcept -> const kota::codec::json::Object& {
+        return *value;
+    }
+};
+
+struct ArrayView {
+    const kota::codec::json::Array* value = nullptr;
+
+    auto empty() const noexcept -> bool {
+        return value->empty();
+    }
+
+    auto size() const noexcept -> std::size_t {
+        return value->size();
+    }
+
+    auto begin() const noexcept {
+        return value->begin();
+    }
+
+    auto end() const noexcept {
+        return value->end();
+    }
+
+    auto operator[](std::size_t index) const -> const kota::codec::json::Value& {
+        return (*value)[index];
+    }
+
+    auto operator->() const noexcept -> const kota::codec::json::Array* {
+        return value;
+    }
+
+    auto operator*() const noexcept -> const kota::codec::json::Array& {
+        return *value;
+    }
+};
+
+auto unexpected_json_error(std::string_view context, const kota::codec::json::error& err)
     -> std::unexpected<LLMError>;
 
 auto normalize_utf8(std::string_view text, std::string_view field_name) -> std::string;
@@ -207,28 +237,32 @@ auto parse_json_value(const kota::codec::json::Value& value, std::string_view co
 auto serialize_value_to_string(const kota::codec::json::Value& value, std::string_view context)
     -> std::expected<std::string, LLMError>;
 
-auto expect_object(kota::codec::json::ValueRef value, std::string_view context)
-    -> std::expected<kota::codec::json::ObjectRef, LLMError>;
+auto expect_object(const kota::codec::json::Value& value, std::string_view context)
+    -> std::expected<ObjectView, LLMError>;
 
-auto expect_array(kota::codec::json::ValueRef value, std::string_view context)
-    -> std::expected<kota::codec::json::ArrayRef, LLMError>;
+auto expect_object(kota::codec::json::Cursor value, std::string_view context)
+    -> std::expected<ObjectView, LLMError>;
 
-auto expect_string(kota::codec::json::ValueRef value, std::string_view context)
+auto expect_array(const kota::codec::json::Value& value, std::string_view context)
+    -> std::expected<ArrayView, LLMError>;
+
+auto expect_array(kota::codec::json::Cursor value, std::string_view context)
+    -> std::expected<ArrayView, LLMError>;
+
+auto expect_string(const kota::codec::json::Value& value, std::string_view context)
     -> std::expected<std::string_view, LLMError>;
 
-auto clone_object(kota::codec::json::Document& document,
-                  kota::codec::json::ObjectRef source,
-                  std::string_view context) -> std::expected<kota::codec::json::Object, LLMError>;
-
-auto clone_array(kota::codec::json::Document& document,
-                 kota::codec::json::ArrayRef source,
-                 std::string_view context) -> std::expected<kota::codec::json::Array, LLMError>;
+auto expect_string(kota::codec::json::Cursor value, std::string_view context)
+    -> std::expected<std::string_view, LLMError>;
 
 auto clone_object(const kota::codec::json::Object& source, std::string_view context)
     -> std::expected<kota::codec::json::Object, LLMError>;
 
-auto clone_object(kota::codec::json::ObjectRef source, std::string_view context)
+auto clone_object(ObjectView source, std::string_view context)
     -> std::expected<kota::codec::json::Object, LLMError>;
+
+auto clone_array(ArrayView source, std::string_view context)
+    -> std::expected<kota::codec::json::Array, LLMError>;
 
 auto clone_value(const kota::codec::json::Value& source, std::string_view context)
     -> std::expected<kota::codec::json::Value, LLMError>;
@@ -239,15 +273,17 @@ namespace clore::net::detail {
 
 namespace json = kota::codec::json;
 
-auto unexpected_json_error(std::string_view context, yyjson_write_code err)
-    -> std::unexpected<LLMError> {
-    return std::unexpected(
-        LLMError(std::format("{}: {}", context, json::error_message(json::make_write_error(err)))));
+auto ObjectView::get(std::string_view key) const -> std::optional<json::Cursor> {
+    auto* item = value->find(key);
+    if(item == nullptr) {
+        return std::nullopt;
+    }
+    return item->cursor();
 }
 
-auto unexpected_json_error(std::string_view context, json::error_kind err)
+auto unexpected_json_error(std::string_view context, const json::error& err)
     -> std::unexpected<LLMError> {
-    return std::unexpected(LLMError(std::format("{}: {}", context, json::error_message(err))));
+    return std::unexpected(LLMError(std::format("{}: {}", context, err.to_string())));
 }
 
 auto normalize_utf8(std::string_view text, std::string_view field_name) -> std::string {
@@ -264,17 +300,13 @@ auto insert_string_field(json::Object& object,
                          std::string_view key,
                          std::string_view value,
                          std::string_view context) -> std::expected<void, LLMError> {
-    auto status = object.insert(key, value);
-    if(!status.has_value()) {
-        return std::unexpected(
-            LLMError(std::format("{}: {}", context, json::error_message(status.error()))));
-    }
+    object.insert(std::string(key), std::string(value));
     return {};
 }
 
 template <typename Status>
 auto to_llm_unexpected(Status error, std::string_view context) -> std::unexpected<LLMError> {
-    return std::unexpected(LLMError(std::format("{}: {}", context, json::error_message(error))));
+    return std::unexpected(LLMError(std::format("{}: {}", context, error.to_string())));
 }
 
 auto excerpt_for_error(std::string_view body) -> std::string {
@@ -302,23 +334,17 @@ auto run_task_sync(auto&& make_task) -> std::expected<T, LLMError> {
 }
 
 auto make_empty_object(std::string_view context) -> std::expected<json::Object, LLMError> {
-    auto parsed = json::Object::parse("{}");
+    auto parsed = json::parse<json::Object>("{}");
     if(!parsed.has_value()) {
-        return std::unexpected(
-            LLMError(std::format("{}: {}",
-                                 context,
-                                 json::error_message(json::make_read_error(parsed.error())))));
+        return unexpected_json_error(context, parsed.error());
     }
     return *parsed;
 }
 
 auto make_empty_array(std::string_view context) -> std::expected<json::Array, LLMError> {
-    auto parsed = json::Array::parse("[]");
+    auto parsed = json::parse<json::Array>("[]");
     if(!parsed.has_value()) {
-        return std::unexpected(
-            LLMError(std::format("{}: {}",
-                                 context,
-                                 json::error_message(json::make_read_error(parsed.error())))));
+        return unexpected_json_error(context, parsed.error());
     }
     return *parsed;
 }
@@ -337,47 +363,61 @@ auto parse_json_value(std::string_view raw, std::string_view context)
 template <typename T>
 auto parse_json_value(const json::Value& value, std::string_view context)
     -> std::expected<T, LLMError> {
-    auto raw = value.to_json_string();
+    auto raw = json::to_string(value);
     if(!raw.has_value()) {
-        return std::unexpected(
-            LLMError(std::format("failed to serialize {} for parsing: {}",
-                                 context,
-                                 json::error_message(json::make_write_error(raw.error())))));
+        return unexpected_json_error(std::format("failed to serialize {} for parsing", context),
+                                     raw.error());
     }
     return parse_json_value<T>(*raw, context);
 }
 
 auto serialize_value_to_string(const json::Value& value, std::string_view context)
     -> std::expected<std::string, LLMError> {
-    auto encoded = value.to_json_string();
+    auto encoded = json::to_string(value);
     if(!encoded.has_value()) {
-        return std::unexpected(
-            LLMError(std::format("failed to serialize {}: {}",
-                                 context,
-                                 json::error_message(json::make_write_error(encoded.error())))));
+        return unexpected_json_error(std::format("failed to serialize {}", context),
+                                     encoded.error());
     }
     return *encoded;
 }
 
-auto expect_object(json::ValueRef value, std::string_view context)
-    -> std::expected<json::ObjectRef, LLMError> {
-    auto object = value.get_object();
-    if(!object.has_value()) {
+auto expect_object(const json::Value& value, std::string_view context)
+    -> std::expected<ObjectView, LLMError> {
+    auto* object = value.get_object();
+    if(object == nullptr) {
         return std::unexpected(LLMError(std::format("{} is not a JSON object", context)));
     }
-    return *object;
+    return ObjectView{.value = object};
 }
 
-auto expect_array(json::ValueRef value, std::string_view context)
-    -> std::expected<json::ArrayRef, LLMError> {
-    auto array = value.get_array();
-    if(!array.has_value()) {
+auto expect_object(json::Cursor value, std::string_view context)
+    -> std::expected<ObjectView, LLMError> {
+    auto* object = value.get_object();
+    if(object == nullptr) {
+        return std::unexpected(LLMError(std::format("{} is not a JSON object", context)));
+    }
+    return ObjectView{.value = object};
+}
+
+auto expect_array(const json::Value& value, std::string_view context)
+    -> std::expected<ArrayView, LLMError> {
+    auto* array = value.get_array();
+    if(array == nullptr) {
         return std::unexpected(LLMError(std::format("{} is not a JSON array", context)));
     }
-    return *array;
+    return ArrayView{.value = array};
 }
 
-auto expect_string(json::ValueRef value, std::string_view context)
+auto expect_array(json::Cursor value, std::string_view context)
+    -> std::expected<ArrayView, LLMError> {
+    auto* array = value.get_array();
+    if(array == nullptr) {
+        return std::unexpected(LLMError(std::format("{} is not a JSON array", context)));
+    }
+    return ArrayView{.value = array};
+}
+
+auto expect_string(const json::Value& value, std::string_view context)
     -> std::expected<std::string_view, LLMError> {
     auto text = value.get_string();
     if(!text.has_value()) {
@@ -386,130 +426,35 @@ auto expect_string(json::ValueRef value, std::string_view context)
     return *text;
 }
 
-auto clone_array(json::Document& document, json::ArrayRef source, std::string_view context)
-    -> std::expected<json::Array, LLMError> {
-    if(!source.valid()) {
-        return std::unexpected(
-            LLMError(std::format("{}: source is not a valid JSON array", context)));
+auto expect_string(json::Cursor value, std::string_view context)
+    -> std::expected<std::string_view, LLMError> {
+    auto text = value.get_string();
+    if(!text.has_value()) {
+        return std::unexpected(LLMError(std::format("{} is not a JSON string", context)));
     }
-
-    auto cloned = make_empty_array(context);
-    if(!cloned.has_value()) {
-        return std::unexpected(std::move(cloned.error()));
-    }
-    for(auto value: source) {
-        auto status = json_detail::append_cloned_value(document, *cloned, value, context);
-        if(!status.has_value()) {
-            return std::unexpected(std::move(status.error()));
-        }
-    }
-    return std::move(*cloned);
+    return *text;
 }
 
-auto clone_object(json::Document& document, json::ObjectRef source, std::string_view context)
-    -> std::expected<json::Object, LLMError> {
-    if(!source.valid()) {
-        return std::unexpected(
-            LLMError(std::format("{}: source is not a valid JSON object", context)));
-    }
-
-    auto cloned = make_empty_object(context);
-    if(!cloned.has_value()) {
-        return std::unexpected(std::move(cloned.error()));
-    }
-    for(auto entry: source) {
-        auto status =
-            json_detail::insert_cloned_value(document, *cloned, entry.key, entry.value, context);
-        if(!status.has_value()) {
-            return std::unexpected(std::move(status.error()));
-        }
-    }
-    return std::move(*cloned);
+auto clone_array(ArrayView source, std::string_view) -> std::expected<json::Array, LLMError> {
+    return json::Array(*source.value);
 }
 
-auto clone_object(const json::Object& source, std::string_view context)
+auto clone_object(const json::Object& source, std::string_view)
     -> std::expected<json::Object, LLMError> {
-    if(!source.valid()) {
-        return std::unexpected(
-            LLMError(std::format("{}: source is not a valid JSON object", context)));
-    }
-
-    auto encoded = source.to_json_string();
-    if(!encoded.has_value()) {
-        return unexpected_json_error(context, encoded.error());
-    }
-    auto parsed = json::Object::parse(*encoded);
-    if(!parsed.has_value()) {
-        return std::unexpected(
-            LLMError(std::format("{}: {}",
-                                 context,
-                                 json::error_message(json::make_read_error(parsed.error())))));
-    }
-    return *parsed;
+    return json::Object(source);
 }
 
-auto clone_object(json::ObjectRef source, std::string_view context)
-    -> std::expected<json::Object, LLMError> {
-    json::Document document;
-    return clone_object(document, source, context);
+auto clone_object(ObjectView source, std::string_view) -> std::expected<json::Object, LLMError> {
+    return json::Object(*source.value);
 }
 
 auto clone_value(const json::Value& source, std::string_view context)
     -> std::expected<json::Value, LLMError> {
-    auto encoded = source.to_json_string();
-    if(!encoded.has_value()) {
-        return unexpected_json_error(context, encoded.error());
-    }
-    auto parsed = json::Value::parse(*encoded);
-    if(!parsed.has_value()) {
-        return std::unexpected(
-            LLMError(std::format("{}: {}",
-                                 context,
-                                 json::error_message(json::make_read_error(parsed.error())))));
-    }
-    return *parsed;
+    static_cast<void>(context);
+    return json::Value(source);
 }
 
 }  // namespace clore::net::detail
-
-namespace clore::net::json_detail {
-
-auto append_cloned_value(json::Document& document,
-                         json::Array& target,
-                         json::ValueRef source,
-                         std::string_view context) -> std::expected<void, LLMError> {
-    static_cast<void>(document);
-    auto copied = json::Value::copy_of(source);
-    if(!copied.has_value()) {
-        return std::unexpected(
-            LLMError(std::format("{}: {}", context, json::error_message(copied.error()))));
-    }
-    auto status = target.push_back(std::move(*copied));
-    if(!status.has_value()) {
-        return detail::to_llm_unexpected(status.error(), context);
-    }
-    return {};
-}
-
-auto insert_cloned_value(json::Document& document,
-                         json::Object& target,
-                         std::string_view key,
-                         json::ValueRef source,
-                         std::string_view context) -> std::expected<void, LLMError> {
-    static_cast<void>(document);
-    auto copied = json::Value::copy_of(source);
-    if(!copied.has_value()) {
-        return std::unexpected(
-            LLMError(std::format("{}: {}", context, json::error_message(copied.error()))));
-    }
-    auto status = target.insert(key, std::move(*copied));
-    if(!status.has_value()) {
-        return detail::to_llm_unexpected(status.error(), context);
-    }
-    return {};
-}
-
-}  // namespace clore::net::json_detail
 
 // ── text validation
 // ────────────────────────────────────────────────────────
@@ -537,11 +482,10 @@ auto parse_tool_arguments(const ToolCall& call) -> std::expected<T, LLMError>;
 namespace clore::net::protocol {
 
 auto validate_json_output(std::string_view content) -> std::expected<void, LLMError> {
-    auto parsed = kota::codec::json::Value::parse(content);
+    auto parsed = kota::codec::json::parse<kota::codec::json::Value>(content);
     if(!parsed.has_value()) {
-        return std::unexpected(LLMError(std::format(
-            "LLM output is not valid JSON: {}",
-            kota::codec::json::error_message(kota::codec::json::make_read_error(parsed.error())))));
+        return std::unexpected(
+            LLMError(std::format("LLM output is not valid JSON: {}", parsed.error().to_string())));
     }
     return {};
 }
@@ -657,13 +601,12 @@ auto parse_response_text(const CompletionResponse& response) -> std::expected<T,
 
 template <typename T>
 auto parse_tool_arguments(const ToolCall& call) -> std::expected<T, LLMError> {
-    auto encoded = call.arguments.to_json_string();
+    auto encoded = kota::codec::json::to_string(call.arguments);
     if(!encoded.has_value()) {
         return std::unexpected(
             LLMError(std::format("failed to serialize tool arguments for '{}': {}",
                                  call.name,
-                                 kota::codec::json::error_message(
-                                     kota::codec::json::make_write_error(encoded.error())))));
+                                 encoded.error().to_string())));
     }
 
     auto parsed = kota::codec::json::from_json<T>(*encoded);
@@ -677,20 +620,15 @@ auto parse_tool_arguments(const ToolCall& call) -> std::expected<T, LLMError> {
 
 }  // namespace clore::net::protocol
 
-// ── retry logic
+// ── prompt output handling
 // ──────────────────────────────────────────────────────────
 export namespace clore::net::detail {
-
-auto compute_retry_delay(std::uint32_t next_attempt, std::uint32_t retry_initial_backoff_ms)
-    -> std::expected<std::chrono::milliseconds, LLMError>;
 
 auto infer_output_contract(const PromptRequest& request)
     -> std::expected<PromptOutputContract, LLMError>;
 
 auto validate_prompt_output(std::string_view content, PromptOutputContract contract)
     -> std::expected<void, LLMError>;
-
-auto retry_prompt_reminder(PromptOutputContract contract) -> std::string_view;
 
 template <typename CompletionRequester>
 auto request_text_once_async(CompletionRequester request_completion,
@@ -699,47 +637,9 @@ auto request_text_once_async(CompletionRequester request_completion,
                              PromptRequest request,
                              kota::event_loop& loop) -> kota::task<std::string, LLMError>;
 
-template <typename AsyncRequester>
-auto request_text_with_retries(std::string model,
-                               std::string system_prompt,
-                               PromptRequest request,
-                               std::uint32_t retry_count,
-                               std::uint32_t retry_initial_backoff_ms,
-                               kota::event_loop& loop,
-                               AsyncRequester request_async,
-                               std::string_view provider_name) -> kota::task<std::string, LLMError>;
-
 }  // namespace clore::net::detail
 
 namespace clore::net::detail {
-
-auto compute_retry_delay(std::uint32_t next_attempt, std::uint32_t retry_initial_backoff_ms)
-    -> std::expected<std::chrono::milliseconds, LLMError> {
-    if(next_attempt == 0) {
-        return std::unexpected(LLMError("next_attempt must be greater than 0"));
-    }
-
-    if(next_attempt > 63) {
-        return std::unexpected(
-            LLMError(std::format("retry delay overflow at attempt {}", next_attempt)));
-    }
-
-    auto multiplier = std::uint64_t{1} << (next_attempt - 1);
-
-    if(static_cast<std::uint64_t>(retry_initial_backoff_ms) >
-       (std::numeric_limits<std::uint64_t>::max() / multiplier)) {
-        return std::unexpected(
-            LLMError(std::format("retry delay overflow at attempt {}", next_attempt)));
-    }
-
-    auto delay_ms = static_cast<std::uint64_t>(retry_initial_backoff_ms) * multiplier;
-    if(delay_ms > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
-        return std::unexpected(
-            LLMError(std::format("retry delay exceeds supported range: {}ms", delay_ms)));
-    }
-
-    return std::chrono::milliseconds(static_cast<std::int64_t>(delay_ms));
-}
 
 auto infer_output_contract(const PromptRequest& request)
     -> std::expected<PromptOutputContract, LLMError> {
@@ -772,23 +672,17 @@ auto validate_prompt_output(std::string_view content, PromptOutputContract contr
     return std::unexpected(LLMError("unsupported prompt output contract"));
 }
 
-auto retry_prompt_reminder(PromptOutputContract contract) -> std::string_view {
-    switch(contract) {
-        case PromptOutputContract::Json:
-            return "\n\nIMPORTANT: Return valid JSON only that strictly matches the provided schema. " "Do not include markdown, prose, or fenced code blocks.";
-        case PromptOutputContract::Markdown:
-            return "\n\nIMPORTANT: Return markdown fragment text only. Do not return JSON. " "Do not include H1 headings ('# ') or fenced code blocks.";
-        case PromptOutputContract::Unspecified: return {};
-    }
-    return {};
-}
-
 template <typename CompletionRequester>
 auto request_text_once_async(CompletionRequester request_completion,
                              std::string_view model,
                              std::string_view system_prompt,
                              PromptRequest request,
                              kota::event_loop& loop) -> kota::task<std::string, LLMError> {
+    auto contract = infer_output_contract(request);
+    if(!contract.has_value()) {
+        co_await kota::fail(std::move(contract.error()));
+    }
+
     std::optional<ResponseFormat> response_format = std::move(request.response_format);
     if(request.output_contract == PromptOutputContract::Json && !response_format.has_value()) {
         response_format = ResponseFormat{
@@ -814,69 +708,12 @@ auto request_text_once_async(CompletionRequester request_completion,
     if(!text.has_value()) {
         co_await kota::fail(std::move(text.error()));
     }
+    auto validation = validate_prompt_output(*text, *contract);
+    if(!validation.has_value()) {
+        co_await kota::fail(std::move(validation.error()));
+    }
+
     co_return std::move(*text);
-}
-
-template <typename AsyncRequester>
-auto request_text_with_retries(std::string model,
-                               std::string system_prompt,
-                               PromptRequest request,
-                               std::uint32_t retry_count,
-                               std::uint32_t retry_initial_backoff_ms,
-                               kota::event_loop& loop,
-                               AsyncRequester request_async,
-                               std::string_view provider_name)
-    -> kota::task<std::string, LLMError> {
-    bool appended_reminder = false;
-    auto label = provider_name.empty() ? std::string_view("LLM") : provider_name;
-    auto contract = infer_output_contract(request);
-    if(!contract.has_value()) {
-        co_await kota::fail(std::move(contract.error()));
-    }
-
-    for(std::uint32_t attempt = 0;; ++attempt) {
-        auto result = co_await request_async(model, system_prompt, request, loop).catch_cancel();
-
-        std::optional<LLMError> error;
-        if(result.is_cancelled()) {
-            error = LLMError("LLM request cancelled");
-        } else if(result.has_error()) {
-            error = LLMError(std::move(result).error());
-        } else {
-            auto validation = validate_prompt_output(*result, *contract);
-            if(validation.has_value()) {
-                co_return std::move(*result);
-            }
-            error = std::move(validation.error());
-        }
-
-        if(attempt >= retry_count) {
-            co_await kota::fail(std::move(*error));
-        }
-
-        auto delay = compute_retry_delay(attempt + 1, retry_initial_backoff_ms);
-        if(!delay.has_value()) {
-            co_await kota::fail(std::move(delay.error()));
-        }
-
-        logging::warn("{} request failed: attempt={}/{} retry_in_ms={} reason={}",
-                      label,
-                      attempt + 1,
-                      retry_count + 1,
-                      delay->count(),
-                      error->message);
-
-        auto reminder = retry_prompt_reminder(*contract);
-        if(!appended_reminder && !reminder.empty()) {
-            request.prompt += reminder;
-            appended_reminder = true;
-        }
-
-        request.prompt +=
-            std::format("\n\n[SYSTEM FEEDBACK - ATTEMPT {}]: {}", attempt + 1, error->message);
-
-        co_await kota::sleep(*delay, loop);
-    }
 }
 
 }  // namespace clore::net::detail
@@ -902,7 +739,9 @@ auto get_probed_capabilities(std::string_view provider) -> ProbedCapabilities& {
 auto sanitize_request_for_capabilities(CompletionRequest request, const ProbedCapabilities& caps)
     -> CompletionRequest {
     if(!caps.supports_json_schema.load(std::memory_order_relaxed)) {
-        request.response_format = std::nullopt;
+        if(request.response_format.has_value() && request.response_format->schema.has_value()) {
+            request.response_format->schema = std::nullopt;
+        }
     }
     if(!caps.supports_tool_choice.load(std::memory_order_relaxed)) {
         request.tool_choice = std::nullopt;
@@ -916,6 +755,26 @@ auto sanitize_request_for_capabilities(CompletionRequest request, const ProbedCa
     return request;
 }
 
+auto icontains(std::string_view haystack, std::string_view needle) -> bool {
+    if(needle.size() > haystack.size()) {
+        return false;
+    }
+    for(std::size_t i = 0; i <= haystack.size() - needle.size(); ++i) {
+        bool match = true;
+        for(std::size_t j = 0; j < needle.size(); ++j) {
+            if(std::tolower(static_cast<unsigned char>(haystack[i + j])) !=
+               std::tolower(static_cast<unsigned char>(needle[j]))) {
+                match = false;
+                break;
+            }
+        }
+        if(match) {
+            return true;
+        }
+    }
+    return false;
+}
+
 auto is_feature_rejection_error(std::string_view error_message) -> bool {
     constexpr static std::string_view patterns[] = {
         "unsupported parameter",
@@ -927,10 +786,8 @@ auto is_feature_rejection_error(std::string_view error_message) -> bool {
         "unrecognized field",
         "invalid parameter",
     };
-    auto lower = std::string(error_message);
-    std::ranges::transform(lower, lower.begin(), ::tolower);
     for(auto pattern: patterns) {
-        if(lower.find(pattern) != std::string::npos) {
+        if(icontains(error_message, pattern)) {
             return true;
         }
     }
@@ -951,11 +808,8 @@ auto parse_rejected_feature_from_error(std::string_view error_message)
         {"max_tokens",          "max_tokens"         },
     };
 
-    auto lower = std::string(error_message);
-    std::ranges::transform(lower, lower.begin(), ::tolower);
-
     for(const auto& [keyword, field]: field_patterns) {
-        if(lower.find(keyword) != std::string::npos) {
+        if(icontains(error_message, keyword)) {
             return std::string(field);
         }
     }

@@ -1,5 +1,4 @@
 #include "generate/prelude.h"
-#include "kota/codec/json/json.h"
 
 import config;
 import extract;
@@ -7,16 +6,16 @@ import generate;
 import agent;
 
 #include "generate/support.h"
+#include "kota/codec/json/json.h"
 
 namespace {
 
 namespace json = kota::codec::json;
 
 auto parse_json_value(std::string_view text) -> std::expected<json::Value, std::string> {
-    auto parsed = json::Value::parse(text);
+    auto parsed = json::parse<json::Value>(text);
     if(!parsed.has_value()) {
-        return std::unexpected(
-            std::string(json::error_message(json::make_read_error(parsed.error()))));
+        return std::unexpected(parsed.error().to_string());
     }
     return *parsed;
 }
@@ -147,7 +146,7 @@ TEST_CASE(dispatch_tool_call_get_symbol_resolves_deferred_source_snippet) {
     auto snippet = std::string{"int compute() { return 42; }\n"};
 
     {
-        std::ofstream file(file_path);
+        std::ofstream file(file_path, std::ios::binary);
         file << snippet;
     }
 

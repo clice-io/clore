@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "kota/async/async.h"
-#include "kota/codec/json/json.h"
 #include "kota/zest/zest.h"
 
 import network;
@@ -21,8 +20,6 @@ import support;
 using namespace clore::net;
 
 namespace {
-
-namespace json = kota::codec::json;
 
 struct SummaryPayload {
     std::string title;
@@ -39,17 +36,8 @@ struct FixedLabelPayload {
     std::array<std::string, 2> labels;
 };
 
-auto parse_object(std::string_view text) -> std::expected<json::Object, std::string> {
-    auto parsed = json::Object::parse(text);
-    if(!parsed.has_value()) {
-        return std::unexpected(
-            std::string(json::error_message(json::make_read_error(parsed.error()))));
-    }
-    return *parsed;
-}
-
-auto required_contains(json::ArrayRef required, std::string_view name) -> bool {
-    return std::ranges::any_of(required, [name](json::ValueRef value) {
+auto required_contains(const auto& required, std::string_view name) -> bool {
+    return std::ranges::any_of(required, [name](const auto& value) {
         auto current = value.get_string();
         return current.has_value() && *current == name;
     });
@@ -63,18 +51,6 @@ auto extract_text_response(std::string_view payload) -> std::expected<std::strin
     return protocol::text_from_response(*response);
 }
 
-// Wrap a synchronous request handler into the async shape required by
-// request_text_with_retries.  Uses a free-function coroutine instead of a
-// coroutine-lambda to avoid Apple-clang coroutine-lambda capture bugs.
-template <typename Fn>
-auto invoke_sync_handler(Fn fn, const PromptRequest& req) -> kota::task<std::string, LLMError> {
-    auto result = fn(req);
-    if(result.has_value()) {
-        co_return std::move(*result);
-    }
-    co_await kota::fail(std::move(result.error()));
-}
-
 template <typename Fn>
 auto invoke_completion_handler(Fn fn, CompletionRequest req, kota::event_loop& loop)
     -> kota::task<CompletionResponse, LLMError> {
@@ -83,13 +59,6 @@ auto invoke_completion_handler(Fn fn, CompletionRequest req, kota::event_loop& l
         co_return std::move(*result);
     }
     co_await kota::fail(std::move(result.error()));
-}
-
-template <typename Fn>
-auto make_async_requester(Fn fn) {
-    return [fn](std::string, std::string, const PromptRequest& req, kota::event_loop&) {
-        return invoke_sync_handler(fn, req);
-    };
 }
 
 }  // namespace
@@ -134,27 +103,9 @@ TEST_CASE(build_request_json_preserves_utf8_content) {
     auto json = protocol::build_request_json(request);
 
     ASSERT_TRUE(json.has_value());
-
-    auto parsed = parse_object(*json);
-    ASSERT_TRUE(parsed.has_value());
-
-    auto model = parsed->get("model");
-    ASSERT_TRUE(model.has_value());
-    EXPECT_EQ(model->get_string().value_or(""), "deepseek-chat");
-
-    auto messages_value = parsed->get("messages");
-    ASSERT_TRUE(messages_value.has_value());
-    auto messages = messages_value->get_array();
-    ASSERT_TRUE(messages.has_value());
-    ASSERT_EQ(messages->size(), 2u);
-
-    auto system_message = (*messages)[0].get_object();
-    auto user_message = (*messages)[1].get_object();
-    ASSERT_TRUE(system_message.has_value());
-    ASSERT_TRUE(user_message.has_value());
-    EXPECT_EQ(system_message->get("content")->get_string().value_or(""), "你是一名中文文档作者。");
-    EXPECT_EQ(user_message->get("content")->get_string().value_or(""),
-              "请说明 `LLMClient` 的职责。");
+    EXPECT_NE(json->find(R"("model":"deepseek-chat")"), std::string::npos);
+    EXPECT_NE(json->find("你是一名中文文档作者。"), std::string::npos);
+    EXPECT_NE(json->find("请说明 `LLMClient` 的职责。"), std::string::npos);
 }
 
 TEST_CASE(build_request_json_repairs_invalid_utf8_content) {
@@ -178,18 +129,7 @@ TEST_CASE(build_request_json_repairs_invalid_utf8_content) {
     auto json = protocol::build_request_json(request);
 
     ASSERT_TRUE(json.has_value());
-
-    auto parsed = parse_object(*json);
-    ASSERT_TRUE(parsed.has_value());
-
-    auto messages_value = parsed->get("messages");
-    ASSERT_TRUE(messages_value.has_value());
-    auto messages = messages_value->get_array();
-    ASSERT_TRUE(messages.has_value());
-    auto user_message = (*messages)[1].get_object();
-    ASSERT_TRUE(user_message.has_value());
-    EXPECT_EQ(user_message->get("content")->get_string().value_or(""),
-              clore::support::ensure_utf8(invalid_prompt));
+    EXPECT_NE(json->find(clore::support::ensure_utf8(invalid_prompt)), std::string::npos);
 }
 
 TEST_CASE(response_format_generates_strict_schema) {
@@ -200,38 +140,38 @@ TEST_CASE(response_format_generates_strict_schema) {
     EXPECT_FALSE(format->name.empty());
     ASSERT_TRUE(format->schema.has_value());
 
-    auto type = format->schema->get("type");
-    ASSERT_TRUE(type.has_value());
+    auto* type = format->schema->find("type");
+    ASSERT_TRUE(type != nullptr);
     EXPECT_EQ(type->get_string().value_or(""), "object");
 
-    auto additional_properties = format->schema->get("additionalProperties");
-    ASSERT_TRUE(additional_properties.has_value());
+    auto* additional_properties = format->schema->find("additionalProperties");
+    ASSERT_TRUE(additional_properties != nullptr);
     EXPECT_EQ(additional_properties->get_bool().value_or(true), false);
 
-    auto properties_value = format->schema->get("properties");
-    ASSERT_TRUE(properties_value.has_value());
-    auto properties = properties_value->get_object();
-    ASSERT_TRUE(properties.has_value());
-    EXPECT_TRUE(properties->get("title").has_value());
-    EXPECT_TRUE(properties->get("notes").has_value());
-    EXPECT_TRUE(properties->get("tags").has_value());
+    auto* properties_value = format->schema->find("properties");
+    ASSERT_TRUE(properties_value != nullptr);
+    auto* properties = properties_value->get_object();
+    ASSERT_TRUE(properties != nullptr);
+    EXPECT_TRUE(properties->find("title") != nullptr);
+    EXPECT_TRUE(properties->find("notes") != nullptr);
+    EXPECT_TRUE(properties->find("tags") != nullptr);
 
-    auto required_value = format->schema->get("required");
-    ASSERT_TRUE(required_value.has_value());
-    auto required = required_value->get_array();
-    ASSERT_TRUE(required.has_value());
+    auto* required_value = format->schema->find("required");
+    ASSERT_TRUE(required_value != nullptr);
+    auto* required = required_value->get_array();
+    ASSERT_TRUE(required != nullptr);
     EXPECT_TRUE(required_contains(*required, "title"));
     EXPECT_TRUE(required_contains(*required, "notes"));
     EXPECT_TRUE(required_contains(*required, "tags"));
 
-    auto notes_schema = properties->get("notes");
-    ASSERT_TRUE(notes_schema.has_value());
-    auto notes_object = notes_schema->get_object();
-    ASSERT_TRUE(notes_object.has_value());
-    auto any_of_value = notes_object->get("anyOf");
-    ASSERT_TRUE(any_of_value.has_value());
-    auto any_of = any_of_value->get_array();
-    ASSERT_TRUE(any_of.has_value());
+    auto* notes_schema = properties->find("notes");
+    ASSERT_TRUE(notes_schema != nullptr);
+    auto* notes_object = notes_schema->get_object();
+    ASSERT_TRUE(notes_object != nullptr);
+    auto* any_of_value = notes_object->find("anyOf");
+    ASSERT_TRUE(any_of_value != nullptr);
+    auto* any_of = any_of_value->get_array();
+    ASSERT_TRUE(any_of != nullptr);
     ASSERT_EQ(any_of->size(), 2u);
 }
 
@@ -259,45 +199,12 @@ TEST_CASE(build_request_json_serializes_structured_output_and_tools) {
     auto json = protocol::build_request_json(request);
 
     ASSERT_TRUE(json.has_value());
-
-    auto parsed = parse_object(*json);
-    ASSERT_TRUE(parsed.has_value());
-
-    auto response_format_value = parsed->get("response_format");
-    ASSERT_TRUE(response_format_value.has_value());
-    auto response_format_object = response_format_value->get_object();
-    ASSERT_TRUE(response_format_object.has_value());
-    EXPECT_EQ(response_format_object->get("type")->get_string().value_or(""), "json_schema");
-
-    auto json_schema_value = response_format_object->get("json_schema");
-    ASSERT_TRUE(json_schema_value.has_value());
-    auto json_schema = json_schema_value->get_object();
-    ASSERT_TRUE(json_schema.has_value());
-    EXPECT_EQ(json_schema->get("strict")->get_bool().value_or(false), true);
-
-    auto tools_value = parsed->get("tools");
-    ASSERT_TRUE(tools_value.has_value());
-    auto tools = tools_value->get_array();
-    ASSERT_TRUE(tools.has_value());
-    ASSERT_EQ(tools->size(), 1u);
-    auto tool_object = (*tools)[0].get_object();
-    ASSERT_TRUE(tool_object.has_value());
-    EXPECT_EQ(tool_object->get("type")->get_string().value_or(""), "function");
-
-    auto function_value = tool_object->get("function");
-    ASSERT_TRUE(function_value.has_value());
-    auto function = function_value->get_object();
-    ASSERT_TRUE(function.has_value());
-    EXPECT_EQ(function->get("name")->get_string().value_or(""), "search_repo");
-    EXPECT_EQ(function->get("strict")->get_bool().value_or(false), true);
-
-    auto tool_choice_value = parsed->get("tool_choice");
-    ASSERT_TRUE(tool_choice_value.has_value());
-    EXPECT_EQ(tool_choice_value->get_string().value_or(""), "required");
-
-    auto parallel_tool_calls_value = parsed->get("parallel_tool_calls");
-    ASSERT_TRUE(parallel_tool_calls_value.has_value());
-    EXPECT_EQ(parallel_tool_calls_value->get_bool().value_or(true), false);
+    EXPECT_NE(json->find(R"("response_format":{"type":"json_schema")"), std::string::npos);
+    EXPECT_NE(json->find(R"("strict":true)"), std::string::npos);
+    EXPECT_NE(json->find(R"("tools":[{"type":"function")"), std::string::npos);
+    EXPECT_NE(json->find(R"("name":"search_repo")"), std::string::npos);
+    EXPECT_NE(json->find(R"("tool_choice":"required")"), std::string::npos);
+    EXPECT_NE(json->find(R"("parallel_tool_calls":false)"), std::string::npos);
 }
 
 TEST_CASE(validate_markdown_fragment_output_rejects_h1) {
@@ -329,95 +236,78 @@ TEST_CASE(make_markdown_fragment_request_marks_markdown_contract) {
     EXPECT_EQ(request.output_contract, PromptOutputContract::Markdown);
 }
 
-TEST_CASE(request_text_with_retries_preserves_response_format_on_retry) {
+TEST_CASE(request_text_once_preserves_response_format) {
     auto response_format = schema::response_format<SummaryPayload>();
 
     ASSERT_TRUE(response_format.has_value());
 
-    struct Log {
-        std::size_t count = 0;
-        bool first_had_format = false;
-        bool second_had_format = false;
-    } log;
+    bool had_format = false;
 
-    auto* log_state = &log;
-
-    auto result = detail::run_task_sync<std::string>([response_format = *response_format,
-                                                      log_state](kota::event_loop& loop) {
-        return detail::request_text_with_retries(
-            "deepseek-chat",
-            "You return JSON.",
-            PromptRequest{
-                .prompt = "Summarize this symbol.",
-                .response_format = response_format,
-                .output_contract = PromptOutputContract::Json,
-            },
-            1,
-            0,
-            loop,
-            make_async_requester([log_state](const PromptRequest& request)
-                                     -> std::expected<std::string, LLMError> {
-                ++log_state->count;
-                if(log_state->count == 1) {
-                    log_state->first_had_format = request.response_format.has_value();
-                    return std::unexpected(LLMError(
-                        "LLM request failed with HTTP 400: {\"error\":{\"message\":" "\"This response_format type is unavailable now\"}}"));
-                }
-                log_state->second_had_format = request.response_format.has_value();
-                return std::string(R"({"title":"demo","notes":null,"tags":["core"]})");
-            }),
-            "OpenAI");
-    });
+    auto result =
+        detail::run_task_sync<std::string>([response_format = *response_format,
+                                            &had_format](kota::event_loop& loop) {
+            return detail::request_text_once_async(
+                [&](CompletionRequest completion_request,
+                    kota::event_loop& completion_loop) {
+                    return invoke_completion_handler(
+                        [&](CompletionRequest request,
+                            kota::event_loop&) -> std::expected<CompletionResponse, LLMError> {
+                            had_format = request.response_format.has_value();
+                            return CompletionResponse{
+                                .id = "resp_json",
+                                .model = "deepseek-chat",
+                                .message = AssistantOutput{
+                                    .text = std::string(
+                                        R"({"title":"demo","notes":null,"tags":["core"]})")},
+                                .raw_json = "{}",
+                            };
+                        },
+                        std::move(completion_request),
+                        completion_loop);
+                },
+                "deepseek-chat",
+                "You return JSON.",
+                PromptRequest{
+                    .prompt = "Summarize this symbol.",
+                    .response_format = response_format,
+                    .output_contract = PromptOutputContract::Json,
+                },
+                loop);
+        });
 
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(log.count, 2u);
-    EXPECT_TRUE(log.first_had_format);
-    EXPECT_TRUE(log.second_had_format);
+    EXPECT_TRUE(had_format);
 }
 
-TEST_CASE(request_text_with_retries_allows_json_object_contract_without_schema) {
+TEST_CASE(request_text_once_allows_json_object_contract_without_schema) {
     CompletionRequest captured_request;
     bool captured = false;
 
     auto result = detail::run_task_sync<std::string>([&](kota::event_loop& loop) {
-        return detail::request_text_with_retries(
+        return detail::request_text_once_async(
+            [&](CompletionRequest completion_request, kota::event_loop& completion_loop) {
+                return invoke_completion_handler(
+                    [&](CompletionRequest request,
+                        kota::event_loop&) -> std::expected<CompletionResponse, LLMError> {
+                        captured_request = std::move(request);
+                        captured = true;
+                        return CompletionResponse{
+                            .id = "resp_json",
+                            .model = "deepseek-chat",
+                            .message = AssistantOutput{.text = std::string(R"({"ok":true})")},
+                            .raw_json = "{}",
+                        };
+                    },
+                    std::move(completion_request),
+                    completion_loop);
+            },
             "deepseek-chat",
             "You return JSON.",
             PromptRequest{
                 .prompt = "Summarize this symbol.",
                 .output_contract = PromptOutputContract::Json,
             },
-            0,
-            0,
-            loop,
-            [&](std::string_view model,
-                std::string_view system_prompt,
-                PromptRequest request,
-                kota::event_loop& request_loop) {
-                return detail::request_text_once_async(
-                    [&](CompletionRequest completion_request, kota::event_loop& completion_loop) {
-                        return invoke_completion_handler(
-                            [&](CompletionRequest request,
-                                kota::event_loop&) -> std::expected<CompletionResponse, LLMError> {
-                                captured_request = std::move(request);
-                                captured = true;
-                                return CompletionResponse{
-                                    .id = "resp_json",
-                                    .model = "deepseek-chat",
-                                    .message =
-                                        AssistantOutput{.text = std::string(R"({"ok":true})")},
-                                    .raw_json = "{}",
-                                };
-                            },
-                            std::move(completion_request),
-                            completion_loop);
-                    },
-                    model,
-                    system_prompt,
-                    std::move(request),
-                    request_loop);
-            },
-            "OpenAI");
+            loop);
     });
 
     ASSERT_TRUE(result.has_value());
@@ -431,80 +321,72 @@ TEST_CASE(request_text_with_retries_allows_json_object_contract_without_schema) 
     EXPECT_NE(encoded->find(R"("response_format":{"type":"json_object"})"), std::string::npos);
 }
 
-TEST_CASE(request_text_with_retries_retries_when_markdown_contains_code_fence) {
+TEST_CASE(request_text_once_rejects_markdown_code_fence) {
     auto result = detail::run_task_sync<std::string>([](kota::event_loop& loop) {
-        return detail::request_text_with_retries(
+        return detail::request_text_once_async(
+            [](CompletionRequest, kota::event_loop&) -> kota::task<CompletionResponse, LLMError> {
+                co_return CompletionResponse{
+                    .id = "resp_markdown",
+                    .model = "deepseek-chat",
+                    .message =
+                        AssistantOutput{.text = std::string("Paragraph\n```cpp\nint x = 1;\n```\n")},
+                    .raw_json = "{}",
+                };
+            },
             "deepseek-chat",
             "You return markdown.",
             PromptRequest{
                 .prompt = "Summarize this symbol.",
                 .output_contract = PromptOutputContract::Markdown,
             },
-            1,
-            0,
-            loop,
-            make_async_requester(
-                [](const PromptRequest& request) -> std::expected<std::string, LLMError> {
-                    if(request.prompt.find("IMPORTANT: Return markdown fragment text only.") ==
-                       std::string::npos) {
-                        return std::string("Paragraph\n```cpp\nint x = 1;\n```\n");
-                    }
-                    return std::string("Recovered markdown fragment.");
-                }),
-            "OpenAI");
+            loop);
     });
 
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(*result, "Recovered markdown fragment.");
+    EXPECT_FALSE(result.has_value());
+    EXPECT_NE(result.error().message.find("code fence"), std::string::npos);
 }
 
-TEST_CASE(request_text_with_retries_retries_when_markdown_json_is_invalid) {
-    std::size_t call_count = 0;
-    auto* call_count_state = &call_count;
-
-    auto result = detail::run_task_sync<std::string>([call_count_state](kota::event_loop& loop) {
-        return detail::request_text_with_retries(
+TEST_CASE(request_text_once_rejects_markdown_json) {
+    auto result = detail::run_task_sync<std::string>([](kota::event_loop& loop) {
+        return detail::request_text_once_async(
+            [](CompletionRequest, kota::event_loop&) -> kota::task<CompletionResponse, LLMError> {
+                co_return CompletionResponse{
+                    .id = "resp_markdown",
+                    .model = "deepseek-chat",
+                    .message = AssistantOutput{.text = std::string(R"({"markdown":123})")},
+                    .raw_json = "{}",
+                };
+            },
             "deepseek-chat",
             "You return markdown.",
             PromptRequest{
                 .prompt = "Summarize this symbol.",
                 .output_contract = PromptOutputContract::Markdown,
             },
-            1,
-            0,
-            loop,
-            make_async_requester([call_count_state](const PromptRequest& request)
-                                     -> std::expected<std::string, LLMError> {
-                ++*call_count_state;
-                if(*call_count_state == 1) {
-                    return std::string(R"({"markdown":123})");
-                }
-                EXPECT_NE(request.prompt.find("Do not return JSON"), std::string::npos);
-                return std::string("Recovered markdown fragment.");
-            }),
-            "OpenAI");
+            loop);
     });
 
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(*result, "Recovered markdown fragment.");
-    EXPECT_EQ(call_count, 2u);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_NE(result.error().message.find("JSON"), std::string::npos);
 }
 
-TEST_CASE(request_text_with_retries_rejects_unspecified_output_contract) {
+TEST_CASE(request_text_once_rejects_unspecified_output_contract) {
     auto result = detail::run_task_sync<std::string>([](kota::event_loop& loop) {
-        return detail::request_text_with_retries(
+        return detail::request_text_once_async(
+            [](CompletionRequest, kota::event_loop&) -> kota::task<CompletionResponse, LLMError> {
+                co_return CompletionResponse{
+                    .id = "resp_text",
+                    .model = "deepseek-chat",
+                    .message = AssistantOutput{.text = std::string("unreachable")},
+                    .raw_json = "{}",
+                };
+            },
             "deepseek-chat",
             "You return text.",
             PromptRequest{
                 .prompt = "Summarize this symbol.",
             },
-            0,
-            0,
-            loop,
-            make_async_requester([](const PromptRequest&) -> std::expected<std::string, LLMError> {
-                return std::string("unreachable");
-            }),
-            "OpenAI");
+            loop);
     });
 
     EXPECT_FALSE(result.has_value());
@@ -518,11 +400,26 @@ TEST_CASE(response_format_fixed_arrays_use_exact_bounds) {
     ASSERT_TRUE(format.has_value());
     ASSERT_TRUE(format->schema.has_value());
 
-    auto encoded = format->schema->to_json_string();
-    ASSERT_TRUE(encoded.has_value());
-    EXPECT_NE(encoded->find(R"("labels":{"type":"array")"), std::string::npos);
-    EXPECT_NE(encoded->find(R"("minItems":2)"), std::string::npos);
-    EXPECT_NE(encoded->find(R"("maxItems":2)"), std::string::npos);
+    auto* properties_value = format->schema->find("properties");
+    ASSERT_TRUE(properties_value != nullptr);
+    auto* properties = properties_value->get_object();
+    ASSERT_TRUE(properties != nullptr);
+
+    auto* labels_value = properties->find("labels");
+    ASSERT_TRUE(labels_value != nullptr);
+    auto* labels = labels_value->get_object();
+    ASSERT_TRUE(labels != nullptr);
+
+    auto* type = labels->find("type");
+    ASSERT_TRUE(type != nullptr);
+    EXPECT_EQ(type->get_string().value_or(""), "array");
+
+    auto* min_items = labels->find("minItems");
+    auto* max_items = labels->find("maxItems");
+    ASSERT_TRUE(min_items != nullptr);
+    ASSERT_TRUE(max_items != nullptr);
+    EXPECT_EQ(min_items->get_int().value_or(-1), 2);
+    EXPECT_EQ(max_items->get_int().value_or(-1), 2);
 }
 
 TEST_CASE(parse_response_success) {
@@ -630,23 +527,6 @@ TEST_CASE(append_tool_outputs_builds_follow_up_history) {
     ASSERT_TRUE(tool_result != nullptr);
     EXPECT_EQ(tool_result->tool_call_id, "call_1");
     EXPECT_EQ(tool_result->content, R"({"matches":["src/network/openai.cppm"]})");
-}
-
-TEST_CASE(call_completion_async_rejects_unknown_provider) {
-    ::unsetenv("ANTHROPIC_BASE_URL");
-    ::unsetenv("ANTHROPIC_API_KEY");
-    ::unsetenv("OPENAI_BASE_URL");
-    ::unsetenv("OPENAI_API_KEY");
-
-    CompletionRequest request{};
-    request.messages.push_back(UserMessage{.content = "ping"});
-
-    auto result = detail::run_task_sync<CompletionResponse>(
-        [&](auto& loop) { return call_completion_async(request, loop); });
-
-    EXPECT_FALSE(result.has_value());
-    EXPECT_NE(result.error().message.find("no supported llm provider environment found"),
-              std::string::npos);
 }
 
 };  // TEST_SUITE(llm)

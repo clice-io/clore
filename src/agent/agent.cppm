@@ -163,16 +163,10 @@ auto serialize_completion_response(const clore::net::CompletionResponse& respons
     }
 
     if(response.message.text.has_value()) {
-        if(auto status = root->insert("t", std::string_view(*response.message.text));
-           !status.has_value()) {
-            return std::unexpected(clore::net::LLMError("failed to serialize agent cache text"));
-        }
+        root->insert("t", *response.message.text);
     }
     if(response.message.refusal.has_value()) {
-        if(auto status = root->insert("r", std::string_view(*response.message.refusal));
-           !status.has_value()) {
-            return std::unexpected(clore::net::LLMError("failed to serialize agent cache refusal"));
-        }
+        root->insert("r", *response.message.refusal);
     }
     if(!response.message.tool_calls.empty()) {
         auto calls = clore::net::detail::make_empty_array("agent cache tool_calls");
@@ -184,58 +178,45 @@ auto serialize_completion_response(const clore::net::CompletionResponse& respons
             if(!call_obj.has_value()) {
                 return std::unexpected(std::move(call_obj.error()));
             }
-            if(auto status = call_obj->insert("i", std::string_view(call.id));
-               !status.has_value()) {
-                return std::unexpected(clore::net::LLMError("failed to serialize tool call id"));
-            }
-            if(auto status = call_obj->insert("n", std::string_view(call.name));
-               !status.has_value()) {
-                return std::unexpected(clore::net::LLMError("failed to serialize tool call name"));
-            }
-            if(auto status = call_obj->insert("a", std::string_view(call.arguments_json));
-               !status.has_value()) {
-                return std::unexpected(
-                    clore::net::LLMError("failed to insert tool call arguments"));
-            }
-            if(auto status = calls->push_back(std::move(*call_obj)); !status.has_value()) {
-                return std::unexpected(clore::net::LLMError("failed to append tool call"));
-            }
+            call_obj->insert("i", call.id);
+            call_obj->insert("n", call.name);
+            call_obj->insert("a", call.arguments_json);
+            calls->push_back(std::move(*call_obj));
         }
-        if(auto status = root->insert("c", std::move(*calls)); !status.has_value()) {
-            return std::unexpected(
-                clore::net::LLMError("failed to serialize agent cache tool_calls"));
-        }
+        root->insert("c", std::move(*calls));
     }
 
-    auto encoded = root->to_json_string();
+    auto encoded = kota::codec::json::to_string(*root);
     if(!encoded.has_value()) {
-        return std::unexpected(clore::net::LLMError("failed to encode agent cache response"));
+        return std::unexpected(clore::net::LLMError(
+            std::format("failed to encode agent cache response: {}", encoded.error().to_string())));
     }
     return *encoded;
 }
 
 auto deserialize_completion_response(std::string_view raw_json)
     -> std::expected<clore::net::CompletionResponse, clore::net::LLMError> {
-    auto parsed = kota::codec::json::Object::parse(raw_json);
+    auto parsed = kota::codec::json::parse<kota::codec::json::Object>(raw_json);
     if(!parsed.has_value()) {
         return std::unexpected(clore::net::LLMError("failed to parse cached agent response"));
     }
 
     clore::net::AssistantOutput output;
+    auto root = clore::net::detail::ObjectView{.value = &*parsed};
 
-    if(auto text_value = parsed->get("t"); text_value.has_value()) {
+    if(auto text_value = root.get("t"); text_value.has_value()) {
         auto text = text_value->get_string();
         if(text.has_value()) {
             output.text = std::string(*text);
         }
     }
-    if(auto refusal_value = parsed->get("r"); refusal_value.has_value()) {
+    if(auto refusal_value = root.get("r"); refusal_value.has_value()) {
         auto refusal = refusal_value->get_string();
         if(refusal.has_value()) {
             output.refusal = std::string(*refusal);
         }
     }
-    if(auto calls_value = parsed->get("c"); calls_value.has_value()) {
+    if(auto calls_value = root.get("c"); calls_value.has_value()) {
         auto calls = clore::net::detail::expect_array(*calls_value, "cached tool_calls");
         if(!calls.has_value()) {
             return std::unexpected(std::move(calls.error()));
@@ -267,7 +248,7 @@ auto deserialize_completion_response(std::string_view raw_json)
             }
             auto args_text = args_value->get_string();
             if(args_text.has_value()) {
-                auto parsed_args = kota::codec::json::Value::parse(*args_text);
+                auto parsed_args = kota::codec::json::parse<kota::codec::json::Value>(*args_text);
                 if(!parsed_args.has_value()) {
                     return std::unexpected(
                         clore::net::LLMError("failed to parse tool_call.arguments"));
@@ -282,11 +263,12 @@ auto deserialize_completion_response(std::string_view raw_json)
                 continue;
             }
 
-            auto args_copy = kota::codec::json::Value::copy_of(*args_value);
-            if(!args_copy.has_value()) {
+            auto* raw_args = args_value->unwrap();
+            if(raw_args == nullptr) {
                 return std::unexpected(clore::net::LLMError("failed to copy tool_call.arguments"));
             }
-            auto args_string = args_copy->to_json_string();
+            auto args_copy = kota::codec::json::Value(*raw_args);
+            auto args_string = kota::codec::json::to_string(args_copy);
             if(!args_string.has_value()) {
                 return std::unexpected(
                     clore::net::LLMError("failed to serialize tool_call.arguments"));
@@ -296,7 +278,7 @@ auto deserialize_completion_response(std::string_view raw_json)
                 .id = std::string(*id),
                 .name = std::string(*name),
                 .arguments_json = std::string(*args_string),
-                .arguments = std::move(*args_copy),
+                .arguments = std::move(args_copy),
             });
         }
     }
@@ -316,10 +298,6 @@ auto list_existing_guide_filenames(std::string_view output_root) -> std::vector<
     auto guides_dir = fs::path(std::string(output_root)) / "guides";
 
     std::error_code ec;
-    if(!fs::exists(guides_dir, ec) || ec || !fs::is_directory(guides_dir, ec)) {
-        return filenames;
-    }
-
     for(const auto& entry: fs::directory_iterator(guides_dir, ec)) {
         if(ec) {
             break;
@@ -440,8 +418,11 @@ auto run_agent_loop(const config::TaskConfig& config,
                                   turn,
                                   save_result.error().message);
                 } else {
-                    cache_index.entries.insert_or_assign(std::move(cache_key),
-                                                         std::string(*serialized));
+                    auto it = cache_index.entries.find(cache_key);
+                    if(it == cache_index.entries.end() || it->second != *serialized) {
+                        cache_index.entries.insert_or_assign(std::move(cache_key),
+                                                             std::string(*serialized));
+                    }
                 }
             } else {
                 logging::warn("agent cache serialization failed for turn {}: {}",

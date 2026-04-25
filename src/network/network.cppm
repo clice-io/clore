@@ -9,6 +9,7 @@ export import anthropic;
 export import client;
 export import http;
 export import openai;
+export import provider;
 export import protocol;
 export import schema;
 
@@ -17,8 +18,6 @@ export namespace clore::net {
 auto call_llm_async(std::string_view model,
                     std::string_view system_prompt,
                     PromptRequest request,
-                    std::uint32_t retry_count,
-                    std::uint32_t retry_initial_backoff_ms,
                     kota::event_loop& loop = kota::event_loop::current())
     -> kota::task<std::string, LLMError>;
 
@@ -58,31 +57,16 @@ auto request_provider_text_async(std::string_view provider_label,
                                  std::string_view model,
                                  std::string_view system_prompt,
                                  PromptRequest request,
-                                 std::uint32_t retry_count,
-                                 std::uint32_t retry_initial_backoff_ms,
                                  kota::event_loop& loop) -> kota::task<std::string, LLMError> {
-    auto result = co_await detail::request_text_with_retries(
-                      std::string(model),
-                      std::string(system_prompt),
-                      std::move(request),
-                      retry_count,
-                      retry_initial_backoff_ms,
-                      loop,
-                      [request_completion](std::string_view current_model,
-                                           std::string_view current_system_prompt,
-                                           PromptRequest current_request,
-                                           kota::event_loop& current_loop) {
-                          return detail::request_text_once_async(request_completion,
-                                                                 current_model,
-                                                                 current_system_prompt,
-                                                                 std::move(current_request),
-                                                                 current_loop);
-                      },
-                      provider_label)
+    auto result = co_await detail::request_text_once_async(request_completion,
+                                                           model,
+                                                           system_prompt,
+                                                           std::move(request),
+                                                           loop)
                       .catch_cancel();
 
     if(result.is_cancelled()) {
-        co_await kota::fail(LLMError("LLM request cancelled"));
+        co_await kota::fail(LLMError(std::format("{} request cancelled", provider_label)));
     }
     if(result.has_error()) {
         co_await kota::fail(std::move(result).error());
@@ -132,8 +116,6 @@ auto provider_label(Provider provider) -> std::string_view {
 auto call_llm_async(std::string_view model,
                     std::string_view system_prompt,
                     PromptRequest request,
-                    std::uint32_t retry_count,
-                    std::uint32_t retry_initial_backoff_ms,
                     kota::event_loop& loop) -> kota::task<std::string, LLMError> {
     auto provider_result = detect_provider_from_environment();
     if(!provider_result.has_value()) {
@@ -151,8 +133,6 @@ auto call_llm_async(std::string_view model,
         model,
         system_prompt,
         std::move(request),
-        retry_count,
-        retry_initial_backoff_ms,
         loop)
         .or_fail();
 }

@@ -82,10 +82,6 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
         return r;
     if(auto r = validate_nonzero(config.llm.retry_count, "llm.retry_count"); !r)
         return r;
-    if(auto r =
-           validate_nonzero(config.llm.retry_initial_backoff_ms, "llm.retry_initial_backoff_ms");
-       !r)
-        return r;
 
     return {};
 }

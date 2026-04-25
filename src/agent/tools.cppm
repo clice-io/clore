@@ -640,12 +640,12 @@ auto build_reflected_tool_definition()
 template <typename ToolImpl>
 auto dispatch_reflected_tool(const json::Value& arguments, const ToolContext& context)
     -> std::expected<std::string, ToolError> {
-    auto encoded = arguments.to_json_string();
+    auto encoded = json::to_string(arguments);
     if(!encoded.has_value()) {
         return std::unexpected(ToolError{
             .message = std::format("failed to serialize arguments for '{}': {}",
                                    ToolImpl::name,
-                                   json::error_message(json::make_write_error(encoded.error()))),
+                                   encoded.error().to_string()),
         });
     }
 
@@ -867,8 +867,8 @@ auto extract_string_arg(const json::Value& arguments, std::string_view field_nam
     if(!arguments.is_object()) {
         return std::unexpected(ToolError{.message = "arguments is not an object"});
     }
-    auto object = arguments.get_object();
-    if(!object.has_value()) {
+    auto* object = arguments.get_object();
+    if(object == nullptr) {
         return std::unexpected(ToolError{.message = "failed to read arguments object"});
     }
     for(auto entry: *object) {
@@ -904,13 +904,12 @@ auto dispatch_tool_call(std::string_view tool_name,
                         const extract::ProjectModel& model,
                         std::string_view project_root,
                         std::string_view output_root) -> std::expected<std::string, ToolError> {
-    auto encoded_arguments = arguments.to_json_string();
+    auto encoded_arguments = json::to_string(arguments);
     if(!encoded_arguments.has_value()) {
         return std::unexpected(ToolError{
-            .message =
-                std::format("failed to serialize arguments for '{}': {}",
-                            tool_name,
-                            json::error_message(json::make_write_error(encoded_arguments.error()))),
+            .message = std::format("failed to serialize arguments for '{}': {}",
+                                   tool_name,
+                                   encoded_arguments.error().to_string()),
         });
     }
 

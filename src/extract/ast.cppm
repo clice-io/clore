@@ -158,11 +158,68 @@ auto apply_described_template_info(const clang::NamedDecl* decl,
     }
 }
 
+auto build_function_signature(const clang::FunctionDecl* func,
+                              const clang::PrintingPolicy& policy) -> std::string {
+    if(llvm::isa<clang::CXXConstructorDecl>(func) ||
+       llvm::isa<clang::CXXDestructorDecl>(func)) {
+        std::string result = func->getQualifiedNameAsString();
+        result += "(";
+        bool first = true;
+        for(auto* param: func->parameters()) {
+            if(!first) {
+                result += ", ";
+            }
+            first = false;
+            std::string param_str;
+            llvm::raw_string_ostream param_os(param_str);
+            param->print(param_os, policy);
+            result += param_str;
+        }
+        result += ")";
+        return result;
+    }
+    return func->getType().getAsString(policy);
+}
+
 auto get_doc_comment(const clang::ASTContext& ctx, const clang::Decl* decl) -> std::string {
     auto* comment = ctx.getRawCommentForDeclNoCache(decl);
     if(!comment)
         return "";
     return clore::support::ensure_utf8(comment->getRawText(ctx.getSourceManager()).str());
+}
+
+auto should_extract_named_decl(const clang::ASTContext& context, const clang::NamedDecl* decl)
+    -> bool {
+    if(decl == nullptr || decl->isImplicit()) {
+        return false;
+    }
+
+    auto loc = decl->getLocation();
+    if(loc.isInvalid()) {
+        return false;
+    }
+
+    if(context.getSourceManager().isInSystemHeader(loc)) {
+        return false;
+    }
+
+    if(classify_decl(decl) == SymbolKind::Unknown) {
+        return false;
+    }
+
+    if(decl->getDeclName().isEmpty()) {
+        return false;
+    }
+
+    if(llvm::isa<clang::TemplateDecl>(decl) && !llvm::isa<clang::ConceptDecl>(decl)) {
+        return false;
+    }
+
+    if(llvm::isa<clang::ClassTemplateSpecializationDecl>(decl)) {
+        return false;
+    }
+
+    return true;
 }
 
 struct SourceSnippetBounds {
@@ -191,26 +248,39 @@ auto get_source_snippet_bounds(const clang::ASTContext& ctx, const clang::Decl* 
     if(range.isInvalid())
         return {};
 
-    auto begin_offset = sm.getFileOffset(range.getBegin());
+    auto begin_loc = sm.getSpellingLoc(range.getBegin());
+    auto end_token_loc = sm.getSpellingLoc(range.getEnd());
+    if(begin_loc.isInvalid() || end_token_loc.isInvalid()) {
+        return {};
+    }
+
+    auto file_id = sm.getFileID(begin_loc);
+    if(file_id.isInvalid() || file_id != sm.getFileID(end_token_loc)) {
+        return {};
+    }
+
+    auto begin_offset = sm.getFileOffset(begin_loc);
 
     // getSourceRange().getEnd() points to the start of the last token.
     // Advance past the last token so we capture closing braces, semicolons, etc.
-    auto end_loc = clang::Lexer::getLocForEndOfToken(range.getEnd(), 0, sm, ctx.getLangOpts());
+    auto end_loc = clang::Lexer::getLocForEndOfToken(end_token_loc, 0, sm, ctx.getLangOpts());
+    if(end_loc.isInvalid() || file_id != sm.getFileID(sm.getSpellingLoc(end_loc))) {
+        return {};
+    }
     auto end_offset = sm.getFileOffset(end_loc);
 
     if(end_offset <= begin_offset) {
-        end_offset = sm.getFileOffset(range.getEnd());
+        end_offset = sm.getFileOffset(end_token_loc);
     }
 
-    auto file_id = sm.getFileID(range.getBegin());
-    auto buffer = sm.getBufferData(file_id);
-    if(buffer.empty())
+    auto buffer = sm.getBufferDataOrNone(file_id);
+    if(!buffer.has_value() || buffer->empty())
         return {};
 
-    if(begin_offset >= buffer.size())
+    if(begin_offset >= buffer->size())
         return {};
-    if(end_offset > buffer.size()) {
-        end_offset = buffer.size();
+    if(end_offset > buffer->size()) {
+        end_offset = buffer->size();
     }
 
     auto length = end_offset - begin_offset;
@@ -221,9 +291,9 @@ auto get_source_snippet_bounds(const clang::ASTContext& ctx, const clang::Decl* 
     return SourceSnippetBounds{
         .offset = static_cast<std::uint32_t>(begin_offset),
         .length = static_cast<std::uint32_t>(length),
-        .file_size = static_cast<std::uint64_t>(buffer.size()),
+        .file_size = static_cast<std::uint64_t>(buffer->size()),
         .content_hash =
-            hash_source_snippet_bytes(std::string_view(buffer.data() + begin_offset, length)),
+            hash_source_snippet_bytes(std::string_view(buffer->data() + begin_offset, length)),
     };
 }
 
@@ -235,12 +305,12 @@ auto get_source_snippet(const clang::ASTContext& ctx, const clang::Decl* decl) -
     auto& sm = ctx.getSourceManager();
     auto range = decl->getSourceRange();
     auto file_id = sm.getFileID(range.getBegin());
-    auto buffer = sm.getBufferData(file_id);
-    if(buffer.empty() || bounds.offset >= buffer.size())
+    auto buffer = sm.getBufferDataOrNone(file_id);
+    if(!buffer.has_value() || buffer->empty() || bounds.offset >= buffer->size())
         return "";
 
-    auto end = std::min(static_cast<std::uint32_t>(buffer.size()), bounds.offset + bounds.length);
-    std::string result(buffer.substr(bounds.offset, end - bounds.offset).str());
+    auto end = std::min(static_cast<std::uint32_t>(buffer->size()), bounds.offset + bounds.length);
+    std::string result(buffer->substr(bounds.offset, end - bounds.offset).str());
 
     std::string normalized;
     normalized.reserve(result.size());
@@ -424,30 +494,12 @@ public:
     }
 
     bool VisitNamedDecl(clang::NamedDecl* decl) {
-        if(decl->isImplicit())
-            return true;
-
         auto& sm = context.getSourceManager();
-        auto loc = decl->getLocation();
-        if(loc.isInvalid())
-            return true;
-
-        if(sm.isInSystemHeader(loc))
-            return true;
-
-        auto kind = classify_decl(decl);
-        if(kind == SymbolKind::Unknown)
-            return true;
-
-        if(decl->getDeclName().isEmpty())
-            return true;
-
-        if(llvm::isa<clang::TemplateDecl>(decl) && !llvm::isa<clang::ConceptDecl>(decl)) {
+        if(!should_extract_named_decl(context, decl)) {
             return true;
         }
-        if(llvm::isa<clang::ClassTemplateSpecializationDecl>(decl))
-            return true;
 
+        auto kind = classify_decl(decl);
         auto id = compute_symbol_id(decl);
         if(!id.is_valid())
             return true;
@@ -465,7 +517,7 @@ public:
             if(func->isThisDeclarationADefinition()) {
                 info.definition_location = make_source_location(sm, func->getLocation());
             }
-            info.signature = func->getType().getAsString(context.getPrintingPolicy());
+            info.signature = build_function_signature(func, context.getPrintingPolicy());
             if(info.signature.empty()) {
                 info.signature = info.qualified_name;
             }
@@ -520,24 +572,28 @@ public:
     }
 
     bool TraverseFunctionDecl(clang::FunctionDecl* decl) {
-        auto id = compute_symbol_id(decl);
-        if(id.is_valid())
+        auto id = should_extract_named_decl(context, decl) ? compute_symbol_id(decl) : SymbolID{};
+        if(id.is_valid()) {
             enclosing_stack.push_back(id);
+        }
         bool result =
             clang::RecursiveASTVisitor<SymbolExtractorVisitor>::TraverseFunctionDecl(decl);
-        if(id.is_valid())
+        if(id.is_valid()) {
             enclosing_stack.pop_back();
+        }
         return result;
     }
 
     bool TraverseCXXMethodDecl(clang::CXXMethodDecl* decl) {
-        auto id = compute_symbol_id(decl);
-        if(id.is_valid())
+        auto id = should_extract_named_decl(context, decl) ? compute_symbol_id(decl) : SymbolID{};
+        if(id.is_valid()) {
             enclosing_stack.push_back(id);
+        }
         bool result =
             clang::RecursiveASTVisitor<SymbolExtractorVisitor>::TraverseCXXMethodDecl(decl);
-        if(id.is_valid())
+        if(id.is_valid()) {
             enclosing_stack.pop_back();
+        }
         return result;
     }
 
@@ -573,7 +629,7 @@ public:
 
     bool VisitCallExpr(clang::CallExpr* expr) {
         auto* callee = expr->getDirectCallee();
-        if(!callee)
+        if(!callee || !should_extract_named_decl(context, callee))
             return true;
 
         auto callee_id = compute_symbol_id(callee);
@@ -582,7 +638,7 @@ public:
 
     bool VisitDeclRefExpr(clang::DeclRefExpr* expr) {
         auto* referenced = llvm::dyn_cast<clang::NamedDecl>(expr->getDecl());
-        if(!referenced)
+        if(!referenced || !should_extract_named_decl(context, referenced))
             return true;
 
         if(llvm::isa<clang::FunctionDecl>(referenced))
@@ -594,7 +650,7 @@ public:
 
     bool VisitMemberExpr(clang::MemberExpr* expr) {
         auto* member = expr->getMemberDecl();
-        if(!member)
+        if(!member || !should_extract_named_decl(context, member))
             return true;
 
         if(llvm::isa<clang::FunctionDecl>(member))
@@ -658,6 +714,7 @@ auto extract_symbols(const CompileEntry& entry) -> std::expected<ASTResult, ASTE
     auto& frontend_opts = instance->getInvocation().getFrontendOpts();
     frontend_opts.ProgramAction = clang::frontend::ParseSyntaxOnly;
     frontend_opts.OutputFile.clear();
+    frontend_opts.ModuleOutputPath.clear();
 
     SymbolExtractorAction action(result.symbols, raw_relations);
     if(!action.BeginSourceFile(*instance, instance->getFrontendOpts().Inputs[0])) {

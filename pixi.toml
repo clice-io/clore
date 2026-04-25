@@ -9,14 +9,13 @@ channels = ["conda-forge"]
 platforms = ["win-64", "linux-64", "osx-arm64"]
 
 [dependencies]
-python = "==3.14"
 cmake = "==4.3.1"
-conan = "==2.27.1"
 ninja = "==1.13.2"
-sccache = "==0.14.0"
 cppcheck = "==2.20.1"
 fd-find = "==10.4.2"
-
+spdlog = "==1.17.0"
+libcurl = "==8.19.0"
+openssl = "==3.6.2"
 clang = "==22.1.3"
 clangdev = "==22.1.3"
 clangxx = "==22.1.3"
@@ -24,18 +23,16 @@ clang-tools = "==22.1.3"
 llvmdev = "==22.1.3"
 llvm-tools = "==22.1.3"
 compiler-rt = "==22.1.3"
-
-[activation.env]
-CMAKE_C_COMPILER_LAUNCHER = "sccache"
-CMAKE_CXX_COMPILER_LAUNCHER = "sccache"
+zlib = "==1.3.2"
+libxml2-devel = "==2.15.3"
 
 [target.win-64.dependencies]
 lld = "==22.1.3"
 
 [target.win-64.activation.env]
-CXXFLAGS = "/Z7 /Gw /Gy"
-LDFLAGS = "-fuse-ld=lld"
-CONAN_HOME = "%PIXI_PROJECT_ROOT%\\.conan"
+CC = "clang.exe"
+CXX = "clang++.exe"
+RC = "llvm-rc.exe"
 
 [target.linux-64.dependencies]
 sysroot_linux-64 = "==2.39"
@@ -49,37 +46,19 @@ CC = "clang"
 CXX = "clang++"
 CXXFLAGS = "-stdlib=libstdc++"
 LDFLAGS = "-stdlib=libstdc++ -fuse-ld=mold"
-CONAN_HOME = "$PIXI_PROJECT_ROOT/.conan"
 
 [target.osx-arm64.activation.env]
-CONAN_HOME = "$PIXI_PROJECT_ROOT/.conan"
-
-[tasks.install]
-args = [{ arg = "type", default = "Debug" }]
-cmd = """
-conan profile detect --force && \
-conan source . && \
-conan install . -s build_type={{ type }} -s:h compiler.cppstd=23 --build=missing
-"""
-inputs = ["conanfile.py"]
-outputs = ["build/{{ type }}/generators/conan_toolchain.cmake"]
+CC = "clang"
+CXX = "clang++"
 
 [tasks.config]
 args = [{ arg = "type", default = "Debug" }]
-cmd = """
-cmake -B build/{{ type }} -G Ninja \
-    -DCMAKE_BUILD_TYPE={{ type }} \
-    -DCMAKE_TOOLCHAIN_FILE=build/{{ type }}/generators/conan_toolchain.cmake \
-    -DCMAKE_EXPERIMENTAL_CXX_IMPORT_STD=451f2fe2-a8a2-47c3-bc32-94786d8fc91b
-"""
+cmd = "cmake -B build/{{ type }} -G Ninja -DCMAKE_BUILD_TYPE={{ type }}"
 inputs = ["CMakeLists.txt", "src/CMakeLists.txt", "tests/CMakeLists.txt"]
 outputs = ["build/{{ type }}/CMakeCache.txt"]
-depends-on = [{ task = "install", args = ["{{ type }}"] }]
 
 [tasks.format]
-cmd = """
-fd -e h -e cpp -e cppm -t f . src tests -x clang-format -i
-"""
+cmd = "fd -e h -e cpp -e cppm -t f . src tests -x clang-format -i"
 
 [tasks.check]
 args = [{ arg = "type", default = "Debug" }]
@@ -94,15 +73,4 @@ depends-on = [{ task = "config", args = ["{{ type }}"] }]
 [tasks.test]
 args = [{ arg = "type", default = "Debug" }]
 cmd = "./build/{{ type }}/tests/unit_tests"
-depends-on = [{ task = "build", args = ["{{ type }}"] }]
-
-[tasks.generate]
-args = [{ arg = "lang", default = "zh" }, { arg = "type", default = "Debug" }]
-cmd = """
-./build/{{ type }}/src/clore \
---config clore.{{ lang }}.toml \
---compile-commands build/{{ type }}/compile_commands.json \
---source-dir src --output-dir docs/{{ lang }} \
---log-level debug --model deepseek-chat
-"""
 depends-on = [{ task = "build", args = ["{{ type }}"] }]

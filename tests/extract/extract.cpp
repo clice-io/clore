@@ -5,6 +5,7 @@
 #include <fstream>
 
 #include "extract/compdb.h"
+#include "kota/async/async.h"
 #include "kota/zest/zest.h"
 
 import config;
@@ -12,6 +13,33 @@ import extract;
 import generate;
 
 using namespace clore;
+
+namespace {
+
+auto run_extract_project_async(const config::TaskConfig& cfg)
+    -> std::expected<extract::ProjectModel, extract::ExtractError> {
+    kota::event_loop loop;
+    auto task = extract::extract_project_async(cfg, loop).catch_cancel();
+    loop.schedule(task);
+    loop.run();
+
+    if(!task->is_finished() && !task->is_failed() && !task->is_cancelled()) {
+        return std::unexpected(extract::ExtractError{
+            .message = "extract test task stopped before completion",
+        });
+    }
+
+    auto result = task.result();
+    if(result.is_cancelled()) {
+        return std::unexpected(extract::ExtractError{.message = "extract test task cancelled"});
+    }
+    if(result.has_error()) {
+        return std::unexpected(std::move(result.error()));
+    }
+    return std::move(*result);
+}
+
+}  // namespace
 
 TEST_SUITE(extract_integration) {
 
@@ -133,7 +161,7 @@ void Widget::set_value(int v) { value_ = v; }
     task_config.output_root = (temp_dir / "docs").string();
     task_config.workspace_root = temp_dir.string();
 
-    auto result = extract::extract_project(task_config);
+    auto result = run_extract_project_async(task_config);
     ASSERT_TRUE(result.has_value());
 
     auto& model = *result;
@@ -211,7 +239,7 @@ int add(int lhs, int rhs) {
     cfg.output_root = (root / "out").string();
     cfg.workspace_root = root.string();
 
-    auto first = extract::extract_project(cfg);
+    auto first = run_extract_project_async(cfg);
     ASSERT_TRUE(first.has_value());
     auto first_symbols = first->symbols.size();
     auto first_files = first->files.size();
@@ -221,7 +249,7 @@ int add(int lhs, int rhs) {
     auto clice_cache_path = root / ".clice" / "cache" / "cache.json";
     EXPECT_TRUE(fs::exists(clice_cache_path));
 
-    auto second = extract::extract_project(cfg);
+    auto second = run_extract_project_async(cfg);
     ASSERT_TRUE(second.has_value());
 
     EXPECT_EQ(second->symbols.size(), first_symbols);
@@ -313,7 +341,7 @@ export int detail() {
     cfg.output_root = (root / "out").string();
     cfg.workspace_root = root.string();
 
-    auto result = extract::extract_project(cfg);
+    auto result = run_extract_project_async(cfg);
     ASSERT_TRUE(result.has_value());
 
     EXPECT_TRUE(result->uses_modules);
@@ -374,7 +402,7 @@ int add(int lhs, int rhs) {
     cfg.workspace_root = root.string();
     cfg.filter.include = {"src"};
 
-    auto result = extract::extract_project(cfg);
+    auto result = run_extract_project_async(cfg);
     ASSERT_TRUE(result.has_value());
 
     auto add_it = std::ranges::find_if(result->symbols,
@@ -502,7 +530,7 @@ export int run() {
     cfg.output_root = (root / "out").string();
     cfg.workspace_root = root.string();
 
-    auto result = extract::extract_project(cfg);
+    auto result = run_extract_project_async(cfg);
     ASSERT_TRUE(result.has_value());
 
     ASSERT_TRUE(result->modules.contains(source));
@@ -627,7 +655,7 @@ export int run() {
     cfg.output_root = (root / "out").string();
     cfg.workspace_root = root.string();
 
-    auto result = extract::extract_project(cfg);
+    auto result = run_extract_project_async(cfg);
     EXPECT_FALSE(result.has_value());
     EXPECT_NE(result.error().message.find("conflicting module names for source file"),
               std::string::npos);
@@ -676,7 +704,7 @@ struct Options {};
     cfg.output_root = (root / "out").string();
     cfg.workspace_root = root.string();
 
-    auto result = extract::extract_project(cfg);
+    auto result = run_extract_project_async(cfg);
     ASSERT_TRUE(result.has_value());
 
     ASSERT_TRUE(result->namespaces.contains("demo"));
@@ -734,9 +762,9 @@ TEST_CASE(rejects_path_outside_project_root) {
     cfg.output_root = (root / "out").string();
     cfg.workspace_root = root.string();
 
-    auto result = extract::extract_project(cfg);
+    auto result = run_extract_project_async(cfg);
     // The outside file is filtered; since no files remain in the project, the
-    // model should be empty (no error — filtering is not an error).
+    // model should be empty (no error; filtering is not an error).
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->files.size(), 0u);
 
@@ -806,7 +834,7 @@ TEST_CASE(include_src_does_not_match_deps_src) {
     cfg.workspace_root = root.string();
     cfg.filter.include = {"src"};
 
-    auto result = extract::extract_project(cfg);
+    auto result = run_extract_project_async(cfg);
     ASSERT_TRUE(result.has_value());
 
     // The dep file should be excluded.
@@ -915,7 +943,7 @@ int other_value() {
     cfg.output_root = (root / "out").string();
     cfg.workspace_root = root.string();
 
-    auto model_result = extract::extract_project(cfg);
+    auto model_result = run_extract_project_async(cfg);
     ASSERT_TRUE(model_result.has_value());
 
     auto& model = *model_result;

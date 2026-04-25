@@ -3,6 +3,7 @@ module;
 #include "kota/async/async.h"
 #include "kota/codec/json/error.h"
 #include "kota/codec/json/json.h"
+#include "kota/http/http.h"
 
 export module anthropic;
 
@@ -11,10 +12,11 @@ import http;
 import protocol;
 import schema;
 import client;
+import provider;
 import support;
 
 // ── protocol serialization ──────────────────────────────────────────────
-namespace clore::net::anthropic_protocol_detail {
+namespace clore::net::anthropic::protocol::detail {
 
 namespace json = kota::codec::json;
 
@@ -89,11 +91,7 @@ auto make_tool_use_block(const ToolCall& call) -> std::expected<json::Object, LL
     if(!input.has_value()) {
         return std::unexpected(std::move(input.error()));
     }
-    auto status = block->insert("input", std::move(*input));
-    if(!status.has_value()) {
-        return clore::net::detail::unexpected_json_error("failed to set tool_use input",
-                                                         status.error());
-    }
+    block->insert("input", std::move(*input));
     return *block;
 }
 
@@ -166,24 +164,13 @@ auto make_role_message(std::string_view role, json::Array blocks)
        !status.has_value()) {
         return std::unexpected(std::move(status.error()));
     }
-    auto status = message->insert("content", std::move(blocks));
-    if(!status.has_value()) {
-        return clore::net::detail::unexpected_json_error("failed to set message content blocks",
-                                                         status.error());
-    }
+    message->insert("content", std::move(blocks));
     return *message;
 }
 
 auto parse_json_text(std::string_view raw, std::string_view context)
     -> std::expected<json::Object, LLMError> {
-    auto parsed = json::Object::parse(raw);
-    if(!parsed.has_value()) {
-        return std::unexpected(
-            LLMError(std::format("{}: {}",
-                                 context,
-                                 json::error_message(json::make_read_error(parsed.error())))));
-    }
-    return *parsed;
+    return clore::net::detail::parse_json_object(raw, context);
 }
 
 auto format_schema_instruction(const ResponseFormat& format)
@@ -192,7 +179,7 @@ auto format_schema_instruction(const ResponseFormat& format)
         return std::string("Return only a JSON object. Do not include markdown fences.");
     }
 
-    auto encoded = format.schema->to_json_string();
+    auto encoded = json::to_string(*format.schema);
     if(!encoded.has_value()) {
         return clore::net::detail::unexpected_json_error("failed to serialize response schema",
                                                          encoded.error());
@@ -204,21 +191,10 @@ auto format_schema_instruction(const ResponseFormat& format)
 }
 
 auto validate_request(const CompletionRequest& request) -> std::expected<void, LLMError> {
-    if(request.model.empty()) {
-        return std::unexpected(LLMError("request model must not be empty"));
-    }
-    if(request.messages.empty()) {
-        return std::unexpected(LLMError("request messages must not be empty"));
-    }
-    if((request.tool_choice.has_value() || request.parallel_tool_calls.has_value()) &&
-       request.tools.empty()) {
-        return std::unexpected(
-            LLMError("tool_choice and parallel_tool_calls require at least one tool"));
-    }
-    return {};
+    return clore::net::detail::validate_completion_request(request, false, false);
 }
 
-}  // namespace clore::net::anthropic_protocol_detail
+}  // namespace clore::net::anthropic::protocol::detail
 
 export namespace clore::net::anthropic::protocol {
 
@@ -251,15 +227,13 @@ auto build_messages_url(std::string_view api_base) -> std::string {
         url.pop_back();
     }
     if(url.ends_with("/v1")) {
-        url += "/messages";
-        return url;
+        return clore::net::detail::append_url_path(url, "messages");
     }
-    url += "/v1/messages";
-    return url;
+    return clore::net::detail::append_url_path(url, "v1/messages");
 }
 
 auto build_request_json(const CompletionRequest& request) -> std::expected<std::string, LLMError> {
-    auto validation = anthropic_protocol_detail::validate_request(request);
+    auto validation = detail::validate_request(request);
     if(!validation.has_value()) {
         return std::unexpected(std::move(validation.error()));
     }
@@ -268,15 +242,8 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
     if(!root.has_value()) {
         return std::unexpected(std::move(root.error()));
     }
-    if(auto status = root->insert("model", std::string_view(request.model)); !status.has_value()) {
-        return clore::net::detail::unexpected_json_error("failed to serialize model",
-                                                         status.error());
-    }
-    if(auto status = root->insert("max_tokens", anthropic_protocol_detail::kDefaultMaxTokens);
-       !status.has_value()) {
-        return clore::net::detail::unexpected_json_error("failed to serialize max_tokens",
-                                                         status.error());
-    }
+    root->insert("model", request.model);
+    root->insert("max_tokens", detail::kDefaultMaxTokens);
 
     auto messages = clore::net::detail::make_empty_array("failed to create Anthropic messages");
     if(!messages.has_value()) {
@@ -290,18 +257,16 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
                 -> std::expected<std::optional<kota::codec::json::Object>, LLMError> {
                 using message_type = std::remove_cvref_t<decltype(current)>;
                 if constexpr(std::same_as<message_type, SystemMessage>) {
-                    anthropic_protocol_detail::append_text_with_gap(system_text, current.content);
+                    detail::append_text_with_gap(system_text, current.content);
                     return std::optional<kota::codec::json::Object>{std::nullopt};
                 } else if constexpr(std::same_as<message_type, UserMessage>) {
-                    auto object =
-                        anthropic_protocol_detail::make_role_message("user", current.content);
+                    auto object = detail::make_role_message("user", current.content);
                     if(!object.has_value()) {
                         return std::unexpected(std::move(object.error()));
                     }
                     return std::optional<kota::codec::json::Object>{std::move(*object)};
                 } else if constexpr(std::same_as<message_type, AssistantMessage>) {
-                    auto object =
-                        anthropic_protocol_detail::make_role_message("assistant", current.content);
+                    auto object = detail::make_role_message("assistant", current.content);
                     if(!object.has_value()) {
                         return std::unexpected(std::move(object.error()));
                     }
@@ -313,32 +278,20 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
                         return std::unexpected(std::move(blocks.error()));
                     }
                     if(current.content.has_value()) {
-                        auto text_block =
-                            anthropic_protocol_detail::make_text_block(*current.content);
+                        auto text_block = detail::make_text_block(*current.content);
                         if(!text_block.has_value()) {
                             return std::unexpected(std::move(text_block.error()));
                         }
-                        if(auto status = blocks->push_back(std::move(*text_block));
-                           !status.has_value()) {
-                            return clore::net::detail::unexpected_json_error(
-                                "failed to append assistant text block",
-                                status.error());
-                        }
+                        blocks->push_back(std::move(*text_block));
                     }
                     for(const auto& call: current.tool_calls) {
-                        auto tool_block = anthropic_protocol_detail::make_tool_use_block(call);
+                        auto tool_block = detail::make_tool_use_block(call);
                         if(!tool_block.has_value()) {
                             return std::unexpected(std::move(tool_block.error()));
                         }
-                        if(auto status = blocks->push_back(std::move(*tool_block));
-                           !status.has_value()) {
-                            return clore::net::detail::unexpected_json_error(
-                                "failed to append tool_use block",
-                                status.error());
-                        }
+                        blocks->push_back(std::move(*tool_block));
                     }
-                    auto object = anthropic_protocol_detail::make_role_message("assistant",
-                                                                               std::move(*blocks));
+                    auto object = detail::make_role_message("assistant", std::move(*blocks));
                     if(!object.has_value()) {
                         return std::unexpected(std::move(object.error()));
                     }
@@ -349,18 +302,12 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
                     if(!blocks.has_value()) {
                         return std::unexpected(std::move(blocks.error()));
                     }
-                    auto result_block = anthropic_protocol_detail::make_tool_result_block(current);
+                    auto result_block = detail::make_tool_result_block(current);
                     if(!result_block.has_value()) {
                         return std::unexpected(std::move(result_block.error()));
                     }
-                    if(auto status = blocks->push_back(std::move(*result_block));
-                       !status.has_value()) {
-                        return clore::net::detail::unexpected_json_error(
-                            "failed to append tool_result block",
-                            status.error());
-                    }
-                    auto object =
-                        anthropic_protocol_detail::make_role_message("user", std::move(*blocks));
+                    blocks->push_back(std::move(*result_block));
+                    auto object = detail::make_role_message("user", std::move(*blocks));
                     if(!object.has_value()) {
                         return std::unexpected(std::move(object.error()));
                     }
@@ -372,20 +319,16 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
             return std::unexpected(std::move(serialized.error()));
         }
         if(serialized->has_value()) {
-            if(auto status = messages->push_back(std::move(**serialized)); !status.has_value()) {
-                return clore::net::detail::unexpected_json_error("failed to append message",
-                                                                 status.error());
-            }
+            messages->push_back(std::move(**serialized));
         }
     }
 
     if(request.response_format.has_value()) {
-        auto schema_instruction =
-            anthropic_protocol_detail::format_schema_instruction(*request.response_format);
+        auto schema_instruction = detail::format_schema_instruction(*request.response_format);
         if(!schema_instruction.has_value()) {
             return std::unexpected(std::move(schema_instruction.error()));
         }
-        anthropic_protocol_detail::append_text_with_gap(system_text, *schema_instruction);
+        detail::append_text_with_gap(system_text, *schema_instruction);
     }
 
     if(!system_text.empty()) {
@@ -398,10 +341,7 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
         }
     }
 
-    if(auto status = root->insert("messages", std::move(*messages)); !status.has_value()) {
-        return clore::net::detail::unexpected_json_error("failed to serialize messages",
-                                                         status.error());
-    }
+    root->insert("messages", std::move(*messages));
 
     if(!request.tools.empty()) {
         auto tools = clore::net::detail::make_empty_array("failed to create Anthropic tools");
@@ -435,21 +375,10 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
             if(!input_schema.has_value()) {
                 return std::unexpected(std::move(input_schema.error()));
             }
-            if(auto status = object->insert("input_schema", std::move(*input_schema));
-               !status.has_value()) {
-                return clore::net::detail::unexpected_json_error(
-                    "failed to serialize tool input schema",
-                    status.error());
-            }
-            if(auto status = tools->push_back(std::move(*object)); !status.has_value()) {
-                return clore::net::detail::unexpected_json_error("failed to append tool",
-                                                                 status.error());
-            }
+            object->insert("input_schema", std::move(*input_schema));
+            tools->push_back(std::move(*object));
         }
-        if(auto status = root->insert("tools", std::move(*tools)); !status.has_value()) {
-            return clore::net::detail::unexpected_json_error("failed to serialize tools",
-                                                             status.error());
-        }
+        root->insert("tools", std::move(*tools));
     }
 
     if(request.tool_choice.has_value() ||
@@ -514,22 +443,13 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
         }
 
         if(request.parallel_tool_calls.has_value() && !*request.parallel_tool_calls) {
-            if(auto status = tool_choice->insert("disable_parallel_tool_use", true);
-               !status.has_value()) {
-                return clore::net::detail::unexpected_json_error(
-                    "failed to serialize disable_parallel_tool_use",
-                    status.error());
-            }
+            tool_choice->insert("disable_parallel_tool_use", true);
         }
 
-        if(auto status = root->insert("tool_choice", std::move(*tool_choice));
-           !status.has_value()) {
-            return clore::net::detail::unexpected_json_error("failed to serialize tool_choice",
-                                                             status.error());
-        }
+        root->insert("tool_choice", std::move(*tool_choice));
     }
 
-    auto encoded = root->to_json_string();
+    auto encoded = kota::codec::json::to_string(*root);
     if(!encoded.has_value()) {
         return clore::net::detail::unexpected_json_error("failed to serialize request JSON",
                                                          encoded.error());
@@ -538,14 +458,13 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
 }
 
 auto parse_response(std::string_view json_text) -> std::expected<CompletionResponse, LLMError> {
-    auto parsed =
-        anthropic_protocol_detail::parse_json_text(json_text,
-                                                   "failed to parse Anthropic response JSON");
+    auto parsed = detail::parse_json_text(json_text, "failed to parse Anthropic response JSON");
     if(!parsed.has_value()) {
         return std::unexpected(std::move(parsed.error()));
     }
 
-    if(auto error_value = parsed->get("error"); error_value.has_value()) {
+    auto root_view = clore::net::detail::ObjectView{.value = &*parsed};
+    if(auto error_value = root_view.get("error"); error_value.has_value()) {
         auto error_object = clore::net::detail::expect_object(*error_value, "error");
         if(!error_object.has_value()) {
             return std::unexpected(std::move(error_object.error()));
@@ -559,7 +478,7 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
         return std::unexpected(LLMError("LLM API returned an error payload"));
     }
 
-    auto id_value = parsed->get("id");
+    auto id_value = root_view.get("id");
     if(!id_value.has_value()) {
         return std::unexpected(LLMError("Anthropic response is missing id"));
     }
@@ -568,7 +487,7 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
         return std::unexpected(std::move(id.error()));
     }
 
-    auto model_value = parsed->get("model");
+    auto model_value = root_view.get("model");
     if(!model_value.has_value()) {
         return std::unexpected(LLMError("Anthropic response is missing model"));
     }
@@ -577,7 +496,7 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
         return std::unexpected(std::move(model.error()));
     }
 
-    auto stop_reason_value = parsed->get("stop_reason");
+    auto stop_reason_value = root_view.get("stop_reason");
     std::string_view stop_reason = "end_turn";
     if(stop_reason_value.has_value() && !stop_reason_value->is_null()) {
         auto parsed_stop_reason =
@@ -592,7 +511,7 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
         return std::unexpected(LLMError("LLM response was truncated (stop_reason=max_tokens)"));
     }
 
-    auto content_value = parsed->get("content");
+    auto content_value = root_view.get("content");
     if(!content_value.has_value()) {
         return std::unexpected(LLMError("Anthropic response is missing content"));
     }
@@ -667,17 +586,15 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
         if(!input.has_value()) {
             return std::unexpected(std::move(input.error()));
         }
-        auto input_json = input->to_json_string();
+        auto input_json = kota::codec::json::to_string(*input);
         if(!input_json.has_value()) {
             return clore::net::detail::unexpected_json_error("failed to serialize tool input JSON",
                                                              input_json.error());
         }
-        auto arguments = kota::codec::json::Value::parse(*input_json);
+        auto arguments = kota::codec::json::parse<kota::codec::json::Value>(*input_json);
         if(!arguments.has_value()) {
-            return std::unexpected(
-                LLMError(std::format("failed to parse tool_use input: {}",
-                                     kota::codec::json::error_message(
-                                         kota::codec::json::make_read_error(arguments.error())))));
+            return std::unexpected(LLMError(
+                std::format("failed to parse tool_use input: {}", arguments.error().to_string())));
         }
 
         output.tool_calls.push_back(ToolCall{
@@ -728,26 +645,40 @@ auto parse_tool_arguments(const ToolCall& call) -> std::expected<T, LLMError> {
 }  // namespace clore::net::anthropic::protocol
 
 // ── client wrapper ────────────────────────────────────────────────────────
-namespace clore::net::anthropic_detail {
+namespace clore::net::anthropic::detail {
 
 constexpr std::string_view kAnthropicBaseUrlEnv = "ANTHROPIC_BASE_URL";
 constexpr std::string_view kAnthropicApiKeyEnv = "ANTHROPIC_API_KEY";
 constexpr std::string_view kAnthropicVersion = "2023-06-01";
 
 struct Protocol {
-    static auto read_environment() -> std::expected<detail::EnvironmentConfig, LLMError> {
-        return detail::read_environment(kAnthropicBaseUrlEnv, kAnthropicApiKeyEnv);
+    static auto read_environment()
+        -> std::expected<clore::net::detail::EnvironmentConfig, LLMError> {
+        return clore::net::detail::read_credentials(clore::net::detail::CredentialEnv{
+            .base_url_env = kAnthropicBaseUrlEnv,
+            .api_key_env = kAnthropicApiKeyEnv,
+        });
     }
 
-    static auto build_url(const detail::EnvironmentConfig& environment) -> std::string {
+    static auto build_url(const clore::net::detail::EnvironmentConfig& environment) -> std::string {
         return clore::net::anthropic::protocol::build_messages_url(environment.api_base);
     }
 
-    static auto build_headers(const detail::EnvironmentConfig& environment) -> detail::HttpHeaders {
-        return detail::HttpHeaders{
-            "Content-Type: application/json; charset=utf-8",
-            std::format("x-api-key: {}", environment.api_key),
-            std::format("anthropic-version: {}", kAnthropicVersion),
+    static auto build_headers(const clore::net::detail::EnvironmentConfig& environment)
+        -> std::vector<kota::http::header> {
+        return std::vector<kota::http::header>{
+            kota::http::header{
+                               .name = "Content-Type",
+                               .value = "application/json; charset=utf-8",
+                               },
+            kota::http::header{
+                               .name = "x-api-key",
+                               .value = environment.api_key,
+                               },
+            kota::http::header{
+                               .name = "anthropic-version",
+                               .value = std::string(kAnthropicVersion),
+                               },
         };
     }
 
@@ -756,7 +687,7 @@ struct Protocol {
         return clore::net::anthropic::protocol::build_request_json(request);
     }
 
-    static auto parse_response(const detail::RawHttpResponse& raw_response)
+    static auto parse_response(const clore::net::detail::RawHttpResponse& raw_response)
         -> std::expected<CompletionResponse, LLMError> {
         if(raw_response.body.empty()) {
             return std::unexpected(LLMError("empty response from Anthropic"));
@@ -784,7 +715,7 @@ struct Protocol {
     }
 };
 
-}  // namespace clore::net::anthropic_detail
+}  // namespace clore::net::anthropic::detail
 
 export namespace clore::net::anthropic {
 
@@ -832,9 +763,8 @@ namespace clore::net::anthropic {
 
 auto call_completion_async(CompletionRequest request, kota::event_loop& loop)
     -> kota::task<CompletionResponse, LLMError> {
-    co_return co_await clore::net::call_completion_async<anthropic_detail::Protocol>(
-        std::move(request),
-        &loop)
+    co_return co_await clore::net::call_completion_async<detail::Protocol>(std::move(request),
+                                                                           &loop)
         .or_fail();
 }
 
@@ -842,10 +772,10 @@ auto call_llm_async(std::string_view model,
                     std::string_view system_prompt,
                     PromptRequest request,
                     kota::event_loop& loop) -> kota::task<std::string, LLMError> {
-    co_return co_await clore::net::call_llm_async<anthropic_detail::Protocol>(model,
-                                                                              system_prompt,
-                                                                              std::move(request),
-                                                                              &loop)
+    co_return co_await clore::net::call_llm_async<detail::Protocol>(model,
+                                                                    system_prompt,
+                                                                    std::move(request),
+                                                                    &loop)
         .or_fail();
 }
 
@@ -853,10 +783,10 @@ auto call_llm_async(std::string_view model,
                     std::string_view system_prompt,
                     std::string_view prompt,
                     kota::event_loop& loop) -> kota::task<std::string, LLMError> {
-    co_return co_await clore::net::call_llm_async<anthropic_detail::Protocol>(model,
-                                                                              system_prompt,
-                                                                              prompt,
-                                                                              &loop)
+    co_return co_await clore::net::call_llm_async<detail::Protocol>(model,
+                                                                    system_prompt,
+                                                                    prompt,
+                                                                    &loop)
         .or_fail();
 }
 
@@ -865,11 +795,10 @@ auto call_structured_async(std::string_view model,
                            std::string_view system_prompt,
                            std::string_view prompt,
                            kota::event_loop& loop) -> kota::task<T, LLMError> {
-    co_return co_await clore::net::call_structured_async<anthropic_detail::Protocol, T>(
-        model,
-        system_prompt,
-        prompt,
-        &loop)
+    co_return co_await clore::net::call_structured_async<detail::Protocol, T>(model,
+                                                                              system_prompt,
+                                                                              prompt,
+                                                                              &loop)
         .or_fail();
 }
 

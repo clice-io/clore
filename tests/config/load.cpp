@@ -15,7 +15,6 @@ constexpr auto kMinimalValidConfig = R"(
 [llm]
 system_prompt = "You are a documentation writer."
 retry_count = 3
-retry_initial_backoff_ms = 250
 )";
 
 auto make_valid_config(std::string_view system_prompt) -> std::string {
@@ -41,7 +40,6 @@ TEST_CASE(load_minimal_valid) {
     ASSERT_TRUE(result.has_value());
     auto& config = *result;
     EXPECT_EQ(config.llm.retry_count, 3u);
-    EXPECT_EQ(config.llm.retry_initial_backoff_ms, 250u);
 }
 
 TEST_CASE(load_requires_required_sections) {

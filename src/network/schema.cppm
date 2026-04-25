@@ -13,14 +13,11 @@ import http;
 import protocol;
 import support;
 
-namespace clore::net::openai_schema_detail {
+namespace clore::net::openai::schema::detail {
 
 namespace json = kota::codec::json;
 namespace meta = kota::meta;
 namespace meta_attrs = kota::meta::attrs;
-
-template <typename T>
-using remove_cvref_t = std::remove_cvref_t<T>;
 
 template <typename T>
 struct is_optional : std::false_type {};
@@ -29,7 +26,7 @@ template <typename T>
 struct is_optional<std::optional<T>> : std::true_type {};
 
 template <typename T>
-constexpr bool is_optional_v = is_optional<remove_cvref_t<T>>::value;
+constexpr bool is_optional_v = is_optional<std::remove_cvref_t<T>>::value;
 
 template <typename T>
 struct optional_inner;
@@ -40,7 +37,7 @@ struct optional_inner<std::optional<T>> {
 };
 
 template <typename T>
-using optional_inner_t = typename optional_inner<remove_cvref_t<T>>::type;
+using optional_inner_t = typename optional_inner<std::remove_cvref_t<T>>::type;
 
 template <typename T>
 struct is_vector : std::false_type {};
@@ -49,7 +46,7 @@ template <typename T, typename Allocator>
 struct is_vector<std::vector<T, Allocator>> : std::true_type {};
 
 template <typename T>
-constexpr bool is_vector_v = is_vector<remove_cvref_t<T>>::value;
+constexpr bool is_vector_v = is_vector<std::remove_cvref_t<T>>::value;
 
 template <typename T>
 struct vector_inner;
@@ -60,7 +57,7 @@ struct vector_inner<std::vector<T, Allocator>> {
 };
 
 template <typename T>
-using vector_inner_t = typename vector_inner<remove_cvref_t<T>>::type;
+using vector_inner_t = typename vector_inner<std::remove_cvref_t<T>>::type;
 
 template <typename T>
 struct is_array : std::false_type {};
@@ -69,7 +66,7 @@ template <typename T, std::size_t N>
 struct is_array<std::array<T, N>> : std::true_type {};
 
 template <typename T>
-constexpr bool is_array_v = is_array<remove_cvref_t<T>>::value;
+constexpr bool is_array_v = is_array<std::remove_cvref_t<T>>::value;
 
 template <typename T>
 struct array_inner;
@@ -80,18 +77,18 @@ struct array_inner<std::array<T, N>> {
 };
 
 template <typename T>
-using array_inner_t = typename array_inner<remove_cvref_t<T>>::type;
+using array_inner_t = typename array_inner<std::remove_cvref_t<T>>::type;
 
 template <typename T>
 struct schema_subject {
-    using type = remove_cvref_t<T>;
+    using type = std::remove_cvref_t<T>;
 };
 
 template <typename T>
-    requires meta::annotated_type<remove_cvref_t<T>> &&
-             (!meta::reflectable_class<remove_cvref_t<T>>)
+    requires meta::annotated_type<std::remove_cvref_t<T>> &&
+             (!meta::reflectable_class<std::remove_cvref_t<T>>)
 struct schema_subject<T> {
-    using type = meta::annotated_underlying_t<remove_cvref_t<T>>;
+    using type = meta::annotated_underlying_t<std::remove_cvref_t<T>>;
 };
 
 template <typename T>
@@ -129,41 +126,34 @@ auto schema_type_name() -> std::expected<std::string, LLMError> {
 }
 
 template <typename T>
-auto make_schema_value(json::Document& document) -> std::expected<json::Value, LLMError>;
+auto make_schema_value() -> std::expected<json::Value, LLMError>;
 
 template <typename T>
 auto make_schema_object() -> std::expected<json::Object, LLMError> {
-    json::Document document;
-    auto value = make_schema_value<T>(document);
+    auto value = make_schema_value<T>();
     if(!value.has_value()) {
         return std::unexpected(std::move(value.error()));
     }
 
-    auto object = value->get_object();
-    if(!object.has_value()) {
+    auto* object = value->get_object();
+    if(object == nullptr) {
         return std::unexpected(LLMError("generated schema root is not an object"));
     }
-    return std::move(*object);
+    return json::Object(*object);
 }
 
 template <typename T>
-auto make_scalar_type_schema(json::Document&, std::string_view type_name)
-    -> std::expected<json::Value, LLMError> {
+auto make_scalar_type_schema(std::string_view type_name) -> std::expected<json::Value, LLMError> {
     auto object = clore::net::detail::make_empty_object("failed to create scalar schema object");
     if(!object.has_value()) {
         return std::unexpected(std::move(object.error()));
     }
-    auto status = object->insert("type", type_name);
-    if(!status.has_value()) {
-        return clore::net::detail::to_llm_unexpected(status.error(),
-                                                     "failed to build scalar schema");
-    }
-    return object->as_value();
+    object->insert("type", std::string(type_name));
+    return json::Value(std::move(*object));
 }
 
 template <typename T>
-auto make_any_of_schema(json::Document&, std::vector<json::Value> choices)
-    -> std::expected<json::Value, LLMError> {
+auto make_any_of_schema(std::vector<json::Value> choices) -> std::expected<json::Value, LLMError> {
     auto object = clore::net::detail::make_empty_object("failed to create anyOf schema object");
     if(!object.has_value()) {
         return std::unexpected(std::move(object.error()));
@@ -173,24 +163,15 @@ auto make_any_of_schema(json::Document&, std::vector<json::Value> choices)
         return std::unexpected(std::move(any_of.error()));
     }
     for(auto& choice: choices) {
-        auto push_status = any_of->push_back(std::move(choice));
-        if(!push_status.has_value()) {
-            return clore::net::detail::to_llm_unexpected(push_status.error(),
-                                                         "failed to append anyOf schema choice");
-        }
+        any_of->push_back(std::move(choice));
     }
-    auto status = object->insert("anyOf", std::move(*any_of));
-    if(!status.has_value()) {
-        return clore::net::detail::to_llm_unexpected(status.error(),
-                                                     "failed to build anyOf schema");
-    }
-    return object->as_value();
+    object->insert("anyOf", std::move(*any_of));
+    return json::Value(std::move(*object));
 }
 
 template <typename Object, std::size_t... Indices>
-auto populate_object_schema(json::Document& document,
-                            json::Object& object,
-                            std::index_sequence<Indices...>) -> std::expected<void, LLMError> {
+auto populate_object_schema(json::Object& object, std::index_sequence<Indices...>)
+    -> std::expected<void, LLMError> {
     constexpr bool fields_valid = meta_attrs::validate_field_schema<Object>();
     static_assert(fields_valid, "schema field names contain collisions or alias conflicts");
 
@@ -214,25 +195,13 @@ auto populate_object_schema(json::Document& document,
                 "flatten fields are not supported by " "automatic OpenAI schema generation"));
         } else {
             using field_type = meta::field_type<Object, index>;
-            auto field_value = make_schema_value<field_type>(document);
+            auto field_value = make_schema_value<field_type>();
             if(!field_value.has_value()) {
                 return std::unexpected(std::move(field_value.error()));
             }
 
-            auto property_status =
-                properties->insert(field_schema.canonical_name, std::move(*field_value));
-            if(!property_status.has_value()) {
-                return clore::net::detail::to_llm_unexpected(
-                    property_status.error(),
-                    std::format("failed to add schema property '{}'", field_schema.canonical_name));
-            }
-
-            auto required_status = required->push_back(field_schema.canonical_name);
-            if(!required_status.has_value()) {
-                return clore::net::detail::to_llm_unexpected(
-                    required_status.error(),
-                    std::format("failed to add required field '{}'", field_schema.canonical_name));
-            }
+            properties->insert(std::string(field_schema.canonical_name), std::move(*field_value));
+            required->push_back(std::string(field_schema.canonical_name));
             return {};
         }
     };
@@ -245,52 +214,38 @@ auto populate_object_schema(json::Document& document,
         }
     }
 
-    if(auto status = object.insert("type", "object"); !status.has_value()) {
-        return clore::net::detail::to_llm_unexpected(status.error(),
-                                                     "failed to set object schema type");
-    }
-    if(auto status = object.insert("properties", std::move(*properties)); !status.has_value()) {
-        return clore::net::detail::to_llm_unexpected(status.error(),
-                                                     "failed to set object schema properties");
-    }
-    if(auto status = object.insert("required", std::move(*required)); !status.has_value()) {
-        return clore::net::detail::to_llm_unexpected(status.error(),
-                                                     "failed to set object schema required keys");
-    }
-    if(auto status = object.insert("additionalProperties", false); !status.has_value()) {
-        return clore::net::detail::to_llm_unexpected(
-            status.error(),
-            "failed to set object schema additionalProperties");
-    }
+    object.insert("type", "object");
+    object.insert("properties", std::move(*properties));
+    object.insert("required", std::move(*required));
+    object.insert("additionalProperties", false);
     return {};
 }
 
 template <typename T>
-auto make_schema_value(json::Document& document) -> std::expected<json::Value, LLMError> {
+auto make_schema_value() -> std::expected<json::Value, LLMError> {
     using schema_type = schema_subject_t<T>;
 
     if constexpr(std::same_as<schema_type, std::string> ||
                  std::same_as<schema_type, std::string_view>) {
-        return make_scalar_type_schema<schema_type>(document, "string");
+        return make_scalar_type_schema<schema_type>("string");
     } else if constexpr(std::same_as<schema_type, bool>) {
-        return make_scalar_type_schema<schema_type>(document, "boolean");
+        return make_scalar_type_schema<schema_type>("boolean");
     } else if constexpr(std::integral<schema_type> && !std::same_as<schema_type, bool>) {
-        return make_scalar_type_schema<schema_type>(document, "integer");
+        return make_scalar_type_schema<schema_type>("integer");
     } else if constexpr(std::floating_point<schema_type>) {
-        return make_scalar_type_schema<schema_type>(document, "number");
+        return make_scalar_type_schema<schema_type>("number");
     } else if constexpr(is_optional_v<schema_type>) {
-        auto inner = make_schema_value<optional_inner_t<schema_type>>(document);
+        auto inner = make_schema_value<optional_inner_t<schema_type>>();
         if(!inner.has_value()) {
             return std::unexpected(std::move(inner.error()));
         }
-        auto null_value = make_scalar_type_schema<std::nullptr_t>(document, "null");
+        auto null_value = make_scalar_type_schema<std::nullptr_t>("null");
         if(!null_value.has_value()) {
             return std::unexpected(std::move(null_value.error()));
         }
-        return make_any_of_schema<schema_type>(document,
-                                               {std::move(*inner), std::move(*null_value)});
+        return make_any_of_schema<schema_type>({std::move(*inner), std::move(*null_value)});
     } else if constexpr(is_vector_v<schema_type>) {
-        auto item_schema = make_schema_value<vector_inner_t<schema_type>>(document);
+        auto item_schema = make_schema_value<vector_inner_t<schema_type>>();
         if(!item_schema.has_value()) {
             return std::unexpected(std::move(item_schema.error()));
         }
@@ -298,18 +253,12 @@ auto make_schema_value(json::Document& document) -> std::expected<json::Value, L
         if(!object.has_value()) {
             return std::unexpected(std::move(object.error()));
         }
-        if(auto status = object->insert("type", "array"); !status.has_value()) {
-            return clore::net::detail::to_llm_unexpected(status.error(),
-                                                         "failed to set array schema type");
-        }
-        if(auto status = object->insert("items", std::move(*item_schema)); !status.has_value()) {
-            return clore::net::detail::to_llm_unexpected(status.error(),
-                                                         "failed to set array schema items");
-        }
-        return object->as_value();
+        object->insert("type", "array");
+        object->insert("items", std::move(*item_schema));
+        return json::Value(std::move(*object));
     } else if constexpr(is_array_v<schema_type>) {
         constexpr auto fixed_size = std::tuple_size_v<schema_type>;
-        auto item_schema = make_schema_value<array_inner_t<schema_type>>(document);
+        auto item_schema = make_schema_value<array_inner_t<schema_type>>();
         if(!item_schema.has_value()) {
             return std::unexpected(std::move(item_schema.error()));
         }
@@ -318,40 +267,23 @@ auto make_schema_value(json::Document& document) -> std::expected<json::Value, L
         if(!object.has_value()) {
             return std::unexpected(std::move(object.error()));
         }
-        if(auto status = object->insert("type", "array"); !status.has_value()) {
-            return clore::net::detail::to_llm_unexpected(status.error(),
-                                                         "failed to set fixed array schema type");
-        }
-        if(auto status = object->insert("items", std::move(*item_schema)); !status.has_value()) {
-            return clore::net::detail::to_llm_unexpected(status.error(),
-                                                         "failed to set fixed array schema items");
-        }
-        if(auto status = object->insert("minItems", static_cast<std::uint64_t>(fixed_size));
-           !status.has_value()) {
-            return clore::net::detail::to_llm_unexpected(
-                status.error(),
-                "failed to set fixed array schema minItems");
-        }
-        if(auto status = object->insert("maxItems", static_cast<std::uint64_t>(fixed_size));
-           !status.has_value()) {
-            return clore::net::detail::to_llm_unexpected(
-                status.error(),
-                "failed to set fixed array schema maxItems");
-        }
-        return object->as_value();
+        object->insert("type", "array");
+        object->insert("items", std::move(*item_schema));
+        object->insert("minItems", static_cast<std::uint64_t>(fixed_size));
+        object->insert("maxItems", static_cast<std::uint64_t>(fixed_size));
+        return json::Value(std::move(*object));
     } else if constexpr(meta::reflectable_class<schema_type>) {
         auto object = clore::net::detail::make_empty_object("failed to create object schema root");
         if(!object.has_value()) {
             return std::unexpected(std::move(object.error()));
         }
         auto status = populate_object_schema<schema_type>(
-            document,
             *object,
             std::make_index_sequence<meta::field_count<schema_type>()>{});
         if(!status.has_value()) {
             return std::unexpected(std::move(status.error()));
         }
-        return object->as_value();
+        return json::Value(std::move(*object));
     } else {
         static_assert(sizeof(schema_type) == 0,
                   "automatic OpenAI schema generation only supports "
@@ -360,7 +292,7 @@ auto make_schema_value(json::Document& document) -> std::expected<json::Value, L
     }
 }
 
-auto validate_schema_array_of_types(json::ArrayRef array, std::string_view path, bool is_root)
+auto validate_schema_array_of_types(const json::Array& array, std::string_view path, bool is_root)
     -> std::expected<void, LLMError> {
     std::optional<std::string_view> primary_type;
     bool saw_null = false;
@@ -393,20 +325,29 @@ auto validate_schema_array_of_types(json::ArrayRef array, std::string_view path,
     return {};
 }
 
-auto validate_openai_schema(json::ObjectRef object, std::string_view path, bool is_root)
+auto validate_openai_schema(const json::Object& object, std::string_view path, bool is_root)
     -> std::expected<void, LLMError>;
 
-auto validate_openai_schema_value(json::ValueRef value, std::string_view path, bool is_root)
+auto validate_openai_schema_value(const json::Value& value, std::string_view path, bool is_root)
     -> std::expected<void, LLMError> {
     auto object = clore::net::detail::expect_object(value, path);
     if(!object.has_value()) {
         return std::unexpected(std::move(object.error()));
     }
-    return validate_openai_schema(*object, path, is_root);
+    return validate_openai_schema(**object, path, is_root);
 }
 
-auto validate_required_properties(json::ObjectRef properties,
-                                  json::ArrayRef required,
+auto validate_openai_schema_value(json::Cursor value, std::string_view path, bool is_root)
+    -> std::expected<void, LLMError> {
+    auto object = clore::net::detail::expect_object(value, path);
+    if(!object.has_value()) {
+        return std::unexpected(std::move(object.error()));
+    }
+    return validate_openai_schema(**object, path, is_root);
+}
+
+auto validate_required_properties(clore::net::detail::ObjectView properties,
+                                  clore::net::detail::ArrayView required,
                                   std::string_view path) -> std::expected<void, LLMError> {
     std::unordered_set<std::string> required_names;
     for(auto value: required) {
@@ -429,9 +370,10 @@ auto validate_required_properties(json::ObjectRef properties,
     return {};
 }
 
-auto validate_openai_schema(json::ObjectRef object, std::string_view path, bool is_root)
+auto validate_openai_schema(const json::Object& object, std::string_view path, bool is_root)
     -> std::expected<void, LLMError> {
-    auto any_of_value = object.get("anyOf");
+    auto object_view = clore::net::detail::ObjectView{.value = &object};
+    auto any_of_value = object_view.get("anyOf");
     if(any_of_value.has_value()) {
         if(is_root) {
             return std::unexpected(LLMError("root schema must not use anyOf"));
@@ -456,7 +398,7 @@ auto validate_openai_schema(json::ObjectRef object, std::string_view path, bool 
         return {};
     }
 
-    auto type_value = object.get("type");
+    auto type_value = object_view.get("type");
     if(!type_value.has_value()) {
         return std::unexpected(LLMError(std::format("{} schema is missing a 'type' field", path)));
     }
@@ -464,7 +406,7 @@ auto validate_openai_schema(json::ObjectRef object, std::string_view path, bool 
     std::optional<std::string_view> schema_type;
     if(auto type_string = type_value->get_string(); type_string.has_value()) {
         schema_type = *type_string;
-    } else if(auto type_array = type_value->get_array(); type_array.has_value()) {
+    } else if(auto type_array = type_value->get_array(); type_array != nullptr) {
         auto status = validate_schema_array_of_types(*type_array, path, is_root);
         if(!status.has_value()) {
             return std::unexpected(std::move(status.error()));
@@ -490,7 +432,7 @@ auto validate_openai_schema(json::ObjectRef object, std::string_view path, bool 
     }
 
     if(*schema_type == "object") {
-        auto properties_value = object.get("properties");
+        auto properties_value = object_view.get("properties");
         if(!properties_value.has_value()) {
             return std::unexpected(
                 LLMError(std::format("{} object schema is missing properties", path)));
@@ -501,7 +443,7 @@ auto validate_openai_schema(json::ObjectRef object, std::string_view path, bool 
             return std::unexpected(std::move(properties.error()));
         }
 
-        auto required_value = object.get("required");
+        auto required_value = object_view.get("required");
         if(!required_value.has_value()) {
             return std::unexpected(
                 LLMError(std::format("{} object schema is missing required", path)));
@@ -512,7 +454,7 @@ auto validate_openai_schema(json::ObjectRef object, std::string_view path, bool 
             return std::unexpected(std::move(required.error()));
         }
 
-        auto additional_properties_value = object.get("additionalProperties");
+        auto additional_properties_value = object_view.get("additionalProperties");
         if(!additional_properties_value.has_value()) {
             return std::unexpected(LLMError(
                 std::format("{} object schema must set additionalProperties to false", path)));
@@ -538,7 +480,7 @@ auto validate_openai_schema(json::ObjectRef object, std::string_view path, bool 
             }
         }
     } else if(*schema_type == "array") {
-        auto items_value = object.get("items");
+        auto items_value = object_view.get("items");
         if(!items_value.has_value()) {
             return std::unexpected(LLMError(std::format("{} array schema is missing items", path)));
         }
@@ -549,7 +491,7 @@ auto validate_openai_schema(json::ObjectRef object, std::string_view path, bool 
         }
     }
 
-    if(auto defs_value = object.get("$defs"); defs_value.has_value()) {
+    if(auto defs_value = object_view.get("$defs"); defs_value.has_value()) {
         auto defs = clore::net::detail::expect_object(*defs_value, std::format("{}.$defs", path));
         if(!defs.has_value()) {
             return std::unexpected(std::move(defs.error()));
@@ -567,7 +509,7 @@ auto validate_openai_schema(json::ObjectRef object, std::string_view path, bool 
     return {};
 }
 
-}  // namespace clore::net::openai_schema_detail
+}  // namespace clore::net::openai::schema::detail
 
 export namespace clore::net::schema {
 
@@ -597,7 +539,7 @@ auto validate_response_format(const ResponseFormat& format) -> std::expected<voi
     if(format.name.empty()) {
         return std::unexpected(LLMError("response_format.name must not be empty"));
     }
-    return openai_schema_detail::validate_openai_schema(*format.schema, format.name, true);
+    return openai::schema::detail::validate_openai_schema(*format.schema, format.name, true);
 }
 
 auto validate_tool_definition(const FunctionToolDefinition& tool) -> std::expected<void, LLMError> {
@@ -608,7 +550,7 @@ auto validate_tool_definition(const FunctionToolDefinition& tool) -> std::expect
         return std::unexpected(
             LLMError(std::format("tool '{}' description must not be empty", tool.name)));
     }
-    return openai_schema_detail::validate_openai_schema(tool.parameters, tool.name, true);
+    return openai::schema::detail::validate_openai_schema(tool.parameters, tool.name, true);
 }
 
 }  // namespace clore::net::detail
@@ -617,16 +559,16 @@ namespace clore::net::schema {
 
 template <typename T>
 auto response_format() -> std::expected<ResponseFormat, LLMError> {
-    using root_type = openai_schema_detail::schema_subject_t<T>;
+    using root_type = openai::schema::detail::schema_subject_t<T>;
     static_assert(kota::meta::reflectable_class<root_type>,
                   "automatic structured output schemas require a reflectable " "root object type");
 
-    auto name = openai_schema_detail::schema_type_name<root_type>();
+    auto name = openai::schema::detail::schema_type_name<root_type>();
     if(!name.has_value()) {
         return std::unexpected(std::move(name.error()));
     }
 
-    auto schema = openai_schema_detail::make_schema_object<root_type>();
+    auto schema = openai::schema::detail::make_schema_object<root_type>();
     if(!schema.has_value()) {
         return std::unexpected(std::move(schema.error()));
     }
@@ -641,7 +583,7 @@ auto response_format() -> std::expected<ResponseFormat, LLMError> {
 template <typename T>
 auto function_tool(std::string name, std::string description)
     -> std::expected<FunctionToolDefinition, LLMError> {
-    using root_type = openai_schema_detail::schema_subject_t<T>;
+    using root_type = openai::schema::detail::schema_subject_t<T>;
     static_assert(kota::meta::reflectable_class<root_type>,
                   "automatic function tool schemas require a reflectable root object type");
 
@@ -652,7 +594,7 @@ auto function_tool(std::string name, std::string description)
         return std::unexpected(LLMError("tool description must not be empty"));
     }
 
-    auto schema = openai_schema_detail::make_schema_object<root_type>();
+    auto schema = openai::schema::detail::make_schema_object<root_type>();
     if(!schema.has_value()) {
         return std::unexpected(std::move(schema.error()));
     }

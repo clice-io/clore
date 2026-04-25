@@ -139,29 +139,15 @@ auto call_llm_async(std::string_view model,
                     clore::net::PromptRequest request,
                     kota::event_loop* loop) -> kota::task<std::string, clore::net::LLMError> {
     auto& active_loop = detail::select_event_loop(loop);
-    auto request_async = [](std::string_view current_model,
-                            std::string_view current_system_prompt,
-                            clore::net::PromptRequest current_request,
-                            kota::event_loop& current_loop) {
-        return clore::net::detail::request_text_once_async(
+    co_return co_await clore::net::detail::unwrap_caught_result(
+        co_await clore::net::detail::request_text_once_async(
             [](clore::net::CompletionRequest request, kota::event_loop& request_loop) {
                 return call_completion_async<Protocol>(std::move(request), &request_loop);
             },
-            current_model,
-            current_system_prompt,
-            std::move(current_request),
-            current_loop);
-    };
-
-    co_return co_await clore::net::detail::unwrap_caught_result(
-        co_await clore::net::detail::request_text_with_retries(std::string(model),
-                                                               std::string(system_prompt),
-                                                               std::move(request),
-                                                               0,
-                                                               0,
-                                                               active_loop,
-                                                               request_async,
-                                                               Protocol::provider_name())
+            model,
+            system_prompt,
+            std::move(request),
+            active_loop)
             .catch_cancel(),
         "LLM request cancelled");
 }

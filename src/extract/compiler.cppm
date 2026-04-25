@@ -253,16 +253,6 @@ auto query_toolchain_cached(CompilationDatabase& db, const CompileEntry& entry)
 
 namespace {
 
-// Thread-local cache of parsed CompilerInvocation keyed by compile signature.
-// This avoids re-parsing command-line arguments for files that share the same
-// compile configuration (same directory, include paths, defines, etc.).
-auto invocation_cache()
-    -> std::unordered_map<std::uint64_t, std::shared_ptr<clang::CompilerInvocation>>& {
-    thread_local std::unordered_map<std::uint64_t, std::shared_ptr<clang::CompilerInvocation>>
-        cache;
-    return cache;
-}
-
 auto parse_compiler_invocation(const std::vector<std::string>& driver_args,
                                std::string_view input_file,
                                const llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem>& vfs,
@@ -301,16 +291,6 @@ auto parse_compiler_invocation(const std::vector<std::string>& driver_args,
     return std::shared_ptr<clang::CompilerInvocation>(std::move(unique_invocation));
 }
 
-auto warm_up_clang_invocation_parsing(const std::vector<std::string>& driver_args,
-                                      std::string_view input_file,
-                                      const llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem>& vfs,
-                                      clang::DiagnosticsEngine& diagnostics) -> void {
-    static std::once_flag once;
-    std::call_once(once, [&] {
-        static_cast<void>(parse_compiler_invocation(driver_args, input_file, vfs, diagnostics));
-    });
-}
-
 }  // namespace
 
 auto create_compiler_instance(const CompileEntry& entry)
@@ -331,40 +311,17 @@ auto create_compiler_instance(const CompileEntry& entry)
         return nullptr;
     }
 
-    warm_up_clang_invocation_parsing(driver_args, entry.file, vfs, *diagnostics);
-
-    std::shared_ptr<clang::CompilerInvocation> invocation;
-
-    // Try to reuse a cached invocation for the same compile signature.
-    auto sig = entry.compile_signature;
-    if(sig != 0) {
-        auto& cache = invocation_cache();
-        auto cached_it = cache.find(sig);
-        if(cached_it != cache.end() && cached_it->second) {
-            // Clone the cached invocation; all options are identical for the
-            // same compile signature (same directory, flags, etc.).
-            invocation = std::make_shared<clang::CompilerInvocation>(*cached_it->second);
-        }
-    }
-
+    auto invocation = parse_compiler_invocation(driver_args, entry.file, vfs, *diagnostics);
     if(!invocation) {
-        invocation = parse_compiler_invocation(driver_args, entry.file, vfs, *diagnostics);
-        if(!invocation) {
-            return nullptr;
-        }
-
-        invocation->getFrontendOpts().DisableFree = false;
-        invocation->getFileSystemOpts().WorkingDir = entry.directory;
-
-        if(sig != 0) {
-            invocation_cache()[sig] = invocation;
-        }
+        return nullptr;
     }
+    invocation->getFrontendOpts().DisableFree = false;
+    invocation->getFileSystemOpts().WorkingDir = entry.directory;
 
-    // Reset input to the specific file for this entry.
-    invocation->getFrontendOpts().Inputs.clear();
-    invocation->getFrontendOpts().Inputs.push_back(
-        clang::FrontendInputFile(entry.file, clang::InputKind(clang::Language::CXX)));
+    auto& frontend_inputs = invocation->getFrontendOpts().Inputs;
+    if(frontend_inputs.empty()) {
+        return nullptr;
+    }
 
     auto instance = std::make_unique<clang::CompilerInstance>(invocation);
     instance->setVirtualFileSystem(vfs);

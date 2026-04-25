@@ -14,11 +14,10 @@ import support;
 namespace clore {
 
 using kota::deco::decl::KVStyle;
-constexpr std::uint32_t defaultRateLimit = 16;
 
 struct Options {
     DecoKV(style = KVStyle::JoinedOrSeparate,
-           help = "Path to clore configuration file (default: clore.toml)",
+           help = "Path to clore configuration file",
            required = false)
     <std::string> config;
 
@@ -49,7 +48,7 @@ struct Options {
 
     DecoKV(style = KVStyle::JoinedOrSeparate,
            names = {"--rate-limit", "--rate-limit="},
-           help = "Maximum concurrent LLM requests when --model is used (default: 16)",
+           help = "Maximum concurrent LLM requests when --model is used",
            required = false)
     <std::uint32_t> rate_limit;
 
@@ -87,16 +86,48 @@ auto log_generation_summary(const generate::GenerationSummary& summary) -> void 
     }
 }
 
+template <typename Task,
+          typename Value = typename Task::value_type,
+          typename Error = typename Task::error_type>
+auto await_task_result(Task& task, std::string_view name) -> std::expected<Value, Error> {
+    if(!task->is_finished() && !task->is_failed() && !task->is_cancelled()) {
+        return std::unexpected(Error{
+            .message = std::format("{} stopped before completion with pending work", name),
+        });
+    }
+
+    try {
+        auto result = task.result();
+        if(result.is_cancelled()) {
+            return std::unexpected(Error{
+                .message = std::format("{} was cancelled", name),
+            });
+        }
+        if(result.has_error()) {
+            return std::unexpected(std::move(result.error()));
+        }
+        return std::move(*result);
+    } catch(const std::exception& ex) {
+        return std::unexpected(Error{
+            .message = std::format("{} threw exception: {}", name, ex.what()),
+        });
+    } catch(...) {
+        return std::unexpected(Error{
+            .message = std::format("{} threw unknown exception", name),
+        });
+    }
+}
+
 }  // namespace clore
 
 int main(int argc, const char** argv) {
     clore::support::enable_utf8_console();
 
-    struct HttpRuntimeShutdownGuard {
-        ~HttpRuntimeShutdownGuard() {
-            clore::net::shutdown_http_runtime();
+    struct LLMRateLimitShutdownGuard {
+        ~LLMRateLimitShutdownGuard() {
+            clore::net::shutdown_llm_rate_limit();
         }
-    } http_runtime_shutdown_guard;
+    } llm_rate_limit_shutdown_guard;
 
     auto args = kota::deco::util::argvify(argc, argv);
     auto result = kota::deco::cli::parse<clore::Options>(args);
@@ -144,7 +175,11 @@ int main(int argc, const char** argv) {
         return true;
     };
 
-    const std::string config_path = opts.config.value_or("clore.toml");
+    if(!opts.config.has_value()) {
+        clore::logging::err("--config is required");
+        return 1;
+    }
+    const std::string config_path = *opts.config;
     auto cfg_result = clore::config::load_config(config_path);
     if(log_expected_error(cfg_result, "failed to load config")) {
         return 1;
@@ -199,33 +234,19 @@ int main(int argc, const char** argv) {
         llm_model = *opts.model;
     }
 
-    auto rate_limit = opts.rate_limit.value_or(clore::defaultRateLimit);
-    clore::net::initialize_llm_rate_limit(rate_limit);
-
-    if(!prompt_dry_run) {
-        auto env_threads = std::thread::hardware_concurrency();
-        if(env_threads == 0) {
-            clore::logging::err("failed to determine hardware concurrency");
-            return 1;
-        }
-
-        auto target_size = std::max(rate_limit, env_threads);
-#if defined(_WIN32)
-        if(_putenv_s("UV_THREADPOOL_SIZE", std::to_string(target_size).c_str()) != 0) {
-            clore::logging::err("failed to set UV_THREADPOOL_SIZE");
-            return 1;
-        }
-#else
-        if(::setenv("UV_THREADPOOL_SIZE", std::to_string(target_size).c_str(), 1) != 0) {
-            clore::logging::err("failed to set UV_THREADPOOL_SIZE");
-            return 1;
-        }
-#endif
-    }
-
     if(!prompt_dry_run && llm_model.empty()) {
         clore::logging::err("model must not be empty");
         return 1;
+    }
+
+    std::uint32_t rate_limit = 0;
+    if(!prompt_dry_run) {
+        if(!opts.rate_limit.has_value()) {
+            clore::logging::err("--rate-limit is required when --model is used");
+            return 1;
+        }
+        rate_limit = *opts.rate_limit;
+        clore::net::initialize_llm_rate_limit(rate_limit);
     }
 
     auto normalize_result = clore::config::normalize(task_config);
@@ -246,11 +267,14 @@ int main(int argc, const char** argv) {
     if(!prompt_dry_run) {
         clore::logging::info("  model: {}", llm_model);
         clore::logging::info("  rate_limit: {}", rate_limit);
-        clore::logging::info("  uv_threadpool_size: {}",
-                             std::max(rate_limit, std::thread::hardware_concurrency()));
     }
 
-    auto extract_result = clore::extract::extract_project(task_config);
+    kota::event_loop loop;
+    auto extract_task = clore::extract::extract_project_async(task_config, loop).catch_cancel();
+    loop.schedule(extract_task);
+    loop.run();
+
+    auto extract_result = clore::await_task_result(extract_task, "extract task");
     if(!extract_result.has_value()) {
         clore::logging::err("extraction failed: {}", extract_result.error().message);
         return 1;
@@ -284,24 +308,24 @@ int main(int argc, const char** argv) {
     if(agent_mode) {
         clore::logging::info("agent mode enabled: running agent and generation in parallel");
 
-        kota::event_loop loop;
+        kota::event_loop parallel_loop;
         auto agent_task = clore::agent::run_agent_async(task_config,
                                                         model,
                                                         llm_model,
                                                         task_config.output_root,
-                                                        loop)
+                                                        parallel_loop)
                               .catch_cancel();
         auto gen_task = clore::generate::generate_pages_async(task_config,
                                                               model,
                                                               llm_model,
                                                               rate_limit,
                                                               task_config.output_root,
-                                                              loop)
+                                                              parallel_loop)
                             .catch_cancel();
 
-        loop.schedule(agent_task);
-        loop.schedule(gen_task);
-        loop.run();
+        parallel_loop.schedule(agent_task);
+        parallel_loop.schedule(gen_task);
+        parallel_loop.run();
 
         if(!agent_task->is_finished() && !agent_task->is_failed() && !agent_task->is_cancelled()) {
             clore::logging::err("agent task stopped before completion with pending work");
@@ -343,11 +367,17 @@ int main(int argc, const char** argv) {
         return 0;
     }
 
-    auto gen_result = clore::generate::generate_pages(task_config,
-                                                      model,
-                                                      llm_model,
-                                                      rate_limit,
-                                                      task_config.output_root);
+    auto gen_task = clore::generate::generate_pages_async(task_config,
+                                                          model,
+                                                          llm_model,
+                                                          rate_limit,
+                                                          task_config.output_root,
+                                                          loop)
+                        .catch_cancel();
+    loop.schedule(gen_task);
+    loop.run();
+
+    auto gen_result = clore::await_task_result(gen_task, "generation task");
     if(!gen_result.has_value()) {
         clore::logging::err("generation failed: {}", gen_result.error().message);
         return 1;

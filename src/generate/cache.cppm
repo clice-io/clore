@@ -113,12 +113,12 @@ auto response_format_fingerprint(const std::optional<clore::net::ResponseFormat>
         return std::format("{}:json_object", response_format->name);
     }
 
-    auto schema_json = response_format->schema->to_json_string();
+    auto schema_json = kota::codec::json::to_string(*response_format->schema);
     if(!schema_json.has_value()) {
         return std::unexpected(CacheError{
-            .message = std::format("failed to serialize response format schema '{}' (code {})",
+            .message = std::format("failed to serialize response format schema '{}': {}",
                                    response_format->name,
-                                   static_cast<int>(schema_json.error())),
+                                   schema_json.error().to_string()),
         });
     }
 
@@ -270,13 +270,13 @@ auto load_cache_index(std::string_view workspace_root) -> std::expected<CacheInd
                 continue;
             }
 
-            auto parsed = kota::codec::json::Object::parse(line);
+            auto parsed = kota::codec::json::parse<kota::codec::json::Object>(line);
             if(!parsed.has_value()) {
                 continue;
             }
 
-            auto key_value = parsed->get("key");
-            if(!key_value.has_value()) {
+            auto* key_value = parsed->find("key");
+            if(key_value == nullptr) {
                 continue;
             }
             auto key = key_value->get_string();
@@ -284,8 +284,8 @@ auto load_cache_index(std::string_view workspace_root) -> std::expected<CacheInd
                 continue;
             }
 
-            auto resp_value = parsed->get("resp");
-            if(!resp_value.has_value()) {
+            auto* resp_value = parsed->find("resp");
+            if(resp_value == nullptr) {
                 continue;
             }
             auto resp = resp_value->get_string();

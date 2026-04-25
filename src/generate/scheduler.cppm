@@ -35,15 +35,8 @@ auto make_generate_error(cache::CacheError error) -> GenerateError {
 auto request_llm_async(std::string_view model,
                        std::string_view system_prompt,
                        clore::net::PromptRequest request,
-                       std::uint32_t retry_count,
-                       std::uint32_t retry_initial_backoff_ms,
                        kota::event_loop& loop) -> kota::task<std::string, clore::net::LLMError> {
-    co_return co_await clore::net::call_llm_async(model,
-                                                  system_prompt,
-                                                  std::move(request),
-                                                  retry_count,
-                                                  retry_initial_backoff_ms,
-                                                  loop)
+    co_return co_await clore::net::call_llm_async(model, system_prompt, std::move(request), loop)
         .or_fail();
 }
 
@@ -726,6 +719,7 @@ struct PageState {
     std::size_t unsatisfied_deps = 0;
     bool submitted = false;
     bool written = false;
+    bool failed = false;
     std::unordered_map<std::string, std::string> prompt_outputs;
 };
 
@@ -741,24 +735,35 @@ using SymbolPendingMap = std::unordered_map<std::string,
 // ---------------------------------------------------------------------------
 // WorkQueue: priority deque with deferred-symbol staging and stop signalling.
 // Page prompts are enqueued at the front for early rendering; symbol analysis
-// goes to the back.
+// goes to the back. A semaphore is used as a counted wakeup so one enqueued
+// item resumes one worker; kota::event is broadcast-style and can re-enter all
+// workers for a single item.
 // ---------------------------------------------------------------------------
 class WorkQueue {
 public:
     auto enqueue(ScheduledWork work) -> void {
+        if(stopped_) {
+            return;
+        }
         if(std::holds_alternative<PagePromptWork>(work)) {
             queue_.push_front(std::move(work));
         } else {
             queue_.push_back(std::move(work));
         }
-        available_.set();
+        available_.release();
     }
 
     auto enqueue_deferred(SymbolAnalysisWork work) -> void {
+        if(stopped_) {
+            return;
+        }
         deferred_.push_back(std::move(work));
     }
 
     auto flush_deferred() -> void {
+        if(stopped_) {
+            return;
+        }
         while(!deferred_.empty()) {
             enqueue(std::move(deferred_.front()));
             deferred_.pop_front();
@@ -769,36 +774,37 @@ public:
         return !deferred_.empty();
     }
 
-    auto empty() const -> bool {
-        return queue_.empty();
-    }
-
     auto stopped() const -> bool {
         return stopped_;
     }
 
-    auto dequeue() -> ScheduledWork {
+    auto dequeue() -> std::optional<ScheduledWork> {
+        if(stopped_ || queue_.empty()) {
+            return std::nullopt;
+        }
         auto work = std::move(queue_.front());
         queue_.pop_front();
-        if(queue_.empty() && !stopped_) {
-            available_.reset();
-        }
         return work;
     }
 
-    auto stop() -> void {
+    auto stop(std::size_t worker_count) -> void {
+        if(stopped_) {
+            return;
+        }
         stopped_ = true;
-        available_.set();
+        queue_.clear();
+        deferred_.clear();
+        available_.release(static_cast<std::ptrdiff_t>(worker_count));
     }
 
-    auto event() -> kota::event& {
+    auto available() -> kota::semaphore& {
         return available_;
     }
 
 private:
     std::deque<ScheduledWork> queue_;
     std::deque<SymbolAnalysisWork> deferred_;
-    kota::event available_;
+    kota::semaphore available_;
     bool stopped_ = false;
 };
 
@@ -893,7 +899,33 @@ public:
     }
 
     auto mark_page_written(std::size_t state_idx, std::string_view page_id) -> void {
+        if(states_[state_idx].written || states_[state_idx].failed) {
+            return;
+        }
         states_[state_idx].written = true;
+        release_dependents(page_id);
+    }
+
+    auto mark_page_failed(std::size_t state_idx, std::string_view page_id) -> void {
+        if(states_[state_idx].written || states_[state_idx].failed) {
+            return;
+        }
+        states_[state_idx].failed = true;
+        release_dependents(page_id);
+    }
+
+    auto finished_count() const -> std::size_t {
+        return std::ranges::count_if(states_, [](const PageState& state) {
+            return state.written || state.failed;
+        });
+    }
+
+    auto failed_count() const -> std::size_t {
+        return std::ranges::count_if(states_, [](const PageState& state) { return state.failed; });
+    }
+
+private:
+    auto release_dependents(std::string_view page_id) -> void {
         auto dep_it = dependents_.find(std::string(page_id));
         if(dep_it != dependents_.end()) {
             for(auto dep_state_idx: dep_it->second) {
@@ -905,6 +937,7 @@ public:
         }
     }
 
+public:
     auto pop_ready_candidate() -> std::optional<std::size_t> {
         while(!ready_candidates_.empty()) {
             auto i = ready_candidates_.back();
@@ -913,7 +946,7 @@ public:
                 continue;
             }
             auto& state = states_[i];
-            if(state.written || state.submitted || state.unsatisfied_deps > 0 ||
+            if(state.written || state.failed || state.submitted || state.unsatisfied_deps > 0 ||
                state.pending_symbol_analyses > 0) {
                 continue;
             }
@@ -1121,12 +1154,23 @@ public:
             co_await kota::fail(std::move(scope_result.error()));
         }
 
-        if(renderer_.written_page_count() != tracker_.state_count()) {
+        if(failure_limit_exceeded()) {
             co_await kota::fail(GenerateError{
-                .message = std::format("generation stopped with {}/{} page states written",
-                                       renderer_.written_page_count(),
+                .message = std::format("generation stopped after {} consecutive LLM failures",
+                                       config_.llm.retry_count),
+            });
+        }
+
+        if(tracker_.finished_count() != tracker_.state_count()) {
+            co_await kota::fail(GenerateError{
+                .message = std::format("generation stopped with {}/{} page states finished",
+                                       tracker_.finished_count(),
                                        tracker_.state_count()),
             });
+        }
+        if(tracker_.failed_count() > 0) {
+            logging::warn("generation completed with {} failed page states",
+                          tracker_.failed_count());
         }
 
         if(!renderer_.dry_run()) {
@@ -1174,6 +1218,37 @@ public:
     }
 
 private:
+    auto reset_consecutive_failures(std::string_view reason) -> void {
+        auto previous = consecutive_failures_.exchange(0, std::memory_order_relaxed);
+        if(previous > 0) {
+            logging::info("reset consecutive generation failures after {}: {} -> 0",
+                          reason,
+                          previous);
+        }
+    }
+
+    auto record_consecutive_failure(std::string_view owner, std::string_view reason) -> bool {
+        auto count = consecutive_failures_.fetch_add(1, std::memory_order_relaxed) + 1;
+        logging::warn("consecutive generation failure {}/{} at '{}': {}",
+                      count,
+                      config_.llm.retry_count,
+                      owner,
+                      reason);
+        if(count < config_.llm.retry_count) {
+            return false;
+        }
+
+        failure_limit_exceeded_.store(true, std::memory_order_relaxed);
+        work_queue_.stop(worker_count_);
+        logging::err("generation failure limit exceeded after {} consecutive failures",
+                     count);
+        return true;
+    }
+
+    auto failure_limit_exceeded() const -> bool {
+        return failure_limit_exceeded_.load(std::memory_order_relaxed);
+    }
+
     auto schedule_symbol_analysis(const PreparedSymbolAnalysisTarget& target)
         -> std::expected<void, GenerateError> {
         auto* sym = extract::lookup_symbol(model_, target.symbol_id);
@@ -1185,7 +1260,7 @@ private:
 
         store_fallback_analysis(prepared_analyses_.analyses, *sym, model_);
 
-        std::size_t blocking_prompts = 0;
+        std::size_t pending_prompt_count = 0;
         for(auto kind: target.prompt_kinds) {
             SymbolAnalysisWork work{
                 .symbol_id = sym->id,
@@ -1193,6 +1268,7 @@ private:
                 .kind = kind,
             };
 
+            ++pending_prompt_count;
             if(is_declaration_summary_prompt(kind)) {
                 work_queue_.enqueue_deferred(std::move(work));
                 continue;
@@ -1203,15 +1279,14 @@ private:
             }
 
             work_queue_.enqueue(std::move(work));
-            ++blocking_prompts;
         }
 
-        if(blocking_prompts == 0) {
+        if(pending_prompt_count == 0) {
             tracker_.mark_symbol_ready(target.target_key);
             return {};
         }
 
-        tracker_.add_pending_symbols(target.target_key, blocking_prompts);
+        tracker_.add_pending_symbols(target.target_key, pending_prompt_count);
         return {};
     }
 
@@ -1232,8 +1307,6 @@ private:
         auto result = co_await request_llm_async(model_version_,
                                                  config_.llm.system_prompt,
                                                  std::move(request),
-                                                 config_.llm.retry_count,
-                                                 config_.llm.retry_initial_backoff_ms,
                                                  loop_)
                           .catch_cancel();
 
@@ -1259,33 +1332,67 @@ private:
             });
         }
 
+        reset_consecutive_failures("successful LLM request");
         co_return clore::support::ensure_utf8(*result);
     }
 
     auto worker_task() -> kota::task<void, GenerateError> {
         while(true) {
-            while(work_queue_.empty()) {
+            co_await work_queue_.available().acquire();
+
+            auto work = work_queue_.dequeue();
+            if(!work.has_value()) {
                 if(work_queue_.stopped()) {
                     co_return;
                 }
-
-                auto wait_result = co_await work_queue_.event().wait().catch_cancel();
-                if(wait_result.is_cancelled()) {
-                    co_await kota::fail(
-                        GenerateError{.message = "generation worker was cancelled"});
-                }
-                work_queue_.event().reset();
+                co_await kota::fail(
+                    GenerateError{.message = "generation worker woke without queued work"});
             }
 
-            auto work = work_queue_.dequeue();
-
-            if(std::holds_alternative<SymbolAnalysisWork>(work)) {
-                co_await run_symbol_analysis_task(std::move(std::get<SymbolAnalysisWork>(work)))
-                    .or_fail();
-            } else if(std::holds_alternative<PagePromptWork>(work)) {
-                co_await run_page_prompt_task(std::move(std::get<PagePromptWork>(work))).or_fail();
+            if(std::holds_alternative<SymbolAnalysisWork>(*work)) {
+                auto item = std::move(std::get<SymbolAnalysisWork>(*work));
+                auto result = co_await run_symbol_analysis_task(item).catch_cancel();
+                if(result.is_cancelled()) {
+                    logging::warn("symbol analysis work '{}' was cancelled", item.target_key);
+                    record_consecutive_failure(item.target_key, "symbol analysis was cancelled");
+                    co_await submit_after_symbol_analysis(item).catch_cancel();
+                } else if(result.has_error()) {
+                    logging::warn("symbol analysis work '{}' failed: {}",
+                                  item.target_key,
+                                  result.error().message);
+                    record_consecutive_failure(item.target_key, result.error().message);
+                    co_await submit_after_symbol_analysis(item).catch_cancel();
+                }
+            } else if(std::holds_alternative<PagePromptWork>(*work)) {
+                auto item = std::move(std::get<PagePromptWork>(*work));
+                auto result = co_await run_page_prompt_task(item).catch_cancel();
+                if(result.is_cancelled()) {
+                    logging::warn("page prompt work '{}' was cancelled", item.cache_identity);
+                    record_consecutive_failure(item.cache_identity, "page prompt was cancelled");
+                    co_await fail_page_work(item.state_index, "page prompt was cancelled")
+                        .catch_cancel();
+                } else if(result.has_error()) {
+                    logging::warn("page prompt work '{}' failed: {}",
+                                  item.cache_identity,
+                                  result.error().message);
+                    record_consecutive_failure(item.cache_identity, result.error().message);
+                    co_await fail_page_work(item.state_index, result.error().message)
+                        .catch_cancel();
+                }
             } else {
-                co_await render_ready_page(std::get<RenderPageWork>(work).state_index).or_fail();
+                auto item = std::get<RenderPageWork>(*work);
+                auto result = co_await render_ready_page(item.state_index).catch_cancel();
+                if(result.is_cancelled()) {
+                    logging::warn("render work for state {} was cancelled", item.state_index);
+                    co_await fail_page_work(item.state_index, "render was cancelled")
+                        .catch_cancel();
+                } else if(result.has_error()) {
+                    logging::warn("render work for state {} failed: {}",
+                                  item.state_index,
+                                  result.error().message);
+                    co_await fail_page_work(item.state_index, result.error().message)
+                        .catch_cancel();
+                }
             }
         }
     }
@@ -1296,6 +1403,17 @@ private:
             finish_base_symbol_prompt(work.kind);
         }
         tracker_.finish_symbol_prompt(work.target_key);
+        co_await try_submit_ready_pages().or_fail();
+        co_return;
+    }
+
+    auto fail_page_work(std::size_t state_index, std::string_view reason)
+        -> kota::task<void, GenerateError> {
+        auto& state = tracker_.state_at(state_index);
+        auto& plan = context_.plan_set.plans[state.plan_index];
+        tracker_.mark_page_failed(state_index, plan.page_id);
+        logging::warn("page '{}' failed and dependents were released: {}", plan.page_id, reason);
+        maybe_stop_workers();
         co_await try_submit_ready_pages().or_fail();
         co_return;
     }
@@ -1398,6 +1516,7 @@ private:
             auto message = raw_result.is_cancelled() ? std::string("LLM request cancelled")
                                                      : raw_result.error().message;
             logging::warn("using fallback analysis for '{}': {}", output_key, message);
+            record_consecutive_failure(output_key, message);
             co_await submit_after_symbol_analysis(work).or_fail();
             co_return;
         }
@@ -1414,6 +1533,10 @@ private:
             logging::warn("using fallback analysis for '{}': {}",
                           output_key,
                           apply_result.error().message);
+            if(record_consecutive_failure(output_key, apply_result.error().message)) {
+                co_await submit_after_symbol_analysis(work).or_fail();
+                co_return;
+            }
         } else if(cache_index_.has_value()) {
             auto save_result =
                 co_await cache::save_cache_entry_async(std::string(config_.workspace_root),
@@ -1572,7 +1695,7 @@ private:
 
     auto render_ready_page(std::size_t state_idx) -> kota::task<void, GenerateError> {
         auto& state = tracker_.state_at(state_idx);
-        if(state.written) {
+        if(state.written || state.failed) {
             co_return;
         }
 
@@ -1618,6 +1741,9 @@ private:
                                  std::string output_key,
                                  std::string parsed_output) -> kota::task<void, GenerateError> {
         auto& state = tracker_.state_at(state_index);
+        if(state.written || state.failed) {
+            co_return;
+        }
         state.prompt_outputs[output_key] = std::move(parsed_output);
         state.completed_prompts++;
 
@@ -1669,8 +1795,8 @@ private:
     }
 
     auto maybe_stop_workers() -> void {
-        if(renderer_.written_page_count() == tracker_.state_count()) {
-            work_queue_.stop();
+        if(tracker_.finished_count() == tracker_.state_count()) {
+            work_queue_.stop(worker_count_);
         }
     }
 
@@ -1699,6 +1825,8 @@ private:
     std::atomic<std::size_t> expected_llm_requests_ = 0;
     std::atomic<std::size_t> llm_requests_issued_ = 0;
     std::atomic<std::size_t> llm_requests_completed_ = 0;
+    std::atomic<std::size_t> consecutive_failures_ = 0;
+    std::atomic<bool> failure_limit_exceeded_ = false;
 };
 
 }  // namespace

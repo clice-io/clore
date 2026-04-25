@@ -12,7 +12,6 @@ struct FilterRule {
 struct LLMConfig {
     std::string system_prompt;
     std::uint32_t retry_count = 0;
-    std::uint32_t retry_initial_backoff_ms = 0;
 };
 
 struct TaskConfig {

@@ -37,7 +37,7 @@ TEST_CASE(build_page_doc_layout_empty_for_file_page) {
     EXPECT_TRUE(layout.function_docs.empty());
 }
 
-TEST_CASE(build_page_doc_layout_groups_symbols) {
+TEST_CASE(build_page_doc_layout_groups_symbols_without_variable_subpages) {
     extract::ProjectModel model;
     auto file = "test.cpp";
 
@@ -70,6 +70,8 @@ TEST_CASE(build_page_doc_layout_groups_symbols) {
     auto var_id = var_sym.id;
 
     auto fn_sym = make_function_symbol(6, "render", "demo::render", "void render()", file, "demo");
+    fn_sym.calls = {member_fn_id};
+    fn_sym.called_by = {member_fn_id};
     auto fn_id = fn_sym.id;
 
     type_sym.children = {
@@ -93,14 +95,53 @@ TEST_CASE(build_page_doc_layout_groups_symbols) {
 
     auto layout = build_page_doc_layout(plan, model);
     EXPECT_EQ(layout.type_docs.size(), 1u);
-    EXPECT_EQ(layout.variable_docs.size(), 1u);
+    EXPECT_TRUE(layout.variable_docs.empty());
     EXPECT_EQ(layout.function_docs.size(), 1u);
-    EXPECT_FALSE(layout.type_docs.front().detail_path.empty());
-    EXPECT_FALSE(layout.variable_docs.front().detail_path.empty());
-    EXPECT_FALSE(layout.function_docs.front().detail_path.empty());
-    EXPECT_TRUE(layout.detail_paths.contains("demo::Widget"));
-    EXPECT_TRUE(layout.detail_paths.contains("demo::count"));
-    EXPECT_TRUE(layout.detail_paths.contains("demo::render"));
+    EXPECT_EQ(layout.type_docs.front().index_path, "namespaces/demo/types/widget.md");
+    EXPECT_EQ(layout.function_docs.front().index_path, "namespaces/demo/functions/render.md");
+    EXPECT_TRUE(layout.index_paths.contains("demo::Widget"));
+    EXPECT_FALSE(layout.index_paths.contains("demo::count"));
+    EXPECT_TRUE(layout.index_paths.contains("demo::render"));
+}
+
+TEST_CASE(build_page_doc_layout_requires_complex_function_for_function_subpage) {
+    extract::ProjectModel model;
+    auto file = "test.cpp";
+
+    auto leaf = make_function_symbol(10, "leaf", "demo::leaf", "void leaf()", file, "demo");
+    auto leaf_id = leaf.id;
+
+    auto caller = make_function_symbol(11, "caller", "demo::caller", "void caller()", file, "demo");
+    auto caller_id = caller.id;
+
+    auto coordinator = make_function_symbol(12,
+                                            "coordinator",
+                                            "demo::coordinator",
+                                            "void coordinator()",
+                                            file,
+                                            "demo");
+    auto coordinator_id = coordinator.id;
+    coordinator.calls = {leaf_id};
+    coordinator.called_by = {caller_id};
+
+    add_symbol(model, std::move(leaf));
+    add_symbol(model, std::move(caller));
+    add_symbol(model, std::move(coordinator));
+    add_namespace(model, "demo", {leaf_id, caller_id, coordinator_id});
+
+    PagePlan plan;
+    plan.page_type = PageType::Namespace;
+    plan.owner_keys = {"demo"};
+    plan.relative_path = "namespaces/demo/index.md";
+
+    auto layout = build_page_doc_layout(plan, model);
+
+    ASSERT_EQ(layout.function_docs.size(), 1u);
+    ASSERT_TRUE(layout.function_docs.front().symbol != nullptr);
+    EXPECT_EQ(layout.function_docs.front().symbol->qualified_name, "demo::coordinator");
+    EXPECT_FALSE(layout.index_paths.contains("demo::leaf"));
+    EXPECT_FALSE(layout.index_paths.contains("demo::caller"));
+    EXPECT_TRUE(layout.index_paths.contains("demo::coordinator"));
 }
 
 TEST_CASE(normalize_frontmatter_title_strips_inline_markdown) {

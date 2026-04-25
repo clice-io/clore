@@ -2,6 +2,7 @@
 #include <fstream>
 #include <string>
 
+#include "kota/async/async.h"
 #include "kota/zest/zest.h"
 
 import extract;
@@ -26,6 +27,21 @@ auto canonical_test_path(const std::filesystem::path& path) -> std::string {
     }
 
     return canonical.generic_string();
+}
+
+auto run_build_dependency_graph_async(CompilationDatabase db,
+                                      DependencyGraph& graph,
+                                      ScanCache& cache) -> std::expected<void, ScanError> {
+    kota::event_loop loop;
+    auto task = build_dependency_graph_async(std::move(db), graph, &cache, loop);
+    loop.schedule(task);
+    loop.run();
+
+    auto result = task.result();
+    if(result.has_error()) {
+        return std::unexpected(std::move(result.error()));
+    }
+    return {};
 }
 
 }  // namespace
@@ -161,7 +177,7 @@ TEST_CASE(build_dependency_graph_mints_missing_cache_keys) {
                                        });
     DependencyGraph graph;
 
-    auto result = build_dependency_graph(db, graph, &initial_cache);
+    auto result = run_build_dependency_graph_async(std::move(db), graph, initial_cache);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(graph.files.size(), 1u);
@@ -234,7 +250,7 @@ TEST_CASE(build_dependency_graph_with_initial_cache_mints_missing_cache_keys) {
                                        });
     DependencyGraph graph;
 
-    auto result = build_dependency_graph(db, graph, &initial_cache);
+    auto result = run_build_dependency_graph_async(std::move(db), graph, initial_cache);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(graph.files.size(), 2u);
@@ -287,7 +303,7 @@ TEST_CASE(build_dependency_graph_clears_preexisting_graph_state) {
         {.from = "stale.cpp", .to = "stale.hpp"}
     };
 
-    auto result = build_dependency_graph(db, graph, &initial_cache);
+    auto result = run_build_dependency_graph_async(std::move(db), graph, initial_cache);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(graph.files.size(), 1u);
@@ -347,7 +363,7 @@ TEST_CASE(build_dependency_graph_scans_uncached_entries_and_populates_cache) {
     DependencyGraph graph;
     ScanCache cache;
 
-    auto result = build_dependency_graph(db, graph, &cache);
+    auto result = run_build_dependency_graph_async(std::move(db), graph, cache);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(graph.files.size(), 2u);
@@ -422,7 +438,7 @@ TEST_CASE(build_dependency_graph_deduplicates_duplicate_sources_and_cache_writes
     DependencyGraph graph;
     ScanCache cache;
 
-    auto result = build_dependency_graph(db, graph, &cache);
+    auto result = run_build_dependency_graph_async(std::move(db), graph, cache);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(graph.files.size(), 2u);
@@ -520,7 +536,7 @@ TEST_CASE(build_dependency_graph_normalizes_relative_includes_like_entries) {
                                        });
     DependencyGraph graph;
 
-    auto result = build_dependency_graph(db, graph, &initial_cache);
+    auto result = run_build_dependency_graph_async(std::move(db), graph, initial_cache);
 
     ASSERT_TRUE(result.has_value());
     ASSERT_EQ(graph.edges.size(), 1u);
@@ -587,7 +603,7 @@ TEST_CASE(build_dependency_graph_canonicalizes_symlinked_entries_and_includes) {
                                        });
     DependencyGraph graph;
 
-    auto result = build_dependency_graph(db, graph, &initial_cache);
+    auto result = run_build_dependency_graph_async(std::move(db), graph, initial_cache);
 
     ASSERT_TRUE(result.has_value());
     ASSERT_EQ(graph.edges.size(), 1u);

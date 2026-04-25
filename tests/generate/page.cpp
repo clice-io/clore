@@ -128,6 +128,63 @@ TEST_CASE(render_page_markdown_links_type_declarations_and_implementations_bidir
     EXPECT_EQ(module_markdown->find("struct Widget {}"), std::string::npos);
 }
 
+TEST_CASE(render_module_page_links_imports_bidirectionally) {
+    ScopedTempDir temp("module_import_links");
+    fs::create_directories(temp.path / "src");
+
+    auto config = make_config(temp.path);
+    extract::ProjectModel model;
+    model.uses_modules = true;
+
+    auto util_file = (temp.path / "src" / "util.cppm").generic_string();
+    auto app_file = (temp.path / "src" / "app.cppm").generic_string();
+
+    add_module(model,
+               extract::ModuleUnit{
+                   .name = "demo.util",
+                   .is_interface = true,
+                   .source_file = util_file,
+                   .imports = {},
+                   .symbols = {},
+               });
+    add_module(model,
+               extract::ModuleUnit{
+                   .name = "demo.app",
+                   .is_interface = true,
+                   .source_file = app_file,
+                   .imports = {"demo.util"},
+                   .symbols = {},
+               });
+
+    PagePlan util_plan{
+        .page_id = "module:demo.util",
+        .page_type = PageType::Module,
+        .title = "Module `demo.util`",
+        .relative_path = "modules/demo/util/index.md",
+        .owner_keys = {"demo.util"},
+    };
+    PagePlan app_plan{
+        .page_id = "module:demo.app",
+        .page_type = PageType::Module,
+        .title = "Module `demo.app`",
+        .relative_path = "modules/demo/app/index.md",
+        .owner_keys = {"demo.app"},
+    };
+
+    PagePlanSet plan_set{
+        .plans = {util_plan, app_plan}
+    };
+    auto links = build_link_resolver(plan_set);
+
+    auto util_markdown = render_page_markdown(util_plan, config, model, {}, links);
+    auto app_markdown = render_page_markdown(app_plan, config, model, {}, links);
+
+    ASSERT_TRUE(util_markdown.has_value());
+    ASSERT_TRUE(app_markdown.has_value());
+    EXPECT_NE(app_markdown->find("[`demo.util`](../util/index.md)"), std::string::npos);
+    EXPECT_NE(util_markdown->find("[`demo.app`](../app/index.md)"), std::string::npos);
+}
+
 TEST_CASE(render_page_markdown_emits_file_dependency_diagram_when_graph_is_nontrivial) {
     ScopedTempDir temp("file_dependency_diagram");
     fs::create_directories(temp.path / "src");
@@ -190,6 +247,59 @@ TEST_CASE(render_page_markdown_omits_file_dependency_diagram_for_tiny_graph) {
     EXPECT_NE(result->find("## Functions\n"), std::string::npos);
     EXPECT_NE(result->find("### `demo::run`\n"), std::string::npos);
     EXPECT_EQ(result->find("## Dependency Diagram"), std::string::npos);
+}
+
+TEST_CASE(render_file_page_links_includes_bidirectionally) {
+    ScopedTempDir temp("file_include_links");
+    fs::create_directories(temp.path / "src");
+    fs::create_directories(temp.path / "include");
+
+    auto config = make_config(temp.path);
+    extract::ProjectModel model;
+    auto header = (temp.path / "include" / "engine.hpp").generic_string();
+    auto source = (temp.path / "src" / "engine.cpp").generic_string();
+
+    model.files.emplace(header,
+                        extract::FileInfo{
+                            .path = header,
+                            .symbols = {extract::SymbolID{.hash = 920}},
+                            .includes = {},
+                        });
+    model.files.emplace(source,
+                        extract::FileInfo{
+                            .path = source,
+                            .symbols = {extract::SymbolID{.hash = 921}},
+                            .includes = {header},
+                        });
+
+    PagePlan header_plan{
+        .page_id = "file:" + header,
+        .page_type = PageType::File,
+        .title = "File `include/engine.hpp`",
+        .relative_path = "files/include/engine.hpp.md",
+        .owner_keys = {header},
+    };
+    PagePlan source_plan{
+        .page_id = "file:" + source,
+        .page_type = PageType::File,
+        .title = "File `src/engine.cpp`",
+        .relative_path = "files/src/engine.cpp.md",
+        .owner_keys = {source},
+    };
+
+    PagePlanSet plan_set{
+        .plans = {header_plan, source_plan}
+    };
+    auto links = build_link_resolver(plan_set);
+
+    auto header_markdown = render_page_markdown(header_plan, config, model, {}, links);
+    auto source_markdown = render_page_markdown(source_plan, config, model, {}, links);
+
+    ASSERT_TRUE(header_markdown.has_value());
+    ASSERT_TRUE(source_markdown.has_value());
+    EXPECT_NE(source_markdown->find("[`include/engine.hpp`](../include/engine.hpp.md)"),
+              std::string::npos);
+    EXPECT_NE(header_markdown->find("[`src/engine.cpp`](../src/engine.cpp.md)"), std::string::npos);
 }
 
 TEST_CASE(render_namespace_diagram_keeps_distinct_types_with_same_short_name) {
@@ -260,7 +370,7 @@ TEST_CASE(render_namespace_diagram_keeps_distinct_types_with_same_short_name) {
     EXPECT_EQ(count_occurrences(diagram, "[\"Widget\"]"), 1u);
 }
 
-TEST_CASE(render_page_bundle_places_complex_type_members_in_nested_doc_page_without_code_blocks) {
+TEST_CASE(render_page_bundle_places_complex_type_members_in_nested_doc_page) {
     ScopedTempDir temp("type_member_order");
     fs::create_directories(temp.path / "src");
 
@@ -338,9 +448,12 @@ TEST_CASE(render_page_bundle_places_complex_type_members_in_nested_doc_page_with
     ASSERT_TRUE(root_page != bundle->end());
     ASSERT_TRUE(detail_page != bundle->end());
     EXPECT_EQ(root_page->content.find("struct Widget {}"), std::string::npos);
-    EXPECT_EQ(detail_page->content.find("struct Widget {}"), std::string::npos);
+    EXPECT_NE(detail_page->content.find("struct Widget {}"), std::string::npos);
     EXPECT_EQ(detail_page->content.find("void run() { return 0; }"), std::string::npos);
-    EXPECT_NE(root_page->content.find("[Overview](types/widget.md)"), std::string::npos);
+    EXPECT_NE(root_page->content.find("[Declaration](types/widget.md)"), std::string::npos);
+    EXPECT_FALSE(std::ranges::any_of(*bundle, [](const GeneratedPage& page) {
+        return page.relative_path == "namespaces/demo/types/widget-declaration.md";
+    }));
 
     auto member_types = detail_page->content.find("## Member Types");
     auto member_variables = detail_page->content.find("## Member Variables");
@@ -350,6 +463,15 @@ TEST_CASE(render_page_bundle_places_complex_type_members_in_nested_doc_page_with
     ASSERT_TRUE(member_functions != std::string::npos);
     EXPECT_LT(member_types, member_variables);
     EXPECT_LT(member_variables, member_functions);
+    EXPECT_NE(root_page->content.find("#### Member Types"), std::string::npos);
+    EXPECT_NE(root_page->content.find("##### `demo::Widget::Options`"), std::string::npos);
+    EXPECT_NE(root_page->content.find("#### Member Variables"), std::string::npos);
+    EXPECT_NE(root_page->content.find("##### `demo::Widget::state`"), std::string::npos);
+    EXPECT_NE(root_page->content.find("#### Member Functions"), std::string::npos);
+    EXPECT_NE(root_page->content.find("##### `demo::Widget::run`"), std::string::npos);
+    EXPECT_NE(root_page->content.find("void run();"), std::string::npos);
+    EXPECT_EQ(root_page->content.find("void run() { return 0; }"), std::string::npos);
+    EXPECT_NE(detail_page->content.find("void run();"), std::string::npos);
 }
 
 TEST_CASE(render_page_markdown_preserves_prompt_code_fence_markers) {
@@ -506,9 +628,130 @@ TEST_CASE(render_page_bundle_emits_nested_symbol_docs_for_complex_module_types) 
     });
     ASSERT_TRUE(root_page != bundle->end());
     ASSERT_TRUE(detail_page != bundle->end());
-    EXPECT_NE(root_page->content.find("[Overview](types/widget.md)"), std::string::npos);
+    EXPECT_NE(root_page->content.find("[Implementation](types/widget.md)"), std::string::npos);
+    EXPECT_FALSE(std::ranges::any_of(*bundle, [](const GeneratedPage& page) {
+        return page.relative_path == "modules/demo/math/types/widget-implementation.md";
+    }));
+    EXPECT_NE(root_page->content.find("#### Member Types"), std::string::npos);
+    EXPECT_NE(root_page->content.find("##### `demo::Widget::Options`"), std::string::npos);
+    EXPECT_NE(root_page->content.find("#### Member Variables"), std::string::npos);
+    EXPECT_NE(root_page->content.find("##### `demo::Widget::state`"), std::string::npos);
+    EXPECT_NE(root_page->content.find("#### Member Functions"), std::string::npos);
+    EXPECT_NE(root_page->content.find("##### `demo::Widget::run`"), std::string::npos);
+    EXPECT_NE(root_page->content.find("void run() { return 0; }"), std::string::npos);
     EXPECT_NE(detail_page->content.find("## Structure Diagram"), std::string::npos);
     EXPECT_NE(detail_page->content.find("```mermaid"), std::string::npos);
+    EXPECT_NE(detail_page->content.find("void run() { return 0; }"), std::string::npos);
+}
+
+TEST_CASE(render_file_page_embeds_type_member_implementations) {
+    ScopedTempDir temp("file_type_member_implementations");
+    fs::create_directories(temp.path / "src");
+
+    auto config = make_config(temp.path);
+    extract::ProjectModel model;
+    auto file = (temp.path / "src" / "widget.cpp").generic_string();
+
+    auto widget = make_type_symbol(850, "Widget", "demo::Widget", file, "Widget type.", "demo");
+    auto run = make_function_symbol(851, "run", "demo::Widget::run", "void run()", file, "demo");
+    run.kind = extract::SymbolKind::Method;
+    run.parent = widget.id;
+    run.lexical_parent_name = "demo::Widget";
+    run.lexical_parent_kind = extract::SymbolKind::Struct;
+    widget.children = {run.id};
+
+    auto widget_id = widget.id;
+    auto widget_key = make_symbol_target_key(widget);
+    add_symbol(model, std::move(widget));
+    add_symbol(model, std::move(run));
+
+    PagePlan file_plan{
+        .page_id = "file:" + file,
+        .page_type = PageType::File,
+        .title = "File `src/widget.cpp`",
+        .relative_path = "files/src/widget.md",
+        .owner_keys = {file},
+        .prompt_requests = {},
+    };
+
+    SymbolAnalysisStore analyses;
+    analyses.types.insert_or_assign(widget_key,
+                                    TypeAnalysis{
+                                        .overview_markdown = "Widget declaration notes.",
+                                        .details_markdown = "Widget implementation notes.",
+                                        .invariants = {},
+                                        .key_members = {},
+                                        .usage_patterns = {},
+                                    });
+
+    PagePlanSet plan_set{.plans = {file_plan}};
+    auto links = build_link_resolver(plan_set);
+    auto markdown = render_page_markdown(file_plan, config, model, {}, analyses, links);
+
+    ASSERT_TRUE(markdown.has_value());
+    EXPECT_NE(markdown->find("### `demo::Widget`"), std::string::npos);
+    EXPECT_NE(markdown->find("#### Member Functions"), std::string::npos);
+    EXPECT_NE(markdown->find("##### `demo::Widget::run`"), std::string::npos);
+    EXPECT_NE(markdown->find("void run() { return 0; }"), std::string::npos);
+    EXPECT_NE(markdown->find("Widget implementation notes."), std::string::npos);
+    EXPECT_EQ(markdown->find("Widget declaration notes."), std::string::npos);
+}
+
+TEST_CASE(render_page_bundle_emits_function_docs_only_for_complex_functions) {
+    ScopedTempDir temp("complex_function_docs");
+    fs::create_directories(temp.path / "src");
+
+    auto config = make_config(temp.path);
+    extract::ProjectModel model;
+    auto file = (temp.path / "src" / "flow.cppm").generic_string();
+
+    auto leaf = make_function_symbol(900, "leaf", "demo::leaf", "void leaf()", file, "demo");
+    auto leaf_id = leaf.id;
+    auto caller =
+        make_function_symbol(901, "caller", "demo::caller", "void caller()", file, "demo");
+    auto caller_id = caller.id;
+    auto coordinator = make_function_symbol(902,
+                                            "coordinator",
+                                            "demo::coordinator",
+                                            "void coordinator()",
+                                            file,
+                                            "demo");
+    auto coordinator_id = coordinator.id;
+    coordinator.calls = {leaf_id};
+    coordinator.called_by = {caller_id};
+
+    add_symbol(model, std::move(leaf));
+    add_symbol(model, std::move(caller));
+    add_symbol(model, std::move(coordinator));
+    add_namespace(model, "demo", {leaf_id, caller_id, coordinator_id});
+
+    PagePlan namespace_plan{
+        .page_id = "namespace:demo",
+        .page_type = PageType::Namespace,
+        .title = "Namespace `demo`",
+        .relative_path = "namespaces/demo/index.md",
+        .owner_keys = {"demo"},
+        .prompt_requests = {PromptRequest{.kind = PromptKind::NamespaceSummary}},
+    };
+
+    auto outputs = std::unordered_map<std::string, std::string>{
+        {prompt_request_key(PromptRequest{.kind = PromptKind::NamespaceSummary}), "Summary"},
+    };
+
+    PagePlanSet plan_set{.plans = {namespace_plan}};
+    auto links = build_link_resolver(plan_set);
+    auto bundle = render_page_bundle(namespace_plan, config, model, outputs, links);
+
+    ASSERT_TRUE(bundle.has_value());
+    EXPECT_TRUE(std::ranges::any_of(*bundle, [](const GeneratedPage& page) {
+        return page.relative_path == "namespaces/demo/functions/coordinator.md";
+    }));
+    EXPECT_FALSE(std::ranges::any_of(*bundle, [](const GeneratedPage& page) {
+        return page.relative_path == "namespaces/demo/functions/leaf.md";
+    }));
+    EXPECT_FALSE(std::ranges::any_of(*bundle, [](const GeneratedPage& page) {
+        return page.relative_path == "namespaces/demo/functions/caller.md";
+    }));
 }
 
 TEST_CASE(render_page_markdown_omits_reading_guide_section_from_index) {

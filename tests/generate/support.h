@@ -37,7 +37,6 @@ struct ScopedTempDir {
 
     config.llm.system_prompt = "You are a writer.";
     config.llm.retry_count = 3;
-    config.llm.retry_initial_backoff_ms = 250;
 
     return config;
 }

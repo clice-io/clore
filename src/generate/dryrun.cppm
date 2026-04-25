@@ -124,9 +124,11 @@ auto estimate_request_count(const PagePlanSet& plan_set, const extract::ProjectM
     return estimate;
 }
 
-auto build_request_estimate_page_impl(const PagePlanSet& plan_set,
-                                      const extract::ProjectModel& model,
-                                      const config::TaskConfig& config) -> GeneratedPage {
+}  // namespace
+
+auto build_request_estimate_page(const PagePlanSet& plan_set,
+                                 const extract::ProjectModel& model,
+                                 const config::TaskConfig& config) -> GeneratedPage {
     auto estimate = estimate_request_count(plan_set, model);
     auto project_name = std::filesystem::path(config.project_root).filename().generic_string();
     if(project_name.empty()) {
@@ -188,14 +190,6 @@ auto build_request_estimate_page_impl(const PagePlanSet& plan_set,
         .relative_path = "request-estimate.md",
         .content = std::move(content),
     };
-}
-
-}  // namespace
-
-auto build_request_estimate_page(const PagePlanSet& plan_set,
-                                 const extract::ProjectModel& model,
-                                 const config::TaskConfig& config) -> GeneratedPage {
-    return build_request_estimate_page_impl(plan_set, model, config);
 }
 
 auto page_summary_cache_key_for_request(const PagePlan& plan, const PromptRequest& request)

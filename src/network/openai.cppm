@@ -3,6 +3,7 @@ module;
 #include "kota/async/async.h"
 #include "kota/codec/json/error.h"
 #include "kota/codec/json/json.h"
+#include "kota/http/http.h"
 
 export module openai;
 
@@ -11,101 +12,19 @@ import http;
 import protocol;
 import schema;
 import client;
+import provider;
 import support;
 
 // ── protocol serialization ──────────────────────────────────────────────
-namespace clore::net::openai_protocol_detail {
+namespace clore::net::openai::protocol::detail {
 
 namespace json = kota::codec::json;
 
-template <typename T>
-using remove_cvref_t = std::remove_cvref_t<T>;
-
 auto validate_request(const CompletionRequest& request) -> std::expected<void, LLMError> {
-    if(request.model.empty()) {
-        return std::unexpected(LLMError("request model must not be empty"));
-    }
-    if(request.messages.empty()) {
-        return std::unexpected(LLMError("request messages must not be empty"));
-    }
-
-    if(request.response_format.has_value()) {
-        auto status = clore::net::detail::validate_response_format(*request.response_format);
-        if(!status.has_value()) {
-            return std::unexpected(std::move(status.error()));
-        }
-    }
-
-    for(auto& tool: request.tools) {
-        auto status = clore::net::detail::validate_tool_definition(tool);
-        if(!status.has_value()) {
-            return std::unexpected(std::move(status.error()));
-        }
-    }
-
-    if((request.tool_choice.has_value() || request.parallel_tool_calls.has_value()) &&
-       request.tools.empty()) {
-        return std::unexpected(
-            LLMError("tool_choice and parallel_tool_calls require at least one tool"));
-    }
-
-    if(request.tool_choice.has_value()) {
-        if(auto forced = std::get_if<ForcedFunctionToolChoice>(&*request.tool_choice)) {
-            bool exists = false;
-            for(auto& tool: request.tools) {
-                if(tool.name == forced->name) {
-                    exists = true;
-                    break;
-                }
-            }
-            if(!exists) {
-                return std::unexpected(LLMError(
-                    std::format("forced tool '{}' is not present in request.tools", forced->name)));
-            }
-        }
-    }
-
-    for(auto& message: request.messages) {
-        auto status = std::visit(
-            [](const auto& current) -> std::expected<void, LLMError> {
-                using message_type = remove_cvref_t<decltype(current)>;
-                if constexpr(std::same_as<message_type, AssistantToolCallMessage>) {
-                    if(!current.content.has_value() && current.tool_calls.empty()) {
-                        return std::unexpected(LLMError(
-                            "assistant tool-call message must contain content " "or tool_calls"));
-                    }
-                    std::unordered_set<std::string> ids;
-                    for(auto& call: current.tool_calls) {
-                        if(call.id.empty()) {
-                            return std::unexpected(LLMError("tool call id must not be empty"));
-                        }
-                        if(call.name.empty()) {
-                            return std::unexpected(LLMError("tool call name must not be empty"));
-                        }
-                        if(!ids.emplace(call.id).second) {
-                            return std::unexpected(
-                                LLMError(std::format("duplicate tool call id '{}'", call.id)));
-                        }
-                    }
-                } else if constexpr(std::same_as<message_type, ToolResultMessage>) {
-                    if(current.tool_call_id.empty()) {
-                        return std::unexpected(
-                            LLMError("tool result message tool_call_id must not be empty"));
-                    }
-                }
-                return {};
-            },
-            message);
-        if(!status.has_value()) {
-            return std::unexpected(std::move(status.error()));
-        }
-    }
-
-    return {};
+    return clore::net::detail::validate_completion_request(request, true, true);
 }
 
-auto serialize_message(json::Document&, json::Array& out, const Message& message)
-    -> std::expected<void, LLMError> {
+auto serialize_message(json::Array& out, const Message& message) -> std::expected<void, LLMError> {
     auto object = clore::net::detail::make_empty_object("failed to create request message object");
     if(!object.has_value()) {
         return std::unexpected(std::move(object.error()));
@@ -113,12 +32,9 @@ auto serialize_message(json::Document&, json::Array& out, const Message& message
 
     auto status = std::visit(
         [&](const auto& current) -> std::expected<void, LLMError> {
-            using message_type = remove_cvref_t<decltype(current)>;
+            using message_type = std::remove_cvref_t<decltype(current)>;
             if constexpr(std::same_as<message_type, SystemMessage>) {
-                if(auto result = object->insert("role", "system"); !result.has_value()) {
-                    return clore::net::detail::to_llm_unexpected(result.error(),
-                                                                 "failed to serialize system role");
-                }
+                object->insert("role", "system");
                 auto content =
                     clore::net::detail::normalize_utf8(current.content, "system content");
                 auto result =
@@ -130,10 +46,7 @@ auto serialize_message(json::Document&, json::Array& out, const Message& message
                     return std::unexpected(std::move(result.error()));
                 }
             } else if constexpr(std::same_as<message_type, UserMessage>) {
-                if(auto result = object->insert("role", "user"); !result.has_value()) {
-                    return clore::net::detail::to_llm_unexpected(result.error(),
-                                                                 "failed to serialize user role");
-                }
+                object->insert("role", "user");
                 auto content = clore::net::detail::normalize_utf8(current.content, "user content");
                 auto result =
                     clore::net::detail::insert_string_field(*object,
@@ -144,11 +57,7 @@ auto serialize_message(json::Document&, json::Array& out, const Message& message
                     return std::unexpected(std::move(result.error()));
                 }
             } else if constexpr(std::same_as<message_type, AssistantMessage>) {
-                if(auto result = object->insert("role", "assistant"); !result.has_value()) {
-                    return clore::net::detail::to_llm_unexpected(
-                        result.error(),
-                        "failed to serialize assistant role");
-                }
+                object->insert("role", "assistant");
                 auto content =
                     clore::net::detail::normalize_utf8(current.content, "assistant content");
                 auto result = clore::net::detail::insert_string_field(
@@ -160,11 +69,7 @@ auto serialize_message(json::Document&, json::Array& out, const Message& message
                     return std::unexpected(std::move(result.error()));
                 }
             } else if constexpr(std::same_as<message_type, AssistantToolCallMessage>) {
-                if(auto result = object->insert("role", "assistant"); !result.has_value()) {
-                    return clore::net::detail::to_llm_unexpected(
-                        result.error(),
-                        "failed to serialize assistant role");
-                }
+                object->insert("role", "assistant");
                 if(current.content.has_value()) {
                     auto content =
                         clore::net::detail::normalize_utf8(*current.content, "assistant content");
@@ -202,12 +107,7 @@ auto serialize_message(json::Document&, json::Array& out, const Message& message
                         if(!call_id.has_value()) {
                             return std::unexpected(std::move(call_id.error()));
                         }
-                        if(auto result = call_object->insert("type", "function");
-                           !result.has_value()) {
-                            return clore::net::detail::to_llm_unexpected(
-                                result.error(),
-                                "failed to serialize tool call type");
-                        }
+                        call_object->insert("type", "function");
                         auto function_name = clore::net::detail::insert_string_field(
                             *function_object,
                             "name",
@@ -227,32 +127,13 @@ auto serialize_message(json::Document&, json::Array& out, const Message& message
                         if(!function_arguments.has_value()) {
                             return std::unexpected(std::move(function_arguments.error()));
                         }
-                        if(auto result =
-                               call_object->insert("function", std::move(*function_object));
-                           !result.has_value()) {
-                            return clore::net::detail::to_llm_unexpected(
-                                result.error(),
-                                "failed to serialize tool call function payload");
-                        }
-                        if(auto result = tool_calls->push_back(std::move(*call_object));
-                           !result.has_value()) {
-                            return clore::net::detail::to_llm_unexpected(
-                                result.error(),
-                                "failed to append tool call");
-                        }
+                        call_object->insert("function", std::move(*function_object));
+                        tool_calls->push_back(std::move(*call_object));
                     }
-                    if(auto result = object->insert("tool_calls", std::move(*tool_calls));
-                       !result.has_value()) {
-                        return clore::net::detail::to_llm_unexpected(
-                            result.error(),
-                            "failed to serialize assistant tool_calls");
-                    }
+                    object->insert("tool_calls", std::move(*tool_calls));
                 }
             } else if constexpr(std::same_as<message_type, ToolResultMessage>) {
-                if(auto result = object->insert("role", "tool"); !result.has_value()) {
-                    return clore::net::detail::to_llm_unexpected(result.error(),
-                                                                 "failed to serialize tool role");
-                }
+                object->insert("role", "tool");
                 auto tool_call_id =
                     clore::net::detail::insert_string_field(*object,
                                                             "tool_call_id",
@@ -279,11 +160,7 @@ auto serialize_message(json::Document&, json::Array& out, const Message& message
         return std::unexpected(std::move(status.error()));
     }
 
-    auto push_status = out.push_back(std::move(*object));
-    if(!push_status.has_value()) {
-        return clore::net::detail::to_llm_unexpected(push_status.error(),
-                                                     "failed to append request message");
-    }
+    out.push_back(std::move(*object));
     return {};
 }
 
@@ -291,27 +168,15 @@ auto serialize_tool_choice(json::Object& root, const ToolChoice& choice)
     -> std::expected<void, LLMError> {
     return std::visit(
         [&](const auto& current) -> std::expected<void, LLMError> {
-            using choice_type = remove_cvref_t<decltype(current)>;
+            using choice_type = std::remove_cvref_t<decltype(current)>;
             if constexpr(std::same_as<choice_type, ToolChoiceAuto>) {
-                auto status = root.insert("tool_choice", "auto");
-                if(!status.has_value()) {
-                    return clore::net::detail::to_llm_unexpected(status.error(),
-                                                                 "failed to serialize tool_choice");
-                }
+                root.insert("tool_choice", "auto");
                 return {};
             } else if constexpr(std::same_as<choice_type, ToolChoiceRequired>) {
-                auto status = root.insert("tool_choice", "required");
-                if(!status.has_value()) {
-                    return clore::net::detail::to_llm_unexpected(status.error(),
-                                                                 "failed to serialize tool_choice");
-                }
+                root.insert("tool_choice", "required");
                 return {};
             } else if constexpr(std::same_as<choice_type, ToolChoiceNone>) {
-                auto status = root.insert("tool_choice", "none");
-                if(!status.has_value()) {
-                    return clore::net::detail::to_llm_unexpected(status.error(),
-                                                                 "failed to serialize tool_choice");
-                }
+                root.insert("tool_choice", "none");
                 return {};
             } else {
                 auto object = clore::net::detail::make_empty_object(
@@ -324,11 +189,7 @@ auto serialize_tool_choice(json::Object& root, const ToolChoice& choice)
                 if(!function_object.has_value()) {
                     return std::unexpected(std::move(function_object.error()));
                 }
-                if(auto status = object->insert("type", "function"); !status.has_value()) {
-                    return clore::net::detail::to_llm_unexpected(
-                        status.error(),
-                        "failed to serialize forced tool choice");
-                }
+                object->insert("type", "function");
                 auto status =
                     clore::net::detail::insert_string_field(*function_object,
                                                             "name",
@@ -337,26 +198,16 @@ auto serialize_tool_choice(json::Object& root, const ToolChoice& choice)
                 if(!status.has_value()) {
                     return std::unexpected(std::move(status.error()));
                 }
-                if(auto root_status = object->insert("function", std::move(*function_object));
-                   !root_status.has_value()) {
-                    return clore::net::detail::to_llm_unexpected(
-                        root_status.error(),
-                        "failed to serialize forced tool payload");
-                }
-                auto root_status = root.insert("tool_choice", std::move(*object));
-                if(!root_status.has_value()) {
-                    return clore::net::detail::to_llm_unexpected(root_status.error(),
-                                                                 "failed to serialize tool_choice");
-                }
+                object->insert("function", std::move(*function_object));
+                root.insert("tool_choice", std::move(*object));
                 return {};
             }
         },
         choice);
 }
 
-auto serialize_response_format(json::Document& document,
-                               json::Object& root,
-                               const ResponseFormat& format) -> std::expected<void, LLMError> {
+auto serialize_response_format(json::Object& root, const ResponseFormat& format)
+    -> std::expected<void, LLMError> {
     auto object = clore::net::detail::make_empty_object("failed to create response_format object");
     if(!object.has_value()) {
         return std::unexpected(std::move(object.error()));
@@ -368,17 +219,9 @@ auto serialize_response_format(json::Document& document,
     }
 
     if(!format.schema.has_value()) {
-        if(auto status = object->insert("type", "json_object"); !status.has_value()) {
-            return std::unexpected(
-                LLMError(std::format("failed to serialize response_format.type: {}",
-                                     json::error_message(status.error()))));
-        }
+        object->insert("type", "json_object");
     } else {
-        if(auto status = object->insert("type", "json_schema"); !status.has_value()) {
-            return std::unexpected(
-                LLMError(std::format("failed to serialize response_format.type: {}",
-                                     json::error_message(status.error()))));
-        }
+        object->insert("type", "json_schema");
         auto name_status =
             clore::net::detail::insert_string_field(*schema_object,
                                                     "name",
@@ -387,43 +230,22 @@ auto serialize_response_format(json::Document& document,
         if(!name_status.has_value()) {
             return std::unexpected(std::move(name_status.error()));
         }
-        if(auto status = schema_object->insert("strict", format.strict); !status.has_value()) {
-            return std::unexpected(
-                LLMError(std::format("failed to serialize response_format strict flag: {}",
-                                     json::error_message(status.error()))));
-        }
+        schema_object->insert("strict", format.strict);
         auto copied_schema =
-            clore::net::detail::clone_object(document,
-                                             *format.schema,
+            clore::net::detail::clone_object(*format.schema,
                                              "failed to serialize response_format schema");
         if(!copied_schema.has_value()) {
             return std::unexpected(std::move(copied_schema.error()));
         }
-        if(auto status = schema_object->insert("schema", std::move(*copied_schema));
-           !status.has_value()) {
-            return std::unexpected(
-                LLMError(std::format("failed to serialize response_format schema: {}",
-                                     json::error_message(status.error()))));
-        }
-        if(auto status = object->insert("json_schema", std::move(*schema_object));
-           !status.has_value()) {
-            return std::unexpected(
-                LLMError(std::format("failed to serialize response_format json_schema payload: {}",
-                                     json::error_message(status.error()))));
-        }
+        schema_object->insert("schema", std::move(*copied_schema));
+        object->insert("json_schema", std::move(*schema_object));
     }
 
-    auto root_status = root.insert("response_format", std::move(*object));
-    if(!root_status.has_value()) {
-        return clore::net::detail::to_llm_unexpected(root_status.error(),
-                                                     "failed to serialize response_format");
-    }
+    root.insert("response_format", std::move(*object));
     return {};
 }
 
-auto serialize_tool_definition(json::Document& document,
-                               json::Array& tools,
-                               const FunctionToolDefinition& tool)
+auto serialize_tool_definition(json::Array& tools, const FunctionToolDefinition& tool)
     -> std::expected<void, LLMError> {
     auto object = clore::net::detail::make_empty_object("failed to create tool definition object");
     if(!object.has_value()) {
@@ -435,10 +257,7 @@ auto serialize_tool_definition(json::Document& document,
         return std::unexpected(std::move(function_object.error()));
     }
 
-    if(auto status = object->insert("type", "function"); !status.has_value()) {
-        return std::unexpected(LLMError(
-            std::format("failed to serialize tool type: {}", json::error_message(status.error()))));
-    }
+    object->insert("type", "function");
     auto name_status = clore::net::detail::insert_string_field(*function_object,
                                                                "name",
                                                                std::string_view(tool.name),
@@ -455,35 +274,18 @@ auto serialize_tool_definition(json::Document& document,
         return std::unexpected(std::move(description_status.error()));
     }
     auto copied_parameters =
-        clore::net::detail::clone_object(document,
-                                         tool.parameters,
-                                         "failed to serialize tool parameters");
+        clore::net::detail::clone_object(tool.parameters, "failed to serialize tool parameters");
     if(!copied_parameters.has_value()) {
         return std::unexpected(std::move(copied_parameters.error()));
     }
-    if(auto status = function_object->insert("parameters", std::move(*copied_parameters));
-       !status.has_value()) {
-        return std::unexpected(LLMError(std::format("failed to serialize tool parameters: {}",
-                                                    json::error_message(status.error()))));
-    }
-    if(auto status = function_object->insert("strict", tool.strict); !status.has_value()) {
-        return std::unexpected(LLMError(std::format("failed to serialize tool strict flag: {}",
-                                                    json::error_message(status.error()))));
-    }
-    if(auto status = object->insert("function", std::move(*function_object)); !status.has_value()) {
-        return std::unexpected(LLMError(std::format("failed to serialize function tool payload: {}",
-                                                    json::error_message(status.error()))));
-    }
-
-    auto push_status = tools.push_back(std::move(*object));
-    if(!push_status.has_value()) {
-        return clore::net::detail::to_llm_unexpected(push_status.error(),
-                                                     "failed to append request tool");
-    }
+    function_object->insert("parameters", std::move(*copied_parameters));
+    function_object->insert("strict", tool.strict);
+    object->insert("function", std::move(*function_object));
+    tools.push_back(std::move(*object));
     return {};
 }
 
-auto parse_content_parts(json::ArrayRef parts) -> std::expected<AssistantOutput, LLMError> {
+auto parse_content_parts(const json::Array& parts) -> std::expected<AssistantOutput, LLMError> {
     AssistantOutput output;
     std::string text;
     std::string refusal;
@@ -564,7 +366,7 @@ auto parse_content_parts(json::ArrayRef parts) -> std::expected<AssistantOutput,
     return output;
 }
 
-auto parse_tool_calls(json::ArrayRef calls) -> std::expected<std::vector<ToolCall>, LLMError> {
+auto parse_tool_calls(const json::Array& calls) -> std::expected<std::vector<ToolCall>, LLMError> {
     std::vector<ToolCall> parsed_calls;
     parsed_calls.reserve(calls.size());
     std::unordered_set<std::string> ids;
@@ -629,12 +431,12 @@ auto parse_tool_calls(json::ArrayRef calls) -> std::expected<std::vector<ToolCal
         if(!arguments_json.has_value()) {
             return std::unexpected(std::move(arguments_json.error()));
         }
-        auto parsed_arguments = json::Value::parse(*arguments_json);
+        auto parsed_arguments = json::parse<json::Value>(*arguments_json);
         if(!parsed_arguments.has_value()) {
-            return std::unexpected(LLMError(
-                std::format("failed to parse tool call arguments for '{}': {}",
-                            *name,
-                            json::error_message(json::make_read_error(parsed_arguments.error())))));
+            return std::unexpected(
+                LLMError(std::format("failed to parse tool call arguments for '{}': {}",
+                                     *name,
+                                     parsed_arguments.error().to_string())));
         }
 
         parsed_calls.push_back(ToolCall{
@@ -648,7 +450,7 @@ auto parse_tool_calls(json::ArrayRef calls) -> std::expected<std::vector<ToolCal
     return parsed_calls;
 }
 
-}  // namespace clore::net::openai_protocol_detail
+}  // namespace clore::net::openai::protocol::detail
 
 export namespace clore::net::protocol {
 
@@ -661,12 +463,11 @@ auto parse_response(std::string_view json) -> std::expected<CompletionResponse, 
 namespace clore::net::protocol {
 
 auto build_request_json(const CompletionRequest& request) -> std::expected<std::string, LLMError> {
-    auto validation = openai_protocol_detail::validate_request(request);
+    auto validation = openai::protocol::detail::validate_request(request);
     if(!validation.has_value()) {
         return std::unexpected(std::move(validation.error()));
     }
 
-    kota::codec::json::Document document;
     auto root = clore::net::detail::make_empty_object("failed to create request root object");
     if(!root.has_value()) {
         return std::unexpected(std::move(root.error()));
@@ -676,26 +477,19 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
         return std::unexpected(std::move(messages.error()));
     }
 
-    if(auto status = root->insert("model", std::string_view(request.model)); !status.has_value()) {
-        return clore::net::detail::to_llm_unexpected(status.error(), "failed to serialize model");
-    }
+    root->insert("model", request.model);
 
     for(auto& message: request.messages) {
-        auto status = openai_protocol_detail::serialize_message(document, *messages, message);
+        auto status = openai::protocol::detail::serialize_message(*messages, message);
         if(!status.has_value()) {
             return std::unexpected(std::move(status.error()));
         }
     }
-    if(auto status = root->insert("messages", std::move(*messages)); !status.has_value()) {
-        return clore::net::detail::to_llm_unexpected(status.error(),
-                                                     "failed to serialize request messages");
-    }
+    root->insert("messages", std::move(*messages));
 
     if(request.response_format.has_value()) {
         auto response_format =
-            openai_protocol_detail::serialize_response_format(document,
-                                                              *root,
-                                                              *request.response_format);
+            openai::protocol::detail::serialize_response_format(*root, *request.response_format);
         if(!response_format.has_value()) {
             return std::unexpected(std::move(response_format.error()));
         }
@@ -707,53 +501,43 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
             return std::unexpected(std::move(tools.error()));
         }
         for(auto& tool: request.tools) {
-            auto serialized =
-                openai_protocol_detail::serialize_tool_definition(document, *tools, tool);
+            auto serialized = openai::protocol::detail::serialize_tool_definition(*tools, tool);
             if(!serialized.has_value()) {
                 return std::unexpected(std::move(serialized.error()));
             }
         }
-        if(auto status = root->insert("tools", std::move(*tools)); !status.has_value()) {
-            return clore::net::detail::to_llm_unexpected(status.error(),
-                                                         "failed to serialize tools array");
-        }
+        root->insert("tools", std::move(*tools));
     }
 
     if(request.tool_choice.has_value()) {
         auto tool_choice =
-            openai_protocol_detail::serialize_tool_choice(*root, *request.tool_choice);
+            openai::protocol::detail::serialize_tool_choice(*root, *request.tool_choice);
         if(!tool_choice.has_value()) {
             return std::unexpected(std::move(tool_choice.error()));
         }
     }
 
     if(request.parallel_tool_calls.has_value()) {
-        if(auto status = root->insert("parallel_tool_calls", *request.parallel_tool_calls);
-           !status.has_value()) {
-            return clore::net::detail::to_llm_unexpected(status.error(),
-                                                         "failed to serialize parallel_tool_calls");
-        }
+        root->insert("parallel_tool_calls", *request.parallel_tool_calls);
     }
 
-    auto encoded = root->to_json_string();
+    auto encoded = kota::codec::json::to_string(*root);
     if(!encoded.has_value()) {
-        return std::unexpected(
-            LLMError(std::format("failed to serialize request JSON: {}",
-                                 kota::codec::json::error_message(
-                                     kota::codec::json::make_write_error(encoded.error())))));
+        return std::unexpected(LLMError(
+            std::format("failed to serialize request JSON: {}", encoded.error().to_string())));
     }
     return *encoded;
 }
 
 auto parse_response(std::string_view json_text) -> std::expected<CompletionResponse, LLMError> {
-    auto parsed = kota::codec::json::Object::parse(json_text);
+    auto parsed = kota::codec::json::parse<kota::codec::json::Object>(json_text);
     if(!parsed.has_value()) {
-        return std::unexpected(LLMError(std::format(
-            "failed to parse LLM response JSON: {}",
-            kota::codec::json::error_message(kota::codec::json::make_read_error(parsed.error())))));
+        return std::unexpected(LLMError(
+            std::format("failed to parse LLM response JSON: {}", parsed.error().to_string())));
     }
 
-    auto error_value = parsed->get("error");
+    auto root = clore::net::detail::ObjectView{.value = &*parsed};
+    auto error_value = root.get("error");
     if(error_value.has_value()) {
         auto error_object = clore::net::detail::expect_object(*error_value, "error");
         if(!error_object.has_value()) {
@@ -769,7 +553,7 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
         return std::unexpected(LLMError("LLM API returned an error payload"));
     }
 
-    auto id_value = parsed->get("id");
+    auto id_value = root.get("id");
     if(!id_value.has_value()) {
         return std::unexpected(LLMError("LLM response is missing id"));
     }
@@ -778,7 +562,7 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
         return std::unexpected(std::move(id.error()));
     }
 
-    auto model_value = parsed->get("model");
+    auto model_value = root.get("model");
     if(!model_value.has_value()) {
         return std::unexpected(LLMError("LLM response is missing model"));
     }
@@ -787,7 +571,7 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
         return std::unexpected(std::move(model.error()));
     }
 
-    auto choices_value = parsed->get("choices");
+    auto choices_value = root.get("choices");
     if(!choices_value.has_value()) {
         return std::unexpected(LLMError("LLM response has no choices"));
     }
@@ -848,8 +632,8 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
     if(auto content_value = message->get("content"); content_value.has_value()) {
         if(auto content_text = content_value->get_string(); content_text.has_value()) {
             output.text = std::string(*content_text);
-        } else if(auto content_parts = content_value->get_array(); content_parts.has_value()) {
-            auto parsed_content = openai_protocol_detail::parse_content_parts(*content_parts);
+        } else if(auto content_parts = content_value->get_array(); content_parts != nullptr) {
+            auto parsed_content = openai::protocol::detail::parse_content_parts(*content_parts);
             if(!parsed_content.has_value()) {
                 return std::unexpected(std::move(parsed_content.error()));
             }
@@ -871,7 +655,7 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
         if(!tool_calls.has_value()) {
             return std::unexpected(std::move(tool_calls.error()));
         }
-        auto parsed_calls = openai_protocol_detail::parse_tool_calls(*tool_calls);
+        auto parsed_calls = openai::protocol::detail::parse_tool_calls(**tool_calls);
         if(!parsed_calls.has_value()) {
             return std::unexpected(std::move(parsed_calls.error()));
         }
@@ -903,21 +687,32 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
 }  // namespace clore::net::protocol
 
 // ── client wrapper ────────────────────────────────────────────────────────
-namespace clore::net::openai_detail {
+namespace clore::net::openai::detail {
 
 struct Protocol {
-    static auto read_environment() -> std::expected<detail::EnvironmentConfig, LLMError> {
-        return detail::read_environment();
+    static auto read_environment()
+        -> std::expected<clore::net::detail::EnvironmentConfig, LLMError> {
+        return clore::net::detail::read_credentials(clore::net::detail::CredentialEnv{
+            .base_url_env = "OPENAI_BASE_URL",
+            .api_key_env = "OPENAI_API_KEY",
+        });
     }
 
-    static auto build_url(const detail::EnvironmentConfig& environment) -> std::string {
-        return detail::build_chat_completions_url(environment.api_base);
+    static auto build_url(const clore::net::detail::EnvironmentConfig& environment) -> std::string {
+        return clore::net::detail::append_url_path(environment.api_base, "chat/completions");
     }
 
-    static auto build_headers(const detail::EnvironmentConfig& environment) -> detail::HttpHeaders {
-        return detail::HttpHeaders{
-            "Content-Type: application/json; charset=utf-8",
-            std::format("Authorization: Bearer {}", environment.api_key),
+    static auto build_headers(const clore::net::detail::EnvironmentConfig& environment)
+        -> std::vector<kota::http::header> {
+        return std::vector<kota::http::header>{
+            kota::http::header{
+                               .name = "Content-Type",
+                               .value = "application/json; charset=utf-8",
+                               },
+            kota::http::header{
+                               .name = "Authorization",
+                               .value = std::format("Bearer {}", environment.api_key),
+                               },
         };
     }
 
@@ -926,7 +721,7 @@ struct Protocol {
         return clore::net::protocol::build_request_json(request);
     }
 
-    static auto parse_response(const detail::RawHttpResponse& raw_response)
+    static auto parse_response(const clore::net::detail::RawHttpResponse& raw_response)
         -> std::expected<CompletionResponse, LLMError> {
         if(raw_response.body.empty()) {
             return std::unexpected(LLMError("empty response from LLM"));
@@ -935,7 +730,7 @@ struct Protocol {
             return std::unexpected(
                 LLMError(std::format("LLM request failed with HTTP {}: {}",
                                      raw_response.http_status,
-                                     detail::excerpt_for_error(raw_response.body))));
+                                     clore::net::detail::excerpt_for_error(raw_response.body))));
         }
 
         return clore::net::protocol::parse_response(raw_response.body);
@@ -946,7 +741,7 @@ struct Protocol {
     }
 };
 
-}  // namespace clore::net::openai_detail
+}  // namespace clore::net::openai::detail
 
 export namespace clore::net::openai {
 
@@ -979,9 +774,8 @@ namespace clore::net::openai {
 
 auto call_completion_async(CompletionRequest request, kota::event_loop& loop)
     -> kota::task<CompletionResponse, LLMError> {
-    co_return co_await clore::net::call_completion_async<openai_detail::Protocol>(
-        std::move(request),
-        &loop)
+    co_return co_await clore::net::call_completion_async<detail::Protocol>(std::move(request),
+                                                                           &loop)
         .or_fail();
 }
 
@@ -989,10 +783,10 @@ auto call_llm_async(std::string_view model,
                     std::string_view system_prompt,
                     PromptRequest request,
                     kota::event_loop& loop) -> kota::task<std::string, LLMError> {
-    co_return co_await clore::net::call_llm_async<openai_detail::Protocol>(model,
-                                                                           system_prompt,
-                                                                           std::move(request),
-                                                                           &loop)
+    co_return co_await clore::net::call_llm_async<detail::Protocol>(model,
+                                                                    system_prompt,
+                                                                    std::move(request),
+                                                                    &loop)
         .or_fail();
 }
 
@@ -1000,10 +794,10 @@ auto call_llm_async(std::string_view model,
                     std::string_view system_prompt,
                     std::string_view prompt,
                     kota::event_loop& loop) -> kota::task<std::string, LLMError> {
-    co_return co_await clore::net::call_llm_async<openai_detail::Protocol>(model,
-                                                                           system_prompt,
-                                                                           prompt,
-                                                                           &loop)
+    co_return co_await clore::net::call_llm_async<detail::Protocol>(model,
+                                                                    system_prompt,
+                                                                    prompt,
+                                                                    &loop)
         .or_fail();
 }
 
@@ -1012,10 +806,10 @@ auto call_structured_async(std::string_view model,
                            std::string_view system_prompt,
                            std::string_view prompt,
                            kota::event_loop& loop) -> kota::task<T, LLMError> {
-    co_return co_await clore::net::call_structured_async<openai_detail::Protocol, T>(model,
-                                                                                     system_prompt,
-                                                                                     prompt,
-                                                                                     &loop)
+    co_return co_await clore::net::call_structured_async<detail::Protocol, T>(model,
+                                                                              system_prompt,
+                                                                              prompt,
+                                                                              &loop)
         .or_fail();
 }
 

@@ -11,7 +11,7 @@ clore is a document generator for humans and agents that combines LLVM and LLM t
 
 Run `pixi run build`. If you don't have pixi installed, [install it first](https://pixi.sh/).
 
-The default build path installs third-party dependencies via Conan before CMake configure.
+The default build path uses the `pixi` environment for both the LLVM/Clang toolchain and third-party dependencies before CMake configure. This applies on every supported platform, including Windows.
 
 ```bash
 pixi run build RelWithDebInfo
@@ -20,16 +20,13 @@ pixi run build RelWithDebInfo
 If you want to run each step explicitly:
 
 ```bash
-pixi run install RelWithDebInfo
 pixi run config RelWithDebInfo
 pixi run check RelWithDebInfo
 pixi run format
 pixi run build RelWithDebInfo
 ```
 
-Conan-managed dependencies are `spdlog`, `libcurl`, and `simdjson`.
-
-LLVM and Clang are provided by the `pixi` environment (conda-forge packages: `clang`, `clangdev`, `llvmdev`, etc.).
+LLVM, Clang, `spdlog`, and `libcurl` are provided by the `pixi` environment (conda-forge packages such as `clang`, `clangdev`, `llvmdev`, `spdlog`, and `libcurl`). On Windows the activated toolchain uses `clang.exe`, `clang++.exe`, and `llvm-rc.exe`.
 
 ## CLI usage
 
@@ -42,8 +39,9 @@ clore \
   --config clore.en.toml \
   --compile-commands build/{{ type }}/compile_commands.json \
   --source-dir . \
-  --output-dir docs/api \
-  --dry-run
+  --output-dir docs/en \
+  --model deepseek-chat \
+  --rate-limit 16
 ```
 
 ### Agent mode
@@ -53,23 +51,25 @@ Enable autonomous codebase exploration and guide generation:
 ```bash
 clore \
   --config clore.en.toml \
-  --source-dir . \
-  --output-dir docs/guides \
   --experimental-agent-mode \
-  --model gpt-4o
+  --compile-commands build/{{ type }}/compile_commands.json \
+  --source-dir . \
+  --output-dir docs/en \
+  --model deepseek-chat \
+  --rate-limit 16
 ```
 
 ### Arguments
 
 | Flag | Description |
 | --- | --- |
-| `--config` | Path to config file (default: `clore.toml`; for typical use, start from `clore.en.toml` or `clore.zh.toml` and pass that path here) |
+| `--config` | Path to config file; for typical use, start from `clore.en.toml` or `clore.zh.toml` and pass that path here |
 | `--compile-commands` | Path to `compile_commands.json` |
 | `--source-dir` | Source root directory for relative output paths |
 | `--output-dir` | Output root directory |
 | `--dry-run` | Write assembled prompts to `--output-dir` and skip LLM calls |
-| `--model` | Model name for online generation (e.g. `gpt-4o`, `claude-3-5-sonnet-20241022`) |
-| `--rate-limit` | Max concurrent LLM requests when `--model` is used (default: `16`) |
+| `--model` | Model name for online generation (e.g. `deepseek-chat`) |
+| `--rate-limit` | Required max concurrent LLM requests when `--model` is used |
 | `--experimental-agent-mode` | Enable agent-driven autonomous exploration and guide generation |
 | `--log-level` | Override log level (`trace\|debug\|info\|warn\|error\|off`) |
 
@@ -87,7 +87,6 @@ exclude = []
 [llm]
 system_prompt = "You are a C++ documentation writer. Please generate concise and accurate documentation for C++ code elements. Focus on the purpose, design intent, and role of each element within the codebase. The output documentation must be in Markdown format and suitable for embedding within a document page. Use English in the generated documentation."
 retry_count = 10
-retry_initial_backoff_ms = 5000
 ```
 
 ### LLM provider selection

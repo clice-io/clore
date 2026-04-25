@@ -1,5 +1,7 @@
 module;
 
+#include "kota/async/async.h"
+
 #include "llvm/Support/Error.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendActions.h"
@@ -56,9 +58,10 @@ struct DependencyGraph {
     std::vector<DependencyEdge> edges{};
 };
 
-auto build_dependency_graph(const CompilationDatabase& db,
-                            DependencyGraph& graph,
-                            ScanCache* cache = nullptr) -> std::expected<void, ScanError>;
+auto build_dependency_graph_async(CompilationDatabase db,
+                                  DependencyGraph& graph,
+                                  ScanCache* cache,
+                                  kota::event_loop& loop) -> kota::task<void, ScanError>;
 
 auto topological_order(const DependencyGraph& graph)
     -> std::expected<std::vector<std::string>, ScanError>;
@@ -264,6 +267,10 @@ auto scan_file(const CompileEntry& entry) -> std::expected<ScanResult, ScanError
         return std::unexpected(ScanError{
             .message = std::format("failed to create compiler instance for file: {}", entry.file)});
     }
+    auto& frontend_opts = instance->getInvocation().getFrontendOpts();
+    frontend_opts.ProgramAction = clang::frontend::RunPreprocessorOnly;
+    frontend_opts.OutputFile.clear();
+    frontend_opts.ModuleOutputPath.clear();
 
     auto action = std::make_unique<ScanAction>(result);
     if(!action->BeginSourceFile(*instance, instance->getFrontendOpts().Inputs[0])) {
@@ -293,14 +300,61 @@ struct MissingScanTask {
     const CompileEntry* entry = nullptr;
 };
 
+auto run_scan_task(MissingScanTask task, kota::event_loop& loop)
+    -> kota::task<ScanResult, ScanError> {
+    if(task.entry == nullptr) {
+        co_await kota::fail(ScanError{.message = "missing dependency scan task entry"});
+    }
+
+    auto file = task.entry->file;
+    auto scanned =
+        co_await kota::queue(
+            [entry = *task.entry, file]() -> std::expected<ScanResult, ScanError> {
+                try {
+                    return scan_file(entry);
+                } catch(const std::exception& ex) {
+                    return std::unexpected(ScanError{
+                        .message =
+                            std::format("dependency scan threw for file '{}': {}", file, ex.what()),
+                    });
+                } catch(...) {
+                    return std::unexpected(ScanError{
+                        .message =
+                            std::format("dependency scan threw unknown exception for file '{}'",
+                                        file),
+                    });
+                }
+            },
+            loop)
+            .catch_cancel();
+    if(scanned.is_cancelled()) {
+        co_await kota::fail(ScanError{
+            .message = std::format("dependency scan cancelled for file: {}", file),
+        });
+    }
+    if(scanned.has_error()) {
+        co_await kota::fail(ScanError{
+            .message = std::format("dependency scan task failed for file '{}': {}",
+                                   file,
+                                   scanned.error().message()),
+        });
+    }
+    if(!scanned->has_value()) {
+        co_await kota::fail(std::move(scanned->error()));
+    }
+
+    co_return std::move(**scanned);
+}
+
 }  // namespace
 
-auto build_dependency_graph(const CompilationDatabase& db, DependencyGraph& graph, ScanCache* cache)
-    -> std::expected<void, ScanError> {
+auto build_dependency_graph_async(CompilationDatabase normalized_db,
+                                  DependencyGraph& graph,
+                                  ScanCache* cache,
+                                  kota::event_loop& loop) -> kota::task<void, ScanError> {
     graph.files.clear();
     graph.edges.clear();
 
-    CompilationDatabase normalized_db = db;
     for(auto& entry: normalized_db.entries) {
         if(entry.cache_key.empty()) {
             ensure_cache_key(entry);
@@ -357,55 +411,25 @@ auto build_dependency_graph(const CompilationDatabase& db, DependencyGraph& grap
 
     std::vector<ScanResult> scanned_results(missing_tasks.size());
     if(!missing_tasks.empty()) {
-        const auto hardware_threads = std::thread::hardware_concurrency();
-        const auto num_threads = std::max(1u, hardware_threads > 0 ? hardware_threads : 1u);
-
-        struct ThreadError {
-            ScanError error;
-        };
-
-        std::mutex error_mutex;
-        std::optional<ThreadError> first_error;
-
-        auto worker = [&](std::size_t start, std::size_t end) {
-            for(std::size_t i = start; i < end; ++i) {
-                {
-                    std::lock_guard lock(error_mutex);
-                    if(first_error.has_value()) {
-                        break;
-                    }
-                }
-
-                auto scanned = scan_file(*missing_tasks[i].entry);
-                if(!scanned.has_value()) {
-                    std::lock_guard lock(error_mutex);
-                    if(!first_error.has_value()) {
-                        first_error = ThreadError{.error = std::move(scanned.error())};
-                    }
-                    break;
-                }
-
-                scanned_results[i] = std::move(*scanned);
-            }
-        };
-
-        std::vector<std::thread> threads;
-        auto per_thread = (missing_tasks.size() + num_threads - 1) / num_threads;
-        for(std::size_t t = 0; t < num_threads; ++t) {
-            auto start = t * per_thread;
-            auto end = std::min(start + per_thread, missing_tasks.size());
-            if(start >= end) {
-                break;
-            }
-            threads.emplace_back(worker, start, end);
+        std::vector<kota::task<ScanResult, ScanError>> tasks;
+        tasks.reserve(missing_tasks.size());
+        for(auto task: missing_tasks) {
+            tasks.push_back(run_scan_task(task, loop));
         }
 
-        for(auto& thread: threads) {
-            thread.join();
+        auto all_result = co_await kota::when_all(std::move(tasks));
+        if(all_result.has_error()) {
+            co_await kota::fail(std::move(all_result.error()));
         }
-
-        if(first_error.has_value()) {
-            return std::unexpected(std::move(first_error->error));
+        if(all_result->size() != missing_tasks.size()) {
+            co_await kota::fail(ScanError{
+                .message = std::format("dependency scan result count mismatch: expected {}, got {}",
+                                       missing_tasks.size(),
+                                       all_result->size()),
+            });
+        }
+        for(std::size_t i = 0; i < all_result->size(); ++i) {
+            scanned_results[i] = std::move((*all_result)[i]);
         }
     }
 
@@ -429,7 +453,7 @@ auto build_dependency_graph(const CompilationDatabase& db, DependencyGraph& grap
         } else {
             auto task_index = missing_task_indices[idx];
             if(task_index >= scanned_results.size()) {
-                return std::unexpected(ScanError{
+                co_await kota::fail(ScanError{
                     .message =
                         std::format("missing dependency scan result for file: {}", normalized),
                 });
@@ -458,7 +482,7 @@ auto build_dependency_graph(const CompilationDatabase& db, DependencyGraph& grap
         }
     }
 
-    return {};
+    co_return;
 }
 
 auto topological_order(const DependencyGraph& graph)

@@ -13,7 +13,6 @@ export namespace clore::generate {
 struct SymbolDocPlan {
     const extract::SymbolInfo* symbol = nullptr;
     std::string index_path;
-    std::string detail_path;
     std::vector<SymbolDocPlan> children;
 };
 
@@ -22,7 +21,6 @@ struct PageDocLayout {
     std::vector<SymbolDocPlan> variable_docs;
     std::vector<SymbolDocPlan> function_docs;
     std::unordered_map<std::string, std::string> index_paths;
-    std::unordered_map<std::string, std::string> detail_paths;
 };
 
 template <typename Visitor>
@@ -38,6 +36,26 @@ auto page_supports_symbol_subpages(const PagePlan& plan) -> bool;
 
 auto build_page_doc_layout(const PagePlan& plan, const extract::ProjectModel& model)
     -> PageDocLayout;
+
+auto find_doc_index_path(const PageDocLayout& layout, std::string_view qualified_name)
+    -> const std::string*;
+
+auto add_symbol_doc_links(std::vector<MarkdownNode>& nodes,
+                          std::string_view current_page_path,
+                          const PageDocLayout& layout,
+                          const extract::SymbolInfo& sym,
+                          SymbolDocView view) -> void;
+
+auto append_type_member_sections(std::vector<MarkdownNode>& nodes,
+                                 const extract::SymbolInfo& sym,
+                                 const config::TaskConfig& config,
+                                 const extract::ProjectModel& model,
+                                 const SymbolAnalysisStore& analyses,
+                                 const PagePlan& plan,
+                                 const LinkResolver& links,
+                                 const PageDocLayout& layout,
+                                 std::string_view current_page_path,
+                                 std::uint8_t level) -> void;
 
 auto append_symbol_doc_pages(std::vector<GeneratedPage>& pages,
                              const std::vector<SymbolDocPlan>& doc_plans,
@@ -146,8 +164,13 @@ auto collect_documentable_children(const extract::ProjectModel& model,
 
 auto should_render_symbol_subpage(const extract::ProjectModel& model,
                                   const extract::SymbolInfo& sym) -> bool {
-    if(is_function_kind(sym.kind) || is_variable_kind(sym.kind)) {
-        return true;
+    if(is_variable_kind(sym.kind)) {
+        return false;
+    }
+    if(is_function_kind(sym.kind)) {
+        auto has_dependency_axis = !sym.calls.empty() || !sym.references.empty();
+        auto has_usage_axis = !sym.called_by.empty() || !sym.referenced_by.empty();
+        return has_dependency_axis && has_usage_axis;
     }
     if(!is_type_kind(sym.kind)) {
         return false;
@@ -196,13 +219,10 @@ auto build_symbol_doc_plans(const PagePlan& plan,
 
         auto slug = count == 1 ? base_slug : std::format("{}-{}", base_slug, count);
         auto group_dir = join_relative_paths(base_dir, symbol_doc_group(*sym));
-        auto detail_slug = sanitize_doc_slug(doc_label(symbol_doc_view_for(plan, *sym)));
 
         SymbolDocPlan doc{
             .symbol = sym,
             .index_path = join_relative_paths(group_dir, slug + ".md"),
-            .detail_path =
-                join_relative_paths(group_dir, std::format("{}-{}.md", slug, detail_slug)),
             .children = {},
         };
         plans.push_back(std::move(doc));
@@ -217,24 +237,18 @@ auto register_symbol_doc_plan(PageDocLayout& layout, const SymbolDocPlan& plan) 
     }
 
     layout.index_paths[plan.symbol->qualified_name] = plan.index_path;
-    if(!plan.detail_path.empty()) {
-        layout.detail_paths[plan.symbol->qualified_name] = plan.detail_path;
-    }
     for(const auto& child: plan.children) {
         register_symbol_doc_plan(layout, child);
     }
 }
 
 template <typename Predicate>
-auto build_member_list(const extract::ProjectModel& model,
-                       const extract::SymbolInfo& sym,
-                       std::string_view current_page_path,
-                       const LinkResolver& links,
-                       Predicate&& predicate) -> BulletList {
+auto collect_member_symbols(const extract::ProjectModel& model,
+                            const extract::SymbolInfo& sym,
+                            Predicate&& predicate) -> std::vector<const extract::SymbolInfo*> {
     std::vector<const extract::SymbolInfo*> members;
     members.reserve(sym.children.size());
 
-    BulletList list;
     for(auto child_id: sym.children) {
         auto* child = extract::lookup_symbol(model, child_id);
         if(child == nullptr) {
@@ -254,25 +268,7 @@ auto build_member_list(const extract::ProjectModel& model,
                   return lhs_name < rhs_name;
               });
 
-    for(const auto* child: members) {
-        ListItem item;
-        auto access = child->access.empty() ? std::string{"public"} : child->access;
-        item.fragments.push_back(
-            make_text(access + " " + std::string(extract::symbol_kind_name(child->kind)) + " "));
-        auto label = child->name.empty() ? short_name_of(child->qualified_name) : child->name;
-        if(label.empty()) {
-            label = child->qualified_name;
-        }
-        if(auto* target_path = links.resolve(child->qualified_name);
-           target_path != nullptr && *target_path != current_page_path) {
-            item.fragments.push_back(
-                make_link(label, make_relative_link_target(current_page_path, *target_path), true));
-        } else {
-            item.fragments.push_back(make_code(std::move(label)));
-        }
-        list.items.push_back(std::move(item));
-    }
-    return list;
+    return members;
 }
 
 auto symbol_semantic_kind(const extract::SymbolInfo& sym) -> SemanticKind {
@@ -283,18 +279,6 @@ auto symbol_semantic_kind(const extract::SymbolInfo& sym) -> SemanticKind {
         return SemanticKind::Function;
     }
     return SemanticKind::Variable;
-}
-
-auto find_doc_index_path(const PageDocLayout& layout, std::string_view qualified_name)
-    -> const std::string* {
-    auto it = layout.index_paths.find(std::string(qualified_name));
-    return it != layout.index_paths.end() ? &it->second : nullptr;
-}
-
-auto find_doc_detail_path(const PageDocLayout& layout, std::string_view qualified_name)
-    -> const std::string* {
-    auto it = layout.detail_paths.find(std::string(qualified_name));
-    return it != layout.detail_paths.end() ? &it->second : nullptr;
 }
 
 auto build_child_doc_list(const std::vector<SymbolDocPlan>& children,
@@ -337,10 +321,84 @@ auto add_symbol_fallback_content(std::vector<MarkdownNode>& nodes,
     }
 }
 
+auto resolved_snippet(const extract::SymbolInfo& sym) -> const std::string* {
+    if(!trim_ascii(sym.source_snippet).empty()) {
+        return &sym.source_snippet;
+    }
+
+    static std::mutex mutex;
+    std::lock_guard lock(mutex);
+    if(!trim_ascii(sym.source_snippet).empty()) {
+        return &sym.source_snippet;
+    }
+    if(extract::resolve_source_snippet(const_cast<extract::SymbolInfo&>(sym)) &&
+       !trim_ascii(sym.source_snippet).empty()) {
+        return &sym.source_snippet;
+    }
+    return nullptr;
+}
+
+auto declaration_snippet(const extract::SymbolInfo& sym) -> std::optional<std::string> {
+    if(is_function_kind(sym.kind) && !trim_ascii(sym.signature).empty()) {
+        auto declaration = std::string(trim_ascii(sym.signature));
+        if(!declaration.ends_with(';')) {
+            declaration.push_back(';');
+        }
+        // Skip meaningless signatures with no parameters: "ClassName();" or "void();"
+        auto lparen = declaration.find('(');
+        auto rparen = declaration.find(')', lparen);
+        if(lparen != std::string::npos && rparen != std::string::npos &&
+           rparen + 1 == declaration.size() - 1 && declaration.back() == ';') {
+            auto between = std::string_view(declaration).substr(lparen + 1, rparen - lparen - 1);
+            if(std::ranges::all_of(between, [](char c) { return std::isspace(static_cast<unsigned char>(c)); })) {
+                return std::nullopt;
+            }
+        }
+        return declaration;
+    }
+
+    if(auto* snippet = resolved_snippet(sym)) {
+        return *snippet;
+    }
+    return std::nullopt;
+}
+
+auto implementation_snippet(const extract::SymbolInfo& sym) -> const std::string* {
+    return resolved_snippet(sym);
+}
+
+auto append_symbol_snippet(std::vector<MarkdownNode>& nodes,
+                           const extract::SymbolInfo& sym,
+                           const PagePlan& plan,
+                           std::uint8_t level) -> void {
+    if(plan.page_type == PageType::Namespace) {
+        auto snippet = declaration_snippet(sym);
+        if(!snippet.has_value()) {
+            return;
+        }
+        auto section = make_section(SemanticKind::Section, {}, "Declaration", level);
+        section->children.push_back(make_code_fence("cpp", std::move(*snippet)));
+        nodes.push_back(MarkdownNode{std::move(section)});
+        return;
+    }
+
+    auto* snippet = implementation_snippet(sym);
+    if(snippet == nullptr) {
+        return;
+    }
+    auto section = make_section(SemanticKind::Section, {}, "Implementation", level);
+    section->children.push_back(make_code_fence("cpp", *snippet));
+    nodes.push_back(MarkdownNode{std::move(section)});
+}
+
 auto append_type_structure_sections(std::vector<MarkdownNode>& nodes,
                                     const SymbolDocPlan& doc_plan,
+                                    const config::TaskConfig& config,
                                     const extract::ProjectModel& model,
+                                    const SymbolAnalysisStore& analyses,
+                                    const PagePlan& owner_plan,
                                     const LinkResolver& links,
+                                    const PageDocLayout& layout,
                                     std::string_view current_page_path) -> void {
     if(doc_plan.symbol == nullptr || !is_type_kind(doc_plan.symbol->kind)) {
         return;
@@ -370,29 +428,18 @@ auto append_type_structure_sections(std::vector<MarkdownNode>& nodes,
                   return lhs->qualified_name < rhs->qualified_name;
               });
 
-    auto collect_member_symbols = [&](auto&& predicate) -> std::vector<const extract::SymbolInfo*> {
-        std::vector<const extract::SymbolInfo*> members;
-        members.reserve(doc_plan.symbol->children.size());
-        for(auto child_id: doc_plan.symbol->children) {
-            if(auto* child = extract::lookup_symbol(model, child_id);
-               child != nullptr && predicate(*child)) {
-                members.push_back(child);
-            }
-        }
-        std::sort(members.begin(),
-                  members.end(),
-                  [](const extract::SymbolInfo* lhs, const extract::SymbolInfo* rhs) {
-                      return lhs->qualified_name < rhs->qualified_name;
-                  });
-        return members;
-    };
-
-    auto member_type_symbols = collect_member_symbols(
-        [](const extract::SymbolInfo& child) { return is_type_kind(child.kind); });
-    auto member_variable_symbols = collect_member_symbols(
-        [](const extract::SymbolInfo& child) { return is_variable_kind(child.kind); });
-    auto member_function_symbols = collect_member_symbols(
-        [](const extract::SymbolInfo& child) { return is_function_kind(child.kind); });
+    auto member_type_symbols =
+        collect_member_symbols(model, *doc_plan.symbol, [](const extract::SymbolInfo& child) {
+            return is_type_kind(child.kind);
+        });
+    auto member_variable_symbols =
+        collect_member_symbols(model, *doc_plan.symbol, [](const extract::SymbolInfo& child) {
+            return is_variable_kind(child.kind);
+        });
+    auto member_function_symbols =
+        collect_member_symbols(model, *doc_plan.symbol, [](const extract::SymbolInfo& child) {
+            return is_function_kind(child.kind);
+        });
 
     auto edge_count = base_symbols.size() + derived_symbols.size() + member_type_symbols.size() +
                       member_variable_symbols.size() + member_function_symbols.size();
@@ -448,54 +495,16 @@ auto append_type_structure_sections(std::vector<MarkdownNode>& nodes,
         "Derived Types",
         2,
         build_symbol_link_list(derived_symbols, current_page_path, links, true))});
-    nodes.push_back(
-        MarkdownNode{build_list_section("Member Types",
-                                        2,
-                                        build_member_list(model,
-                                                          *doc_plan.symbol,
-                                                          current_page_path,
-                                                          links,
-                                                          [](const extract::SymbolInfo& child) {
-                                                              return is_type_kind(child.kind);
-                                                          }))});
-    nodes.push_back(
-        MarkdownNode{build_list_section("Member Variables",
-                                        2,
-                                        build_member_list(model,
-                                                          *doc_plan.symbol,
-                                                          current_page_path,
-                                                          links,
-                                                          [](const extract::SymbolInfo& child) {
-                                                              return is_variable_kind(child.kind);
-                                                          }))});
-    nodes.push_back(
-        MarkdownNode{build_list_section("Member Functions",
-                                        2,
-                                        build_member_list(model,
-                                                          *doc_plan.symbol,
-                                                          current_page_path,
-                                                          links,
-                                                          [](const extract::SymbolInfo& child) {
-                                                              return is_function_kind(child.kind);
-                                                          }))});
-}
-
-auto add_symbol_doc_links(std::vector<MarkdownNode>& nodes,
-                          std::string_view current_page_path,
-                          const PageDocLayout& layout,
-                          const extract::SymbolInfo& sym,
-                          SymbolDocView view) -> void {
-    std::vector<LinkTarget> targets;
-    if(auto* index_path = find_doc_index_path(layout, sym.qualified_name);
-       index_path != nullptr && *index_path != current_page_path) {
-        targets.push_back(make_link_target(current_page_path, "Overview", *index_path));
-    }
-    if(auto* detail_path = find_doc_detail_path(layout, sym.qualified_name);
-       detail_path != nullptr && *detail_path != current_page_path) {
-        targets.push_back(
-            make_link_target(current_page_path, std::string(doc_label(view)), *detail_path));
-    }
-    push_link_paragraph(nodes, "Docs: ", targets);
+    append_type_member_sections(nodes,
+                                *doc_plan.symbol,
+                                config,
+                                model,
+                                analyses,
+                                owner_plan,
+                                links,
+                                layout,
+                                current_page_path,
+                                2);
 }
 
 auto push_owner_link(std::vector<MarkdownNode>& nodes,
@@ -545,6 +554,104 @@ auto append_relation_section(std::vector<MarkdownNode>& nodes,
                            build_symbol_link_list(symbols, current_page_path, links, true))});
 }
 
+auto append_symbol_context_links(std::vector<MarkdownNode>& nodes,
+                                 const extract::SymbolInfo& sym,
+                                 const config::TaskConfig& config,
+                                 const extract::ProjectModel& model,
+                                 const PagePlan& plan,
+                                 const LinkResolver& links,
+                                 const PageDocLayout& layout,
+                                 std::string_view current_page_path) -> void {
+    if(plan.page_type == PageType::Namespace) {
+        push_link_paragraph(
+            nodes,
+            "Implementations: ",
+            find_implementation_pages(sym, model, links, current_page_path, config.project_root));
+    } else {
+        push_optional_link_paragraph(nodes,
+                                     "Declaration: ",
+                                     find_declaration_page(sym, links, current_page_path));
+    }
+    add_symbol_doc_links(nodes, current_page_path, layout, sym, symbol_doc_view_for(plan, sym));
+}
+
+auto append_embedded_symbol_content(std::vector<MarkdownNode>& nodes,
+                                    const extract::SymbolInfo& sym,
+                                    const config::TaskConfig& config,
+                                    const extract::ProjectModel& model,
+                                    const SymbolAnalysisStore& analyses,
+                                    const PagePlan& plan,
+                                    const LinkResolver& links,
+                                    const PageDocLayout& layout,
+                                    std::string_view current_page_path,
+                                    std::uint8_t level) -> void {
+    auto entity = make_section(symbol_semantic_kind(sym),
+                               sym.qualified_name,
+                               "`" + sym.qualified_name + "`",
+                               level,
+                               false);
+    auto locations = build_symbol_source_locations(sym, config);
+    for(auto& node: locations) {
+        entity->children.push_back(std::move(node));
+    }
+
+    append_symbol_context_links(entity->children,
+                                sym,
+                                config,
+                                model,
+                                plan,
+                                links,
+                                layout,
+                                current_page_path);
+    append_symbol_snippet(entity->children, sym, plan, level + 1);
+    add_symbol_analysis_sections(entity->children, analyses, plan, sym, level + 1);
+
+    if(is_type_kind(sym.kind)) {
+        append_type_member_sections(entity->children,
+                                    sym,
+                                    config,
+                                    model,
+                                    analyses,
+                                    plan,
+                                    links,
+                                    layout,
+                                    current_page_path,
+                                    level + 1);
+    }
+
+    nodes.push_back(MarkdownNode{std::move(entity)});
+}
+
+auto append_member_section(std::vector<MarkdownNode>& nodes,
+                           std::string heading,
+                           const std::vector<const extract::SymbolInfo*>& members,
+                           const config::TaskConfig& config,
+                           const extract::ProjectModel& model,
+                           const SymbolAnalysisStore& analyses,
+                           const PagePlan& plan,
+                           const LinkResolver& links,
+                           const PageDocLayout& layout,
+                           std::string_view current_page_path,
+                           std::uint8_t level) -> void {
+    auto section = make_section(SemanticKind::Section, {}, std::move(heading), level);
+    for(const auto* member: members) {
+        if(member == nullptr) {
+            continue;
+        }
+        append_embedded_symbol_content(section->children,
+                                       *member,
+                                       config,
+                                       model,
+                                       analyses,
+                                       plan,
+                                       links,
+                                       layout,
+                                       current_page_path,
+                                       level + 1);
+    }
+    nodes.push_back(MarkdownNode{std::move(section)});
+}
+
 auto render_document_page(std::string relative_path,
                           Frontmatter frontmatter,
                           SemanticSectionPtr root) -> std::expected<GeneratedPage, RenderError> {
@@ -588,17 +695,16 @@ auto build_symbol_frontmatter(const extract::SymbolInfo& sym,
     };
 }
 
-auto render_symbol_overview_page(const SymbolDocPlan& doc_plan,
-                                 const PagePlan& owner_plan,
-                                 const config::TaskConfig& config,
-                                 const extract::ProjectModel& model,
-                                 const std::unordered_map<std::string, std::string>&,
-                                 const SymbolAnalysisStore& analyses,
-                                 const LinkResolver& links,
-                                 const PageDocLayout& layout)
-    -> std::expected<GeneratedPage, RenderError> {
+auto render_symbol_page(const SymbolDocPlan& doc_plan,
+                        const PagePlan& owner_plan,
+                        const config::TaskConfig& config,
+                        const extract::ProjectModel& model,
+                        const std::unordered_map<std::string, std::string>&,
+                        const SymbolAnalysisStore& analyses,
+                        const LinkResolver& links,
+                        const PageDocLayout& layout) -> std::expected<GeneratedPage, RenderError> {
     if(doc_plan.symbol == nullptr) {
-        return std::unexpected(RenderError{.message = "symbol overview page missing symbol"});
+        return std::unexpected(RenderError{.message = "symbol page missing symbol"});
     }
 
     auto view = symbol_doc_view_for(owner_plan, *doc_plan.symbol);
@@ -636,9 +742,51 @@ auto render_symbol_overview_page(const SymbolDocPlan& doc_plan,
                                                       config.project_root));
     }
 
+    append_symbol_snippet(root->children, *doc_plan.symbol, owner_plan, 2);
     add_symbol_fallback_content(root->children, *doc_plan.symbol, output);
     add_symbol_analysis_sections(root->children, analyses, owner_plan, *doc_plan.symbol, 2);
-    append_type_structure_sections(root->children, doc_plan, model, links, doc_plan.index_path);
+
+    if(is_type_kind(doc_plan.symbol->kind)) {
+        append_type_structure_sections(root->children,
+                                       doc_plan,
+                                       config,
+                                       model,
+                                       analyses,
+                                       owner_plan,
+                                       links,
+                                       layout,
+                                       doc_plan.index_path);
+    } else if(is_function_kind(doc_plan.symbol->kind)) {
+        append_relation_section(root->children,
+                                "Calls",
+                                2,
+                                doc_plan.symbol->calls,
+                                model,
+                                doc_plan.index_path,
+                                links);
+        append_relation_section(root->children,
+                                "Called By",
+                                2,
+                                doc_plan.symbol->called_by,
+                                model,
+                                doc_plan.index_path,
+                                links);
+    } else {
+        append_relation_section(root->children,
+                                "References",
+                                2,
+                                doc_plan.symbol->references,
+                                model,
+                                doc_plan.index_path,
+                                links);
+        append_relation_section(root->children,
+                                "Referenced By",
+                                2,
+                                doc_plan.symbol->referenced_by,
+                                model,
+                                doc_plan.index_path,
+                                links);
+    }
 
     if(!doc_plan.children.empty()) {
         root->children.push_back(MarkdownNode{
@@ -647,127 +795,96 @@ auto render_symbol_overview_page(const SymbolDocPlan& doc_plan,
                                build_child_doc_list(doc_plan.children, doc_plan.index_path))});
     }
 
-    return render_document_page(
-        doc_plan.index_path,
-        build_symbol_frontmatter(*doc_plan.symbol,
-                                 doc_plan.symbol->qualified_name,
-                                 output,
-                                 std::string(doc_label(view)) + " overview"),
-        std::move(root));
-}
-
-auto render_symbol_detail_page(const SymbolDocPlan& doc_plan,
-                               const PagePlan& owner_plan,
-                               const config::TaskConfig& config,
-                               const extract::ProjectModel& model,
-                               const std::unordered_map<std::string, std::string>&,
-                               const SymbolAnalysisStore& analyses,
-                               const LinkResolver& links,
-                               const PageDocLayout& layout)
-    -> std::expected<GeneratedPage, RenderError> {
-    if(doc_plan.symbol == nullptr) {
-        return std::unexpected(RenderError{.message = "symbol detail page missing symbol"});
-    }
-
-    auto view = symbol_doc_view_for(owner_plan, *doc_plan.symbol);
-    auto* output = owner_plan.page_type == PageType::Namespace
-                       ? analysis_overview_markdown(analyses, *doc_plan.symbol)
-                       : analysis_details_markdown(analyses, *doc_plan.symbol);
-
-    auto heading = std::format("`{}` {}", doc_plan.symbol->qualified_name, doc_label(view));
-    auto root = make_section(symbol_semantic_kind(*doc_plan.symbol),
-                             doc_plan.symbol->qualified_name,
-                             heading,
-                             1,
-                             false);
-    push_owner_link(root->children, doc_plan.detail_path, owner_plan);
-    add_symbol_doc_links(root->children, doc_plan.detail_path, layout, *doc_plan.symbol, view);
-
-    auto locations = build_symbol_source_locations(*doc_plan.symbol, config);
-    for(auto& node: locations) {
-        root->children.push_back(std::move(node));
-    }
-
-    if(owner_plan.page_type != PageType::Namespace) {
-        push_optional_link_paragraph(
-            root->children,
-            "Declaration: ",
-            find_declaration_page(*doc_plan.symbol, links, doc_plan.detail_path));
-    }
-    if(owner_plan.page_type == PageType::Namespace) {
-        push_link_paragraph(root->children,
-                            "Implementations: ",
-                            find_implementation_pages(*doc_plan.symbol,
-                                                      model,
-                                                      links,
-                                                      doc_plan.detail_path,
-                                                      config.project_root));
-    }
-
-    if(output != nullptr && !trim_ascii(*output).empty()) {
-        root->children.push_back(
-            MarkdownNode{build_prompt_section(std::string(doc_label(view)) + " Notes", 2, output)});
-    } else {
-        add_symbol_fallback_content(root->children, *doc_plan.symbol, output);
-    }
-    add_symbol_analysis_sections(root->children, analyses, owner_plan, *doc_plan.symbol, 2);
-
-    if(is_type_kind(doc_plan.symbol->kind)) {
-        append_type_structure_sections(root->children,
-                                       doc_plan,
-                                       model,
-                                       links,
-                                       doc_plan.detail_path);
-    } else if(is_function_kind(doc_plan.symbol->kind)) {
-        append_relation_section(root->children,
-                                "Calls",
-                                2,
-                                doc_plan.symbol->calls,
-                                model,
-                                doc_plan.detail_path,
-                                links);
-        append_relation_section(root->children,
-                                "Called By",
-                                2,
-                                doc_plan.symbol->called_by,
-                                model,
-                                doc_plan.detail_path,
-                                links);
-    } else {
-        append_relation_section(root->children,
-                                "References",
-                                2,
-                                doc_plan.symbol->references,
-                                model,
-                                doc_plan.detail_path,
-                                links);
-        append_relation_section(root->children,
-                                "Referenced By",
-                                2,
-                                doc_plan.symbol->referenced_by,
-                                model,
-                                doc_plan.detail_path,
-                                links);
-    }
-
-    if(!doc_plan.children.empty()) {
-        root->children.push_back(MarkdownNode{
-            build_list_section("Nested Pages",
-                               2,
-                               build_child_doc_list(doc_plan.children, doc_plan.detail_path))});
-    }
-
-    return render_document_page(
-        doc_plan.detail_path,
-        build_symbol_frontmatter(
-            *doc_plan.symbol,
-            std::format("{} {}", doc_plan.symbol->qualified_name, doc_label(view)),
-            output,
-            std::string(doc_label(view)) + " details"),
-        std::move(root));
+    return render_document_page(doc_plan.index_path,
+                                build_symbol_frontmatter(*doc_plan.symbol,
+                                                         doc_plan.symbol->qualified_name,
+                                                         output,
+                                                         std::string(doc_label(view)) + " page"),
+                                std::move(root));
 }
 
 }  // namespace
+
+auto find_doc_index_path(const PageDocLayout& layout, std::string_view qualified_name)
+    -> const std::string* {
+    auto it = layout.index_paths.find(std::string(qualified_name));
+    return it != layout.index_paths.end() ? &it->second : nullptr;
+}
+
+auto add_symbol_doc_links(std::vector<MarkdownNode>& nodes,
+                          std::string_view current_page_path,
+                          const PageDocLayout& layout,
+                          const extract::SymbolInfo& sym,
+                          SymbolDocView view) -> void {
+    std::vector<LinkTarget> targets;
+    if(auto* index_path = find_doc_index_path(layout, sym.qualified_name);
+       index_path != nullptr && *index_path != current_page_path) {
+        targets.push_back(
+            make_link_target(current_page_path, std::string(doc_label(view)), *index_path));
+    }
+    push_link_paragraph(nodes, "Docs: ", targets);
+}
+
+auto append_type_member_sections(std::vector<MarkdownNode>& nodes,
+                                 const extract::SymbolInfo& sym,
+                                 const config::TaskConfig& config,
+                                 const extract::ProjectModel& model,
+                                 const SymbolAnalysisStore& analyses,
+                                 const PagePlan& plan,
+                                 const LinkResolver& links,
+                                 const PageDocLayout& layout,
+                                 std::string_view current_page_path,
+                                 std::uint8_t level) -> void {
+    if(!is_type_kind(sym.kind)) {
+        return;
+    }
+
+    append_member_section(nodes,
+                          "Member Types",
+                          collect_member_symbols(model,
+                                                 sym,
+                                                 [](const extract::SymbolInfo& child) {
+                                                     return is_type_kind(child.kind);
+                                                 }),
+                          config,
+                          model,
+                          analyses,
+                          plan,
+                          links,
+                          layout,
+                          current_page_path,
+                          level);
+    append_member_section(nodes,
+                          "Member Variables",
+                          collect_member_symbols(model,
+                                                 sym,
+                                                 [](const extract::SymbolInfo& child) {
+                                                     return is_variable_kind(child.kind);
+                                                 }),
+                          config,
+                          model,
+                          analyses,
+                          plan,
+                          links,
+                          layout,
+                          current_page_path,
+                          level);
+    append_member_section(nodes,
+                          "Member Functions",
+                          collect_member_symbols(model,
+                                                 sym,
+                                                 [](const extract::SymbolInfo& child) {
+                                                     return is_function_kind(child.kind);
+                                                 }),
+                          config,
+                          model,
+                          analyses,
+                          plan,
+                          links,
+                          layout,
+                          current_page_path,
+                          level);
+}
 
 auto normalize_frontmatter_title(std::string_view page_title) -> std::string {
     auto plain = strip_inline_markdown(page_title);
@@ -851,33 +968,18 @@ auto append_symbol_doc_pages(std::vector<GeneratedPage>& pages,
                              const LinkResolver& links,
                              const PageDocLayout& layout) -> std::expected<void, RenderError> {
     for(const auto& doc_plan: doc_plans) {
-        auto overview = render_symbol_overview_page(doc_plan,
-                                                    owner_plan,
-                                                    config,
-                                                    model,
-                                                    outputs,
-                                                    analyses,
-                                                    links,
-                                                    layout);
-        if(!overview.has_value()) {
-            return std::unexpected(std::move(overview.error()));
+        auto page = render_symbol_page(doc_plan,
+                                       owner_plan,
+                                       config,
+                                       model,
+                                       outputs,
+                                       analyses,
+                                       links,
+                                       layout);
+        if(!page.has_value()) {
+            return std::unexpected(std::move(page.error()));
         }
-        pages.push_back(std::move(*overview));
-
-        if(!doc_plan.detail_path.empty()) {
-            auto detail = render_symbol_detail_page(doc_plan,
-                                                    owner_plan,
-                                                    config,
-                                                    model,
-                                                    outputs,
-                                                    analyses,
-                                                    links,
-                                                    layout);
-            if(!detail.has_value()) {
-                return std::unexpected(std::move(detail.error()));
-            }
-            pages.push_back(std::move(*detail));
-        }
+        pages.push_back(std::move(*page));
 
         if(auto nested = append_symbol_doc_pages(pages,
                                                  doc_plan.children,
