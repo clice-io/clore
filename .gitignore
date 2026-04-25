@@ -53,3 +53,5 @@ CMakePresets.json
 CMakeUserPresets.json
 .conan/
 .clice/
+
+docs/

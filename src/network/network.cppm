@@ -25,6 +25,8 @@ auto call_completion_async(CompletionRequest request,
                            kota::event_loop& loop = kota::event_loop::current())
     -> kota::task<CompletionResponse, LLMError>;
 
+auto validate_llm_provider_environment() -> std::expected<void, LLMError>;
+
 }  // namespace clore::net
 
 namespace clore::net {
@@ -112,6 +114,14 @@ auto provider_label(Provider provider) -> std::string_view {
 }
 
 }  // namespace
+
+auto validate_llm_provider_environment() -> std::expected<void, LLMError> {
+    auto provider_result = detect_provider_from_environment();
+    if(!provider_result.has_value()) {
+        return std::unexpected(std::move(provider_result.error()));
+    }
+    return {};
+}
 
 auto call_llm_async(std::string_view model,
                     std::string_view system_prompt,

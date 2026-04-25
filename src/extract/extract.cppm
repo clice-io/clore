@@ -74,10 +74,10 @@ auto make_unknown_exception_error(std::string_view context) -> ExtractError {
 }
 
 template <typename Value, typename Callable>
-auto run_cache_io_async(Callable&& callable,
-                        std::string_view operation_name,
+auto run_cache_io_async(Callable callable,
+                        std::string operation_name,
                         kota::event_loop& loop) -> kota::task<Value, ExtractError> {
-    auto queued = co_await kota::queue(std::forward<Callable>(callable), loop).catch_cancel();
+    auto queued = co_await kota::queue(std::move(callable), loop).catch_cancel();
 
     if(queued.is_cancelled()) {
         co_await kota::fail(ExtractError{.message = std::format("{} cancelled", operation_name)});

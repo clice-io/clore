@@ -246,6 +246,10 @@ int main(int argc, const char** argv) {
             return 1;
         }
         rate_limit = *opts.rate_limit;
+        auto provider_result = clore::net::validate_llm_provider_environment();
+        if(log_expected_error(provider_result, "LLM provider environment invalid")) {
+            return 1;
+        }
         clore::net::initialize_llm_rate_limit(rate_limit);
     }
 
