@@ -38,10 +38,9 @@ jobs:
             build/${{ env.BUILD_TYPE }}/_deps/
             build/${{ env.BUILD_TYPE }}/src/cmake_install.cmake
             build/${{ env.BUILD_TYPE }}/tests/cmake_install.cmake
-          key: ${{ runner.os }}-config-v1-${{ hashFiles('pixi.lock', 'pixi.toml') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}
+          key: ${{ runner.os }}-config-${{ hashFiles('pixi.lock', 'pixi.toml') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}
           restore-keys: |
-            ${{ runner.os }}-config-v1-${{ hashFiles('pixi.lock', 'pixi.toml') }}-
-            ${{ runner.os }}-config-v1-
+            ${{ runner.os }}-config-${{ hashFiles('pixi.lock', 'pixi.toml') }}-
 
       - name: Configure
         run: pixi run config
@@ -58,12 +57,11 @@ jobs:
             build/${{ env.BUILD_TYPE }}/src/libclore-core.a
             build/${{ env.BUILD_TYPE }}/tests/CMakeFiles/
             build/${{ env.BUILD_TYPE }}/tests/unit_tests
-          key: ${{ runner.os }}-build-v1-${{ hashFiles('pixi.lock', 'pixi.toml') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}-src-${{ hashFiles('src/**/*', 'tests/**/*') }}
+          key: ${{ runner.os }}-build-${{ hashFiles('pixi.lock', 'pixi.toml') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}-src-${{ hashFiles('src/**/*', 'tests/**/*') }}
           restore-keys: |
-            ${{ runner.os }}-build-v1-${{ hashFiles('pixi.lock', 'pixi.toml') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}-
-            ${{ runner.os }}-build-v1-${{ hashFiles('pixi.lock', 'pixi.toml') }}-
-            ${{ runner.os }}-build-v1-
-
+            ${{ runner.os }}-build-${{ hashFiles('pixi.lock', 'pixi.toml') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}-
+            ${{ runner.os }}-build-${{ hashFiles('pixi.lock', 'pixi.toml') }}-
+              
       - name: Build
         run: pixi run build
 

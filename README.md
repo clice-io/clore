@@ -32,7 +32,7 @@ LLVM, Clang, `spdlog`, and `libcurl` are provided by the `pixi` environment (con
 
 ### Standard mode
 
-Generate documentation from a compilation database:
+Generate documentation from a compilation database. In standard mode, exactly one of `--dry-run` or `--model` is required:
 
 ```bash
 clore \
@@ -67,11 +67,13 @@ clore \
 | `--compile-commands` | Path to `compile_commands.json` |
 | `--source-dir` | Source root directory for relative output paths |
 | `--output-dir` | Output root directory |
-| `--dry-run` | Write assembled prompts to `--output-dir` and skip LLM calls |
+| `--dry-run` | Write assembled prompts to `--output-dir` and skip LLM requests |
 | `--model` | Model name for online generation (e.g. `deepseek-chat`) |
-| `--rate-limit` | Required max concurrent LLM requests when `--model` is used |
+| `--rate-limit` | Maximum concurrent LLM requests when `--model` is used |
 | `--experimental-agent-mode` | Enable agent-driven autonomous exploration and guide generation |
 | `--log-level` | Override log level (`trace\|debug\|info\|warn\|error\|off`) |
+| `-h`, `--help` | Show help message |
+| `-v`, `--version` | Show version |
 
 ## Configuration
 
@@ -86,7 +88,7 @@ exclude = []
 
 [llm]
 system_prompt = "You are a C++ documentation writer. Please generate concise and accurate documentation for C++ code elements. Focus on the purpose, design intent, and role of each element within the codebase. The output documentation must be in Markdown format and suitable for embedding within a document page. Use English in the generated documentation."
-retry_count = 10
+retry_count = 20
 ```
 
 ### LLM provider selection
