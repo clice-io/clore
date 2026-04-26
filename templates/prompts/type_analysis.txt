@@ -1,0 +1,18 @@
+R"clore(Analyze the {{target_kind}} `{{target_name}}` and return a JSON object that matches the provided schema.
+
+This analysis will be cached and reused across namespace, module, file, and symbol documentation pages.
+Use only the EVIDENCE section below.
+
+Field requirements:
+- `overview_markdown`: 1 short paragraph for declaration and overview contexts.
+- `details_markdown`: 1 short paragraph focused on internal structure, important members, invariants, and how the type is implemented.
+- `invariants`: short phrases describing stable guarantees, expectations, or constraints implied by the evidence.
+- `key_members`: short phrases naming the members, nested types, or methods that most define the type's role.
+- `usage_patterns`: short phrases describing how other code uses, extends, or depends on this type.
+
+Constraints:
+- Stay conservative and evidence-grounded.
+- Do not invent relationships or guarantees that are not present in the evidence.
+- Markdown fields must be fragments only, with no headings and no code fences.
+
+{{evidence}})clore"

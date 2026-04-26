@@ -1,0 +1,20 @@
+R"clore(Analyze the {{target_kind}} `{{target_name}}` and return a JSON object that matches the provided schema.
+
+This analysis will be cached and reused across namespace, module, file, and symbol documentation pages.
+Use only the EVIDENCE section below.
+
+Field requirements:
+- `overview_markdown`: 1 short paragraph for declaration and overview contexts.
+- `details_markdown`: 1 short paragraph focused on body semantics, control flow, important callees, and implementation strategy.
+- `has_side_effects`: true when the function likely performs observable mutation, I/O, synchronization, logging, allocation-visible ownership transfer, or similar external effects.
+- `side_effects`: concrete phrases describing those effects. Use an empty array when no effects are supported by evidence.
+- `reads_from`: concrete state, parameters, globals, fields, or resources read by the function.
+- `writes_to`: concrete state, outputs, globals, fields, or resources written by the function.
+- `usage_patterns`: short phrases describing how callers or related code use this function.
+
+Constraints:
+- Stay conservative and evidence-grounded.
+- Do not invent behavior that is not present in the evidence.
+- Markdown fields must be fragments only, with no headings and no code fences.
+
+{{evidence}})clore"

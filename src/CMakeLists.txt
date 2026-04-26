@@ -1,80 +1,98 @@
-file(GLOB_RECURSE CLORE_MODULE_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/config/*.cppm"
-    "${CMAKE_CURRENT_SOURCE_DIR}/extract/*.cppm"
-    "${CMAKE_CURRENT_SOURCE_DIR}/generate/*.cppm"
-    "${CMAKE_CURRENT_SOURCE_DIR}/network/*.cppm"
-    "${CMAKE_CURRENT_SOURCE_DIR}/support/*.cppm"
+file(GLOB CLORE_ROOT_MODULE_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.cppm"
 )
 
-# ── report clang-scan-deps configuration for C++20 module compilation ───
-if(CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS)
-    message(STATUS "Found clang-scan-deps: ${CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS}")
-else()
-    message(STATUS "clang-scan-deps not found; will rely on CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS cache")
+file(GLOB_RECURSE CLORE_MODULE_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/**/*.cppm"
+)
+
+if(WIN32)
+    if(NOT DEFINED ENV{VCToolsInstallDir} OR "$ENV{VCToolsInstallDir}" STREQUAL "")
+        message(FATAL_ERROR
+            "VCToolsInstallDir is required for Clang builds on Windows to locate std.ixx"
+        )
+    endif()
+
+    set(CLORE_WINDOWS_STD_MODULE_BASE_DIR "$ENV{VCToolsInstallDir}/modules")
+    set(CLORE_WINDOWS_STD_MODULE_SOURCE
+        "${CLORE_WINDOWS_STD_MODULE_BASE_DIR}/std.ixx"
+    )
+
+    if(NOT EXISTS "${CLORE_WINDOWS_STD_MODULE_SOURCE}")
+        message(FATAL_ERROR
+            "std.ixx not found at expected path: ${CLORE_WINDOWS_STD_MODULE_SOURCE}"
+        )
+    endif()
 endif()
 
 add_library(clore-core STATIC)
+set_target_properties(clore-core PROPERTIES CXX_SCAN_FOR_MODULES ON)
+if(NOT WIN32)
+    set_target_properties(clore-core PROPERTIES CXX_MODULE_STD ON)
+endif()
 add_library(clore::core ALIAS clore-core)
-set_property(TARGET clore-core PROPERTY CXX_SCAN_FOR_MODULES ON)
-
-target_sources(clore-core
+if(WIN32)
+    target_sources(clore-core
+        PUBLIC
+        FILE_SET public_modules TYPE CXX_MODULES
+        BASE_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CLORE_WINDOWS_STD_MODULE_BASE_DIR}"
+        FILES
+        ${CLORE_ROOT_MODULE_SOURCES}
+        ${CLORE_MODULE_SOURCES}
+        "${CLORE_WINDOWS_STD_MODULE_SOURCE}"
+    )
+else()
+    target_sources(clore-core
+        PUBLIC
+        FILE_SET public_modules TYPE CXX_MODULES
+        FILES
+        ${CLORE_ROOT_MODULE_SOURCES}
+        ${CLORE_MODULE_SOURCES}
+    )
+endif()
+target_compile_features(clore-core PUBLIC cxx_std_23)
+if(NOT TARGET simdjson)
+    message(FATAL_ERROR "simdjson target is required before configuring clore-core")
+endif()
+get_target_property(json_headers simdjson INTERFACE_INCLUDE_DIRECTORIES)
+if(NOT json_headers)
+    message(FATAL_ERROR "simdjson target does not expose include directories")
+endif()
+target_include_directories(clore-core
     PUBLIC
-        FILE_SET CXX_MODULES FILES
-            ${CLORE_MODULE_SOURCES}
-)
-
-target_include_directories(clore-core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
+    ${json_headers}
+    PRIVATE
+    "${LLVM_INCLUDE_DIRS}"
 )
-
 target_link_libraries(clore-core PUBLIC
-    clore_options
-    llvm-libs
-    CURL::libcurl
+    clangTooling
+    clangFrontend
+    clangSerialization
+    clangDriver
+    clangParse
+    clangSema
+    clangAST
+    clangLex
+    clangBasic
+    clangIndex
+    LLVMSupport
     spdlog::spdlog
-    eventide::async
-    eventide::serde::toml
-    eventide::serde::json
-    simdjson::simdjson
+    kota::async
+    kota::http
+    kota::codec::toml
+    kota::codec::json
 )
 
 add_executable(clore "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
-set_property(TARGET clore PROPERTY CXX_SCAN_FOR_MODULES ON)
-target_link_libraries(clore PRIVATE clore::core eventide::deco)
-install(TARGETS clore RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-
-add_custom_target(copy_clang_resource ALL
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${LLVM_INSTALL_PATH}/lib/clang"
-        "${PROJECT_BINARY_DIR}/lib/clang"
-    COMMENT "Copying clang resource directory"
-)
-install(
-    DIRECTORY "${LLVM_INSTALL_PATH}/lib/clang"
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-)
-
-if(CLORE_ENABLE_TEST)
-    file(GLOB_RECURSE CLORE_TEST_SOURCES CONFIGURE_DEPENDS
-        "${PROJECT_SOURCE_DIR}/tests/unit/*/*.cpp"
+target_link_libraries(clore PRIVATE clore::core kota::deco)
+if(WIN32)
+    add_custom_command(TARGET clore POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        $<TARGET_RUNTIME_DLLS:clore>
+        $<TARGET_FILE_DIR:clore>
+        COMMAND_EXPAND_LISTS
     )
-
-    add_executable(unit_tests
-        "${PROJECT_SOURCE_DIR}/tests/unit/unit_tests.cpp"
-        ${CLORE_TEST_SOURCES}
-    )
-    target_include_directories(unit_tests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${PROJECT_SOURCE_DIR}/tests/unit"
-    )
-    target_link_libraries(unit_tests PRIVATE clore::core eventide::zest eventide::deco)
-    set_property(TARGET unit_tests PROPERTY CXX_SCAN_FOR_MODULES ON)
-endif()
-
-if(CLORE_ENABLE_IPO)
-    set_property(TARGET clore-core PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    set_property(TARGET clore PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    if(CLORE_ENABLE_TEST)
-        set_property(TARGET unit_tests PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    endif()
 endif()

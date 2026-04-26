@@ -2,15 +2,18 @@ name: Build
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   pull_request:
 
 jobs:
   build:
     strategy:
       matrix:
-        os: ["windows-latest", "ubuntu-latest", "macos-latest"]
+        os: [ "ubuntu-latest", "macos-latest" ]
+
     runs-on: "${{ matrix.os }}"
+    env:
+      BUILD_TYPE: Debug
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -22,24 +25,45 @@ jobs:
           activate-environment: true
           cache: true
 
-      - name: Restore build directory cache
-        id: restore-build-cache
-        uses: actions/cache/restore@v5
+      - name: Cache config layer
+        id: cache-config
+        uses: actions/cache@v5
         with:
-          path: build/Debug/
-          key: ${{ runner.os }}-debug-build-${{ hashFiles('pixi.lock', 'pixi.toml', '**/CMakeLists.txt', 'cmake/**/*.cmake') }}
+          path: |
+            build/${{ env.BUILD_TYPE }}/CMakeCache.txt
+            build/${{ env.BUILD_TYPE }}/build.ninja
+            build/${{ env.BUILD_TYPE }}/cmake_install.cmake
+            build/${{ env.BUILD_TYPE }}/compile_commands.json
+            build/${{ env.BUILD_TYPE }}/CMakeFiles/
+            build/${{ env.BUILD_TYPE }}/_deps/
+            build/${{ env.BUILD_TYPE }}/src/cmake_install.cmake
+            build/${{ env.BUILD_TYPE }}/tests/cmake_install.cmake
+          key: ${{ runner.os }}-config-${{ hashFiles('pixi.lock', 'pixi.toml') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}
           restore-keys: |
-            ${{ runner.os }}-debug-build-
+            ${{ runner.os }}-config-${{ hashFiles('pixi.lock', 'pixi.toml') }}-
 
       - name: Configure
-        run: pixi run cmake-config Debug
+        run: pixi run config
 
-      - name: Save build directory cache
-        if: steps.restore-build-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+      - name: Cache build layer
+        id: cache-build
+        uses: actions/cache@v5
         with:
-          path: build/Debug/
-          key: ${{ steps.restore-build-cache.outputs.cache-primary-key }}
-
+          path: |
+            build/${{ env.BUILD_TYPE }}/.ninja_deps
+            build/${{ env.BUILD_TYPE }}/.ninja_log
+            build/${{ env.BUILD_TYPE }}/src/CMakeFiles/
+            build/${{ env.BUILD_TYPE }}/src/clore
+            build/${{ env.BUILD_TYPE }}/src/libclore-core.a
+            build/${{ env.BUILD_TYPE }}/tests/CMakeFiles/
+            build/${{ env.BUILD_TYPE }}/tests/unit_tests
+          key: ${{ runner.os }}-build-${{ hashFiles('pixi.lock', 'pixi.toml') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}-src-${{ hashFiles('src/**/*', 'tests/**/*') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ hashFiles('pixi.lock', 'pixi.toml') }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/CMakeLists.txt', 'tests/CMakeLists.txt') }}-
+            ${{ runner.os }}-build-${{ hashFiles('pixi.lock', 'pixi.toml') }}-
+              
       - name: Build
-        run: pixi run cmake-build Debug
+        run: pixi run build
+
+      - name: Test
+        run: pixi run test

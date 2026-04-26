@@ -1,103 +1,80 @@
-cmake_minimum_required(VERSION 3.30)
-
-project(clore LANGUAGES C CXX)
+cmake_minimum_required(VERSION 4.3.0)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+project(clore LANGUAGES CXX)
 
-include(GNUInstallDirs)
-include(CheckIPOSupported)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib")
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+include(FetchContent)
 
-option(CLORE_ENABLE_LTO "Enable ThinLTO for all targets" ON)
-option(CLORE_OFFLINE_BUILD "Disable network downloads during configuration" OFF)
-option(CLORE_ENABLE_TEST "Build unit tests" ON)
+find_package(spdlog REQUIRED)
+find_package(LLVM REQUIRED CONFIG)
+find_package(Clang REQUIRED CONFIG)
 
-if(WIN32 AND (MSVC OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND
-                      (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" OR
-                       CMAKE_CXX_COMPILER_LINKER_FRONTEND_VARIANT STREQUAL "MSVC"))))
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL" CACHE STRING
-        "Use the release CRT to stay ABI-compatible with the bundled Windows LLVM artifacts."
-        FORCE)
-endif()
+set(KOTA_ENABLE_ASYNC ON)
+set(KOTA_ENABLE_HTTP ON)
+set(KOTA_ENABLE_OPTION ON)
+set(KOTA_ENABLE_DECO ON)
+set(KOTA_ENABLE_ZEST ON)
+set(KOTA_ENABLE_CCACHE OFF)
+set(KOTA_ENABLE_EXCEPTIONS ON)
+set(KOTA_ENABLE_EXAMPLES OFF)
+set(KOTA_ENABLE_RTTI ON)
+set(KOTA_ENABLE_TEST OFF)
+set(KOTA_BUILD_ALL_TESTS OFF)
+set(KOTA_USE_CPM_FOR_TESTS OFF)
+set(KOTA_SANITIZE_ADDRESS OFF)
+set(KOTA_SANITIZE_MEMORY OFF)
+set(KOTA_SANITIZE_THREAD OFF)
+set(KOTA_SANITIZE_UNDEFINED OFF)
+set(KOTA_CODEC_ENABLE_SIMDJSON ON)
+set(KOTA_CODEC_ENABLE_TOML ON)
+set(KOTA_CODEC_ENABLE_FLATBUFFERS OFF)
 
-# Global flags that apply to all targets (including FetchContent dependencies).
-if(NOT MSVC)
-    add_compile_options(-ffunction-sections -fdata-sections)
-endif()
+set(BUILD_CURL_EXE OFF CACHE INTERNAL "" FORCE)
+set(BUILD_STATIC_LIBS ON CACHE INTERNAL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "" FORCE)
+set(CURL_DISABLE_INSTALL ON CACHE INTERNAL "" FORCE)
+set(CURL_ENABLE_EXPORT_TARGET ON CACHE INTERNAL "" FORCE)
+set(BUILD_LIBCURL_DOCS OFF CACHE INTERNAL "" FORCE)
+set(BUILD_MISC_DOCS OFF CACHE INTERNAL "" FORCE)
+set(ENABLE_CURL_MANUAL OFF CACHE INTERNAL "" FORCE)
+set(BUILD_EXAMPLES OFF CACHE INTERNAL "" FORCE)
+set(BUILD_TESTING OFF CACHE INTERNAL "" FORCE)
+set(CURL_USE_PKGCONFIG OFF CACHE INTERNAL "" FORCE)
+set(CURL_ZLIB OFF CACHE INTERNAL "" FORCE)
+set(CURL_ZSTD OFF CACHE INTERNAL "" FORCE)
+set(CURL_BROTLI OFF CACHE INTERNAL "" FORCE)
+set(CURL_USE_LIBPSL OFF CACHE INTERNAL "" FORCE)
+set(USE_LIBIDN2 OFF CACHE INTERNAL "" FORCE)
+set(USE_NGHTTP2 OFF CACHE INTERNAL "" FORCE)
+set(CURL_USE_LIBSSH2 OFF CACHE INTERNAL "" FORCE)
 
-if(APPLE)
-    # https://conda-forge.org/docs/maintainer/knowledge_base/#newer-c-features-with-old-sdk
-    add_compile_definitions(_LIBCPP_DISABLE_AVAILABILITY=1)
-endif()
-
-if(MSVC OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND
-            (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" OR
-             CMAKE_CXX_COMPILER_LINKER_FRONTEND_VARIANT STREQUAL "MSVC")))
-    string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,/OPT:REF")
-    string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,/OPT:REF")
-elseif(APPLE)
-    string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,-dead_strip")
-    string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,-dead_strip")
-else()
-    string(APPEND CMAKE_EXE_LINKER_FLAGS " -static-libstdc++ -static-libgcc -Wl,--gc-sections")
-    string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,--gc-sections")
-endif()
-
-set(CLORE_ENABLE_IPO OFF)
-set(CLORE_USE_LTO_ARTIFACT OFF)
-if(CLORE_ENABLE_LTO)
-    if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-        check_ipo_supported(RESULT CLORE_IPO_SUPPORTED OUTPUT CLORE_IPO_ERROR LANGUAGES C CXX)
-        if(CLORE_IPO_SUPPORTED)
-            set(CLORE_ENABLE_IPO ON)
-            set(CLORE_USE_LTO_ARTIFACT ON)
-            message(STATUS "Interprocedural optimization enabled for ${CMAKE_BUILD_TYPE} builds.")
-        else()
-            message(WARNING "LTO requested but IPO is not supported by the active toolchain: ${CLORE_IPO_ERROR}")
-        endif()
-    else()
-        message(STATUS "Interprocedural optimization disabled for non-RelWithDebInfo builds.")
-    endif()
-endif()
+set(CMAKE_DISABLE_FIND_PACKAGE_Brotli ON)
+set(ZLIB_FOUND OFF)
+set(ZSTD_FOUND OFF)
+set(BROTLI_FOUND OFF)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    if(WIN32)
-        message(STATUS "AddressSanitizer disabled on Windows Debug builds: the current MSVC-targeting clang toolchain and prebuilt LLVM static libraries are not ASan-safe in this repo.")
-    else()
-        add_compile_options(-fsanitize=address)
-        string(APPEND CMAKE_EXE_LINKER_FLAGS " -fsanitize=address")
-        string(APPEND CMAKE_SHARED_LINKER_FLAGS " -fsanitize=address")
+    add_compile_options(-fno-omit-frame-pointer)
+    add_compile_options(-ftrivial-auto-var-init=pattern)
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT lto_supported OUTPUT lto_error LANGUAGES CXX)
+    if(lto_supported)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
     endif()
 endif()
 
-include("${PROJECT_SOURCE_DIR}/cmake/package.cmake")
-
-# Project-specific options (not applied to third-party deps).
-add_library(clore_options INTERFACE)
-
-if(MSVC OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND
-         CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC"))
-    target_compile_options(clore_options INTERFACE /GR- /EHs-c- /Zc:preprocessor)
-else()
-    target_compile_options(clore_options INTERFACE
-        -fno-rtti
-        -fno-exceptions
-        -Wno-deprecated-declarations
-        $<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>:-Wno-undefined-inline>
-    )
-endif()
-
-if(WIN32)
-    target_link_libraries(clore_options INTERFACE version ntdll)
-endif()
-
-if(CLORE_ENABLE_TEST)
-    target_compile_definitions(clore_options INTERFACE CLORE_ENABLE_TEST=1)
-endif()
+FetchContent_Declare(
+    kotatsu
+    GIT_REPOSITORY https://github.com/fogsong233/eventide.git
+    GIT_TAG        add-curl
+)
+FetchContent_MakeAvailable(kotatsu)
 
 add_subdirectory(src)
+add_subdirectory(tests)
