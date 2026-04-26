@@ -434,7 +434,7 @@ auto edge_hash(SymbolID from, SymbolID to, RelationKind kind) -> std::uint64_t {
                 (hash << 6) + (hash >> 2);
     };
 
-    auto h = std::hash<std::uint64_t>{}(from.hash);
+    std::uint64_t h = std::hash<std::uint64_t>{}(from.hash);
     mix(h, from.signature);
     mix(h, to.hash);
     mix(h, to.signature);
