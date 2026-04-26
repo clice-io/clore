@@ -576,7 +576,8 @@ auto extract_project_async(const config::TaskConfig& config, kota::event_loop& l
                                                          std::move(clice_cache),
                                                          loop);
         if(persist_result.has_error()) {
-            co_await kota::fail(std::move(persist_result.error()));
+            logging::warn("failed to persist caches after extract failure: {}",
+                          persist_result.error().message);
         }
         co_await kota::fail(std::move(error));
     };

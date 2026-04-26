@@ -344,13 +344,15 @@ auto declaration_snippet(const extract::SymbolInfo& sym) -> std::optional<std::s
         if(!declaration.ends_with(';')) {
             declaration.push_back(';');
         }
-        // Skip meaningless signatures with no parameters: "ClassName();" or "void();"
+        // Skip signatures that do not carry a function name, such as "void();".
         auto lparen = declaration.find('(');
         auto rparen = declaration.find(')', lparen);
         if(lparen != std::string::npos && rparen != std::string::npos &&
            rparen + 1 == declaration.size() - 1 && declaration.back() == ';') {
-            auto between = std::string_view(declaration).substr(lparen + 1, rparen - lparen - 1);
-            if(std::ranges::all_of(between, [](char c) { return std::isspace(static_cast<unsigned char>(c)); })) {
+            auto before = trim_ascii(std::string_view(declaration).substr(0, lparen));
+            auto last_space = before.find_last_of(" \t\r\n\f\v");
+            auto name = last_space == std::string_view::npos ? before : before.substr(last_space + 1);
+            if(name.empty() || name == "void") {
                 return std::nullopt;
             }
         }

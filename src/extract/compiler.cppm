@@ -167,12 +167,7 @@ auto lookup(const CompilationDatabase& db, std::string_view file)
 
     namespace fs = std::filesystem;
     for(const auto& entry: db.entries) {
-        auto candidate = fs::path(file);
-        if(candidate.is_relative()) {
-            candidate = (fs::path(entry.directory) / candidate).lexically_normal();
-        } else {
-            candidate = candidate.lexically_normal();
-        }
+        auto candidate = normalize_argument_path(file, entry.directory);
 
         auto normalized_entry =
             entry.normalized_file.empty() ? normalize_entry_file(entry) : entry.normalized_file;
