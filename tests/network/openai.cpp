@@ -243,12 +243,10 @@ TEST_CASE(request_text_once_preserves_response_format) {
 
     bool had_format = false;
 
-    auto result =
-        detail::run_task_sync<std::string>([response_format = *response_format,
-                                            &had_format](kota::event_loop& loop) {
+    auto result = detail::run_task_sync<std::string>(
+        [response_format = *response_format, &had_format](kota::event_loop& loop) {
             return detail::request_text_once_async(
-                [&](CompletionRequest completion_request,
-                    kota::event_loop& completion_loop) {
+                [&](CompletionRequest completion_request, kota::event_loop& completion_loop) {
                     return invoke_completion_handler(
                         [&](CompletionRequest request,
                             kota::event_loop&) -> std::expected<CompletionResponse, LLMError> {
@@ -256,9 +254,10 @@ TEST_CASE(request_text_once_preserves_response_format) {
                             return CompletionResponse{
                                 .id = "resp_json",
                                 .model = "deepseek-chat",
-                                .message = AssistantOutput{
-                                    .text = std::string(
-                                        R"({"title":"demo","notes":null,"tags":["core"]})")},
+                                .message =
+                                    AssistantOutput{
+                                        .text = std::string(
+                                            R"({"title":"demo","notes":null,"tags":["core"]})")},
                                 .raw_json = "{}",
                             };
                         },
@@ -328,8 +327,8 @@ TEST_CASE(request_text_once_rejects_markdown_code_fence) {
                 co_return CompletionResponse{
                     .id = "resp_markdown",
                     .model = "deepseek-chat",
-                    .message =
-                        AssistantOutput{.text = std::string("Paragraph\n```cpp\nint x = 1;\n```\n")},
+                    .message = AssistantOutput{.text = std::string(
+                                                   "Paragraph\n```cpp\nint x = 1;\n```\n")},
                     .raw_json = "{}",
                 };
             },

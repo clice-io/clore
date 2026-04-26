@@ -14,7 +14,7 @@ namespace {
 constexpr auto kMinimalValidConfig = R"(
 [llm]
 system_prompt = "You are a documentation writer."
-retry_count = 3
+retry_limit = 3
 )";
 
 auto make_valid_config(std::string_view system_prompt) -> std::string {
@@ -39,7 +39,7 @@ TEST_CASE(load_minimal_valid) {
     auto result = load_config_from_string(kMinimalValidConfig);
     ASSERT_TRUE(result.has_value());
     auto& config = *result;
-    EXPECT_EQ(config.llm.retry_count, 3u);
+    EXPECT_EQ(config.llm.retry_limit, 3u);
 }
 
 TEST_CASE(load_requires_required_sections) {

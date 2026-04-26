@@ -80,7 +80,7 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
     // Validate LLM config
     if(auto r = validate_nonempty(config.llm.system_prompt, "llm.system_prompt"); !r)
         return r;
-    if(auto r = validate_nonzero(config.llm.retry_count, "llm.retry_count"); !r)
+    if(auto r = validate_nonzero(config.llm.retry_limit, "llm.retry_limit"); !r)
         return r;
 
     return {};

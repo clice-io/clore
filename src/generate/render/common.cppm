@@ -11,6 +11,7 @@ export namespace clore::generate {
 struct LinkTarget {
     std::string label;
     std::string target;
+    bool code_style = false;
 };
 
 enum class SymbolDocView : std::uint8_t {
@@ -79,10 +80,12 @@ auto prompt_output_of(const std::unordered_map<std::string, std::string>& output
 
 auto make_link_target(std::string_view current_page_path,
                       std::string label,
-                      std::string_view target_page_path) -> LinkTarget {
+                      std::string_view target_page_path,
+                      bool code_style = false) -> LinkTarget {
     return LinkTarget{
         .label = std::move(label),
         .target = make_relative_link_target(current_page_path, target_page_path),
+        .code_style = code_style,
     };
 }
 
@@ -99,7 +102,8 @@ auto push_link_paragraph(std::vector<MarkdownNode>& nodes,
         if(i > 0) {
             paragraph.fragments.push_back(make_text(" | "));
         }
-        paragraph.fragments.push_back(make_link(targets[i].label, targets[i].target));
+        paragraph.fragments.push_back(
+            make_link(targets[i].label, targets[i].target, targets[i].code_style));
     }
     nodes.push_back(MarkdownNode{std::move(paragraph)});
 }
@@ -113,7 +117,7 @@ auto push_optional_link_paragraph(std::vector<MarkdownNode>& nodes,
 
     Paragraph paragraph;
     paragraph.fragments.push_back(make_text(std::move(label)));
-    paragraph.fragments.push_back(make_link(target->label, target->target));
+    paragraph.fragments.push_back(make_link(target->label, target->target, target->code_style));
     nodes.push_back(MarkdownNode{std::move(paragraph)});
 }
 
@@ -148,7 +152,7 @@ auto build_string_list(const std::vector<std::string>& items) -> BulletList {
             continue;
         }
         ListItem item;
-        item.fragments.push_back(make_text(item_text));
+        item.fragments = code_spanned_fragments(item_text);
         list.items.push_back(std::move(item));
     }
     return list;
@@ -163,12 +167,26 @@ auto symbol_analysis_markdown_for(const SymbolAnalysisStore& analyses,
     return analysis_details_markdown(analyses, sym);
 }
 
+auto add_symbol_analysis_detail_sections(std::vector<MarkdownNode>& nodes,
+                                         const SymbolAnalysisStore& analyses,
+                                         const PagePlan& plan,
+                                         const extract::SymbolInfo& sym,
+                                         std::uint8_t level) -> void;
+
 auto add_symbol_analysis_sections(std::vector<MarkdownNode>& nodes,
                                   const SymbolAnalysisStore& analyses,
                                   const PagePlan& plan,
                                   const extract::SymbolInfo& sym,
                                   std::uint8_t level) -> void {
     add_prompt_output(nodes, symbol_analysis_markdown_for(analyses, plan, sym));
+    add_symbol_analysis_detail_sections(nodes, analyses, plan, sym, level);
+}
+
+auto add_symbol_analysis_detail_sections(std::vector<MarkdownNode>& nodes,
+                                         const SymbolAnalysisStore& analyses,
+                                         const PagePlan& plan,
+                                         const extract::SymbolInfo& sym,
+                                         std::uint8_t level) -> void {
 
     auto make_list_node =
         [&](std::string heading,
@@ -355,31 +373,59 @@ auto build_symbol_link_list(const std::vector<const extract::SymbolInfo*>& symbo
                           make_relative_link_target(current_page_path, *target_path),
                           true));
         } else {
-            item.fragments.push_back(make_text(label.empty() ? sym->qualified_name : label));
+            item.fragments.push_back(make_code(label.empty() ? sym->qualified_name : label));
         }
         list.items.push_back(std::move(item));
     }
     return list;
 }
 
-auto build_symbol_source_locations(const extract::SymbolInfo& sym, const config::TaskConfig& config)
+auto make_source_link_target(const extract::SourceLocation& location,
+                             const config::TaskConfig& config,
+                             const LinkResolver& links,
+                             std::string_view current_page_path) -> LinkTarget {
+    auto label = make_source_relative(location.file, config.project_root) + ":" +
+                 std::to_string(location.line);
+    if(auto* target_path = links.resolve(location.file)) {
+        return make_link_target(current_page_path, std::move(label), *target_path, true);
+    }
+    return LinkTarget{
+        .label = std::move(label),
+        .target = {},
+        .code_style = true,
+    };
+}
+
+auto push_location_paragraph(std::vector<MarkdownNode>& nodes, std::string label, LinkTarget target)
+    -> void {
+    Paragraph paragraph;
+    paragraph.fragments.push_back(make_text(std::move(label)));
+    if(target.target.empty()) {
+        paragraph.fragments.push_back(make_code(std::move(target.label)));
+    } else {
+        paragraph.fragments.push_back(
+            make_link(std::move(target.label), std::move(target.target), target.code_style));
+    }
+    nodes.push_back(MarkdownNode{std::move(paragraph)});
+}
+
+auto build_symbol_source_locations(const extract::SymbolInfo& sym,
+                                   const config::TaskConfig& config,
+                                   const LinkResolver& links,
+                                   std::string_view current_page_path)
     -> std::vector<MarkdownNode> {
     std::vector<MarkdownNode> nodes;
     if(sym.declaration_location.is_known()) {
-        Paragraph paragraph;
-        paragraph.fragments.push_back(make_text("Declared at: "));
-        paragraph.fragments.push_back(
-            make_code(make_source_relative(sym.declaration_location.file, config.project_root) +
-                      ":" + std::to_string(sym.declaration_location.line)));
-        nodes.push_back(MarkdownNode{std::move(paragraph)});
+        push_location_paragraph(
+            nodes,
+            "Declaration: ",
+            make_source_link_target(sym.declaration_location, config, links, current_page_path));
     }
     if(sym.definition_location.has_value() && sym.definition_location->is_known()) {
-        Paragraph paragraph;
-        paragraph.fragments.push_back(make_text("Defined at: "));
-        paragraph.fragments.push_back(
-            make_code(make_source_relative(sym.definition_location->file, config.project_root) +
-                      ":" + std::to_string(sym.definition_location->line)));
-        nodes.push_back(MarkdownNode{std::move(paragraph)});
+        push_location_paragraph(
+            nodes,
+            "Definition: ",
+            make_source_link_target(*sym.definition_location, config, links, current_page_path));
     }
     return nodes;
 }
@@ -399,8 +445,10 @@ auto find_implementation_pages(const extract::SymbolInfo& sym,
         if(auto* mod = extract::find_module_by_source(model, file_path)) {
             if(auto* target_path = links.resolve_module(mod->name)) {
                 if(seen.insert(*target_path).second) {
-                    results.push_back(
-                        make_link_target(current_page_path, "Module " + mod->name, *target_path));
+                    results.push_back(make_link_target(current_page_path,
+                                                       "Module " + mod->name,
+                                                       *target_path,
+                                                       true));
                 }
             }
             return;
@@ -409,7 +457,8 @@ auto find_implementation_pages(const extract::SymbolInfo& sym,
             if(seen.insert(*target_path).second) {
                 results.push_back(make_link_target(current_page_path,
                                                    make_source_relative(file_path, project_root),
-                                                   *target_path));
+                                                   *target_path,
+                                                   true));
             }
         }
     };
@@ -429,8 +478,8 @@ auto find_declaration_page(const extract::SymbolInfo& sym,
         auto ns_name = !sym.enclosing_namespace.empty() ? sym.enclosing_namespace
                                                         : namespace_of(sym.qualified_name);
         auto label =
-            ns_name.empty() ? std::string{"Declaration page"} : std::string{"Namespace "} + ns_name;
-        return make_link_target(current_page_path, std::move(label), *target_path);
+            ns_name.empty() ? std::string{"Declaration"} : std::string{"Namespace "} + ns_name;
+        return make_link_target(current_page_path, std::move(label), *target_path, true);
     }
 
     auto ns_name = !sym.enclosing_namespace.empty() ? sym.enclosing_namespace
@@ -439,7 +488,7 @@ auto find_declaration_page(const extract::SymbolInfo& sym,
         return std::nullopt;
     }
     if(auto* target_path = links.resolve_namespace(ns_name)) {
-        return make_link_target(current_page_path, "Namespace " + ns_name, *target_path);
+        return make_link_target(current_page_path, "Namespace " + ns_name, *target_path, true);
     }
     return std::nullopt;
 }

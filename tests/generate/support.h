@@ -36,7 +36,7 @@ struct ScopedTempDir {
     config.workspace_root = project_root.generic_string();
 
     config.llm.system_prompt = "You are a writer.";
-    config.llm.retry_count = 3;
+    config.llm.retry_limit = 3;
 
     return config;
 }

@@ -201,10 +201,6 @@ int main(int argc, const char** argv) {
         spdlog::set_level(level);
     };
 
-    // Logging precedence: clore.toml -> CLI override.
-    if(task_config.log_level.has_value()) {
-        set_log_level(*task_config.log_level, "config");
-    }
     if(opts.log_level.has_value()) {
         set_log_level(*opts.log_level, "CLI");
     }

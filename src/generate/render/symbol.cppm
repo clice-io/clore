@@ -322,15 +322,6 @@ auto add_symbol_fallback_content(std::vector<MarkdownNode>& nodes,
 }
 
 auto resolved_snippet(const extract::SymbolInfo& sym) -> const std::string* {
-    if(!trim_ascii(sym.source_snippet).empty()) {
-        return &sym.source_snippet;
-    }
-
-    static std::mutex mutex;
-    std::lock_guard lock(mutex);
-    if(!trim_ascii(sym.source_snippet).empty()) {
-        return &sym.source_snippet;
-    }
     if(extract::resolve_source_snippet(const_cast<extract::SymbolInfo&>(sym)) &&
        !trim_ascii(sym.source_snippet).empty()) {
         return &sym.source_snippet;
@@ -351,7 +342,8 @@ auto declaration_snippet(const extract::SymbolInfo& sym) -> std::optional<std::s
            rparen + 1 == declaration.size() - 1 && declaration.back() == ';') {
             auto before = trim_ascii(std::string_view(declaration).substr(0, lparen));
             auto last_space = before.find_last_of(" \t\r\n\f\v");
-            auto name = last_space == std::string_view::npos ? before : before.substr(last_space + 1);
+            auto name =
+                last_space == std::string_view::npos ? before : before.substr(last_space + 1);
             if(name.empty() || name == "void") {
                 return std::nullopt;
             }
@@ -567,7 +559,7 @@ auto append_symbol_context_links(std::vector<MarkdownNode>& nodes,
     if(plan.page_type == PageType::Namespace) {
         push_link_paragraph(
             nodes,
-            "Implementations: ",
+            "Implementation: ",
             find_implementation_pages(sym, model, links, current_page_path, config.project_root));
     } else {
         push_optional_link_paragraph(nodes,
@@ -589,10 +581,11 @@ auto append_embedded_symbol_content(std::vector<MarkdownNode>& nodes,
                                     std::uint8_t level) -> void {
     auto entity = make_section(symbol_semantic_kind(sym),
                                sym.qualified_name,
-                               "`" + sym.qualified_name + "`",
+                               sym.qualified_name,
                                level,
-                               false);
-    auto locations = build_symbol_source_locations(sym, config);
+                               false,
+                               true);
+    auto locations = build_symbol_source_locations(sym, config, links, current_page_path);
     for(auto& node: locations) {
         entity->children.push_back(std::move(node));
     }
@@ -714,16 +707,17 @@ auto render_symbol_page(const SymbolDocPlan& doc_plan,
                        ? analysis_overview_markdown(analyses, *doc_plan.symbol)
                        : analysis_details_markdown(analyses, *doc_plan.symbol);
 
-    auto heading = "`" + doc_plan.symbol->qualified_name + "`";
     auto root = make_section(symbol_semantic_kind(*doc_plan.symbol),
                              doc_plan.symbol->qualified_name,
-                             heading,
+                             doc_plan.symbol->qualified_name,
                              1,
-                             false);
+                             false,
+                             true);
     push_owner_link(root->children, doc_plan.index_path, owner_plan);
     add_symbol_doc_links(root->children, doc_plan.index_path, layout, *doc_plan.symbol, view);
 
-    auto locations = build_symbol_source_locations(*doc_plan.symbol, config);
+    auto locations =
+        build_symbol_source_locations(*doc_plan.symbol, config, links, doc_plan.index_path);
     for(auto& node: locations) {
         root->children.push_back(std::move(node));
     }
@@ -736,7 +730,7 @@ auto render_symbol_page(const SymbolDocPlan& doc_plan,
     }
     if(owner_plan.page_type == PageType::Namespace) {
         push_link_paragraph(root->children,
-                            "Implementations: ",
+                            "Implementation: ",
                             find_implementation_pages(*doc_plan.symbol,
                                                       model,
                                                       links,
@@ -746,7 +740,7 @@ auto render_symbol_page(const SymbolDocPlan& doc_plan,
 
     append_symbol_snippet(root->children, *doc_plan.symbol, owner_plan, 2);
     add_symbol_fallback_content(root->children, *doc_plan.symbol, output);
-    add_symbol_analysis_sections(root->children, analyses, owner_plan, *doc_plan.symbol, 2);
+    add_symbol_analysis_detail_sections(root->children, analyses, owner_plan, *doc_plan.symbol, 2);
 
     if(is_type_kind(doc_plan.symbol->kind)) {
         append_type_structure_sections(root->children,
@@ -824,7 +818,7 @@ auto add_symbol_doc_links(std::vector<MarkdownNode>& nodes,
         targets.push_back(
             make_link_target(current_page_path, std::string(doc_label(view)), *index_path));
     }
-    push_link_paragraph(nodes, "Docs: ", targets);
+    push_link_paragraph(nodes, std::string(doc_label(view)) + ": ", targets);
 }
 
 auto append_type_member_sections(std::vector<MarkdownNode>& nodes,

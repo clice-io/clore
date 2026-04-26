@@ -158,10 +158,9 @@ auto apply_described_template_info(const clang::NamedDecl* decl,
     }
 }
 
-auto build_function_signature(const clang::FunctionDecl* func,
-                              const clang::PrintingPolicy& policy) -> std::string {
-    if(llvm::isa<clang::CXXConstructorDecl>(func) ||
-       llvm::isa<clang::CXXDestructorDecl>(func)) {
+auto build_function_signature(const clang::FunctionDecl* func, const clang::PrintingPolicy& policy)
+    -> std::string {
+    if(llvm::isa<clang::CXXConstructorDecl>(func) || llvm::isa<clang::CXXDestructorDecl>(func)) {
         std::string result = func->getQualifiedNameAsString();
         result += "(";
         bool first = true;

@@ -30,7 +30,6 @@ namespace {
 struct RawTaskConfig {
     std::optional<FilterRule> filter;
     std::optional<LLMConfig> llm;
-    std::optional<std::string> log_level;
 };
 
 auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
@@ -44,8 +43,6 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
         return std::unexpected(ConfigError{.message = "missing required section [llm]"});
     }
     cfg.llm = std::move(*raw.llm);
-
-    cfg.log_level = std::move(raw.log_level);
     return cfg;
 }
 
@@ -53,7 +50,6 @@ auto reject_unknown_top_level_keys(const ::toml::table& table) -> std::expected<
     constexpr std::string_view allowed_keys[] = {
         "filter",
         "llm",
-        "log_level",
     };
 
     auto contains_key = [](const auto& keys, std::string_view key) {

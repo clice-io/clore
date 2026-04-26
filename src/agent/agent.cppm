@@ -381,26 +381,46 @@ auto run_agent_loop(const config::TaskConfig& config,
         }
 
         if(!cache_hit) {
-            clore::net::CompletionRequest request{
-                .model = std::string(llm_model),
-                .messages = messages,
-                .tools = tool_defs,
-                .tool_choice = clore::net::ToolChoiceAuto{},
-            };
+            bool success = false;
+            for(std::uint32_t attempt = 0; attempt <= config.llm.retry_limit; ++attempt) {
+                clore::net::CompletionRequest request{
+                    .model = std::string(llm_model),
+                    .messages = messages,
+                    .tools = tool_defs,
+                    .tool_choice = clore::net::ToolChoiceAuto{},
+                };
 
-            auto response_result =
-                co_await clore::net::call_completion_async(std::move(request), loop).catch_cancel();
+                auto response_result =
+                    co_await clore::net::call_completion_async(std::move(request), loop)
+                        .catch_cancel();
 
-            if(response_result.is_cancelled()) {
-                co_await kota::fail(AgentError{.message = "agent LLM request cancelled"});
+                if(!response_result.is_cancelled() && !response_result.has_error()) {
+                    response = std::move(*response_result);
+                    success = true;
+                    break;
+                }
+
+                auto message = response_result.is_cancelled()
+                                   ? std::string("agent LLM request cancelled")
+                                   : response_result.error().message;
+                if(attempt < config.llm.retry_limit) {
+                    logging::warn("agent LLM call failed (attempt {}/{}): {}, retrying",
+                                  attempt + 1,
+                                  config.llm.retry_limit,
+                                  message);
+                } else {
+                    co_await kota::fail(AgentError{
+                        .message = std::format("agent LLM call failed after {} attempts: {}",
+                                               attempt + 1,
+                                               message),
+                    });
+                }
             }
-            if(response_result.has_error()) {
+
+            if(!success) {
                 co_await kota::fail(
-                    AgentError{.message = std::format("agent LLM failed: {}",
-                                                      std::move(response_result).error().message)});
+                    AgentError{.message = "agent LLM call did not succeed after all retries"});
             }
-
-            response = std::move(*response_result);
 
             // Save to cache in provider-independent format
             auto serialized = serialize_completion_response(response);

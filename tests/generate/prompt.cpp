@@ -32,4 +32,12 @@ TEST_CASE(parse_markdown_prompt_output_normalizes_input) {
     EXPECT_EQ(*result, "  Summary text.");
 }
 
+TEST_CASE(parse_markdown_prompt_output_wraps_code_elements) {
+    auto result =
+        parse_markdown_prompt_output("Delegates to call_llm_async with std::vector<Message>.\n",
+                                     "test");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "Delegates to `call_llm_async` with `std::vector<Message>`.");
+}
+
 };  // TEST_SUITE(generate_prompt)

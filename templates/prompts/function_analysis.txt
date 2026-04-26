@@ -16,5 +16,6 @@ Constraints:
 - Stay conservative and evidence-grounded.
 - Do not invent behavior that is not present in the evidence.
 - Markdown fields must be fragments only, with no headings and no code fences.
+- Wrap every code element in inline code, including identifiers, qualified names, type names, function names, member names, parameters, constants, macros, operators, and template forms.
 
 {{evidence}})clore"

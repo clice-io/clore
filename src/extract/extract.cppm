@@ -74,9 +74,8 @@ auto make_unknown_exception_error(std::string_view context) -> ExtractError {
 }
 
 template <typename Value, typename Callable>
-auto run_cache_io_async(Callable callable,
-                        std::string operation_name,
-                        kota::event_loop& loop) -> kota::task<Value, ExtractError> {
+auto run_worker_task_async(Callable callable, std::string operation_name, kota::event_loop& loop)
+    -> kota::task<Value, ExtractError> {
     auto queued = co_await kota::queue(std::move(callable), loop).catch_cancel();
 
     if(queued.is_cancelled()) {
@@ -99,6 +98,12 @@ auto run_cache_io_async(Callable callable,
     } else {
         co_return std::move(*result);
     }
+}
+
+template <typename Value, typename Callable>
+auto run_cache_io_async(Callable callable, std::string operation_name, kota::event_loop& loop)
+    -> kota::task<Value, ExtractError> {
+    return run_worker_task_async<Value>(std::move(callable), std::move(operation_name), loop);
 }
 
 auto load_extract_cache_async(std::string workspace_root, kota::event_loop& loop)
@@ -780,76 +785,85 @@ auto extract_project_async(const config::TaskConfig& config, kota::event_loop& l
         current_file_info.path = normalized;
         std::size_t includes_kept = 0;
 
+        auto make_resolved_path_cache_key = [&](const std::string& raw_path) -> std::string {
+            namespace fs = std::filesystem;
+
+            auto candidate = fs::path(raw_path);
+            if(candidate.is_relative()) {
+                std::string key;
+                key.reserve(entry.directory.size() + raw_path.size() + 1);
+                key.append(entry.directory);
+                key.push_back('\x1f');
+                key.append(raw_path);
+                return key;
+            }
+            return raw_path;
+        };
+
         auto resolve_symbol_location_path =
-            [&](const std::string& path) -> std::expected<std::filesystem::path, PathResolveError> {
+            [&](std::string path) -> kota::task<std::filesystem::path, ExtractError> {
             namespace fs = std::filesystem;
 
             if(path.empty()) {
-                return std::unexpected(
-                    PathResolveError{.message = "compilation database entry has empty file path"});
+                co_await kota::fail(
+                    ExtractError{.message = "compilation database entry has empty file path"});
             }
 
-            auto make_cache_key = [&](const std::string& raw_path) -> std::string {
-                auto candidate = fs::path(raw_path);
-                if(candidate.is_relative()) {
-                    std::string key;
-                    key.reserve(entry.directory.size() + raw_path.size() + 1);
-                    key.append(entry.directory);
-                    key.push_back('\x1f');
-                    key.append(raw_path);
-                    return key;
-                }
-                return raw_path;
-            };
-
-            auto cache_key = make_cache_key(path);
-            auto cache_it = resolved_path_cache.find(cache_key);
+            auto resolved_cache_key = make_resolved_path_cache_key(path);
+            auto cache_it = resolved_path_cache.find(resolved_cache_key);
             if(cache_it != resolved_path_cache.end()) {
-                return cache_it->second;
+                co_return cache_it->second;
             }
 
-            auto resolve = [](const fs::path& p) -> std::expected<fs::path, PathResolveError> {
-                std::error_code ec;
-                auto absolute = fs::absolute(p, ec);
-                if(ec) {
-                    return std::unexpected(PathResolveError{
-                        .message = std::format("failed to resolve absolute path: {}", p.string())});
-                }
-                auto canonical = fs::weakly_canonical(absolute.lexically_normal(), ec);
-                if(!ec) {
-                    return canonical;
-                }
-                return absolute.lexically_normal();
-            };
+            auto resolved = co_await run_worker_task_async<fs::path>(
+                                [path = std::move(path),
+                                 entry_directory = std::string(entry.directory),
+                                 filter_root = std::filesystem::path(filter_root)]()
+                                    -> std::expected<fs::path, ExtractError> {
+                                    auto resolve =
+                                        [](const fs::path& p) -> std::expected<fs::path, ExtractError> {
+                                        std::error_code ec;
+                                        auto absolute = fs::absolute(p, ec);
+                                        if(ec) {
+                                            return unexpected_extract_value<fs::path>(std::format(
+                                                "failed to resolve absolute path: {}",
+                                                p.string()));
+                                        }
+                                        auto canonical =
+                                            fs::weakly_canonical(absolute.lexically_normal(), ec);
+                                        if(!ec) {
+                                            return canonical;
+                                        }
+                                        return absolute.lexically_normal();
+                                    };
 
-            auto candidate = fs::path(path);
-            if(!candidate.is_relative()) {
-                auto result = resolve(candidate);
-                if(result.has_value()) {
-                    resolved_path_cache[cache_key] = *result;
-                }
-                return result;
-            }
+                                    auto candidate = fs::path(path);
+                                    if(!candidate.is_relative()) {
+                                        return resolve(candidate);
+                                    }
 
-            auto workspace_candidate = (filter_root / candidate).lexically_normal();
-            std::error_code exists_error;
-            if(fs::exists(workspace_candidate, exists_error) && !exists_error) {
-                auto result = resolve(workspace_candidate);
-                if(result.has_value()) {
-                    resolved_path_cache[cache_key] = *result;
-                }
-                return result;
-            }
+                                    auto workspace_candidate =
+                                        (filter_root / candidate).lexically_normal();
+                                    std::error_code exists_error;
+                                    if(fs::exists(workspace_candidate, exists_error) &&
+                                       !exists_error) {
+                                        return resolve(workspace_candidate);
+                                    }
 
-            auto fallback = resolve_path_under_directory(path, entry.directory);
-            if(!fallback.has_value()) {
-                return fallback;
-            }
-            auto result = resolve(*fallback);
-            if(result.has_value()) {
-                resolved_path_cache[cache_key] = *result;
-            }
-            return result;
+                                    auto fallback =
+                                        resolve_path_under_directory(path, entry_directory);
+                                    if(!fallback.has_value()) {
+                                        return unexpected_extract_value<fs::path>(
+                                            std::move(fallback.error().message));
+                                    }
+                                    return resolve(*fallback);
+                                },
+                                std::format("symbol location path resolution for {}", path),
+                                loop)
+                                .or_fail();
+
+            resolved_path_cache[resolved_cache_key] = resolved;
+            co_return resolved;
         };
 
         if(cache_it == scan_cache.scan_results.end()) {
@@ -875,13 +889,9 @@ auto extract_project_async(const config::TaskConfig& config, kota::event_loop& l
 
         std::size_t symbols_kept = 0;
         for(const auto& sym: ast_view->symbols) {
-            auto decl_file_result = resolve_symbol_location_path(sym.declaration_location.file);
-            if(!decl_file_result.has_value()) {
-                co_await fail_after_persist(
-                    ExtractError{.message = std::move(decl_file_result.error().message)})
-                    .or_fail();
-            }
-            auto decl_file = decl_file_result->lexically_normal();
+            auto decl_file =
+                (co_await resolve_symbol_location_path(sym.declaration_location.file).or_fail())
+                    .lexically_normal();
 
             if(!matches_filter(decl_file.string(), config.filter, filter_root)) {
                 continue;
@@ -891,15 +901,11 @@ auto extract_project_async(const config::TaskConfig& config, kota::event_loop& l
             normalized_sym.declaration_location.file = decl_file.generic_string();
             if(normalized_sym.definition_location.has_value() &&
                !normalized_sym.definition_location->file.empty()) {
-                auto definition_path_result =
-                    resolve_symbol_location_path(normalized_sym.definition_location->file);
-                if(!definition_path_result.has_value()) {
-                    co_await fail_after_persist(
-                        ExtractError{.message = std::move(definition_path_result.error().message)})
-                        .or_fail();
-                }
+                auto definition_path = co_await resolve_symbol_location_path(
+                                           normalized_sym.definition_location->file)
+                                           .or_fail();
                 normalized_sym.definition_location->file =
-                    definition_path_result->lexically_normal().generic_string();
+                    definition_path.lexically_normal().generic_string();
             }
 
             auto symbol_id = normalized_sym.id;
@@ -970,6 +976,31 @@ auto extract_project_async(const config::TaskConfig& config, kota::event_loop& l
         co_await fail_after_persist(std::move(module_result.error())).or_fail();
     }
     rebuild_lookup_maps(model);
+
+    {
+        auto model_shared = std::make_shared<ProjectModel>(std::move(model));
+        auto snippet_result = co_await kota::queue(
+            [model_shared]() mutable -> bool {
+                for(auto& [symbol_id, symbol]: model_shared->symbols) {
+                    static_cast<void>(symbol_id);
+                    resolve_source_snippet(symbol);
+                }
+                return true;
+            },
+            loop).catch_cancel();
+
+        if(snippet_result.is_cancelled()) {
+            co_await kota::fail(ExtractError{.message = "source snippet resolution cancelled"});
+        }
+        if(snippet_result.has_error()) {
+            co_await kota::fail(ExtractError{
+                .message = std::format("source snippet resolution failed: {}",
+                                       snippet_result.error().message())});
+        }
+
+        model = std::move(*model_shared);
+    }
+
     if(model.uses_modules) {
         logging::info("detected {} module units", model.modules.size());
         for(auto& [source_file, mod]: model.modules) {

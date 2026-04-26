@@ -14,7 +14,7 @@ TEST_CASE(default_construction) {
     EXPECT_TRUE(config.workspace_root.empty());
     EXPECT_TRUE(config.filter.include.empty());
     EXPECT_TRUE(config.filter.exclude.empty());
-    EXPECT_FALSE(config.log_level.has_value());
+    // log_level is CLI-only, not part of TaskConfig schema
 }
 
 };  // TEST_SUITE(config_schema)

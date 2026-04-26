@@ -8,6 +8,7 @@ Output:
 - No heading
 - No YAML
 - No code fences or pasted source code
+- Wrap every code element in inline code, including identifiers, qualified names, type names, function names, member names, parameters, constants, macros, operators, and template forms.
 
 If you need to mention identifiers, use inline code rather than fenced blocks.
 Do not restate the public contract.

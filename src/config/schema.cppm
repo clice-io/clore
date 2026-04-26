@@ -11,7 +11,7 @@ struct FilterRule {
 
 struct LLMConfig {
     std::string system_prompt;
-    std::uint32_t retry_count = 0;
+    std::uint32_t retry_limit = 0;
 };
 
 struct TaskConfig {
@@ -23,7 +23,6 @@ struct TaskConfig {
     FilterRule filter;
     LLMConfig llm;
 
-    std::optional<std::string> log_level;
 };
 
 }  // namespace clore::config

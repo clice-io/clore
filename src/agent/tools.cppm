@@ -132,7 +132,8 @@ auto read_guide(std::string_view output_root, std::string_view name)
     auto relative = canonical_file.lexically_relative(canonical_guides);
     auto relative_string = relative.generic_string();
     auto relative_begin = relative.begin();
-    auto first_component = relative_begin == relative.end() ? std::string{} : relative_begin->string();
+    auto first_component =
+        relative_begin == relative.end() ? std::string{} : relative_begin->string();
     if(relative.empty() || relative_string.empty() || relative_string == "." ||
        first_component == "..") {
         return std::unexpected(ToolError{.message = "guide path escapes the guides directory"});

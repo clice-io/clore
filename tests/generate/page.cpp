@@ -120,9 +120,9 @@ TEST_CASE(render_page_markdown_links_type_declarations_and_implementations_bidir
 
     ASSERT_TRUE(namespace_markdown.has_value());
     ASSERT_TRUE(module_markdown.has_value());
-    EXPECT_NE(namespace_markdown->find("[Module demo.math](../../modules/demo/math/index.md)"),
+    EXPECT_NE(namespace_markdown->find("[`Module demo.math`](../../modules/demo/math/index.md)"),
               std::string::npos);
-    EXPECT_NE(module_markdown->find("[Namespace demo](../../../namespaces/demo/index.md)"),
+    EXPECT_NE(module_markdown->find("[`Namespace demo`](../../../namespaces/demo/index.md)"),
               std::string::npos);
     EXPECT_EQ(namespace_markdown->find("struct Widget {}"), std::string::npos);
     EXPECT_EQ(module_markdown->find("struct Widget {}"), std::string::npos);
@@ -695,6 +695,53 @@ TEST_CASE(render_file_page_embeds_type_member_implementations) {
     EXPECT_NE(markdown->find("void run() { return 0; }"), std::string::npos);
     EXPECT_NE(markdown->find("Widget implementation notes."), std::string::npos);
     EXPECT_EQ(markdown->find("Widget declaration notes."), std::string::npos);
+}
+
+TEST_CASE(render_page_markdown_wraps_analysis_list_code_elements) {
+    ScopedTempDir temp("analysis_list_code");
+    fs::create_directories(temp.path / "src");
+
+    auto config = make_config(temp.path);
+    extract::ProjectModel model;
+    auto file = (temp.path / "src" / "client.cpp").generic_string();
+
+    auto run = make_function_symbol(860, "run", "demo::run", "void run()", file, "demo");
+    auto run_key = make_symbol_target_key(run);
+    add_symbol(model, std::move(run));
+    add_namespace(model, "demo");
+
+    PagePlan file_plan{
+        .page_id = "file:" + file,
+        .page_type = PageType::File,
+        .title = "File `src/client.cpp`",
+        .relative_path = "files/src/client.md",
+        .owner_keys = {file},
+        .prompt_requests = {},
+    };
+
+    SymbolAnalysisStore analyses;
+    analyses.functions.insert_or_assign(run_key,
+                                        FunctionAnalysis{
+                                            .overview_markdown = "Overview note.",
+                                            .details_markdown = "Delegates to call_llm_async.",
+                                            .has_side_effects = true,
+                                            .side_effects = {"allocates std::vector<Message>"},
+                                            .reads_from = {"request parameter"},
+                                            .writes_to = {"returned std::expected<T, LLMError>"},
+                                            .usage_patterns = {"Callers chain .or_fail()"},
+                                        });
+
+    PagePlanSet plan_set{.plans = {file_plan}};
+    auto links = build_link_resolver(plan_set);
+    auto markdown = render_page_markdown(file_plan, config, model, {}, analyses, links);
+
+    ASSERT_TRUE(markdown.has_value());
+    EXPECT_NE(markdown->find("Delegates to `call_llm_async`."), std::string::npos);
+    EXPECT_NE(markdown->find("- allocates `std::vector<Message>`"), std::string::npos);
+    EXPECT_NE(markdown->find("- returned `std::expected<T, LLMError>`"), std::string::npos);
+    EXPECT_NE(markdown->find("- Callers chain `.or_fail()`"), std::string::npos);
+    EXPECT_EQ(markdown->find("- allocates std::vector<Message>"), std::string::npos);
+    EXPECT_EQ(markdown->find("- returned std::expected<T, LLMError>"), std::string::npos);
 }
 
 TEST_CASE(render_page_bundle_emits_function_docs_only_for_complex_functions) {

@@ -28,8 +28,8 @@ auto append_standard_symbol_sections(std::vector<MarkdownNode>& root_children,
         auto section = make_section(SemanticKind::Section, {}, std::move(heading), 2);
         for(const auto* sym: collect_symbols(predicate)) {
             auto entity =
-                make_section(entity_kind, sym->qualified_name, "`" + sym->qualified_name + "`", 3);
-            auto locations = build_symbol_source_locations(*sym, config);
+                make_section(entity_kind, sym->qualified_name, sym->qualified_name, 3, true, true);
+            auto locations = build_symbol_source_locations(*sym, config, links, plan.relative_path);
             for(auto& node: locations) {
                 entity->children.push_back(std::move(node));
             }
@@ -224,7 +224,7 @@ auto build_namespace_page_root(const PagePlan& plan,
         },
         [&](std::vector<MarkdownNode>& nodes, const extract::SymbolInfo& sym) {
             push_link_paragraph(nodes,
-                                "Implementations: ",
+                                "Implementation: ",
                                 find_implementation_pages(sym,
                                                           model,
                                                           links,
@@ -243,7 +243,7 @@ auto build_namespace_page_root(const PagePlan& plan,
         BulletList list;
         for(const auto& target: build_related_page_targets(plan, links, plan.relative_path)) {
             ListItem item;
-            item.fragments.push_back(make_link(target.label, target.target));
+            item.fragments.push_back(make_link(target.label, target.target, target.code_style));
             list.items.push_back(std::move(item));
         }
         return list;
@@ -333,7 +333,7 @@ auto build_module_page_root(const PagePlan& plan,
         BulletList list;
         for(const auto& target: build_related_page_targets(plan, links, plan.relative_path)) {
             ListItem item;
-            item.fragments.push_back(make_link(target.label, target.target));
+            item.fragments.push_back(make_link(target.label, target.target, target.code_style));
             list.items.push_back(std::move(item));
         }
         return list;
@@ -435,7 +435,7 @@ auto build_file_page_root(const PagePlan& plan,
         BulletList list;
         for(const auto& target: build_related_page_targets(plan, links, plan.relative_path)) {
             ListItem item;
-            item.fragments.push_back(make_link(target.label, target.target));
+            item.fragments.push_back(make_link(target.label, target.target, target.code_style));
             list.items.push_back(std::move(item));
         }
         return list;

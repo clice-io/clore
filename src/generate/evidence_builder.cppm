@@ -13,14 +13,6 @@ namespace {
 // source_snippet is a lazily-populated cache field; mutating it does not change
 // the observable semantics of the SymbolInfo.
 auto maybe_resolve_snippet(const extract::SymbolInfo& sym) -> bool {
-    if(!sym.source_snippet.empty()) {
-        return true;
-    }
-    static std::mutex resolve_mutex;
-    std::lock_guard lock(resolve_mutex);
-    if(!sym.source_snippet.empty()) {
-        return true;
-    }
     return extract::resolve_source_snippet(const_cast<extract::SymbolInfo&>(sym));
 }
 

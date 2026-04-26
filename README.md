@@ -88,7 +88,7 @@ exclude = []
 
 [llm]
 system_prompt = "You are a C++ documentation writer. Please generate concise and accurate documentation for C++ code elements. Focus on the purpose, design intent, and role of each element within the codebase. The output documentation must be in Markdown format and suitable for embedding within a document page. Use English in the generated documentation."
-retry_count = 20
+retry_limit = 20
 ```
 
 ### LLM provider selection

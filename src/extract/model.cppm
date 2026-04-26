@@ -208,6 +208,7 @@ namespace {
 constexpr std::size_t kSplitQualifiedNameCacheMaxEntries = 10'000;
 constexpr std::uint64_t kSourceSnippetHashOffsetBasis = 14695981039346656037ULL;
 constexpr std::uint64_t kSourceSnippetHashPrime = 1099511628211ULL;
+constexpr std::size_t kSourceSnippetMutexStripeCount = 64;
 
 struct SplitQualifiedNameCache {
     std::shared_mutex mutex;
@@ -221,6 +222,12 @@ struct SplitQualifiedNameCache {
 auto split_qualified_name_cache() -> SplitQualifiedNameCache& {
     static SplitQualifiedNameCache cache;
     return cache;
+}
+
+auto source_snippet_mutex_for(const SymbolInfo& sym) -> std::mutex& {
+    static std::array<std::mutex, kSourceSnippetMutexStripeCount> mutexes;
+    auto key = std::hash<SymbolID>{}(sym.id);
+    return mutexes[key % mutexes.size()];
 }
 
 auto hash_source_snippet_bytes(std::string_view bytes) -> std::uint64_t {
@@ -446,6 +453,8 @@ auto find_module_by_source(const ProjectModel& model, std::string_view source_fi
 }
 
 auto resolve_source_snippet(SymbolInfo& sym) -> bool {
+    std::lock_guard lock(source_snippet_mutex_for(sym));
+
     if(!sym.source_snippet.empty()) {
         return true;
     }

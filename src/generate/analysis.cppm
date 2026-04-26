@@ -6,6 +6,7 @@ export module generate:analysis;
 
 import std;
 import :evidence;
+import :markdown;
 import :model;
 import config;
 import extract;
@@ -126,6 +127,42 @@ auto fallback_variable_analysis(const extract::SymbolInfo& sym) -> VariableAnaly
     return analysis;
 }
 
+auto normalize_analysis_markdown(std::string& markdown) -> void {
+    if(!markdown.empty()) {
+        markdown = code_spanned_markdown(markdown);
+    }
+}
+
+auto normalize_analysis_list(std::vector<std::string>& items) -> void {
+    for(auto& item: items) {
+        normalize_analysis_markdown(item);
+    }
+}
+
+auto normalize_analysis(FunctionAnalysis& analysis) -> void {
+    normalize_analysis_markdown(analysis.overview_markdown);
+    normalize_analysis_markdown(analysis.details_markdown);
+    normalize_analysis_list(analysis.side_effects);
+    normalize_analysis_list(analysis.reads_from);
+    normalize_analysis_list(analysis.writes_to);
+    normalize_analysis_list(analysis.usage_patterns);
+}
+
+auto normalize_analysis(TypeAnalysis& analysis) -> void {
+    normalize_analysis_markdown(analysis.overview_markdown);
+    normalize_analysis_markdown(analysis.details_markdown);
+    normalize_analysis_list(analysis.invariants);
+    normalize_analysis_list(analysis.key_members);
+    normalize_analysis_list(analysis.usage_patterns);
+}
+
+auto normalize_analysis(VariableAnalysis& analysis) -> void {
+    normalize_analysis_markdown(analysis.overview_markdown);
+    normalize_analysis_markdown(analysis.details_markdown);
+    normalize_analysis_list(analysis.mutation_sources);
+    normalize_analysis_list(analysis.usage_patterns);
+}
+
 auto merge_function_analysis(FunctionAnalysis& target,
                              const FunctionAnalysis& fallback,
                              FunctionAnalysis parsed) -> void {
@@ -222,7 +259,9 @@ auto parse_structured_response(std::string_view raw, std::string_view context)
                                    parsed.error().to_string()),
         });
     }
-    return *parsed;
+    auto value = std::move(*parsed);
+    normalize_analysis(value);
+    return value;
 }
 
 auto normalize_markdown_fragment(std::string_view raw, std::string_view context)
@@ -235,6 +274,7 @@ auto normalize_markdown_fragment(std::string_view raw, std::string_view context)
             .message = std::format("empty markdown fragment for {}", context),
         });
     }
+    normalize_analysis_markdown(normalized);
     return normalized;
 }
 
