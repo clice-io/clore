@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::anthropic::detail'
-description: 'The clore::net::anthropic::detail namespace serves as the internal implementation layer for the Anthropic API client, encapsulating protocol-specific logic and configuration details. It defines the Protocol struct, which provides methods for building request JSON, constructing HTTP headers, composing the API URL, parsing responses, and reading environment variables that configure the client’s behaviour. Notable constants in this namespace include kAnthropicApiKeyEnv, kAnthropicBaseUrlEnv, and kAnthropicVersion, which store the environment variable names and the default API version string.'
+description: 'The namespace clore::net::anthropic::detail encapsulates internal implementation details of the Anthropic API client within the clore networking library. Its primary architectural role is to provide a dedicated scope for protocol-specific logic and configuration constants that are not intended for direct use by client code. Notable declarations include the Protocol struct, which defines methods for building request JSON, constructing HTTP headers and URLs, parsing responses, reading environment variables, and providing the provider name and capability probe key. Supporting constants such as kAnthropicApiKeyEnv, kAnthropicBaseUrlEnv, and kAnthropicVersion specify the environment variable names and API version string used to configure the client. By isolating these low‑level networking and serialization details, the namespace helps maintain separation of concerns and shields higher‑level abstractions from Anthropic‑specific implementation details.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-The `clore::net::anthropic::detail` namespace serves as the internal implementation layer for the Anthropic API client, encapsulating protocol-specific logic and configuration details. It defines the `Protocol` struct, which provides methods for building request JSON, constructing HTTP headers, composing the API URL, parsing responses, and reading environment variables that configure the client’s behaviour. Notable constants in this namespace include `kAnthropicApiKeyEnv`, `kAnthropicBaseUrlEnv`, and `kAnthropicVersion`, which store the environment variable names and the default API version string.
-
-Architecturally, this namespace hides the low‑level Anthropic protocol details from the public API, allowing the rest of the `clore::net::anthropic` module to interact with a clean, abstract interface. By centralising request/response handling and environment configuration in `detail`, the codebase maintains a clear separation between internal mechanics and the user‑facing client surface.
+The namespace `clore::net::anthropic::detail` encapsulates internal implementation details of the Anthropic API client within the clore networking library. Its primary architectural role is to provide a dedicated scope for protocol-specific logic and configuration constants that are not intended for direct use by client code. Notable declarations include the `Protocol` struct, which defines methods for building request JSON, constructing HTTP headers and `URLs`, parsing responses, reading environment variables, and providing the provider name and capability probe key. Supporting constants such as `kAnthropicApiKeyEnv`, `kAnthropicBaseUrlEnv`, and `kAnthropicVersion` specify the environment variable names and API version string used to configure the client. By isolating these low‑level networking and serialization details, the namespace helps maintain separation of concerns and shields higher‑level abstractions from Anthropic‑specific implementation details.
 
 ## Types
 
@@ -27,10 +25,10 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- All methods are static and stateless
-- Environment config must be valid before calling `build_url`, `build_headers`, or `build_request_json`
-- `parse_response` expects a non-empty body or handles empty body with an error
-- Provider name is always `"Anthropic"`
+- All members are static; no instance state exists.
+- Environment configuration must provide `api_base` and `api_key`.
+- HTTP response parsing expects a non-empty body for success.
+- Error mapping respects HTTP status codes >= 400.
 
 #### Key Members
 
@@ -40,12 +38,13 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 - `build_request_json`
 - `parse_response`
 - `provider_name`
+- `capability_probe_key`
 
 #### Usage Patterns
 
-- Used as a policy or adapter for the Anthropic provider in generic request workflows
-- Methods are called sequentially: `read_environment`, then `build_url`, `build_headers`, `build_request_json`, and finally `parse_response`
-- Likely substituable with other provider-specific `Protocol` structs via template or duck typing
+- Used as a protocol policy for generic API client code that calls these static methods.
+- Relied upon by higher-level networking to construct and send Anthropic API requests.
+- Provides the provider identifier for capability probe key generation.
 
 #### Member Functions
 
@@ -89,6 +88,20 @@ Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
 ```cpp
 auto (const int &) -> std::string;
+```
+
+##### `clore::net::anthropic::detail::Protocol::capability_probe_key`
+
+Declaration: `network/anthropic.cppm:717`
+
+Definition: `network/anthropic.cppm:717`
+
+Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
+
+###### Declaration
+
+```cpp
+auto (const int &, const int &) -> std::string;
 ```
 
 ##### `clore::net::anthropic::detail::Protocol::parse_response`
@@ -141,11 +154,7 @@ Declaration: `network/anthropic.cppm:651`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-A `constexpr std::string_view` constant that holds the string `"ANTHROPIC_API_KEY"`, representing the name of the environment variable used to configure the Anthropic API key.
-
-#### Usage Patterns
-
-- used as environment variable name to retrieve Anthropic API key
+The variable `clore::net::anthropic::detail::kAnthropicApiKeyEnv` is a `constexpr std::string_view` constant initialized to `"ANTHROPIC_API_KEY"`. It represents the name of the environment variable used to obtain the Anthropic API key.
 
 ### `clore::net::anthropic::detail::kAnthropicBaseUrlEnv`
 
@@ -153,7 +162,7 @@ Declaration: `network/anthropic.cppm:650`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-A compile-time constant `std::string_view` holding the environment variable name for the Anthropic base URL.
+A `constexpr std::string_view` constant that holds the environment variable name `"ANTHROPIC_BASE_URL"` for configuring the base URL of the Anthropic API client.
 
 ### `clore::net::anthropic::detail::kAnthropicVersion`
 
@@ -161,7 +170,11 @@ Declaration: `network/anthropic.cppm:652`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-The constant `kAnthropicVersion` is a `constexpr std::string_view` initialized to "2023-06-01". It is declared in the `clore::net::anthropic::detail` namespace.
+A compile-time constant string view that specifies the version of the Anthropic API to use.
+
+#### Usage Patterns
+
+- intended to be used as the version string for Anthropic API requests
 
 ## Related Pages
 

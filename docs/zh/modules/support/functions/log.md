@@ -1,6 +1,6 @@
 ---
 title: 'clore::logging::log'
-description: '函数 clore::logging::log 首先根据全局日志级别 clore::logging::g_log_level 进行过滤。如果 g_log_level 已被设置且参数 lvl 的级别低于该阈值，函数会直接返回，避免不必要的日志输出。否则，它将通过调用 spdlog::default_logger_raw()->log 将消息 msg 传递到 spdlog 后端。该实现依赖于 spdlog 库的日志记录基础设施，并利用预编译的格式字符串 "{}" 将消息作为纯字符串记录。'
+description: '函数 clore::logging::log 的实现首先检查可选的全局日志级别 clore::logging::g_log_level：若该级别已设置且传入的 lvl 低于阈值，则立即返回，避免不必要的格式化开销。否则，直接委托给 spdlog::default_logger_raw() 的 log 方法，使用 "{}" 格式字符串将消息输出。该函数依赖 spdlog 库实现底层日志记录，并通过 g_log_level 提供静态的日志等级过滤控制。'
 layout: doc
 template: doc
 ---
@@ -26,22 +26,26 @@ inline void log(spdlog::level::level_enum lvl, std::string_view msg) {
 }
 ```
 
-函数 `clore::logging::log` 首先根据全局日志级别 `clore::logging::g_log_level` 进行过滤。如果 `g_log_level` 已被设置且参数 `lvl` 的级别低于该阈值，函数会直接返回，避免不必要的日志输出。否则，它将通过调用 `spdlog::default_logger_raw()->log` 将消息 `msg` 传递到 spdlog 后端。该实现依赖于 spdlog 库的日志记录基础设施，并利用预编译的格式字符串 `"{}"` 将消息作为纯字符串记录。
+函数 `clore::logging::log` 的实现首先检查可选的全局日志级别 `clore::logging::g_log_level`：若该级别已设置且传入的 `lvl` 低于阈值，则立即返回，避免不必要的格式化开销。否则，直接委托给 `spdlog::default_logger_raw()` 的 `log` 方法，使用 `"{}"` 格式字符串将消息输出。该函数依赖 `spdlog` 库实现底层日志记录，并通过 `g_log_level` 提供静态的日志等级过滤控制。
 
 ## Side Effects
 
-- 记录一条日志消息到`spdlog`默认日志器的输出目标（如控制台或文件）
+- Logs a message via `spdlog::default_logger_raw()->log()`
 
 ## Reads From
 
-- 参数`lvl`
-- 参数`msg`
-- 全局变量`g_log_level`
+- global variable `g_log_level`
+- function parameter `lvl`
+- function parameter `msg`
+
+## Writes To
+
+- spdlog's default logger (log output)
 
 ## Usage Patterns
 
-- 由`LogProxy::operator()`在日志记录时调用
-- 用于按级别过滤日志消息
+- Called by `clore::logging::LogProxy::operator()(std::string_view)` to perform the actual logging after constructing the message
+- Used directly by other components that need to log with an explicit severity level
 
 ## Called By
 

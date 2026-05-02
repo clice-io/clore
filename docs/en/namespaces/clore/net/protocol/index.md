@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::protocol'
-description: 'The clore::net::protocol namespace provides a centralized set of utilities for constructing, parsing, and validating messages exchanged over the network according to a defined protocol. Its primary responsibility is to handle the serialization and deserialization of JSON‑based requests and responses, with a strong emphasis on tool calls and completion responses. Notable declarations include functions for building request JSON (build_request_json), parsing raw response strings (parse_response), extracting textual content from responses (text_from_response, parse_response_text), manipulating tool call arguments and outputs (parse_tool_arguments, append_tool_outputs), and validating output formats such as JSON or markdown fragments (validate_json_output, validate_markdown_fragment_output). Architecturally, this namespace acts as the protocol abstraction layer, insulating the rest of the application from the low‑level details of message formatting and verification while ensuring that all communication adheres to the expected structure and semantics.'
+description: 'The clore::net::protocol namespace provides the core communication layer for interacting with a remote service (e.g., an LLM API). It is responsible for constructing JSON‑formatted requests (build_request_json), parsing raw network responses (parse_response), and extracting structured data (e.g., text_from_response, parse_response_text). The namespace also includes tool‑call lifecycle functions: parse_tool_arguments deserialises tool call arguments into a caller‑specified type, and append_tool_outputs collects tool results for subsequent requests. Additionally, it offers validation utilities for both JSON (validate_json_output) and Markdown fragment (validate_markdown_fragment_output) outputs, ensuring that responses conform to expected formats.'
 layout: doc
 template: doc
 ---
@@ -9,24 +9,27 @@ template: doc
 
 ## Summary
 
-The `clore::net::protocol` namespace provides a centralized set of utilities for constructing, parsing, and validating messages exchanged over the network according to a defined protocol. Its primary responsibility is to handle the serialization and deserialization of JSON‑based requests and responses, with a strong emphasis on tool calls and completion responses. Notable declarations include functions for building request JSON (`build_request_json`), parsing raw response strings (`parse_response`), extracting textual content from responses (`text_from_response`, `parse_response_text`), manipulating tool call arguments and outputs (`parse_tool_arguments`, `append_tool_outputs`), and validating output formats such as JSON or markdown fragments (`validate_json_output`, `validate_markdown_fragment_output`). Architecturally, this namespace acts as the protocol abstraction layer, insulating the rest of the application from the low‑level details of message formatting and verification while ensuring that all communication adheres to the expected structure and semantics.
+The `clore::net::protocol` namespace provides the core communication layer for interacting with a remote service (e.g., an LLM API). It is responsible for constructing JSON‑formatted requests (`build_request_json`), parsing raw network responses (`parse_response`), and extracting structured data (e.g., `text_from_response`, `parse_response_text`). The namespace also includes tool‑call lifecycle functions: `parse_tool_arguments` deserialises tool call arguments into a caller‑specified type, and `append_tool_outputs` collects tool results for subsequent requests. Additionally, it offers validation utilities for both JSON (`validate_json_output`) and Markdown fragment (`validate_markdown_fragment_output`) outputs, ensuring that responses conform to expected formats.
+
+Architecturally, `clore::net::protocol` serves as a well‑defined abstraction between higher‑level application logic and the raw byte streams of the network. By centralising serialisation, deserialisation, and validation tasks, it isolates the rest of the codebase from protocol‑specific details and error conventions. The functions return integral status codes, enabling callers to uniformly handle success or failure without requiring deep knowledge of the underlying protocol. Notable declarations include the tool‑argument and response‑text parsing templates, which allow type‑safe extraction of content from service replies.
 
 ## Functions
 
 ### `clore::net::protocol::append_tool_outputs`
 
-Declaration: `network/protocol.cppm:469`
+Declaration: `network/protocol.cppm:473`
 
-Definition: `network/protocol.cppm:540`
+Definition: `network/protocol.cppm:544`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::protocol::append_tool_outputs` appends tool outputs derived from a given `CompletionResponse` to the internal state identified by the first integer parameter. The third integer parameter may control the number of outputs appended or otherwise modify the operation. It returns an integer status code that indicates success or failure. Callers are responsible for providing a valid `CompletionResponse` containing the tool outputs and ensuring the identifier refers to an existing target.
+The function `clore::net::protocol::append_tool_outputs` is responsible for adding tool outputs from a given `CompletionResponse` to a tool output collection. The caller supplies an integer to identify the tool call or session context, the response containing output data, and a second integer that likely specifies a tool index or output target. The function returns an `int` to indicate success or failure of the append operation. The caller must ensure that the `CompletionResponse` is valid and that the integer arguments refer to an existing context; otherwise, the behavior is defined by the protocol contract.
 
 #### Usage Patterns
 
-- Used by callers to incorporate tool execution results back into the conversation history
-- Called after a tool call response is received and tool outputs have been collected
+- Called to integrate tool outputs into a conversation history
+- Used after receiving a completion response containing tool calls
+- Part of protocol‑level message construction for LLM interactions
 
 ### `clore::net::protocol::build_request_json`
 
@@ -36,13 +39,12 @@ Definition: `network/openai.cppm:465`
 
 Implementation: [`Module openai`](../../../../modules/openai/index.md)
 
-The function `clore::net::protocol::build_request_json` constructs a JSON representation of a request as defined by the protocol. It accepts a single `const int &` parameter and returns an `int` outcome. Callers are responsible for providing a valid integer that represents the necessary request context; the returned integer indicates the result of the construction operation.
+The function `clore::net::protocol::build_request_json` constructs a JSON‑formatted request for the network protocol. It accepts a single parameter of type `const int &` (typically a request identifier or context handle) and returns an `int` that indicates the result of the operation, such as a success code or error status. Callers should supply a valid integer argument when they need to generate a serialized request payload; the returned integer allows the caller to verify that the request was built successfully and to respond accordingly.
 
 #### Usage Patterns
 
-- serializing a completion request to JSON
-- preparing data for HTTP request
-- converting `CompletionRequest` to JSON string
+- Serializing a `CompletionRequest` into a JSON string for network transmission
+- Building the request payload for an `OpenAI` API call
 
 ### `clore::net::protocol::parse_response`
 
@@ -52,91 +54,88 @@ Definition: `network/openai.cppm:532`
 
 Implementation: [`Module openai`](../../../../modules/openai/index.md)
 
-`clore::net::protocol::parse_response` accepts a raw response string as a `std::string_view` and returns an `int` that represents the parsed result. Its primary responsibility is to interpret the response data according to the protocol’s format and produce an integer value that callers can use for further processing, such as status codes or identifiers.
-
-The caller is expected to provide a well-formed response string that conforms to the protocol conventions. The function’s contract does not define the behavior for malformed or unexpected input; callers should ensure the input is valid before invoking this function.
+The function `parse_response` accepts a `std::string_view` representing a raw network response and returns an `int`. Its caller‑facing contract is to parse the provided response and produce a status code that indicates success or failure. The caller must supply a complete and well‑formed response string; the meaning of the returned `int` is defined by the `clore::net::protocol` module and should be interpreted according to its conventions.
 
 #### Usage Patterns
 
-- Called to parse a raw JSON response from an LLM API endpoint
-- Used in the protocol layer to convert HTTP response body to domain object
-- Typically invoked by higher-level functions that handle network responses
+- parsing an LLM API JSON response
+- extracting a `CompletionResponse` from raw response text
+- validating response structure and error conditions
 
 ### `clore::net::protocol::parse_response_text`
 
-Declaration: `network/protocol.cppm:475`
+Declaration: `network/protocol.cppm:479`
 
-Definition: `network/protocol.cppm:588`
+Definition: `network/protocol.cppm:592`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The template function `clore::net::protocol::parse_response_text` accepts a `const CompletionResponse &` and returns an `int`. It is the caller’s entry point for extracting and parsing the textual component from a completion response. The `int` return value encodes the outcome of the parsing operation; its exact meaning depends on the template argument and should be interpreted according to the specific context in which the function is instantiated. Callers must supply a well-formed `CompletionResponse` and can rely on the function to handle the text‑parsing logic without needing to understand its internal implementation.
+The function template `clore::net::protocol::parse_response_text` parses the text content of a provided `CompletionResponse` according to the template parameter `T`. It returns an `int` that signals the result of the parsing operation, typically an error code or a count of parsed elements. The caller is responsible for supplying a valid `CompletionResponse` and ensuring that the type `T` matches the expected structure of the response text.
 
 #### Usage Patterns
 
-- Used to parse structured LLM responses into a specified type.
-- Combines text extraction and JSON parsing with error handling.
+- Used to convert a `CompletionResponse` into a structured type `T` after an LLM completion
+- Typically invoked after receiving a response that contains a JSON body to be deserialized
 
 ### `clore::net::protocol::parse_tool_arguments`
 
-Declaration: `network/protocol.cppm:478`
+Declaration: `network/protocol.cppm:482`
 
-Definition: `network/protocol.cppm:603`
+Definition: `network/protocol.cppm:607`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::protocol::parse_tool_arguments` is a public template that accepts a `const ToolCall &` and returns an `int`. Its caller-facing responsibility is to parse the tool arguments contained in the given `ToolCall` object, producing an integer result that typically represents a status code (e.g., success or error) or a count of parsed arguments. The caller is expected to provide a valid `ToolCall` instance, and the return value indicates the outcome of the parsing operation as defined by the protocol conventions.
+The function `clore::net::protocol::parse_tool_arguments` accepts a `const ToolCall &` and returns an `int` that signals success or failure. It is a template parameterised by `T`, indicating that callers provide a target type expected from the tool call’s arguments. The contract is that the tool call must contain data parseable into `T`; if parsing fails, a non‑zero error code is returned. The caller is responsible for interpreting the return value according to the protocol’s error conventions.
 
 #### Usage Patterns
 
-- Used to deserialize tool call arguments into a typed structure.
-- Typically called when processing a `ToolCall` to extract its arguments as a specific type.
+- deserialize tool call arguments into the expected type T
+- called during LLM response processing to extract typed tool parameters
 
 ### `clore::net::protocol::text_from_response`
 
-Declaration: `network/protocol.cppm:467`
+Declaration: `network/protocol.cppm:471`
 
-Definition: `network/protocol.cppm:524`
+Definition: `network/protocol.cppm:528`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::protocol::text_from_response` extracts or processes the textual component of a `CompletionResponse`. Callers supply a `const CompletionResponse&` and receive an `int` that indicates the result of the operation—typically a status code or the number of characters processed. The contract requires that the provided response is valid and that the caller interprets the returned integer according to the protocol’s conventions.
+The function `clore::net::protocol::text_from_response` accepts a `const CompletionResponse &` and returns an `int`. It extracts the textual content from the response and provides an integer result that may represent the length of the extracted text, a success status, or other metadata. The caller is responsible for supplying a valid `CompletionResponse` containing the expected textual data; the function does not validate the response structure. The returned integer is intended for further processing or error checking by the caller.
 
 #### Usage Patterns
 
-- safely extract text content from `CompletionResponse`
-- handle refusal, tool calls, or missing text errors
-- convert response to text or error
+- Extracting text from a `CompletionResponse` when text is expected
+- Validating that the response is not a refusal and does not contain tool calls
 
 ### `clore::net::protocol::validate_json_output`
 
-Declaration: `network/protocol.cppm:463`
+Declaration: `network/protocol.cppm:467`
 
-Definition: `network/protocol.cppm:484`
+Definition: `network/protocol.cppm:488`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The caller-facing responsibility of `clore::net::protocol::validate_json_output` is to verify that the provided `std::string_view` represents a well-formed JSON output according to protocol expectations. The function returns an `int` status code that indicates whether the validation succeeded or failed, enabling callers to determine if the content is acceptable for further processing. The precise contract is that the input must be a syntactically valid JSON string that also meets any additional structural constraints defined by the protocol; a non-zero return value signals a validation failure.
+This function checks the syntactic and semantic correctness of a given JSON string. It accepts a `std::string_view` representing the output to validate. Returns an integer status code that signals whether the validation succeeded (often zero) or failed (non-zero). Callers should pass the raw JSON output they have received and inspect the return value to determine if the output is well-formed and meets protocol expectations.
 
 #### Usage Patterns
 
-- Validate JSON output before further processing
-- Check if LLM output is valid JSON
+- validate JSON output from an LLM response
+- called before further processing of tool call outputs or responses
 
 ### `clore::net::protocol::validate_markdown_fragment_output`
 
-Declaration: `network/protocol.cppm:465`
+Declaration: `network/protocol.cppm:469`
 
-Definition: `network/protocol.cppm:493`
+Definition: `network/protocol.cppm:497`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::protocol::validate_markdown_fragment_output` accepts a `std::string_view` representing a markdown fragment output and returns an `int`. It verifies that the provided fragment conforms to the expected structural and semantic constraints of the protocol's markdown output format. A return value of zero typically indicates a valid fragment, while non-zero values signal specific validation failures, allowing callers to detect and handle malformed outputs. This function is part of the protocol's set of output validation utilities, used alongside similar validators like `clore::net::protocol::validate_json_output`.
+The function `clore::net::protocol::validate_markdown_fragment_output` verifies that a given output string conforms to the protocol’s expectations for a markdown fragment. It accepts a `std::string_view` representing the raw output and returns an `int` to indicate the result of validation. The contract requires the caller to supply the output as a `std::string_view`; the return value signals whether the output is acceptable (typically zero for success, non-zero for a specific validation failure). This function is part of the protocol’s validation suite and does not modify its argument or any global state.
 
 #### Usage Patterns
 
-- validation step in LLM response processing
-- safeguard before markdown fragment interpretation
+- Used to validate that LLM output is a markdown fragment in the protocol pipeline
+- Likely called after extracting text from a completion response
 
 ## Related Pages
 

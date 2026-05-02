@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::detail::selecteventloop'
-description: 'clore::net::detail::select_event_loop 接收一个指向 kota::event_loop 的可选指针，并返回该事件循环的引用。如果指针非空，函数直接返回其指向的循环；如果指针为空，则返回一个实现定义的默认事件循环（通常是当前线程关联的默认实例）。调用者应确保在异步操作完成之前，所使用的 kota::event_loop 对象保持存活，无论是由调用者提供还是由默认实例提供。该函数主要用于将可选的 kota::event_loop* 参数转换为一个确定的引用，以便内部逻辑无需处理空指针。'
+description: '函数 clore::net::detail::select_event_loop 接受一个可选的 kota::event_loop * 指针，并返回一个 kota::event_loop & 引用。如果传入的指针非空，则返回该指针所指向的事件循环；若指针为空，函数会选择一个默认的事件循环并返回其引用。调用者无需关心默认事件循环的具体选择策略，只需保证在需要自定义事件循环时传入有效指针，否则可传入 nullptr 以使用默认实例。该函数主要用于内部异步操作的调度环境决策，确保调用方总能获得一个有效的事件循环引用来注册回调或等待完成。'
 layout: doc
 template: doc
 ---
@@ -21,12 +21,12 @@ Implementation: [`Module client`](../../../../../modules/client/index.md)
 auto (kota::event_loop *) -> kota::event_loop &;
 ```
 
-`clore::net::detail::select_event_loop` 接收一个指向 `kota::event_loop` 的可选指针，并返回该事件循环的引用。如果指针非空，函数直接返回其指向的循环；如果指针为空，则返回一个实现定义的默认事件循环（通常是当前线程关联的默认实例）。调用者应确保在异步操作完成之前，所使用的 `kota::event_loop` 对象保持存活，无论是由调用者提供还是由默认实例提供。该函数主要用于将可选的 `kota::event_loop*` 参数转换为一个确定的引用，以便内部逻辑无需处理空指针。
+函数 `clore::net::detail::select_event_loop` 接受一个可选的 `kota::event_loop *` 指针，并返回一个 `kota::event_loop &` 引用。如果传入的指针非空，则返回该指针所指向的事件循环；若指针为空，函数会选择一个默认的事件循环并返回其引用。调用者无需关心默认事件循环的具体选择策略，只需保证在需要自定义事件循环时传入有效指针，否则可传入 `nullptr` 以使用默认实例。该函数主要用于内部异步操作的调度环境决策，确保调用方总能获得一个有效的事件循环引用来注册回调或等待完成。
 
 ## Usage Patterns
 
-- Used by `call_completion_async` and `call_llm_async` to obtain a valid event loop reference from an optional pointer
-- Invoked with a potentially null `kota::event_loop*` to default to the current loop
+- 用于将可选的 `event_loop*` 解析为确定的引用
+- 被 `call_completion_async`、`call_llm_async` 等高层函数调用以获取事件循环
 
 ## Called By
 

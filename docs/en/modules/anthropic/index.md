@@ -1,6 +1,6 @@
 ---
 title: 'Module anthropic'
-description: 'The anthropic module implements the Anthropic-specific protocol layer within the network stack, bridging higher-level HTTP and client modules with the Anthropic Messages API. It owns the complete lifecycle of an API interaction: constructing endpoint URLs and headers from environment variables (such as ANTHROPIC_API_KEY), building JSON request bodies (including system prompts, messages, and tool definitions), parsing raw response payloads to extract text, tool arguments, and structured outputs, and validating outgoing requests against protocol constraints. Internal helpers handle the formatting of text blocks, role messages, and tool‑use/tool‑result blocks as required by the Anthropic schema.'
+description: 'The anthropic module implements protocol-level support for the Anthropic API within the broader LLM networking library. Its core responsibility is to construct, validate, and serialize requests conforming to the Anthropic Messages API format, and to parse responses into structured data that can be consumed by higher-level client abstractions. The module owns the clore::net::anthropic namespace, which contains three primary sub-areas: protocol for request building (build_request_json, build_messages_url, response parsing functions like parse_response and text_from_response), detail for internal utilities (environment variable reading, header construction, URL building, and validation), and schema for generating Anthropic-compatible tool and response format definitions.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-The `anthropic` module implements the Anthropic-specific protocol layer within the network stack, bridging higher-level HTTP and client modules with the Anthropic Messages API. It owns the complete lifecycle of an API interaction: constructing endpoint `URLs` and headers from environment variables (such as `ANTHROPIC_API_KEY`), building JSON request bodies (including system prompts, messages, and tool definitions), parsing raw response payloads to extract text, tool arguments, and structured outputs, and validating outgoing requests against protocol constraints. Internal helpers handle the formatting of text blocks, role messages, and tool‑use/tool‑result blocks as required by the Anthropic schema.
+The `anthropic` module implements protocol-level support for the Anthropic API within the broader LLM networking library. Its core responsibility is to construct, validate, and serialize requests conforming to the Anthropic Messages API format, and to parse responses into structured data that can be consumed by higher-level client abstractions. The module owns the `clore::net::anthropic` namespace, which contains three primary sub-areas: `protocol` for request building (`build_request_json`, `build_messages_url`, response parsing functions like `parse_response` and `text_from_response`), `detail` for internal utilities (environment variable reading, header construction, URL building, and validation), and `schema` for generating Anthropic-compatible tool and response format definitions.
 
-The module’s public interface exposes three asynchronous call templates (`call_llm_async`, `call_completion_async`, `call_structured_async`) that drive the full request/response loop on a given `kota::event_loop`. It also provides schema utilities (`function_tool`, `response_format`) for defining tool‑callable functions and structured‑output models, together with protocol‑level parsing functions (`parse_response`, `parse_response_text`, `parse_tool_arguments`, `text_from_response`) that allow callers to decompose responses into the high‑level structures defined in the `protocol` module. In addition, the module maintains constants for default parameters (e.g., `kDefaultMaxTokens`) and environment variable names, ensuring that credential and configuration discovery remains self‑contained.
+The public-facing implementation scope includes the asynchronous calling functions `call_llm_async`, `call_completion_async`, and `call_structured_async`, which accept model identifiers, prompts, and event loop references, returning handles for pending operations. These functions bridge the generic client layer with Anthropic-specific request construction and response handling. The module also exposes constants for environment variable names (`kAnthropicApiKeyEnv`, `kAnthropicBaseUrlEnv`) and protocol versioning (`kAnthropicVersion`), enabling callers to configure and interact with the Anthropic API endpoint.
 
 ## Imports
 
@@ -52,14 +52,14 @@ Definition: `network/anthropic.cppm:654`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
-The struct `clore::net::anthropic::detail::Protocol` is a stateless collection of static member functions that encapsulate the Anthropic-specific protocol logic. Internally, it coordinates credential retrieval via `read_environment`, which reads environment variables using `clore::net::detail::read_credentials` with predefined environment key names. The `build_url` function constructs the messages endpoint by calling `clore::net::anthropic::protocol::build_messages_url` using the `api_base` from the environment config. Headers are built in `build_headers` to include `Content-Type`, the `x-api-key` from the environment, and a fixed `anthropic-version` header. The JSON request body is delegated to the corresponding `protocol::build_request_json` function. Response parsing in `parse_response` first checks for an empty body (returning a `LLMError`), then attempts to parse via `clore::net::anthropic::protocol::parse_response`; if parsing succeeds but the HTTP status is >= 400, an error is returned with the status code; if parsing fails, the raw response error or a formatted HTTP error is returned. The `provider_name` function returns the string `"Anthropic"`. All member functions are static, meaning `Protocol` acts as a pure policy type with no instance state; invariants are enforced by the delegation to shared protocol functions and the error‑handling logic in `parse_response`.
+The struct `clore::net::anthropic::detail::Protocol` is a stateless policy class that bundles all Anthropic-specific networking steps into a single, internal interface. Every member is `static`; no instance state exists. The implementation enforces a strict pipeline: configuration is read from the environment via `read_environment`, which calls `clore::net::detail::read_credentials` with the constants `kAnthropicBaseUrlEnv` and `kAnthropicApiKeyEnv`. The URL is built by `build_url`, which delegates to `clore::net::anthropic::protocol::build_messages_url`, and the request JSON is produced by `build_request_json`, which in turn delegates to `clore::net::anthropic::protocol::build_request_json`. The headers constructed by `build_headers` always include `Content-Type`, `x-api-key`, and `anthropic-version`, with the version string taken from the constant `kAnthropicVersion`. The parsing logic in `parse_response` guards against empty bodies and then calls `clore::net::anthropic::protocol::parse_response`; if the HTTP status is >= 400, an error message with the HTTP code and an excerpt of the response body is generated, maintaining the invariant that any error path returns a descriptive `LLMError`. Finally, `capability_probe_key` produces a deterministic key by combining the provider name, the base URL from the environment, and the model identifier using `clore::net::make_capability_probe_key`.
 
 #### Invariants
 
-- All methods are static and stateless
-- Environment config must be valid before calling `build_url`, `build_headers`, or `build_request_json`
-- `parse_response` expects a non-empty body or handles empty body with an error
-- Provider name is always `"Anthropic"`
+- All members are static; no instance state exists.
+- Environment configuration must provide `api_base` and `api_key`.
+- HTTP response parsing expects a non-empty body for success.
+- Error mapping respects HTTP status codes >= 400.
 
 #### Key Members
 
@@ -69,12 +69,13 @@ The struct `clore::net::anthropic::detail::Protocol` is a stateless collection o
 - `build_request_json`
 - `parse_response`
 - `provider_name`
+- `capability_probe_key`
 
 #### Usage Patterns
 
-- Used as a policy or adapter for the Anthropic provider in generic request workflows
-- Methods are called sequentially: `read_environment`, then `build_url`, `build_headers`, `build_request_json`, and finally `parse_response`
-- Likely substituable with other provider-specific `Protocol` structs via template or duck typing
+- Used as a protocol policy for generic API client code that calls these static methods.
+- Relied upon by higher-level networking to construct and send Anthropic API requests.
+- Provides the provider identifier for capability probe key generation.
 
 #### Member Functions
 
@@ -141,6 +142,25 @@ static auto build_url(const clore::net::detail::EnvironmentConfig& environment) 
     }
 ```
 
+##### `clore::net::anthropic::detail::Protocol::capability_probe_key`
+
+Declaration: `network/anthropic.cppm:717`
+
+Definition: `network/anthropic.cppm:717`
+
+Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
+
+###### Implementation
+
+```cpp
+static auto capability_probe_key(const clore::net::detail::EnvironmentConfig& environment,
+                                     const CompletionRequest& request) -> std::string {
+        return clore::net::make_capability_probe_key(provider_name(),
+                                                     environment.api_base,
+                                                     request.model);
+    }
+```
+
 ##### `clore::net::anthropic::detail::Protocol::parse_response`
 
 Declaration: `network/anthropic.cppm:690`
@@ -164,7 +184,7 @@ static auto parse_response(const clore::net::detail::RawHttpResponse& raw_respon
                 return std::unexpected(
                     LLMError(std::format("Anthropic request failed with HTTP {}: {}",
                                          raw_response.http_status,
-                                         raw_response.body)));
+                                         clore::net::detail::excerpt_for_error(raw_response.body))));
             }
             return std::unexpected(std::move(parsed.error()));
         }
@@ -220,15 +240,11 @@ Declaration: `network/anthropic.cppm:651`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
-This constant is used to look up the Anthropic API key from the process environment, typically by being passed to functions that read environment variables. It is part of the configuration logic alongside similar constants like `kAnthropicBaseUrlEnv`.
+This constant serves as the key for retrieving the Anthropic API key from the process environment. It is declared at `network/anthropic.cppm:651` but no direct usage or mutation is shown in the provided evidence.
 
 #### Mutation
 
 No mutation is evident from the extracted code.
-
-#### Usage Patterns
-
-- used as environment variable name to retrieve Anthropic API key
 
 ### `clore::net::anthropic::detail::kAnthropicBaseUrlEnv`
 
@@ -236,7 +252,7 @@ Declaration: `network/anthropic.cppm:650`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
-This variable is intended to be used as the key to read the base URL from the environment during initialization of the Anthropic client. It is declared `constexpr` and is not mutated.
+This constant is used as the key to read the `ANTHROPIC_BASE_URL` environment variable at runtime. The retrieved value specifies the base endpoint for Anthropic API requests. It participates in configuration logic alongside other environment variable constants such as `kAnthropicApiKeyEnv`.
 
 #### Mutation
 
@@ -248,11 +264,15 @@ Declaration: `network/anthropic.cppm:652`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
-This variable serves as a version identifier for the Anthropic API. It is defined as a compile-time constant and is not modified after initialization. Its value is used to indicate the API version in requests.
+Being `constexpr`, its value is fixed at compile time and is intended to be used throughout the module to identify the API version in requests.
 
 #### Mutation
 
 No mutation is evident from the extracted code.
+
+#### Usage Patterns
+
+- intended to be used as the version string for Anthropic API requests
 
 ### `clore::net::anthropic::protocol::detail::kDefaultMaxTokens`
 
@@ -260,7 +280,7 @@ Declaration: `network/anthropic.cppm:23`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-Serves as the default maximum number of tokens for requests in the Anthropic protocol. It is referenced in `build_request_json` to provide a fallback value when no explicit limit is specified.
+This constant provides a default value for the `max_tokens` parameter when constructing API requests via `build_request_json`. As a `constexpr`, its value is fixed at compile-time and cannot be mutated. The function `build_request_json` likely uses it as a fallback when no explicit token limit is provided.
 
 #### Mutation
 
@@ -268,131 +288,128 @@ No mutation is evident from the extracted code.
 
 #### Usage Patterns
 
-- used as default argument in `build_request_json`
+- Referenced in `build_request_json` function as default value for `max_tokens`
 
 ## Functions
 
 ### `clore::net::anthropic::call_completion_async`
 
-Declaration: `network/anthropic.cppm:722`
-
-Definition: `network/anthropic.cppm:764`
-
-Declaration: [`Namespace clore::net::anthropic`](../../namespaces/clore/net/anthropic/index.md)
-
-This function is a coroutine that delegates to the generic `clore::net::call_completion_async` template parameterized with `clore::net::anthropic::detail::Protocol`. It moves the provided `CompletionRequest` and passes a pointer to the `kota::event_loop`, then unwraps the result via `or_fail()` to yield a `kota::task<CompletionResponse, LLMError>`. The internal control flow depends entirely on the generic `call_completion_async`, which uses the `Protocol` type to read environment variables (via `Protocol::read_environment`), build HTTP headers and URL (using `Protocol::build_headers` and `Protocol::build_url`), construct the JSON request body (through `Protocol::build_request_json`), perform the async HTTP call, and parse the response (via `Protocol::parse_response`). All Anthropic-specific logic — such as message formatting, tool handling, schema instruction generation, and response parsing — is encapsulated within the `Protocol` class and its associated functions in `clore::net::anthropic::detail` and `clore::net::anthropic::protocol`. This wrapper thus provides a clean, type‑specific entry point without exposing the generic infrastructure.
-
-#### Side Effects
-
-- Initiates an asynchronous network request to the Anthropic API via the underlying `clore::net::call_completion_async` specialization.
-- Moves from the `request` parameter.
-
-#### Reads From
-
-- `request`: the `CompletionRequest` object (moved)
-- `loop`: reference to the event loop
-
-#### Usage Patterns
-
-- Used to start an async completion call and obtain a task that can be awaited.
-- Typically called from event-loop-driven code that needs to query an AI model.
-
-### `clore::net::anthropic::call_llm_async`
-
-Declaration: `network/anthropic.cppm:732`
-
-Definition: `network/anthropic.cppm:782`
-
-Declaration: [`Namespace clore::net::anthropic`](../../namespaces/clore/net/anthropic/index.md)
-
-The implementation of `clore::net::anthropic::call_llm_async` is a thin coroutine adapter that delegates the core request lifecycle to the generic `clore::net::call_llm_async` template, instantiated with `detail::Protocol`. Inside, it forwards the `model`, `system_prompt`, `prompt`, and a pointer to the provided `kota::event_loop` reference, then applies `.or_fail()` on the returned `kota::task` to convert any error into the `LLMError` domain. This design keeps the Anthropic-specific glue (protocol encoding, header construction, URL building, and response parsing) entirely within `detail::Protocol`, while `call_llm_async` itself remains stateless and acts as the entry point for high-level LLM completion calls that expect a plain text response.
-
-#### Side Effects
-
-- Initiates an asynchronous HTTP request to an LLM API via the underlying `clore::net::call_llm_async` function.
-
-#### Reads From
-
-- model
-- `system_prompt`
-- prompt
-- loop
-- `detail::Protocol` (compile-time parameter)
-
-#### Writes To
-
-- The returned `kota::task<std::string, LLMError>` object that will eventually contain the response or error.
-
-#### Usage Patterns
-
-- Await the returned task to obtain the LLM response.
-- Call from an async context with an active `kota::event_loop`.
-
-### `clore::net::anthropic::call_llm_async`
-
-Declaration: `network/anthropic.cppm:726`
+Declaration: `network/anthropic.cppm:729`
 
 Definition: `network/anthropic.cppm:771`
 
 Declaration: [`Namespace clore::net::anthropic`](../../namespaces/clore/net/anthropic/index.md)
 
-The implementation of `clore::net::anthropic::call_llm_async` acts as a thin, protocol‑specific adapter that delegates all core logic to the generic asynchronous LLM invocation template `clore::net::call_llm_async<clore::net::anthropic::detail::Protocol>`. Inside the coroutine, it passes the provided `model` and `system_prompt` strings, moves the `PromptRequest` object, and supplies the event loop pointer. The generic template handles the construction of HTTP headers, request body, and URL using the `Protocol` type’s methods (such as `build_headers`, `build_request_json`, and `build_url`), performs the asynchronous network call, and parses the response via `Protocol::parse_response`. The result of `or_fail()` unwraps the `kota::task` into a `std::string` on success or a `LLMError` on failure, which is then returned to the caller via `co_return co_await`. The only dependencies are the `detail::Protocol` struct (which encapsulates Anthropic‑specific API details like environment variable reads and JSON schema construction) and the generic `clore::net::call_llm_async` infrastructure.
+The function `clore::net::anthropic::call_completion_async` is a thin coroutine adapter that delegates all work to the generic `clore::net::call_completion_async` template instantiated with the `clore::net::anthropic::detail::Protocol` class. Within that template, the actual algorithm is driven by the protocol’s methods — `Protocol::read_environment` reads environment variables such as `kAnthropicApiKeyEnv` and `kAnthropicBaseUrlEnv`; `Protocol::build_url` constructs the API endpoint via `protocol::build_messages_url`; `Protocol::build_headers` assembles authentication headers; `Protocol::build_request_json` composes the JSON body using helpers like `protocol::detail::make_role_message`, `protocol::detail::format_schema_instruction`, and `protocol::detail::append_text_with_gap`; and `Protocol::parse_response` delegates to `protocol::parse_response` to extract `protocol::detail::parse_json_text` results, tool call blocks via `protocol::detail::make_tool_use_block`, and response text through `protocol::text_from_response`. The function then `co_await`s the generic call and forwards the result via `or_fail()`, effectively chaining the Anthropic‑specific protocol logic into the general completion pipeline.
 
 #### Side Effects
 
-- Performs asynchronous network I/O via the underlying HTTP client.
-- Moves the `request` argument, transferring ownership.
+- Makes an asynchronous network request to the Anthropic API through the underlying `clore::net::call_completion_async` function
+- The `.or_fail()` call may perform error-type conversion that affects the returned task's error channel
 
 #### Reads From
 
-- model parameter
-- `system_prompt` parameter
-- request parameter
-- loop parameter
+- `request` (moved into the inner call)
+- `loop` (used to schedule the asynchronous operation)
+- `detail::Protocol` (type used to specialize the generic call)
+- Result of `co_await clore::net::call_completion_async<detail::Protocol>(...)`
 
 #### Writes To
 
-- Initiates a network request that writes data to the network.
-- Returns a `kota::task` object that will be populated with the result.
+- The `kota::task` object returned (its internal state will be written when the operation completes)
 
 #### Usage Patterns
 
-- Called by other async functions to obtain an LLM response.
-- Used with `kota::event_loop` for asynchronous execution.
+- Calling this function to initiate an asynchronous LLM completion request to the Anthropic API
+- Awaiting the returned `kota::task` to obtain a `CompletionResponse` or handle an `LLMError`
 
-### `clore::net::anthropic::call_structured_async`
+### `clore::net::anthropic::call_llm_async`
 
 Declaration: `network/anthropic.cppm:739`
 
-Definition: `network/anthropic.cppm:794`
+Definition: `network/anthropic.cppm:789`
 
 Declaration: [`Namespace clore::net::anthropic`](../../namespaces/clore/net/anthropic/index.md)
 
-The implementation delegates to the generic `clore::net::call_structured_async` template, passing `clore::net::anthropic::detail::Protocol` as the protocol type and the supplied `model`, `system_prompt`, `prompt`, and a pointer to the `kota::event_loop`. The result of the coroutine is then unwrapped by calling `.or_fail()`, which converts the expected `kota::task<T, LLMError>` into a `kota::task<T, LLMError>` that will rethrow or return the error. This single‑step orchestration relies on `detail::Protocol` to provide all Anthropic‑specific request building (URL, headers, request JSON, schema instruction formatting) and response parsing (text extraction, tool call detection, argument parsing) that the generic `call_structured_async` uses internally to complete the structured output flow.
+The function `clore::net::anthropic::call_llm_async` acts as a thin delegation layer: it immediately calls `clore::net::call_llm_async<detail::Protocol>` with the forwarded `model`, `system_prompt`, `prompt`, and a pointer to the `loop`, then applies `.or_fail()` on the returned coroutine to convert any error into an `LLMError` and unwrap the resulting `std::string`. All interactions with the Anthropic API — including building the request JSON and URL, sending the HTTP call, and parsing the response — are encapsulated within `detail::Protocol`, which is used as the template argument for the generic async LLM infrastructure. The function itself contains no request construction or response parsing logic; its sole purpose is to provide a clean, concrete entry point that hides the protocol-parameterised machinery from callers.
 
 #### Side Effects
 
-- Performs network I/O to Anthropic API
-- Allocates coroutine frame and task objects
-- Suspends and resumes coroutine execution
-- May propagate `LLMError` on failure
+- Initiates an asynchronous network request to an LLM API via `clore::net::call_llm_async`
+- Captures parameters and the event loop for the asynchronous operation
+- Cooperatively yields execution until the LLM response is available
 
 #### Reads From
 
-- `model`
-- `system_prompt`
-- `prompt`
-- `loop`
-
-#### Writes To
-
-- Returns a `kota::task<T, LLMError>` object representing the asynchronous result
+- Parameter `model`
+- Parameter `system_prompt`
+- Parameter `prompt`
+- Parameter `loop` (a `kota::event_loop&`)
+- Result of `clore::net::call_llm_async<detail::Protocol>` (including potential error state)
 
 #### Usage Patterns
 
-- Called to perform structured async LLM interactions with Anthropic
-- Acts as a type-safe wrapper binding `detail::Protocol`
-- Used in coroutine contexts where `co_await` is applied
+- Called as a coroutine within an event-loop-driven context
+- Used to obtain an LLM-generated string response asynchronously
+- Serves as a high-level entry point for Anthropic API interactions, alongside `call_completion_async` and `call_structured_async`
+
+### `clore::net::anthropic::call_llm_async`
+
+Declaration: `network/anthropic.cppm:733`
+
+Definition: `network/anthropic.cppm:778`
+
+Declaration: [`Namespace clore::net::anthropic`](../../namespaces/clore/net/anthropic/index.md)
+
+The function is a coroutine that delegates entirely to the generic `clore::net::call_llm_async` template, which is instantiated with the Anthropic‑specific `detail::Protocol` traits type. This indirection encapsulates all request construction and response parsing logic behind the Protocol abstraction. The function forwards the `model`, `system_prompt`, `PromptRequest`, and `kota::event_loop` reference to that template, then `co_await`s the returned task, converting any failure into an error via `.or_fail()`. Internally, the generic implementation calls `detail::Protocol` methods such as `build_url`, `build_headers`, `build_request_json`, and `parse_response`, which in turn rely on helpers in `clore::net::anthropic::protocol` (e.g., `build_messages_url`, `make_role_message`, `make_text_block`, `parse_json_text`, `format_schema_instruction`, `validate_request`) and environment variables like `kAnthropicApiKeyEnv` and `kAnthropicBaseUrlEnv`. The resulting HTTP request is dispatched through the event loop, and the response is parsed to produce the final string result.
+
+#### Side Effects
+
+- initiation of an asynchronous network request to the Anthropic API (via delegation to `clore::net::call_llm_async`)
+
+#### Reads From
+
+- `model` parameter
+- `system_prompt` parameter
+- `request` parameter (moved)
+- `loop` parameter
+- `clore::net::call_llm_async<detail::Protocol>` template function
+
+#### Usage Patterns
+
+- asynchronous LLM call with error propagation
+- high-level wrapper over the core networking layer
+
+### `clore::net::anthropic::call_structured_async`
+
+Declaration: `network/anthropic.cppm:746`
+
+Definition: `network/anthropic.cppm:801`
+
+Declaration: [`Namespace clore::net::anthropic`](../../namespaces/clore/net/anthropic/index.md)
+
+The function delegates directly to the generic `clore::net::call_structured_async` template, instantiating it with `clore::net::anthropic::detail::Protocol` as the protocol type. It passes the `model`, `system_prompt`, `prompt`, and a pointer to the `kota::event_loop` unchanged, then invokes `.or_fail()` on the returned task to convert any failure into an exception, yielding a `kota::task<T, LLMError>`. This structure isolates the Anthropic-specific protocol logic within `detail::Protocol`, which provides the core implementation for building requests, parsing responses, and handling tool calls. The function itself is purely an async adapter that makes the structured call interface available for the Anthropic provider by reusing the common call path.
+
+#### Side Effects
+
+- Performs asynchronous network I/O to the Anthropic API via the underlying `call_structured_async`
+- Suspends and resumes the calling coroutine on the provided event loop
+
+#### Reads From
+
+- `model`, `system_prompt`, `prompt` string views
+- the `kota::event_loop` reference for scheduling
+- the result from the delegated `call_structured_async` call
+
+#### Writes To
+
+- the returned `kota::task<T, LLMError>` object (constructed and set via coroutine machinery)
+
+#### Usage Patterns
+
+- Called with a concrete type `T` for structured response deserialization
+- Used in asynchronous contexts where a coroutine handles the result
+- Typically chained with other `kota::task` combinators or awaited directly
 
 ### `clore::net::anthropic::protocol::append_tool_outputs`
 
@@ -402,9 +419,9 @@ Definition: `network/anthropic.cppm:628`
 
 Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clore/net/anthropic/protocol/index.md)
 
-The implementation of `clore::net::anthropic::protocol::append_tool_outputs` is a thin delegation wrapper. It receives three parameters: a span of `history` messages, a `CompletionResponse` object, and a span of `ToolOutput` entries. The function immediately forwards these arguments to the generic `clore::net::protocol::append_tool_outputs` function, which performs the actual work of appending tool outputs into the message history. No additional validation, transformation, or Anthropic‑specific logic is added at this level; the function exists solely to provide a convenience entry point within the `clore::net::anthropic::protocol` namespace that matches the public interface contract for that module.
+The implementation of `clore::net::anthropic::protocol::append_tool_outputs` is a direct delegation to the base protocol function `clore::net::protocol::append_tool_outputs`. It accepts a `std::span<const Message>` for the conversation history, a `const CompletionResponse&` containing the model’s last response, and a `std::span<const ToolOutput>` with the tool execution results. The function forwards these three arguments unchanged and returns the same `std::expected<std::vector<Message>, LLMError>` produced by the underlying call.
 
-The internal control flow consists only of a single call to the shared generic protocol function. Dependencies are limited to the types `Message`, `CompletionResponse`, and `ToolOutput` (all defined elsewhere), and the target function from the `clore::net::protocol` namespace. The actual algorithm for constructing a tool‑result message block and inserting it into the history list is implemented in that generic routine, which this wrapper invokes unchanged.
+Internally, no Anthropic‑specific logic is applied at this level; the method serves as a pass‑through that adapts the generic protocol helper into the `clore::net::anthropic` namespace. The sole dependency is the common `clore::net::protocol::append_tool_outputs` implementation, which handles the actual task of creating tool result messages and appending them to the history for a subsequent inference request.
 
 #### Side Effects
 
@@ -412,18 +429,14 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `history`
-- `response`
-- `outputs`
-
-#### Writes To
-
-- return value of type `std::expected<std::vector<Message>, LLMError>`
+- history
+- response
+- outputs
 
 #### Usage Patterns
 
-- Appending tool outputs to a conversation history
-- Converting a completion response and tool outputs into an updated message list
+- Delegates to generic protocol function
+- Used to incorporate tool outputs into a message history
 
 ### `clore::net::anthropic::protocol::build_messages_url`
 
@@ -435,7 +448,7 @@ Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clor
 
 Implementation: [Implementation](functions/build-messages-url.md)
 
-The function first normalizes the input `api_base` by removing any trailing forward slash characters. It then checks whether the resulting string already ends with the path segment `/v1`. If it does, the function delegates to `clore::net::detail::append_url_path` to directly append `"messages"` to the base URL. Otherwise, it appends the full path `"v1/messages"` using the same utility, ensuring the final URL correctly points to the Anthropic Messages API endpoint. The algorithm relies on `clore::net::detail::append_url_path` to handle path concatenation, which manages proper slash insertion between path components.
+`clore::net::anthropic::protocol::build_messages_url` normalises the provided `api_base` string by stripping trailing forward slashes, then determines the correct path to append for the Anthropic messages endpoint. If the cleaned base already ends with `"/v1"`, it appends the literal `"messages"` via `clore::net::detail::append_url_path`; otherwise it appends `"v1/messages"`. This logic ensures the resulting URL always points to the standard Anthropic `messages` API path regardless of whether the caller supplies a base URL that includes the version segment. The function depends solely on `clore::net::detail::append_url_path` (a generic path‑appending utility) and performs no network or I/O operations itself.
 
 #### Side Effects
 
@@ -443,15 +456,11 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `api_base` parameter
-
-#### Writes To
-
-- returned `std::string`
+- parameter `api_base`
 
 #### Usage Patterns
 
-- Called by `clore::net::anthropic::detail::Protocol::build_url`
+- called by `clore::net::anthropic::detail::Protocol::build_url` to produce the messages endpoint URL
 
 ### `clore::net::anthropic::protocol::build_request_json`
 
@@ -461,27 +470,28 @@ Definition: `network/anthropic.cppm:235`
 
 Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clore/net/anthropic/protocol/index.md)
 
-The function first validates a `CompletionRequest` via `detail::validate_request`. It then constructs a JSON root object, inserting `model` and `max_tokens` (using `detail::kDefaultMaxTokens`). Messages are iterated: inside a `std::visit`, each message type is handled separately. `SystemMessage` content is accumulated into a string `system_text` via `detail::append_text_with_gap`. For `UserMessage` and `AssistantMessage`, `detail::make_role_message` produces a role‑labeled JSON object; `AssistantToolCallMessage` builds a content array combining a text block (`detail::make_text_block`) and tool‑use blocks (`detail::make_tool_use_block`). The default case handles tool‑result messages by calling `detail::make_tool_result_block` and wrapping it in a user‑role object. Non‑system messages that yield valid objects are appended to the `messages` array. After messages, an optional `response_format` trigger a call to `detail::format_schema_instruction` whose result is appended to `system_text`; if `system_text` is non‑empty it is inserted as a `"system"` field. The `messages` array is then inserted. Tools are serialized into a `"tools"` array, each containing `name`, `description`, and a cloned `input_schema` from the tool’s parameters. For `tool_choice` and parallel tool control, a nested object is built using a second `std::visit` over `ToolChoiceAuto`, `ToolChoiceRequired`, `ToolChoiceNone`, and a named tool variant; if `parallel_tool_calls` is explicitly `false`, `disable_parallel_tool_use` is added. Finally the root JSON object is serialized via `kota::codec::json::to_string` and returned as a `std::string`. The function depends on several internal detail helpers (`detail::validate_request`, `detail::append_text_with_gap`, `detail::make_role_message`, `detail::make_text_block`, `detail::make_tool_use_block`, `detail::make_tool_result_block`, `detail::format_schema_instruction`) and on `clore::net::detail` utilities for JSON object/array construction and field insertion.
+The function first validates the provided `CompletionRequest` via `detail::validate_request`; on failure it immediately returns the error. After validation, it constructs a JSON root object, inserts the `model` and a constant `max_tokens` value, then builds a `messages` array by iterating over `request.messages`. Each message is dispatched using `std::visit`: `SystemMessage` content is aggregated into a `system_text` string via `detail::append_text_with_gap` and omitted from the array; other message types are converted to JSON role objects using `detail::make_role_message`, either with a single content string or an array of content blocks (text, `tool_use`, or `tool_result` blocks). Tool‑related blocks are assembled using `detail::make_text_block`, `detail::make_tool_use_block`, and `detail::make_tool_result_block`. After processing all messages, if a `response_format` is present, a schema instruction is appended to `system_text` via `detail::format_schema_instruction` and then `detail::append_text_with_gap`. The accumulated `system_text`, if non‑empty, is inserted as the `"system"` field. The `messages` array is then added to the root.
+
+Optionally, the function serializes the `tools` array from `request.tools`, building each tool object with `name`, `description`, and a cloned `input_schema`. A `tool_choice` object is created if `request.tool_choice` is set or `parallel_tool_calls` is false; its `type` field is determined via `std::visit` on the tool choice variant, and `disable_parallel_tool_use` is added when appropriate. Finally, the entire JSON object is serialized via `kota::codec::json::to_string` and returned as a `std::string`, or an error is propagated from any helper invocation. Key dependencies include `detail::validate_request`, `detail::append_text_with_gap`, the block‑ and role‑making functions, and infrastructure from `clore::net::detail` for JSON construction.
 
 #### Side Effects
 
-- Allocates JSON objects and strings via container operations
-- Returns ownership of a newly allocated `std::string`
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- Parameter `request` of type `CompletionRequest`
-- Constant `detail::kDefaultMaxTokens`
-- Helper functions from `clore::net::detail` and `clore::net::anthropic::protocol::detail`
-
-#### Writes To
-
-- Local JSON objects (`root`, `messages`, `system_text`, etc.)
-- Returned `std::string` containing the serialized JSON
+- `request.model`
+- `request.messages`
+- `request.response_format`
+- `request.tools`
+- `request.tool_choice`
+- `request.parallel_tool_calls`
+- `detail::kDefaultMaxTokens`
 
 #### Usage Patterns
 
-- Called to generate the request body for an Anthropic API call
+- Construct HTTP request payload for Anthropic API
+- Serialize `CompletionRequest` to JSON string
 
 ### `clore::net::anthropic::protocol::detail::append_text_with_gap`
 
@@ -493,24 +503,24 @@ Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespa
 
 Implementation: [Implementation](functions/append-text-with-gap.md)
 
-The function checks whether `text` is empty and exits immediately if so, avoiding unnecessary work. When `text` is non‑empty, it inspects `target`: if `target` already contains some content, a double newline (`"\n\n"`) separator is appended first, ensuring the new text is visually separated from any prior text. Finally, the content of `text` is appended to `target`. No external dependencies beyond the standard library’s `std::string` and `std::string_view` are required; the control flow is a straightforward linear sequence with a single conditional branch for the gap insertion.
+The function `clore::net::anthropic::protocol::detail::append_text_with_gap` appends a given `std::string_view text` to a `std::string& target` while inserting a gap separator when both strings are non‑empty. The control flow begins with an early return if `text` is empty, preserving the existing content of `target`. If `target` is not already empty, a double newline (`"\n\n"`) is appended to separate the previously stored content from the incoming `text`. Finally, the `text` itself is appended. This ensures that accumulated text blocks are visually separated by a blank line, while avoiding leading whitespace for the first block. The implementation relies solely on `std::string` and `std::string_view` operations, with no external dependencies beyond the standard library.
 
 #### Side Effects
 
-- Modifies target string by appending text and optionally a gap
+- Mutates the `target` string by appending `text` and optionally inserting a double-newline separator.
 
 #### Reads From
 
-- Parameter `target` (to check emptiness)
-- Parameter `text` (to read content)
+- `target` parameter (reads its current content to check if empty for separator insertion)
+- `text` parameter (reads its content and checks emptiness)
 
 #### Writes To
 
-- Parameter `target` (modified in place)
+- `target` parameter (appends separator and `text` content)
 
 #### Usage Patterns
 
-- Used in `build_request_json` to assemble text blocks with gaps
+- Used by `build_request_json` to accumulate JSON text blocks with gap separation.
 
 ### `clore::net::anthropic::protocol::detail::format_schema_instruction`
 
@@ -520,7 +530,7 @@ Definition: `network/anthropic.cppm:176`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-The implementation of `clore::net::anthropic::protocol::detail::format_schema_instruction` begins by testing whether the provided `ResponseFormat` object contains an optional schema. When `format.schema` is absent, the function immediately returns a fixed instruction string that requests a plain JSON object without markdown fences. If a schema is present, the function serializes it to a string using `json::to_string`. This serialization is fallible; upon failure the function delegates error reporting to `clore::net::detail::unexpected_json_error` and returns an `std::expected` containing an `LLMError`. On success, it constructs the final instruction via `std::format`, embedding the schema’s name and its JSON representation, appending the same warning about markdown fences. The logic is thus a straightforward linear chain: optionality check, serialization attempt, and formatted string construction.
+The function begins by checking whether the `schema` member of the provided `ResponseFormat` is populated. If absent, it immediately returns a hardcoded instruction string that tells the model to output only a JSON object without markdown fences. When a schema is present, the function calls `json::to_string` to serialize the schema value into a JSON string representation. If serialization fails, it delegates error handling to `clore::net::detail::unexpected_json_error`, constructing an `LLMError` result from the serialization error. On successful serialization, it uses `std::format` to produce a combined instruction that includes the schema's `name` and the serialized JSON text, again warning against markdown fences. The resulting string is returned inside a `std::expected<std::string, LLMError>`. The only external dependencies are the JSON serialization utility, the custom error helper, `std::format`, and the `ResponseFormat` type's members.
 
 #### Side Effects
 
@@ -528,13 +538,14 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- The `ResponseFormat` parameter `format` (specifically `format.schema` and `format.name`)
-- The `std::expected` returned by `json::to_string`
+- `format.schema`
+- `format.name`
+- `json::to_string` (reads the JSON value)
 
 #### Usage Patterns
 
-- Generates instruction string for structured output in Anthropic API requests
-- Called when constructing messages that require a JSON schema response format
+- Called to format the JSON schema instruction for LLM prompts
+- Used in constructing conversation messages with tool-use or structured output
 
 ### `clore::net::anthropic::protocol::detail::make_role_message`
 
@@ -544,29 +555,27 @@ Definition: `network/anthropic.cppm:154`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-The function `clore::net::anthropic::protocol::detail::make_role_message` constructs a JSON object representing a single chat message for the Anthropic protocol. It first creates an empty object using `clore::net::detail::make_empty_object`, attaching a descriptive error message for failure cases. If that step fails, the error is propagated immediately. Otherwise, it inserts the `"role"` field via `clore::net::detail::insert_string_field`, checking the result for errors. After both fields are set, the provided `content` array (a `json::Array`) is moved into the object with `message->insert("content", std::move(blocks))`. The completed `json::Object` is returned on success, or a `LLMError` on any intermediate failure.
-
-The control flow is a linear sequence of dependency‑based operations: object creation, field insertion (with error handling), and unconditional array insertion. The function relies on the utility helpers `clore::net::detail::make_empty_object` and `clore::net::detail::insert_string_field` for low‑level JSON manipulation and error reporting. This function is a building block used by higher‑level protocol assembly routines, such as `build_request_json`.
+The function constructs a JSON object representing a role‑tagged message for the Anthropic Messages API. It first calls `clore::net::detail::make_empty_object` to allocate an empty `json::Object`; if that fails, the error is propagated immediately via `std::unexpected`. Next, `clore::net::detail::insert_string_field` is used to set the `"role"` key to the given `role` string. If insertion fails (e.g., due to a duplicate key), the error is again returned as an unexpected result. Finally, the `blocks` array is moved directly into the object under the key `"content"`. The function relies on two utility helpers from the lower‑level `clore::net::detail` namespace for object creation and safe field insertion, and returns a `std::expected<json::Object, LLMError>` to unify success and error paths.
 
 #### Side Effects
 
+- Moves the input `blocks` array into the newly created JSON object
 - Allocates a new `json::Object`
-- Moves the input `blocks` array into the returned object
+- Inserts a string field and an array field into that object
 
 #### Reads From
 
-- `role` parameter
-- `blocks` parameter
+- Parameter `role`
+- Parameter `blocks` (via move)
 
 #### Writes To
 
 - Returned `json::Object`
-- Local variable `message`
 
 #### Usage Patterns
 
-- Used to construct role-based message objects for the Anthropic protocol
-- Called when building a request message with a role and content blocks
+- Constructing a message object for Anthropic API requests
+- Associating a role string with a list of content blocks
 
 ### `clore::net::anthropic::protocol::detail::make_role_message`
 
@@ -576,9 +585,9 @@ Definition: `network/anthropic.cppm:130`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-The function begins by delegating to `clore::net::detail::make_empty_object` to allocate a new JSON object, propagating any failure immediately as an unexpected `LLMError`. It then uses `clore::net::detail::insert_string_field` to add the `"role"` key, using the `role` parameter directly; again, a failed insertion short‑circuits the call. For the `"content"` key, the function first normalizes the input `text` via `clore::net::detail::normalize_utf8`, ensuring valid UTF‑8 encoding before embedding the string. The normalized string is then inserted with the same error‑handling pattern. On successful completion, the fully constructed JSON object is returned.
+The function `clore::net::anthropic::protocol::detail::make_role_message` constructs a JSON object representing a single message in the Anthropic Messages API format. It first creates an empty JSON object via `clore::net::detail::make_empty_object`, propagating any failure immediately as an `std::unexpected` error. The `role` parameter is then inserted as a string field using `clore::net::detail::insert_string_field`. The `text` content is normalized with `clore::net::detail::normalize_utf8` before being inserted as the `content` field. On any insertion failure, the function returns the error. The internal control flow follows a linear sequence of fallible steps, each checking the status of the previous operation and returning early on error.
 
-All JSON manipulation dependencies are drawn from `clore::net::detail`, and the function’s own helpers live in the `clore::net::anthropic::protocol::detail` namespace. The algorithm is a straightforward sequence of guarded operations, where every step that can fail returns a `std::expected` and the function unwraps or forwards each error immediately.
+The implementation depends on three utilities from `clore::net::detail`: `make_empty_object` for creating the initial JSON container, `insert_string_field` for safely adding key-value pairs, and `normalize_utf8` for ensuring the text content is valid UTF-8. All error paths return `LLMError` wrapped in `std::unexpected`.
 
 #### Side Effects
 
@@ -586,16 +595,11 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- role parameter
-- text parameter
-
-#### Writes To
-
-- returns a newly constructed `json::Object` with role and content fields set
+- parameters `role` and `text`
 
 #### Usage Patterns
 
-- called to create a role message object for Anthropic protocol messages
+- Used to generate a JSON role-content message pair for Anthropic protocol, typically as part of building a request payload.
 
 ### `clore::net::anthropic::protocol::detail::make_text_block`
 
@@ -605,19 +609,25 @@ Definition: `network/anthropic.cppm:35`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-The function `clore::net::anthropic::protocol::detail::make_text_block` constructs a JSON object representing a text content block for the Anthropic API. It begins by calling `clore::net::detail::make_empty_object` to allocate a fresh `json::Object`, propagating any failure as a `std::unexpected` error. On success, it inserts the literal string `"text"` into the `"type"` field via `clore::net::detail::insert_string_field`, again forwarding errors immediately. The supplied input text is then normalized using `clore::net::detail::normalize_utf8` to ensure well‑formed UTF‑8, and the normalized result is stored in the `"text"` field. If any insertion step fails, the function returns an `LLMError` wrapped in `std::unexpected`; otherwise it returns the completed `json::Object` block. The entire operation follows an early‑return pattern on error, relying on the helper utilities `make_empty_object`, `insert_string_field`, and `normalize_utf8` from the `clore::net::detail` namespace.
+The function constructs a JSON object representing a text content block for the Anthropic API. It first creates an empty object via `clore::net::detail::make_empty_object`, aborting with the propagated error if that fails. It then inserts a `"type"` field set to the string `"text"` using `clore::net::detail::insert_string_field`, again returning early on failure. The input text is normalized through `clore::net::detail::normalize_utf8` to ensure valid UTF‑8, and the result is inserted as a `"text"` field. Each insertion step returns a `std::expected` and is checked for errors; any error immediately yields `std::unexpected` with the corresponding `LLMError`. The function depends on `clore::net::detail` utilities for object creation, string insertion, and UTF‑8 normalization, and follows a straight‑line control flow with three sequential error‑handled steps before returning the completed block.
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- allocates a new `json::Object` and its contained strings
+- normalizes UTF-8 input, which may allocate a new string
 
 #### Reads From
 
-- `text` parameter (`std::string_view`)
+- parameter `text`
+
+#### Writes To
+
+- returns a newly constructed `json::Object`
 
 #### Usage Patterns
 
-- Constructing a text content block for an Anthropic API message array
+- creating text blocks for Anthropic API requests
+- building message content parts in the protocol layer
 
 ### `clore::net::anthropic::protocol::detail::make_tool_result_block`
 
@@ -627,29 +637,28 @@ Definition: `network/anthropic.cppm:98`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-The function constructs a JSON object representing a tool result block by first creating an empty object via `clore::net::detail::make_empty_object`; if that call fails, it immediately returns the propagated error. It then inserts three fields sequentially using `clore::net::detail::insert_string_field`: the literal `"type"` set to `"tool_result"`, the `"tool_use_id"` from the input `message.tool_call_id`, and a `"content"` field. For the content, it normalizes `message.content` as UTF-8 via `clore::net::detail::normalize_utf8` before insertion. Each insertion step is guarded by an `if` that checks the returned `std::expected`; if any insertion fails, the function returns the corresponding `LLMError` early. On success, the fully populated JSON object is returned.
-
-Internally, the function relies entirely on the utility layer in `clore::net::detail` for JSON construction (`make_empty_object`, `insert_string_field`) and text normalization (`normalize_utf8`). It does not perform any looping or branching beyond the three successive error checks, making its control flow a linear chain of fallible steps with early exit on the first error.
+The function constructs a JSON object representing an Anthropic tool‑result content block. It first calls `clore::net::detail::make_empty_object` to allocate an empty `json::Object` and returns a `std::unexpected` on failure. Then it sequentially inserts three string fields using `clore::net::detail::insert_string_field`: the literal `"type"` (value `"tool_result"`), the `"tool_use_id"` taken directly from the input `ToolResultMessage` parameter `message.tool_call_id`, and finally the `"content"` field. The content value is first normalized via `clore::net::detail::normalize_utf8` applied to `message.content`. Each insertion is checked for success; the function returns the appropriate `std::unexpected` upon the first error. If all inserts succeed, the constructed `json::Object` is returned as a `std::expected`.
 
 #### Side Effects
 
-- Allocates a `json::Object` and may allocate a normalized UTF-8 string for the content field.
-- Returns a `json::Object` by value, transferring ownership of the allocated object.
+- allocates JSON objects and strings
+- may allocate memory during UTF-8 normalization
 
 #### Reads From
 
-- The `message` parameter of type `const ToolResultMessage&`: specifically `message.tool_call_id` and `message.content`.
-- The result of `clore::net::detail::normalize_utf8(message.content, ...)`.
+- parameter `message`
+- `message.tool_call_id`
+- `message.content`
 
 #### Writes To
 
-- The temporary `json::Object` `block` via `clore::net::detail::insert_string_field` calls (modifies the object in place).
-- The return value of type `std::expected<json::Object, LLMError>` (by move or unexpected error).
+- local variable `block`
+- underlying JSON object modified via `insert_string_field`
 
 #### Usage Patterns
 
-- Used when constructing a tool result message to be sent to the Anthropic API.
-- Expected to be called from higher-level protocol message building functions.
+- called to create `tool_result` blocks for Anthropic assistant responses
+- used in higher-level message construction functions
 
 ### `clore::net::anthropic::protocol::detail::make_tool_use_block`
 
@@ -659,28 +668,34 @@ Definition: `network/anthropic.cppm:58`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-The function constructs a JSON object representing a tool use block for the Anthropic protocol. It first validates that the incoming tool call’s `arguments` member is a JSON object; if not, it returns an `LLMError` describing the invalid input. The function then creates an empty JSON object via `clore::net::detail::make_empty_object`, propagates any error upward, and sequentially inserts three string fields – `"type"` set to `"tool_use"`, `"id"` from `call.id`, and `"name"` from `call.name` – using `clore::net::detail::insert_string_field`. Each insertion is checked for failure and the error is forwarded if it occurs. Finally, the tool call’s `arguments` object is cloned via `clore::net::detail::clone_value` and inserted under the key `"input"`. The completed JSON object is returned on success, or a `std::unexpected` error is propagated at the first failure point.
+The function first validates that the `call.arguments` member is an JSON object; otherwise it returns an error. It then creates an empty JSON object via `clore::net::detail::make_empty_object`, propagating any failure. The control flow proceeds linearly: each required field—`type`, `id`, and `name`—is inserted into the block using `clore::net::detail::insert_string_field`, and each insertion is checked for success. Finally, the `input` field is set by cloning `call.arguments` with `clore::net::detail::clone_value`, and the completed block is returned. The entire sequence is built on `std::expected` error handling, aborting at the first failure and forwarding the underlying `LLMError`.
 
 #### Side Effects
 
-- allocates a `json::Object`
-- clones a `json::Value`
-- inserts fields into the JSON object
+- allocates a JSON object
+- inserts string fields into JSON object
+- clones a JSON value
+- moves cloned value into object
+- returns error state on failure
 
 #### Reads From
 
-- `call.arguments`
-- `call.id`
-- `call.name`
+- `ToolCall::arguments`
+- `ToolCall::id`
+- `ToolCall::name`
 
 #### Writes To
 
-- local `json::Object` `block`
-- returned `json::Object`
+- inserts 'type' field
+- inserts 'id' field
+- inserts 'name' field
+- inserts 'input' field
+- may write `LLMError` into expected
 
 #### Usage Patterns
 
-- used to create a `tool_use` block for Anthropic protocol requests
+- used when constructing Anthropic API requests that include tool use blocks
+- called by higher-level functions building message content or request bodies
 
 ### `clore::net::anthropic::protocol::detail::parse_json_text`
 
@@ -690,7 +705,7 @@ Definition: `network/anthropic.cppm:171`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-The implementation of `parse_json_text` is a thin delegation wrapper. It forwards both the raw JSON string (`raw`) and a contextual description (`context`) directly to `clore::net::detail::parse_json_object`, which performs the actual parsing of a JSON object. The function solely relies on that lower‑level parser; it has no additional validation, error transformation, or control flow of its own. The return type `std::expected<json::Object, LLMError>` is inherited from the underlying call, enabling callers to handle parse failures via the expected interface.
+The implementation of `parse_json_text` serves as a thin wrapper around the shared parsing utility `clore::net::detail::parse_json_object`. It forwards both the `raw` JSON string and the `context` `string_view` directly to that function, relying entirely on it for the actual JSON deserialization and error handling. No additional validation, transformation, or control flow is introduced at this level. The function’s sole purpose is to specialize the generic parser for the Anthropic protocol domain, accepting the same arguments and returning the same `std::expected<json::Object, LLMError>` result. The dependency on `clore::net::detail::parse_json_object` ensures consistent parsing semantics and error reporting across different network providers.
 
 #### Side Effects
 
@@ -698,12 +713,14 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `raw`
-- `context`
+- parameter `raw` of type `std::string_view`
+- parameter `context` of type `std::string_view`
 
 #### Usage Patterns
 
-- Used internally to parse JSON text in Anthropic protocol implementation
+- parsing JSON objects from raw text strings
+- delegating to the core JSON parser `clore::net::detail::parse_json_object`
+- used in Anthropic protocol message construction or response processing
 
 ### `clore::net::anthropic::protocol::detail::validate_request`
 
@@ -713,7 +730,9 @@ Definition: `network/anthropic.cppm:193`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-The implementation of `clore::net::anthropic::protocol::detail::validate_request` is a thin wrapper that immediately delegates all validation logic to `clore::net::detail::validate_completion_request`. The call passes the `request` argument along with two boolean flags—both set to `false`—which likely control whether certain validation passes (such as tool‑use or streaming constraints) are applied. This design centralises common request validation in the `clore::net::detail` namespace, allowing the Anthropic‑specific layer to reuse the same checks while disabling any protocol‑dependent features that are not relevant for the Anthropic completion path. No additional branching, error handling, or data transformation occurs within the function itself; the entire internal control flow is inherited from the shared validator.
+The implementation of `clore::net::anthropic::protocol::detail::validate_request` is a thin delegating wrapper. Its single responsibility is to forward the incoming `CompletionRequest` to the shared generic validator `clore::net::detail::validate_completion_request`, passing the request and two `false` boolean flags. The flags likely indicate that no special validation modes (such as streaming or tool-specific checks) are required for this particular invocation path.
+
+The internal control flow is trivial: the function simply returns the result of that delegated call, which is `std::expected<void, LLMError>`. The only dependencies are the `CompletionRequest` type and the common validation function located in the `clore::net::detail` namespace. No further transformation, error wrapping, or additional logic is performed; the function exists to provide a protocol‑specific entry point that enforces the same validation rules used across other parts of the Anthropic provider implementation.
 
 #### Side Effects
 
@@ -721,13 +740,11 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `request` parameter
-- fields of `CompletionRequest` (accessed via callee)
+- const `CompletionRequest` & request
 
 #### Usage Patterns
 
-- Called before sending a completion request to Anthropic API
-- Used in request construction and validation pipelines
+- Called to validate a completion request before submitting to the API.
 
 ### `clore::net::anthropic::protocol::parse_response`
 
@@ -737,27 +754,21 @@ Definition: `network/anthropic.cppm:460`
 
 Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clore/net/anthropic/protocol/index.md)
 
-The function first parses the raw JSON into a `json::Value` using `detail::parse_json_text` and wraps the result in a `clore::net::detail::ObjectView` for structured field access. If the payload contains an `"error"` object, the function extracts the `"message"` field and returns an `LLMError`. Next, it validates mandatory top-level fields: `"id"` and `"model"` are required as strings, and `"stop_reason"` defaults to `"end_turn"` but is validated when present; a `"max_tokens"` stop reason causes an early error return. The `"content"` array is then iterated block by block. For each `"text"` block, the text content is appended to either `refusal` (if `stop_reason == "refusal"`) or `text`; `"tool_use"` blocks require `"id"`, `"name"`, and `"input"` – the input is cloned via `clore::net::detail::clone_object`, serialized to a JSON string using `kota::codec::json::to_string`, and then parsed back into a `kota::codec::json::Value` to produce a `ToolCall` inside `output.tool_calls`. After processing all blocks, non‑empty `text` or `refusal` are assigned to the `AssistantOutput`, and a `CompletionResponse` is constructed containing `id`, `model`, the assembled message, and the raw JSON string.
+The function first deserializes the incoming `json_text` via `detail::parse_json_text` and checks for a top-level `"error"` field; if present, it extracts the `"error.message"` string and returns an `LLMError`. After that, it validates the presence and type of the required `"id"` and `"model"` fields. The optional `"stop_reason"` field is read with a default of `"end_turn"`; a value of `"max_tokens"` causes an early error return.
+
+The body of the response is processed by iterating the `"content"` array. For each content block the function inspects the `"type"` field: blocks of type `"text"` accumulate their text into either a `refusal` or a `text` string depending on `stop_reason`, while blocks of type `"tool_use"` are parsed for `"id"`, `"name"`, and an `"input"` object. The input object is cloned, serialized to a JSON string via `kota::codec::json::to_string`, and then re-parsed with `kota::codec::json::parse` to produce the `arguments` value and its JSON representation, which are stored in a `ToolCall` appended to the output. Blocks with other types are silently skipped. Finally, the non-empty text, refusal, and tool calls are bundled into an `AssistantOutput` and returned inside a `CompletionResponse` along with the original `id`, `model`, and raw JSON string.
 
 #### Side Effects
 
-- Allocates memory for strings and vectors in the returned `CompletionResponse`
-- Allocates memory for error messages in `LLMError`
-- Moves ownership of parsed JSON values and strings
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- Input parameter `json_text` (a `std::string_view`)
-
-#### Writes To
-
-- Return value of type `std::expected<CompletionResponse, LLMError>`
+- the `string_view` parameter `json_text`
 
 #### Usage Patterns
 
-- Called to deserialize an Anthropic API response string into a structured object
-- Used in error handling to detect API errors or truncation
-- Consumed by higher-level protocol functions that need a `CompletionResponse`
+- Used to parse Anthropic API response JSON into a structured result for further processing.
 
 ### `clore::net::anthropic::protocol::parse_response_text`
 
@@ -767,7 +778,9 @@ Definition: `network/anthropic.cppm:636`
 
 Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clore/net/anthropic/protocol/index.md)
 
-The implementation of `clore::net::anthropic::protocol::parse_response_text` is a thin delegation wrapper. The internal control flow consists solely of forwarding the incoming `CompletionResponse` parameter to the generic base function `clore::net::protocol::parse_response_text<T>`, which performs the actual parsing. No Anthropic-specific logic or error handling is introduced at this level; the function relies entirely on the base protocol layer to extract and convert the response’s text content into the requested type `T`. Its primary dependency is the template function `clore::net::protocol::parse_response_text`, which must be instantiated with the same type `T` to satisfy the `std::expected<T, LLMError>` return. This design centralises parsing in the shared protocol module and avoids duplicating logic across provider‑specific implementations.
+The implementation of `clore::net::anthropic::protocol::parse_response_text` is a thin forwarding wrapper. Its sole body returns the result of calling `clore::net::protocol::parse_response_text<T>`, passing the incoming `response` argument unchanged. This delegates all parsing logic to a generic protocol‑level utility, which is shared across different providers (e.g., `OpenAI`). The function does not perform any additional validation or transformation itself; it relies entirely on the target `parse_response_text` in the parent namespace `clore::net::protocol` to extract the desired `T` from the serialized `CompletionResponse`.
+
+The internal control flow is a single direct call. Dependencies are limited to the generic template `clore::net::protocol::parse_response_text`, which must be instantiated for the concrete `T` and the response type. No Anthropic‑specific parsing logic is introduced at this layer; any type‑dependent extraction (e.g., for `std::string`, `json::Value`, or custom structures) is handled by the protocol foundation.
 
 #### Side Effects
 
@@ -775,12 +788,12 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- response parameter of type `const CompletionResponse&`
+- `response` parameter (const `CompletionResponse`&)
 
 #### Usage Patterns
 
-- Called when parsing a text response from the Anthropic API
-- Used to convert raw API response to a typed `expected` result
+- delegation to generic `parse_response_text`
+- template instantiation for response types
 
 ### `clore::net::anthropic::protocol::parse_tool_arguments`
 
@@ -790,7 +803,7 @@ Definition: `network/anthropic.cppm:641`
 
 Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clore/net/anthropic/protocol/index.md)
 
-The implementation of `clore::net::anthropic::protocol::parse_tool_arguments` is a thin forwarding function that delegates immediately to `clore::net::protocol::parse_tool_arguments<T>`, passing the received `call` parameter of type `ToolCall`. No additional Anthropic‑specific logic or transformation is applied at this level. The algorithm consists solely of calling the generic protocol‑level function and returning its `std::expected<T, LLMError>` result. Control flow is linear: argument reception, single delegation, return. The only external dependency is the common protocol layer function `clore::net::protocol::parse_tool_arguments`, which contains the actual JSON parsing and schema‑driven extraction logic (e.g., using `detail::parse_json_text` and related helpers). The template parameter `T` is inferred from the caller and dictates the expected output type.
+The implementation of `clore::net::anthropic::protocol::parse_tool_arguments` is a thin forwarding function. Its entire logic consists of delegating the call to `clore::net::protocol::parse_tool_arguments<T>`, passing through the provided `ToolCall` parameter and returning the resulting `std::expected<T, LLMError>` directly. No additional parsing, validation, or transformation is performed at this layer; the function exists solely to expose the generic protocol parsing mechanism through the `clore::net::anthropic::protocol` namespace with a consistent interface for the Anthropic provider.
 
 #### Side Effects
 
@@ -798,11 +811,12 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `call` parameter (`const ToolCall&`)
+- `const ToolCall& call` parameter
 
 #### Usage Patterns
 
-- Used to deserialize tool call arguments into a strongly typed object
+- Extract typed tool arguments from a `ToolCall`
+- Bridge between Anthropic-specific and generic protocol parsing
 
 ### `clore::net::anthropic::protocol::text_from_response`
 
@@ -812,9 +826,7 @@ Definition: `network/anthropic.cppm:623`
 
 Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clore/net/anthropic/protocol/index.md)
 
-The function `clore::net::anthropic::protocol::text_from_response` simply delegates to `clore::net::protocol::text_from_response` with the given `response`. It acts as a thin adapter within the Anthropic protocol layer, forwarding the response object to the generic protocol helper. No additional parsing, transformation, or branching occurs inside this function; all extraction logic resides in the called routine.
-
-Internally, the function’s control flow is a single call expression, with the return value passed directly back to the caller. The only dependency is the generic `clore::net::protocol::text_from_response` function, which is expected to handle the concrete message structure of Anthropic responses. Any error handling or text extraction is performed by that underlying implementation, not within this wrapper.
+The implementation of `clore::net::anthropic::protocol::text_from_response` is a thin forwarding function. It receives a `const CompletionResponse &` (the actual type of the parameter, despite the stub signature in the module interface) and immediately delegates to `clore::net::protocol::text_from_response`, passing the same response object. The return type is `std::expected<std::string, LLMError>`. No additional validation or transformation is performed; the core logic resides entirely in the base `clore::net::protocol::text_from_response` function, on which this implementation depends. The control flow is a single call with the forwarded argument, and the result is returned directly.
 
 #### Side Effects
 
@@ -822,21 +834,22 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the `response` parameter of type `CompletionResponse`
+- parameter `response`
 
 #### Usage Patterns
 
-- Used to retrieve the textual content from a `CompletionResponse`.
+- extract text from Anthropic `CompletionResponse`
+- called by higher-level response parsing code
 
 ### `clore::net::anthropic::schema::function_tool`
 
-Declaration: `network/anthropic.cppm:755`
+Declaration: `network/anthropic.cppm:762`
 
-Definition: `network/anthropic.cppm:755`
+Definition: `network/anthropic.cppm:762`
 
 Declaration: [`Namespace clore::net::anthropic::schema`](../../namespaces/clore/net/anthropic/schema/index.md)
 
-The implementation of `clore::net::anthropic::schema::function_tool` is a thin forwarding wrapper. It receives `name` and `description` as `std::string` values, moves them into `clore::net::schema::function_tool<T>`, and returns the `std::expected` result directly. No additional validation, transformation, or branching occurs within this function; all logic is delegated to the generic schema layer. The only dependency is the template function `clore::net::schema::function_tool<T>`, which must be defined elsewhere in the codebase. This design keeps the Anthropic-specific entry point consistent with the common schema interface, allowing tool definitions to be constructed through a single code path.
+The implementation of `clore::net::anthropic::schema::function_tool` is a thin forwarder. It takes a `name` and `description` as `std::string` parameters, moves them into a call to `clore::net::schema::function_tool<T>`, and returns the result directly. The control flow is linear: the function constructs the delegate call immediately and propagates its return type, which is `std::expected<FunctionToolDefinition, LLMError>`. The only dependency is the generic schema function `clore::net::schema::function_tool<T>`, which performs the actual tool definition construction; this function exists primarily to provide an Anthropic‑namespace entry point that reuses the common schema layer.
 
 #### Side Effects
 
@@ -844,23 +857,23 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `name` parameter
-- `description` parameter
+- `name`
+- `description`
 
 #### Usage Patterns
 
-- Used to construct a `FunctionToolDefinition` for a specific type `T`
-- Called with name and description strings to create a tool definition for the Anthropic API
+- Creating a function tool definition for Anthropic schema
+- Delegating to generic function tool creator
 
 ### `clore::net::anthropic::schema::response_format`
 
-Declaration: `network/anthropic.cppm:750`
+Declaration: `network/anthropic.cppm:757`
 
-Definition: `network/anthropic.cppm:750`
+Definition: `network/anthropic.cppm:757`
 
 Declaration: [`Namespace clore::net::anthropic::schema`](../../namespaces/clore/net/anthropic/schema/index.md)
 
-The implementation of `clore::net::anthropic::schema::response_format` is a thin forwarding layer that delegates to the generic template function `clore::net::schema::response_format<T>()`. It performs no additional validation, transformation, or intermediate processing; the function simply returns the result of that underlying call. The internal control flow consists of a single return statement wrapping the dependent invocation. The primary dependency is on the `clore::net::schema` module, which provides the actual algorithm for computing the response format. No branching, loops, or side effects occur within this function.
+The implementation of `clore::net::anthropic::schema::response_format` is a thin template wrapper that delegates directly to `clore::net::schema::response_format<T>()`. It returns a `std::expected<ResponseFormat, LLMError>`, and its sole dependency is the generic schema infrastructure in the parent `clore::net::schema` namespace. There is no additional logic, branching, or data transformation inside the function; the entire internal control flow is a single forwarding call, with the template parameter `T` passed as-is.
 
 #### Side Effects
 
@@ -868,13 +881,11 @@ No observable side effects are evident from the extracted code.
 
 #### Usage Patterns
 
-- Obtain a response format for the specified type T in the Anthropic context
+- Callers use this function to obtain the response format configuration for the template type `T` when interacting with the Anthropic API.
 
 ## Internal Structure
 
-The `anthropic` module is decomposed into several internal namespaces that separate protocol-level message construction (`clore::net::anthropic::protocol`) from provider-specific configuration and networking logic (`clore::net::anthropic::detail`). The `protocol` namespace contains public functions for building and parsing Anthropic API payloads (e.g., `build_request_json`, `parse_response`, `text_from_response`), while its `detail` sub‑namespace exposes low‑level helpers (e.g., `make_text_block`, `make_role_message`, `validate_request`) used by the higher‑level routines. The `detail` namespace at module level houses the `Protocol` struct, which encapsulates environment‑based API key and base‑URL discovery, URL construction, header assembly, and response parsing, providing a single provider‑specific implementation for the generic HTTP and async layers.
-
-The module imports `client`, `http`, `protocol`, `provider`, `schema`, and `support` as its main dependencies, indicating that it builds on top of generic LLM types and transport abstractions to realise Anthropic‑specific serialization, endpoint management, and schema generation (e.g., `function_tool` and `response_format` in the `schema` namespace). The public async call interfaces (`call_llm_async`, `call_completion_async`, `call_structured_async`) rely on the `Protocol` struct for configuration and on the `http` module for actual network dispatch, while the internal helpers handle the fine‑grained construction of message blocks, tool‑call containers, and response text extraction.
+The `anthropic` module is decomposed into three layered namespaces within `clore::net::anthropic`: a public API surface, a protocol layer, and an internal implementation. The `protocol` namespace and its nested `detail` sub‑namespace contain request‑building and response‑parsing utilities (e.g., `build_messages_url`, `parse_response`, `make_text_block`) as well as validation and formatting helpers. A separate `detail` namespace houses the `Protocol` class, which encapsulates environment‑variable reading (`kAnthropicApiKeyEnv`, `kAnthropicBaseUrlEnv`, `kAnthropicVersion`), URL and header construction, request JSON assembly, and response parsing – providing a single internal interface for the module’s public functions. The `schema` namespace supplies `function_tool` and `response_format` templates for constructing structured schema objects. The module imports `client`, `http`, `protocol`, `provider`, `schema`, `std`, and `support`, placing it as a provider‑specific bridge between the generic HTTP/client infrastructure and the Anthropic API. Public entry points such as `call_llm_async`, `call_completion_async`, and `call_structured_async` delegate to the internal `Protocol` class, which manages all provider‑specific request formatting and response handling.
 
 ## Related Pages
 

@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::agent'
-description: 'clore::agent 命名空间封装了代理系统的核心机制，负责驱动基于工具调用的自动化代码探索与文档生成流程。其显著声明包括高层入口函数 run_agent 和 run_agent_async，前者同步运行代理循环并返回生成的文档数量（成功时以 std::size_t 表示，失败时以 AgentError 表示），后者在 kota::event_loop 上启动异步操作。此外，build_tool_definitions 提供工具定义集合的初始化入口，dispatch_tool_call 是工具调度的核心函数，依据工具名称和参数执行并返回结果或 ToolError，而 extract_string_arg 则负责从 JSON 参数中安全提取字符串值。ToolError 和 AgentError 结构体用于表达工具调用或代理运行过程中的特定错误。'
+description: 'clore::agent 命名空间承担着智能代理系统的核心职责，提供了一套用于定义、注册和调用工具（tool）以及驱动代理循环执行的完整机制。它包含了多个关键函数：dispatch_tool_call 根据工具名称和 JSON 参数执行对应的工具调用并返回结果或错误；run_agent 和 run_agent_async 分别启动同步和异步的代理循环，其中同步版本会在指定输出根目录下生成指南文档；build_tool_definitions 汇总当前注册的工具规格并返回工具数量；extract_string_arg 则用于从工具调用的参数对象中安全地提取字符串参数。此外，命名空间中还定义了 ToolError 和 AgentError 两个错误类型，用于细化工具调用和代理执行过程中的错误处理。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-`clore::agent` 命名空间封装了代理系统的核心机制，负责驱动基于工具调用的自动化代码探索与文档生成流程。其显著声明包括高层入口函数 `run_agent` 和 `run_agent_async`，前者同步运行代理循环并返回生成的文档数量（成功时以 `std::size_t` 表示，失败时以 `AgentError` 表示），后者在 `kota::event_loop` 上启动异步操作。此外，`build_tool_definitions` 提供工具定义集合的初始化入口，`dispatch_tool_call` 是工具调度的核心函数，依据工具名称和参数执行并返回结果或 `ToolError`，而 `extract_string_arg` 则负责从 JSON 参数中安全提取字符串值。`ToolError` 和 `AgentError` 结构体用于表达工具调用或代理运行过程中的特定错误。
+`clore::agent` 命名空间承担着智能代理系统的核心职责，提供了一套用于定义、注册和调用工具（tool）以及驱动代理循环执行的完整机制。它包含了多个关键函数：`dispatch_tool_call` 根据工具名称和 JSON 参数执行对应的工具调用并返回结果或错误；`run_agent` 和 `run_agent_async` 分别启动同步和异步的代理循环，其中同步版本会在指定输出根目录下生成指南文档；`build_tool_definitions` 汇总当前注册的工具规格并返回工具数量；`extract_string_arg` 则用于从工具调用的参数对象中安全地提取字符串参数。此外，命名空间中还定义了 `ToolError` 和 `AgentError` 两个错误类型，用于细化工具调用和代理执行过程中的错误处理。
 
-该命名空间在架构中扮演代理系统的中枢角色，协调 LLM 模型、工具补全缓存、输出根目录及会话状态等组件。其内部的变量（如 `model`、`arguments`、`output_root`、`config`、`cache` 等）反映了代理运行时的关键上下文。通过 `dispatch_tool_call` 和 `build_tool_definitions` 等函数，它实现了工具调度层与代理控制逻辑的解耦，使上层应用能够专注于任务定义和结果处理，而无需直接操作底层工具执行细节。
+在架构上，`clore::agent` 充当了代理功能模块的命名空间层级组织者，它将工具调度、参数解析、代理生命周期管理等职责集中在一起，使外部调用者能够通过统一的接口与代理系统交互。该命名空间的函数共同构成了一个可扩展的工具调用框架，并支撑起自动化的代码库探索与文档生成流程，是 `clore` 项目中实现智能代理行为的关键组件。
 
 ## Types
 
@@ -27,16 +27,15 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- message should contain a non-empty string describing the error context
+- 错误消息由调用方提供，无预设约束
 
 #### Key Members
 
-- message
+- `message`：存储错误描述字符串
 
 #### Usage Patterns
 
-- returned as an error type from agent operations
-- used to propagate error information via exceptions or result types
+- 作为返回值或异常的一部分传递错误信息
 
 ### `clore::agent::ToolError`
 
@@ -58,12 +57,12 @@ Definition: `agent/tools.cppm:887`
 
 Implementation: [`Module agent:tools`](../../../modules/agent/tools.md)
 
-`clore::agent::build_tool_definitions` 为调用者提供构建工具定义集合的入口点。该函数不接收任何参数，返回一个 `int` 值，用于指示操作结果或定义的数量。调用者应在需要初始化或更新工具定义列表时调用此函数；返回值的具体含义（例如成功状态码或定义计数）由调用者根据契约进行解释。
+该函数负责构建并返回一个表示当前 Agent 工具集定义的数值状态。调用方调用 `clore::agent::build_tool_definitions` 后，可以获取到在内部 `tool_registry` 中注册的工具规格的汇总信息，通常用于验证、初始化或报告可用工具的数量。函数的返回值是一个整数，成功时代表已登记的工具数量，失败或不适用时可能返回其他约定值。调用方应假设该函数会访问全局或模块级的工具注册表，并在执行前确保所需工具已正确声明。
 
 #### Usage Patterns
 
-- called to prepare tool definitions for a chat API request
-- used in agent initialization
+- Called to generate a complete set of tool definitions for network requests
+- Used to prepare tool definitions before dispatching agent calls
 
 ### `clore::agent::dispatch_tool_call`
 
@@ -73,12 +72,12 @@ Definition: `agent/tools.cppm:902`
 
 Implementation: [`Module agent:tools`](../../../modules/agent/tools.md)
 
-`clore::agent::dispatch_tool_call` 是工具调度系统的核心入口，负责根据指定的工具名称和参数执行工具调用。调用者需提供工具名称、参数 JSON 值、会话标识符以及客户端和请求标识符。函数返回 `std::expected<std::string, ToolError>`，成功时包含工具执行的字符串结果，失败时包含详细的错误信息。调用者应始终检查返回值，并在出错时采取适当措施（例如向用户报告错误）。该函数不会直接修改会话状态，但执行结果可能影响后续代理步骤。
+`clore::agent::dispatch_tool_call` 接受工具名称（`std::string_view`）、工具参数（`const json::Value &`）、一个整数标识符（`const int &`）以及两个附加上下文字符串（`std::string_view`），并尝试执行对应的工具调用。调用者有责任提供合法的工具名称和与工具定义一致的参数，以及正确的上下文数据。该函数返回 `std::expected<std::string, ToolError>`，成功时包含工具执行的结果字符串，失败时携带 `ToolError` 错误。调用者必须检查返回值以确定调用是否成功，并对 `ToolError` 进行适当的错误处理。
 
 #### Usage Patterns
 
-- Called to handle tool execution requests
-- Used by agent loop to dispatch tool calls
+- invoked during agent execution to handle a tool call from an LLM
+- used with caching to avoid duplicate tool executions with identical arguments
 
 ### `clore::agent::extract_string_arg`
 
@@ -88,11 +87,13 @@ Definition: `agent/tools.cppm:865`
 
 Implementation: [`Module agent:tools`](../../../modules/agent/tools.md)
 
-从给定的 `json::Value` 对象中提取由名称标识的字符串参数。如果名称对应的参数不存在或其值不是字符串类型，则返回一个表示失败的 `ToolError`。该函数是工具调用参数提取的核心契约，确保调用方获得一个经过验证的字符串值或明确的错误原因。
+函数 `clore::agent::extract_string_arg` 从给定的 `json::Value` 对象中提取指定名称的字符串参数。调用者传入一个 JSON 值（通常为工具调用的参数对象）和一个参数名（`std::string_view`）。若参数存在且为字符串，则返回该字符串；若参数缺失、类型不匹配或发生其他可恢复错误，则返回 `std::expected` 的错误状态，其错误类型为 `ToolError`。此函数是工具调用解包过程中可靠提取字符串参数的关键契约，调用者必须负责检查返回值或传播错误。
 
 #### Usage Patterns
 
-- Called by `dispatch_tool_call` to extract required string arguments from tool invocation JSON
+- extract string field from tool call arguments
+- validate and retrieve string-typed JSON field
+- used in `dispatch_tool_call` to parse tool arguments
 
 ### `clore::agent::run_agent`
 
@@ -102,12 +103,12 @@ Definition: `agent/agent.cppm:524`
 
 Implementation: [`Module agent`](../../../modules/agent/index.md)
 
-函数 `clore::agent::run_agent` 负责运行代理循环：通过工具调用探索代码库，并在输出根目录下的 `guides/` 夹中生成指南文档。调用者需提供两个整数引用（`const int &`）、一个字符串视图（`std::string_view`，通常指向输出根目录路径）及一个字符串（`std::string`）。成功时该函数返回生成的文档数量（`std::size_t`），失败时返回 `AgentError`。调用者应检查 `std::expected` 的返回状态以处理潜在错误。
+`clore::agent::run_agent` 启动代理循环：它通过工具调用探索代码库，并在 `${output_root}/guides/` 下生成指南文档。该函数接受两个 `const int &`（通常表示配置或限制）、一个 `std::string_view`（可能指定输出根路径）和一个 `std::string`（其他参数），返回 `std::expected<std::size_t, AgentError>`。成功时产生一个无符号整数（例如已完成的指南数量），失败时携带 `AgentError` 错误信息。调用者应确保输入参数有效，并处理可能的错误结果。
 
 #### Usage Patterns
 
-- Called to execute the full agent workflow synchronously from user-facing entry points
-- Wraps the asynchronous `run_agent_async` in an event loop for blocking invocation
+- Entry point for synchronous agent execution
+- Used to produce guide documents from codebase analysis
 
 ### `clore::agent::run_agent_async`
 
@@ -117,12 +118,12 @@ Definition: `agent/agent.cppm:507`
 
 Implementation: [`Module agent`](../../../modules/agent/index.md)
 
-`clore::agent::run_agent_async` 启动一个异步代理循环，在给定的 `kota::event_loop` 上运行。调用者必须将返回的任务调度到该循环上并执行它。该函数接受两个 `const int &` 参数、两个 `std::string` 参数以及一个 `kota::event_loop &` 引用，返回一个 `int` 值，代表异步操作的结果或状态。
+`clore::agent::run_agent_async` 启动一个异步代理循环，该循环运行在提供的 `kota::event_loop` 上。它接受两个 `const int &` 参数（通常代表上下文标识符）、两个 `std::string` 参数以及一个 `kota::event_loop &` 引用。函数返回一个 `int`，代表异步任务标识符；调用方必须将此返回的任务调度到事件循环上并运行它，以驱动代理循环的执行。
 
 #### Usage Patterns
 
-- Launch asynchronous agent with event loop
-- Wrap synchronous agent with cache loading
+- callers schedule the returned `kota::task` on the provided `kota::event_loop`
+- used as the entry point for starting an asynchronous agent execution with cache management
 
 ## Related Pages
 

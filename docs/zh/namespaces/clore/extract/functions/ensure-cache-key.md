@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::ensurecachekey'
-description: '函数 clore::extract::ensure_cache_key 确保给定的 CompileEntry 对象已具备可用于缓存查询的唯一键值。该函数会就地修改传入的条目，为后续的工具链参数缓存（例如由 clore::extract::query_toolchain_cached 执行的操作）建立正确的匹配依据。调用方应在依赖缓存机制的流程之前调用此函数，以保证缓存体系的一致性。'
+description: '函数 clore::extract::ensure_cache_key 负责为给定的 CompileEntry 建立可用于缓存查找的键值。它接收一个 CompileEntry & 类型参数并返回 void，通过修改该条目使其满足下游缓存函数（如 clore::extract::query_toolchain_cached）的契约要求。调用者应在对 CompileEntry 进行任何可能影响缓存一致性的更改后调用此函数，以确保后续的缓存操作基于正确的键值发生。该函数的调用不保证键的唯一性或完整性，但保证 CompileEntry 在缓存系统中具有可被识别的状态。'
 layout: doc
 template: doc
 ---
@@ -21,11 +21,11 @@ Implementation: [`Module extract:compiler`](../../../../modules/extract/compiler
 auto (CompileEntry &) -> void;
 ```
 
-函数 `clore::extract::ensure_cache_key` 确保给定的 `CompileEntry` 对象已具备可用于缓存查询的唯一键值。该函数会就地修改传入的条目，为后续的工具链参数缓存（例如由 `clore::extract::query_toolchain_cached` 执行的操作）建立正确的匹配依据。调用方应在依赖缓存机制的流程之前调用此函数，以保证缓存体系的一致性。
+函数 `clore::extract::ensure_cache_key` 负责为给定的 `CompileEntry` 建立可用于缓存查找的键值。它接收一个 `CompileEntry &` 类型参数并返回 `void`，通过修改该条目使其满足下游缓存函数（如 `clore::extract::query_toolchain_cached`）的契约要求。调用者应在对 `CompileEntry` 进行任何可能影响缓存一致性的更改后调用此函数，以确保后续的缓存操作基于正确的键值发生。该函数的调用不保证键的唯一性或完整性，但保证 `CompileEntry` 在缓存系统中具有可被识别的状态。
 
 ## Usage Patterns
 
-- Called by `query_toolchain_cached` before attempting to use cached toolchain information to ensure the entry has a valid cache key.
+- Called before `clore::extract::query_toolchain_cached` to ensure a cache key is present.
 
 ## Calls
 

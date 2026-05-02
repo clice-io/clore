@@ -1,6 +1,6 @@
 ---
 title: 'Module extract:ast'
-description: '模块 extract:ast 负责基于 Clang AST 的符号提取，是 C++ 项目解析流水线的核心引擎。它通过自定义的递归 AST 访问器（SymbolExtractorVisitor）和消费者（SymbolExtractorConsumer）来遍历翻译单元，为每个可提取的声明计算唯一标识、源片段边界、词法上下文、文档注释和函数签名，同时收集各类关系（函数调用、成员访问、引用、继承）以及文件依赖。提取结果以 ASTResult 结构体封装，包含符号列表、关系列表和依赖文件集合，而模块唯一的公开入口点为 extract_symbols 函数。'
+description: 'extract:ast 模块是代码提取系统的核心 AST 处理单元。它负责接收来自 extract:compiler 模块提供的编译器配置，驱动 Clang 前端对源文件进行解析，并通过递归遍历抽象语法树（AST）从中提取出结构化的符号信息、依赖关系以及引用关系。模块内部封装了符号提取器（SymbolExtractorVisitor、SymbolExtractorConsumer）、关系建模以及代码片段的边界计算等实现细节，最终将提取结果以 ASTResult 结构（包含符号列表、关系列表和依赖文件列表）或 ASTError 结构对外暴露。'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,9 @@ template: doc
 
 ## Summary
 
-模块 `extract:ast` 负责基于 Clang AST 的符号提取，是 C++ 项目解析流水线的核心引擎。它通过自定义的递归 AST 访问器（`SymbolExtractorVisitor`）和消费者（`SymbolExtractorConsumer`）来遍历翻译单元，为每个可提取的声明计算唯一标识、源片段边界、词法上下文、文档注释和函数签名，同时收集各类关系（函数调用、成员访问、引用、继承）以及文件依赖。提取结果以 `ASTResult` 结构体封装，包含符号列表、关系列表和依赖文件集合，而模块唯一的公开入口点为 `extract_symbols` 函数。
+`extract:ast` 模块是代码提取系统的核心 AST 处理单元。它负责接收来自 `extract:compiler` 模块提供的编译器配置，驱动 Clang 前端对源文件进行解析，并通过递归遍历抽象语法树（AST）从中提取出结构化的符号信息、依赖关系以及引用关系。模块内部封装了符号提取器（`SymbolExtractorVisitor`、`SymbolExtractorConsumer`）、关系建模以及代码片段的边界计算等实现细节，最终将提取结果以 `ASTResult` 结构（包含符号列表、关系列表和依赖文件列表）或 `ASTError` 结构对外暴露。
+
+该模块的公共接口范围限定在命名空间 `clore::extract` 下，主要包含 `extract_symbols` 函数（入口点）以及 `ASTResult`、`ASTError`、`ExtractedRelation` 等数据结构。这些类型直接面向调用方，用于获取 AST 分析的完整结果。模块内部使用匿名命名空间隔离了大量实现细节，如 `SymbolExtractorVisitor`、`RelationEdge` 等类与辅助函数，这些均不构成公共接口。此外，该模块依赖 `extract:model` 提供的数据模型定义以及 `support` 模块的基础设施工具。
 
 ## Imports
 
@@ -32,19 +34,19 @@ Definition: `extract/ast.cppm:26`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-结构体 `clore::extract::ASTError` 的实现是一个仅包含单个 `std::string message` 成员的聚合体，其内部结构完全依赖于标准字符串的存储和生命周期管理。该设计使得错误消息能够以零额外开销的方式被动态构造、拷贝和移动，编译器自动生成的默认构造函数、析构函数以及拷贝/移动赋值运算符保证了成员的正确初始化和资源释放，无需自定义特殊成员函数。关于不变性，`message` 字段可以持有任何 UTF-8 或 ASCII 文本，不要求非空或特定格式，结构体本身不维护错误码、层级或上下文信息，其语义完全由外层提取逻辑解释。
+`clore::extract::ASTError` 是一个仅用于携带错误信息的简单聚合体。其唯一数据成员 `message` 类型为 `std::string`，负责描述错误的文本内容。结构体本身不维护额外的内部不变式，亦不提供任何自定义构造函数或赋值操作；所有成员由编译器生成的默认操作处理。该设计确保了错误消息的存储与传递零开销，并允许通过直接赋值或聚合初始化来构造实例。
 
 #### Invariants
 
-- `message` 成员始终包含有效的错误描述字符串。
+- `message` 成员持有有效的字符串对象
 
 #### Key Members
 
-- `message`
+- message
 
 #### Usage Patterns
 
-- 作为 `clore::extract` 命名空间中错误处理的结果类型使用。
+- 作为错误类型传递给调用者或存储在异常中
 
 ### `clore::extract::ASTResult`
 
@@ -54,14 +56,12 @@ Definition: `extract/ast.cppm:37`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-结构体 `clore::extract::ASTResult` 是一个纯数据聚合体，其内部直接暴露三个公有成员：`symbols`（类型为 `std::vector<SymbolInfo>`）、`relations`（类型为 `std::vector<ExtractedRelation>`）以及 `dependencies`（类型为 `std::vector<std::string>`）。这些字段分别负责承载从 AST 中提取出的符号信息、元素间的关联关系以及外部依赖名列表。该结构体不包含任何自定义构造函数、析构函数或成员函数，其所有成员均可通过直接初始化或聚合初始化来赋值，因此实例化时无需特殊逻辑。
-
-由于 `ASTResult` 仅依赖标准库容器，其内存布局完全由编译器决定，且不存在任何需要运行时维护的不变式。通常，各个字段会在提取流程中被顺序填充，并在最终使用时协同解释：`symbols` 与 `relations` 通过索引或 ID 相关联，而 `dependencies` 则独立提供后续编译或分析所需的依赖项集合。该结构体在设计上仅作为数据传输的中间容器，不涉及深拷贝控制或资源管理——由容器本身负责其内部元素的析构与移动语义。
+`clore::extract::ASTResult` 是一个纯数据聚合体，内部仅包含三个公共 `std::vector` 成员：`symbols` 存储 `SymbolInfo` 类型的已提取符号元数据，`relations` 存储 `ExtractedRelation` 类型的符号间关系，`dependencies` 存储 `std::string` 类型的依赖项名称。这三个向量之间没有显式的不变式约束，但通常它们的内容来自同一次 AST 遍历过程，因此隐含地通过符号的索引或标识符相互关联。该结构体没有定义任何构造函数、析构函数或成员函数，所有成员均保持默认构造语义，对象的构造与所有权完全由调用方管理。
 
 #### Invariants
 
-- 字段均为公共向量，可自由读写
-- 无显式不变量约束
+- 各向量成员可能为空
+- 成员之间没有隐含的顺序或一致性约束
 
 #### Key Members
 
@@ -71,9 +71,8 @@ Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.m
 
 #### Usage Patterns
 
-- 作为提取管道的输出类型
-- 由分析函数填充并返回
-- 消费者遍历各向量以获取提取结果
+- 作为 `clore::extract` 模块中提取操作的返回类型
+- 调用方通过访问 `symbols`、`relations`、`dependencies` 字段获取提取结果
 
 ### `clore::extract::ExtractedRelation`
 
@@ -83,25 +82,26 @@ Definition: `extract/ast.cppm:30`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-`ExtractedRelation` 是一个仅包含数据的结构体，用于表示在 AST 提取过程中发现的一条二元关系。该结构体的核心字段为两个 `SymbolID` 类型成员 `from` 和 `to`，分别代表关系中的源和目标符号。另外两个布尔成员 `is_call` 和 `is_inheritance` 标记关系的具体语义：当 `is_call` 为真时，表示 `from` 调用了 `to`；当 `is_inheritance` 为真时，表示 `from` 派生于 `to`。虽然在设计上这两个标志通常不应同时为真，但结构体本身并不强制这一不变性，调用方应确保关系的类型是明确的。
+`clore::extract::ExtractedRelation` 是一个简单的数据聚合体，用于表示两个符号之间的有向关系。其内部结构由四个字段组成：`from` 和 `to` 均为 `SymbolID` 类型，分别标识关系中的源符号和目标符号；`is_call` 和 `is_inheritance` 为布尔标志，默认均为 `false`，分别指示该关系是否为调用边或继承边。对于继承边，`from` 代表派生类、`to` 代表基类。该结构体的关键不变性在于，关系类型通过两个独立布尔字段表达，虽然二者在语义上是互斥的，但实现未强制约束——实际使用时依赖调用方确保正确设置，通常一个 `ExtractedRelation` 实例仅将其中一个置为 `true`。两个字段的默认 `false` 值避免了未初始化问题，并允许在构造后通过赋值明确分类。
 
 #### Invariants
 
-- `from` 和 `to` 必须为有效的 `SymbolID`
-- `is_call` 和 `is_inheritance` 至少一个为 true 或均为 false
+- `from` 和 `to` 应为有效的 `SymbolID`
+- 默认情况下，两个布尔标志均为 `false`，表示未分类的关系
+- 当 `is_inheritance == true` 时，`from` 代表派生符号，`to` 代表基类符号
 
 #### Key Members
 
-- `from`：关系的源符号标识
-- `to`：关系的目标符号标识
-- `is_call`：是否为调用关系
-- `is_inheritance`：是否为继承关系
+- `from`
+- `to`
+- `is_call`
+- `is_inheritance`
 
 #### Usage Patterns
 
-- 用于构建符号之间的调用图
-- 用于记录继承层次结构
-- 在提取阶段填充此结构体以描述符号间依赖
+- 设置 `is_call` 或 `is_inheritance` 以标识边的语义
+- 通过 `from` 和 `to` 遍历或查询符号间的关系
+- 在提取流程中存储调用图或继承图的边
 
 ## Functions
 
@@ -113,39 +113,43 @@ Definition: `extract/ast.cppm:669`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该函数是符号提取的入口点，内部串联了编译器实例的创建、前端选项的强制调整（将`ProgramAction`设为`clang::frontend::ParseSyntaxOnly`并清空输出路径）、以及`SymbolExtractorAction`的调度执行。依赖`create_compiler_instance`构建`clang::CompilerInstance`，并使用`collect_dependency_files`从`SourceManager`提取文件依赖。控制流首先检查`entry.arguments`是否为空，然后依次调用`SymbolExtractorAction`的`BeginSourceFile`、`Execute`和`EndSourceFile`，每一步失败均返回`std::unexpected`。提取出的原生`RelationEdge`列表随后被转换为`ExtractedRelation`结构，填充`from`、`to`、`is_call`和`is_inheritance`字段，从而解耦内部枚举类型。
+该函数首先检查 `CompileEntry` 的 `arguments` 是否为空，若为空则立即返回包装在 `ASTError` 中的错误信息。随后通过 `create_compiler_instance` 构建 `clang::CompilerInstance`，并强制修改前端选项：将 `ProgramAction` 设为 `clang::frontend::ParseSyntaxOnly`，同时清空 `OutputFile` 和 `ModuleOutputPath`，从而将原本可能产生对象文件或 PCM 的命令转换为纯语义分析。接着创建 `SymbolExtractorAction` 实例，其构造器接收 `result.symbols` 的引用以及一个用于暂存原始关系数据的 `std::vector<RelationEdge>`。在成功调用 `BeginSourceFile` 后，执行 `Execute` 进行 AST 遍历；若执行失败则消费 `llvm::Error` 并返回 `ASTError`。提取完成后，调用 `collect_dependency_files` 从 `SourceManager` 收集所有依赖文件路径并存入 `result.dependencies`。最后遍历 `raw_relations`，将每条 `RelationEdge` 转换为 `ExtractedRelation`，根据 `edge.kind` 与 `RelationKind` 枚举的比较分别设置 `is_call` 和 `is_inheritance` 标志，最终返回填充完毕的 `ASTResult`。整个流程依赖 `Clang` 的前端基础设施、自定义的 AST 消费者及访问器类（如 `SymbolExtractorAction`、`SymbolExtractorConsumer`、`SymbolExtractorVisitor`）以及工具函数 `collect_dependency_files` 来完成符号与关系的提取。
 
 #### Side Effects
 
-- Creates and mutates a compiler instance (via `create_compiler_instance` and frontend option modifications)
-- Reads source files and includes via the clang frontend during extraction
-- Populates the `ASTResult` output with symbols, relations, and dependency file paths
-- Invokes `collect_dependency_files` which reads the source manager
-- May produce diagnostics or cache results indirectly through clang infrastructure
+- Creates a compiler instance from the compilation entry, which may perform file I/O and allocate memory
+- Executes AST extraction that reads the source file and its dependencies
+- Collects dependency files by reading the source manager
+- Allocates and populates an `ASTResult` object
 
 #### Reads From
 
-- The `entry` parameter of type `CompileEntry` (its `file`, `arguments` fields)
-- The filesystem: source file and its transitive includes via clang
-- Compiler configuration and toolchain (via `create_compiler_instance`)
+- const `CompileEntry`& entry
+- entry`.arguments`
+- entry`.file`
+- source file corresponding to entry`.file`
+- compilation database (via `create_compiler_instance`)
+- source manager (for dependency extraction)
 
 #### Writes To
 
-- The local `result` object of type `ASTResult` (its `symbols`, `dependencies`, `relations` sub-objects)
-- The local `raw_relations` vector of `RelationEdge`
-- The compiler instance's frontend options (`ProgramAction`, `OutputFile`, `ModuleOutputPath`)
+- local `ASTResult` result
+- result`.symbols`
+- result`.relations`
+- result`.dependencies`
+- `raw_relations` vector
 
 #### Usage Patterns
 
-- Used to extract symbols from a single compile entry
-- Called as part of a larger extraction pipeline (e.g., `extract_project_async`)
-- Returns an `expected` that callers handle for success or error
+- Called to extract symbols from a single `CompileEntry`
+- Used as a building block for project-wide extraction
+- Typically invoked per translation unit in an extraction pipeline
 
 ## Internal Structure
 
-`extract:ast` 模块实现了从 Clang AST 中提取符号与关系的核心逻辑。它导入 `extract:compiler`（编译数据库）、`extract:model`（结果数据模型）、`support`（基础工具）和标准库。内部采用三层结构：底层为一组匿名命名空间中的辅助函数（如符号 ID 计算、声明分类、文档注释提取、签名构建、源码片段范界计算、依赖文件收集等）；中间层定义了 `SymbolExtractorVisitor`（基于 `RecursiveASTVisitor` 的遍历器，负责访问声明、调用、引用、成员表达式并记录符号与关系）、`SymbolExtractorConsumer`（接收翻译单元并驱动访问器）和 `SymbolExtractorAction`（触发入口）；顶层公开函数 `extract_symbols` 接收项目标识符并返回状态码，填充 `ASTResult` 结构（内含 `symbols`、`relations`、`dependencies` 字段）。
+模块 `extract:ast` 是代码提取流程的核心，负责将 Clang AST 遍历结果转化为结构化的符号与关系数据。它按照标准的前端动作模式分解：`SymbolExtractorAction` 创建 `SymbolExtractorConsumer`，后者在 `HandleTranslationUnit` 中实例化 `SymbolExtractorVisitor` 执行递归遍历。三个类分别承担动作生命周期、消费者上下文和访问逻辑，职责清晰。
 
-提取过程中，每个声明均通过 `compute_symbol_id` 获得整数 ID，依赖收集通过 `collect_dependency_files` 解析文件包含；关系类型使用 `RelationKind` 枚举（`Inheritance`、`Call`、`Reference`），并由 `RelationEdge` 与 `ExtractedRelation` 中间结构承载，最终归入 `ASTResult`。辅助结构 `SourceSnippetBounds` 与 `LexicalContextInfo` 分别用于记录源码区域和词法上下文。这种分解方式将 AST 遍历、元数据计算与数据汇总清晰分离，便于维护与测试。
+内部实现细分为两层：底层包含一组匿名命名空间辅助函数，用于计算符号标识、签名、文档注释、源片段哈希及依赖文件收集，并封装了轻量数据结构 `SourceSnippetBounds`、`LexicalContextInfo` 和 `RelationEdge` 来传递中间结果；上层 Visitor 通过 `VisitNamedDecl`、`TraverseFunctionDecl`、`VisitCallExpr`、`VisitMemberExpr` 和 `VisitDeclRefExpr` 等方法，在遍历中提取符号并利用 `try_record_relation` 记录调用、引用和继承关系，最终产出 `ASTResult`。模块依赖 `extract:compiler` 获取编译配置，依赖 `extract:model` 定义输出模型，同时引入 `support` 和标准库处理通用工具与容器。
 
 ## Related Pages
 

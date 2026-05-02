@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::icontains'
-description: '函数 clore::net::icontains 是一种不区分大小写的子串搜索，通过逐字符比较 haystack 和 needle 实现。实现首先检查 needle.size() > haystack.size()，若成立则直接返回 false，以避免不必要的循环。随后外层循环遍历 haystack 中所有可能的起始位置（i 从 0 到 haystack.size() - needle.size()），内层循环对每个字符对进行不区分大小写的匹配：使用 std::tolower 将两个字符均转为小写后比较。一旦内层循环完全匹配，立即返回 true；否则继续扫描；若所有起始位置都检查完毕未匹配，返回 false。该算法不依赖项目内部工具，仅依赖标准库函数 std::tolower 和 static_cast<unsigned char> 保证字符类型安全。'
+description: 'clore::net::icontains 采用朴素的 O(n·m) 子串搜索算法来执行不区分大小写的包含检查。函数首先进行快速长度剪枝：若 needle 的长度大于 haystack 则直接返回 false。随后在外层循环中枚举 haystack 内所有可能作为起点的位置，内层循环逐字符进行比较，每次比较前将两字符通过 std::tolower 统一转换为小写，一旦发现完整匹配即返回 true。若所有位置均未匹配，则返回 false。该实现完全依赖标准库的 std::tolower 进行大小写折叠，无其他外部依赖或动态内存分配，适用于短字符串或性能要求不高的场景。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module protocol](../index.md)
 
-Declaration: `network/protocol.cppm:758`
+Declaration: `network/protocol.cppm:768`
 
-Definition: `network/protocol.cppm:758`
+Definition: `network/protocol.cppm:768`
 
 Declaration: [`Namespace clore::net`](../../../namespaces/clore/net/index.md)
 
@@ -39,7 +39,7 @@ auto icontains(std::string_view haystack, std::string_view needle) -> bool {
 }
 ```
 
-函数 `clore::net::icontains` 是一种不区分大小写的子串搜索，通过逐字符比较 `haystack` 和 `needle` 实现。实现首先检查 `needle.size() > haystack.size()`，若成立则直接返回 `false`，以避免不必要的循环。随后外层循环遍历 `haystack` 中所有可能的起始位置（`i` 从 `0` 到 `haystack.size() - needle.size()`），内层循环对每个字符对进行不区分大小写的匹配：使用 `std::tolower` 将两个字符均转为小写后比较。一旦内层循环完全匹配，立即返回 `true`；否则继续扫描；若所有起始位置都检查完毕未匹配，返回 `false`。该算法不依赖项目内部工具，仅依赖标准库函数 `std::tolower` 和 `static_cast<unsigned char>` 保证字符类型安全。
+`clore::net::icontains` 采用朴素的 **O(n·m)** 子串搜索算法来执行不区分大小写的包含检查。函数首先进行快速长度剪枝：若 `needle` 的长度大于 `haystack` 则直接返回 `false`。随后在外层循环中枚举 `haystack` 内所有可能作为起点的位置，内层循环逐字符进行比较，每次比较前将两字符通过 `std::tolower` 统一转换为小写，一旦发现完整匹配即返回 `true`。若所有位置均未匹配，则返回 `false`。该实现完全依赖标准库的 `std::tolower` 进行大小写折叠，无其他外部依赖或动态内存分配，适用于短字符串或性能要求不高的场景。
 
 ## Side Effects
 
@@ -52,7 +52,7 @@ No observable side effects are evident from the extracted code.
 
 ## Usage Patterns
 
-- Used by `is_feature_rejection_error` to check if an error message contains a substring case-insensitively
+- Used by `clore::net::is_feature_rejection_error` to perform case-insensitive matching on error messages.
 
 ## Called By
 

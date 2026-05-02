@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:common'
-description: '模块 generate:common 属于文档生成渲染阶段的公共工具模块。它基于 generate:model 中的核心数据结构和 extract 模块提取的符号信息，提供了一系列辅助函数来构建 Markdown 文档内容、管理页面间链接以及生成符号分析章节。主要公开内容包括：结构化表示链接目标的 LinkTarget 类型和 SymbolDocView 枚举，以及用于修剪文本、获取符号名称、查询命名空间、构建提示段落、生成符号链接列表、解析声明页和实现页、收集命名空间与实现符号等通用操作。这些功能被上层页面生成模块所调用，从而实现统一的文档渲染流程。'
+description: '模块 generate:common 为文档生成管线提供共享的基础设施与辅助函数，涵盖字符串处理（trim_ascii, strip_inline_markdown, short_name_of, namespace_of）、链接目标构造（LinkTarget 及配套工厂函数）、符号列表收集与筛选（collect_namespace_symbols, collect_implementation_symbols）、以及 Markdown 片段构建（build_list_section, build_prompt_section, build_symbol_link_list, push_link_paragraph, push_optional_link_paragraph, add_symbol_analysis_sections 等）。该模块位于 generate/render/common.cppm，是 config、extract、generate:model 与 generate:markdown 之间的粘合层，负责将提取的语义数据转换为可供页面渲染直接调用的结构化输出。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-模块 `generate:common` 属于文档生成渲染阶段的公共工具模块。它基于 `generate:model` 中的核心数据结构和 `extract` 模块提取的符号信息，提供了一系列辅助函数来构建 Markdown 文档内容、管理页面间链接以及生成符号分析章节。主要公开内容包括：结构化表示链接目标的 `LinkTarget` 类型和 `SymbolDocView` 枚举，以及用于修剪文本、获取符号名称、查询命名空间、构建提示段落、生成符号链接列表、解析声明页和实现页、收集命名空间与实现符号等通用操作。这些功能被上层页面生成模块所调用，从而实现统一的文档渲染流程。
-
-该模块亦暴露了若干可调用变量（如 `push_link_paragraph`、`add_symbol_analysis_sections`），用于在渲染流水线中的特定位置插入段落或章节。通过依赖 `config`、`extract`、`generate:markdown` 和 `generate:model` 等模块，`generate:common` 在生成上下文中封装了大量重复性逻辑，降低了文档生成代码的复杂度并提升了可维护性。
+模块 `generate:common` 为文档生成管线提供共享的基础设施与辅助函数，涵盖字符串处理（`trim_ascii`, `strip_inline_markdown`, `short_name_of`, `namespace_of`）、链接目标构造（`LinkTarget` 及配套工厂函数）、符号列表收集与筛选（`collect_namespace_symbols`, `collect_implementation_symbols`）、以及 Markdown 片段构建（`build_list_section`, `build_prompt_section`, `build_symbol_link_list`, `push_link_paragraph`, `push_optional_link_paragraph`, `add_symbol_analysis_sections` 等）。该模块位于 `generate/render/common.cppm`，是 `config`、`extract`、`generate:model` 与 `generate:markdown` 之间的粘合层，负责将提取的语义数据转换为可供页面渲染直接调用的结构化输出。
 
 ## Imports
 
@@ -36,23 +34,23 @@ Definition: `generate/render/common.cppm:11`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::LinkTarget` 是一个公开聚合类型，用于保存单一链接目标所需的全部数据。三个字段直接暴露：`label`（显示文本）、`target`（链接地址或标识符）以及 `code_style`（指示是否应以代码样式渲染该链接的布尔标志）。没有任何内部不变量或特殊成员函数，所有字段均可在构造后独立修改，默认构造时 `code_style` 为 `false`。该结构体的设计意图是作为轻量级的数据载体，在生成管线中传递链接信息。
+结构体 `clore::generate::LinkTarget` 是一个轻量级的数据聚合，用于存储渲染链接所需的三个核心信息：可见文本存储在 `label` 中，目标地址位于 `target`，布尔标志 `code_style` 控制是否以代码风格呈现该链接（默认为 `false`）。所有成员均为公共字段，不存在显式的不变量约束；其设计意图是作为简单的值对象，在各个生成阶段之间传递链接参数。
 
 #### Invariants
 
-- `label` and `target` are expected to be valid strings
-- `code_style` is a boolean flag, initialized to `false`
+- `code_style` is initialized to `false`
+- `label` and `target` are mutable `std::string` values with no constraints on content
 
 #### Key Members
 
-- `label`
-- `target`
-- `code_style`
+- `clore::generate::LinkTarget::label`
+- `clore::generate::LinkTarget::target`
+- `clore::generate::LinkTarget::code_style`
 
 #### Usage Patterns
 
-- Used to represent a link in code generation contexts
-- Passed to functions that render hyperlinks with optional code styling
+- Used as a plain data holder for constructing or rendering link elements
+- Likely populated before being passed to a rendering function or stored in a container
 
 ### `clore::generate::SymbolDocView`
 
@@ -62,9 +60,24 @@ Definition: `generate/render/common.cppm:17`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-枚举 `clore::generate::SymbolDocView` 定义于 `generate/render/common.cppm`，其底层类型显式指定为 `std::uint8_t`，确保枚举值以单字节存储，适用于频繁传递视图选项的代码路径。成员 `Declaration`、`Implementation` 和 `Details` 是三个互斥的枚举值，作为不透明标签在内部渲染流程中通过开关分支选择不同的输出路径；枚举值的数值与顺序本身不提供额外约束，仅承担类型安全标识符的角色，防止整型误用。
+枚举 `clore::generate::SymbolDocView` 是一个以 `std::uint8_t` 为底层类型的作用域枚举，其三个枚举值 `Declaration`、`Implementation` 和 `Details` 分别对应文档的不同视图模式。这些枚举值按顺序递增，但在实现中未附加额外数据或不变量；它们仅作为轻量级标签，用于在代码生成过程中区分文档内容的渲染阶段。
 
-内部结构上，该枚举不附带任何数据成员或自定义运算符，其唯一的不变量是各成员保持唯一且底层值无重叠。`clore::generate::SymbolDocView` 自身不提供转换或取值方法，所有使用均依赖枚举值的模式匹配或开关判断，从而保持渲染逻辑的清晰与封闭。
+#### Invariants
+
+- The enum has exactly three distinct enumerator values
+- The underlying type is `std::uint8_t`
+- Enumerators are fixed at compile time
+
+#### Key Members
+
+- `Declaration`
+- `Implementation`
+- `Details`
+
+#### Usage Patterns
+
+- The enumerator names suggest it controls which section of a symbol's documentation is rendered
+- No explicit usage or dependency evidence is provided in the source
 
 #### Member Variables
 
@@ -112,7 +125,7 @@ Declaration: `generate/render/common.cppm:142`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-No evidence available on its role, how it is read, or its participation in surrounding logic.
+No usage or mutation of this variable is shown in the evidence. It appears only in the list of local variables, indicating it is perhaps used elsewhere in the function or module, but those details are not included.
 
 #### Mutation
 
@@ -124,7 +137,7 @@ Declaration: `generate/render/common.cppm:170`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-No further usage or mutation information is provided in the evidence.
+The variable `clore::generate::add_symbol_analysis_detail_sections` is defined without evidence of reassignment after initialization. Its role as a callable object is to add detail sections for symbol analysis. No direct mutation or usage is observed in the provided evidence.
 
 #### Mutation
 
@@ -136,7 +149,7 @@ Declaration: `generate/render/common.cppm:176`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The variable participates in rendering symbol documentation pages by adding analysis sections to a symbol's output. It is not mutated in the provided evidence. Its role appears to involve consuming analysis data from `analyses`, `plan`, and other rendering context to generate appropriate sections.
+The variable is part of a larger documentation generation routine that processes symbols. No evidence describes its exact role, how it is read, or how it participates in surrounding logic beyond its declaration.
 
 #### Mutation
 
@@ -148,7 +161,7 @@ Declaration: `generate/render/common.cppm:92`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该变量可能用于生成链接段落，但证据中未描述其定义或使用方式，因此无法确定其在代码中的确切角色。
+The role of `clore::generate::push_link_paragraph` within the surrounding logic is unclear from the provided evidence; no explicit reads, calls, or assignments involving this variable are listed. It may be part of the rendering machinery that constructs link-rich Markdown content, but its exact participation cannot be confirmed.
 
 #### Mutation
 
@@ -160,7 +173,7 @@ Declaration: `generate/render/common.cppm:399`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-It is used in `clore::generate::build_symbol_source_locations` to generate location information, formatting and pushing a paragraph describing the symbol's source location.
+The variable appears to be a callable object, possibly a lambda or function pointer, that is used by `clore::generate::build_symbol_source_locations` to generate a paragraph containing a symbol's source location information. No evidence of mutation is present.
 
 #### Mutation
 
@@ -168,7 +181,7 @@ No mutation is evident from the extracted code.
 
 #### Usage Patterns
 
-- called from `clore::generate::build_symbol_source_locations`
+- Referenced in `clore::generate::build_symbol_source_locations`
 
 ### `clore::generate::push_optional_link_paragraph`
 
@@ -176,7 +189,7 @@ Declaration: `generate/render/common.cppm:111`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该变量在生成过程中可能作为标志或函数对象，但证据未提供具体逻辑。
+该变量可能作为可调用对象或配置值，参与链接段落的生成逻辑，但其具体类型和初始化方式在当前证据中未明确。
 
 #### Mutation
 
@@ -192,7 +205,7 @@ Definition: `generate/render/common.cppm:133`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::build_list_section` 接受一个标题字符串 `heading`、一个层级值 `level` 和一个 `BulletList` 对象 `list`，并返回一个 `SemanticSectionPtr`。其实现首先调用 `make_section` 来创建一个 `SemanticKind::Section` 类型的节，并将 `heading` 和 `level` 分别作为标题和层级参数传递。随后，它检查 `list` 中的 `items` 容器是否为空；若不为空，则将整个 `list` 对象包装在 `MarkdownNode` 中，并通过 `push_back` 添加到节对象的 `children` 向量末尾。整个流程不涉及额外的分支或循环，也未依赖其他生成函数的复杂交互，仅利用 `make_section` 和 `BulletList` 的数据成员完成节结构的构建。依赖的符号包括 `SemanticSectionPtr`、`SemanticKind` 枚举、`MarkdownNode` 以及 `BulletList` 类型。
+`clore::generate::build_list_section` 构造一个语义章节，其内容为可选的带项目符号列表。它首先调用 `make_section` 并传入 `SemanticKind::Section`、空的参数、标题和级别以创建章节对象。接着检查输入的 `BulletList`：若其 `items` 数组非空，则将整个列表包装为 `MarkdownNode` 并追加到章节的 `children` 向量中。最终返回该章节的智能指针。该函数直接依赖 `make_section` 和 `MarkdownNode` 的构造，并使用 `BulletList` 的 `items` 成员来判断是否需要添加列表内容。
 
 #### Side Effects
 
@@ -200,14 +213,20 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- heading parameter
-- level parameter
-- list parameter
-- list`.items``.empty()`
+- `heading` parameter
+- `level` parameter
+- `list` parameter
+- `list.items.empty()`
+
+#### Writes To
+
+- local `section` object's `children` vector
+- returned `SemanticSectionPtr`
 
 #### Usage Patterns
 
-- Used within page generation pipelines to wrap a bullet list under a section heading
+- building a section with a bullet list
+- used to wrap a `BulletList` into a `SemanticSection`
 
 ### `clore::generate::build_prompt_section`
 
@@ -217,21 +236,30 @@ Definition: `generate/render/common.cppm:124`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`build_prompt_section` 首先调用 `make_section`，以 `SemanticKind::Section`、空的初始内容列表、传入的 `heading`（通过 `std::move` 转移）和 `level` 创建一个 `SemanticSectionPtr`。随后，检查可选的 `output` 指针：如果指针非空且经 `trim_ascii` 修剪后的内容非空，则构造一个 `make_raw_markdown(*output)` 原始 Markdown 节点，并将其追加到 `section->children` 中。该函数仅依赖 `make_section`、`trim_ascii` 和 `make_raw_markdown` 这三个辅助函数，不涉及循环或递归，控制流为简单的顺序加条件分支。
+该函数首先通过 `make_section` 构造一个 `SemanticSection` 对象，指定类型为 `SemanticKind::Section`、空元数据、移动后的标题文本和层级。随后检查 `output` 指针是否非空，以及经 `clore::generate::trim_ascii` 处理后是否不为空，若满足条件则将 `make_raw_markdown` 生成的原始 Markdown 节点追加到该 section 的子节点列表中。步骤仅由一次可选添加构成，控制流为单分支判断，核心依赖包括 `make_section`、`make_raw_markdown` 和 `trim_ascii`。
 
 #### Side Effects
 
-- Heap allocation for a `SemanticSection` and potentially a `MarkdownNode`
+- Allocates a new `SemanticSection` object
+- Potentially allocates a new `MarkdownNode` object and inserts it into the section's child vector
 
 #### Reads From
 
 - parameter `heading`
 - parameter `level`
-- pointer `output` (dereferenced if non-null, content trimmed by `trim_ascii`)
+- parameter `output` (the pointer and the pointed string if not null)
+- call to `clore::generate::trim_ascii` on `*output`
+
+#### Writes To
+
+- The returned `SemanticSectionPtr`'s underlying object
+- The `children` vector of the created section
+- The created `MarkdownNode` if output is provided
 
 #### Usage Patterns
 
-- Building prompt sections with or without additional markdown content
+- Used to generate a section of a prompt or document with an optional block of raw markdown content
+- Likely invoked within prompt building pipelines such as `clore::generate::build_prompt`
 
 ### `clore::generate::build_related_page_targets`
 
@@ -241,7 +269,7 @@ Definition: `generate/render/common.cppm:504`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数遍历 `plan.linked_pages` 中的每个条目，将其解析为可选的模块或命名空间前缀与实体名称。根据前缀分别调用 `links.resolve_module`、`links.resolve_namespace` 或 `links.resolve` 来获得目标路径。对于每个新发现的路径，使用 `links.resolve_page_title` 获取标题，并经由 `strip_inline_markdown` 清洗后，与路径一同传入 `make_link_target` 构建 `LinkTarget` 对象。结果通过一个 `std::unordered_set<std::string>` 去重后追加到输出向量中。主要依赖 `LinkResolver` 的路径解析接口和 `strip_inline_markdown`、`make_link_target` 两个辅助函数。
+该函数通过遍历`plan.linked_pages`中的链接标识，为每个关联页面生成一个`LinkTarget`对象。对每个标识，它首先查找冒号分隔符：如果存在，则提取前缀（如"module"或"namespace"）并调用`links.resolve_module`或`links.resolve_namespace`；否则降级为通用`links.resolve`。若解析结果为空或已存在于`seen`集合中，则跳过重复项。随后通过`links.resolve_page_title`获取标题，经`strip_inline_markdown`清理，若结果为空则回退到原始实体名。最终调用`make_link_target`创建包含当前页面路径、标签和解析路径的`LinkTarget`。算法依赖`LinkResolver`的多个解析方法和`strip_inline_markdown`、`make_link_target`辅助函数，并通过`seen`集合保证输出无重复。
 
 #### Side Effects
 
@@ -249,20 +277,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `plan.linked_pages`
-- `links.resolve_module`
-- `links.resolve_namespace`
-- `links.resolve`
-- `links.resolve_page_title`
+- plan
+- links
 - `current_page_path`
-
-#### Writes To
-
-- returned `std::vector<LinkTarget>`
+- plan`.linked_pages`
+- `LinkResolver` methods (resolve, `resolve_module`, `resolve_namespace`, `resolve_page_title`)
 
 #### Usage Patterns
 
-- used in page rendering to generate navigation links to related pages
+- building navigation or related-page link lists
+- generating page context for markdown rendering
 
 ### `clore::generate::build_string_list`
 
@@ -272,24 +296,30 @@ Definition: `generate/render/common.cppm:148`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::build_string_list` 遍历输入的 `std::vector<std::string>` 容器 `items`，对每个元素调用 `trim_ascii` 并检查其是否为空字符串，跳过空白项。对于非空元素，使用 `code_spanned_fragments` 将字符串解析为格式化片段序列，并构造一个 `ListItem` 对象，其 `fragments` 成员接收该序列，然后将该列表项追加到返回值 `BulletList list` 的 `items` 向量中。该函数依赖于 `trim_ascii` 进行空白检测、`code_spanned_fragments` 实现内联代码高亮，以及 `BulletList` 和 `ListItem` 的结构定义。内部流程为纯线性循环，无分支或异常处理，保证返回一个包含所有非空项的格式化列表对象。
+该实现遍历输入 `items`，对每个字符串调用 `trim_ascii` 进行修剪，跳过结果为空的条目。对于非空项，创建一个 `ListItem`，将其 `fragments` 设为 `code_spanned_fragments(item_text)` 的返回值，并将该项追加到 `BulletList` 中。控制流为简单的循环与条件过滤，其行为依赖于 `trim_ascii` 和 `code_spanned_fragments` 两个辅助函数。
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- allocates and populates a `BulletList`
+- calls `trim_ascii` on each string element
+- calls `code_spanned_fragments` on each non-empty trimmed string
+- returns by value (ownership transfer)
 
 #### Reads From
 
-- `items` parameter
+- parameter `items` (const reference to vector of strings)
+- function `trim_ascii`
+- function `code_spanned_fragments`
 
 #### Writes To
 
-- local `BulletList` and its `ListItem` elements (returned as result)
+- local variable `list` (constructs and modifies via `push_back`)
+- return value `BulletList` (constructed and returned)
 
 #### Usage Patterns
 
-- building a bullet list of code-spanned text items
-- helper for rendering markdown lists
+- converts user-facing text into a formatted bullet list for markdown rendering
+- used by page-building functions in the `clore::generate` namespace
 
 ### `clore::generate::build_symbol_link_list`
 
@@ -299,7 +329,9 @@ Definition: `generate/render/common.cppm:360`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数构造一个 `BulletList`，遍历输入的 `symbols` 向量，为每个 `SymbolInfo` 指针对应生成一个列表条目。在控制流上，首先提取符号的种类名称（通过 `extract::symbol_kind_name`），然后根据 `use_full_name` 决定显示标签：或使用 `sym->qualified_name`，或通过 `short_name_of` 取短名。接着以 `links.resolve` 查询该符号的已解析目标路径；若存在，则调用 `make_link` 并传入经 `make_relative_link_target` 处理的相对路径以生成内部链接；否则仅以 `make_code` 渲染标签作为纯代码文本。每个条目的片段先后追加种类名称文本和链接/代码片段，最终聚合成完整的 `BulletList`。依赖方面，该函数借用了 `extract::symbol_kind_name`、`short_name_of`、`links` 的解析方法以及 `make_relative_link_target`、`make_text`、`make_link`、`make_code` 等底层工具函数。
+该函数遍历传入的符号列表，为每个符号生成一个列表项。对于每个符号，它首先取得种类名称（通过 `extract::symbol_kind_name`）并作为文本前缀。然后根据参数 `use_full_name` 决定标签为符号的完整限定名或缩短后的短名（调用 `short_name_of`）。接着，通过 `links.resolve` 在链接解析器中查找该限定名对应的目标路径：若存在则用 `make_link` 构造可跳转的链接，目标路径利用 `make_relative_link_target` 转换为相对于当前页面的路径；否则直接以代码样式呈现标签（若标签为空则回退到完整限定名）。最终所有项目被依次压入 `BulletList` 并返回。
+
+该函数依赖于符号提取层的种类表示与链接解析服务，并借助 `short_name_of`、`make_link` 等内部工具完成格式化输出。其设计意图是将抽象符号引用转换为可供文档页面直接渲染的链接列表，按种类前缀分组并适应全称/短称的灵活显示需求。
 
 #### Side Effects
 
@@ -307,21 +339,20 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `symbols` vector of `extract::SymbolInfo*` pointers
-- `sym->kind`
-- `sym->qualified_name`
-- `current_page_path`
-- `links` resolver (via `links.resolve`)
-- `use_full_name` flag
+- `symbols` parameter (`const std::vector<const extract::SymbolInfo*>&`)
+- `current_page_path` parameter (`std::string_view`)
+- `links` parameter (`const LinkResolver&`)
+- `use_full_name` parameter (`bool`)
+- `sym->kind` and `sym->qualified_name` members of each `SymbolInfo`
 
 #### Writes To
 
-- returned `BulletList` object
+- constructs and returns a `BulletList` object
 
 #### Usage Patterns
 
-- Called when generating page content that lists symbols with navigation links
-- Used to produce symbol lists in documentation pages
+- called during page rendering to produce a bullet list of symbol links
+- used in documentation generation to display related symbols with navigation
 
 ### `clore::generate::build_symbol_source_locations`
 
@@ -331,29 +362,22 @@ Definition: `generate/render/common.cppm:412`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::build_symbol_source_locations` 负责为给定的符号构造一组描述其源代码位置的 Markdown 节点。其实现采用线性顺序检查：首先判断 `sym.declaration_location` 是否已知（通过 `is_known()`），若已知则调用 `push_location_paragraph` 并传入标签 `"Declaration: "` 以及由 `make_source_link_target` 基于该位置、`config`、`links` 和 `current_page_path` 生成的链接目标。随后检查 `sym.definition_location` 是否存在且其位置已知，条件满足时以同样方式追加定义位置的段落。最终返回累积的节点向量。
-
-该函数依赖于三个外部组件：`make_source_link_target`（负责将原始位置解析为 `LinkTarget` 对象）、`push_location_paragraph`（向节点容器添加格式化段落）以及 `LinkTarget` 结构体本身。其控制流是纯粹的顺序分支，不涉及循环或递归，因此执行效率完全取决于位置信息的准确性和链接构造函数的开销。
+函数 `clore::generate::build_symbol_source_locations` 接收一个符号信息、任务配置、链接解析器和当前页面路径，生成一个 `std::vector<MarkdownNode>` 表示符号的源位置段落。内部控制流为两个独立的条件分支：首先检查 `sym.declaration_location.is_known()`，若已知则调用 `push_location_paragraph` 并传入标签 "Declaration: " 以及通过 `make_source_link_target` 从声明位置生成的链接目标；随后检查 `sym.definition_location` 是否有值且已知，同样通过 `push_location_paragraph` 添加定义位置的段落。该函数不执行循环或递归，仅依赖 `make_source_link_target` 解析链接目标，以及 `push_location_paragraph` 构建输出节点结构；其行为完全由 `extract::SymbolInfo` 中位置字段的已知性驱动。
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- allocates and returns a new vector of `MarkdownNode` objects
 
 #### Reads From
 
-- `sym.declaration_location`
-- `sym.definition_location`
-- `config`
-- `links`
-- `current_page_path`
-
-#### Writes To
-
-- returned vector of `MarkdownNode`
+- `sym.declaration_location.is_known()`
+- `sym.definition_location.has_value()`
+- `sym.definition_location->is_known()`
+- `config`, `links`, `current_page_path` (passed to `make_source_link_target`)
 
 #### Usage Patterns
 
-- Used to generate source-location markdown for symbol documentation pages
+- used in page-building functions to embed source location links for symbols
 
 ### `clore::generate::collect_implementation_symbols`
 
@@ -363,9 +387,9 @@ Definition: `generate/render/common.cppm:314`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::collect_implementation_symbols` 通过遍历 `plan.owner_keys` 并依据 `plan.page_type` 分派收集逻辑，从 `model` 中提取符合要求的符号。当页面类型为 `PageType::Module` 时，它调用 `extract::find_modules_by_name` 取得模块对象，遍历其 `symbols` 并利用 `seen` 集合去重，再通过 `extract::lookup_symbol` 获取符号指针，经 `is_page_level_symbol` 和 `predicate` 过滤后加入结果。对于其他页面类型（即文件类型），它直接在 `model.files` 中查找键对应的文件对象，遍历其 `symbols` 并执行相同的去重、查找与过滤逻辑。最后收集到的符号按 `qualified_name` 进行升序排序后返回。
+该函数的核心算法按页面类型分流搜索：对于模块类型的计划（`plan.page_type == PageType::Module`），它遍历 `plan.owner_keys` 中的模块名，通过 `extract::find_modules_by_name` 定位模块，再收集所有模块内符号；否则，它假定 owner keys 是文件路径，直接在 `model.files` 中查找文件并遍历其符号。所有符号的去重由 `std::unordered_set<extract::SymbolID> seen` 通过 `insert` 返回值保证，仅当符号尚未被记录且同时满足 `is_page_level_symbol` 检查与 `predicate` 条件时，才将其指针压入结果。最终，`symbols` 按 `extract::SymbolInfo::qualified_name` 升序排序后返回。
 
-该函数核心依赖 `extract::find_modules_by_name`、`extract::lookup_symbol` 以及内部辅助 `is_page_level_symbol` 完成符号检索与验证，并借助 `std::unordered_set` 实现 O(1) 去重，最终通过 `std::sort` 保证输出顺序一致。控制流程中，`PageType` 的分支避免了不必要的文件查找，而 `seen` 集合防止同一符号因多个 `owner_key` 重复加入。
+内部流程依赖 `extract` 命名空间的多个查询函数（`find_modules_by_name`、`lookup_symbol`、`is_page_level_symbol`）以及 `PagePlan` 与 `ProjectModel` 的数据结构。排序步骤依赖 `std::sort` 并借助字符串比较完成稳定顺序。
 
 #### Side Effects
 
@@ -373,16 +397,21 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- plan`.owner_keys`
-- plan`.page_type`
-- model`.files`
-- model (via `extract::find_modules_by_name` and `extract::lookup_symbol`)
-- predicate argument
+- `plan.owner_keys`
+- `plan.page_type`
+- `model` (via `model.files`, `extract::find_modules_by_name`, `extract::lookup_symbol`)
+- `predicate` (called on each qualifying symbol)
+- `lhs->qualified_name` and `rhs->qualified_name` during sort
+
+#### Writes To
+
+- locally allocated `symbols` and `seen` containers
+- returned vector of symbol pointers
 
 #### Usage Patterns
 
-- Called during page generation to gather symbols for documentation output
-- Used by page-building functions like `build_page_root` and `collect_namespace_symbols`
+- Called to gather implementation symbols when building evidence for module, file, function, or type summaries
+- Used with a predicate that filters by symbol kind or other criteria to produce documentation content
 
 ### `clore::generate::collect_namespace_symbols`
 
@@ -392,7 +421,7 @@ Definition: `generate/render/common.cppm:289`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数首先创建一个空的存储向量 `symbols`，然后通过 `model.namespaces` 映射查找给定的 `namespace_name`。若未找到该命名空间，直接返回空结果。否则遍历该命名空间下所有符号 ID，对每个 ID 调用 `extract::lookup_symbol` 获取 `extract::SymbolInfo` 指针，并在指针有效且通过 `is_page_level_symbol` 以及传入的 `predicate` 检查后将其追加至 `symbols`。完成收集后，按 `qualified_name` 的字典序对 `symbols` 进行排序并返回。该函数依赖 `model.namespaces` 的存储结构、`extract::lookup_symbol` 查询接口以及 `extract::SymbolInfo` 的 `qualified_name` 成员，内部仅通过迭代和简单过滤器实现筛选。
+函数首先在传入的 `model.namespaces` 字典中查找指定的 `namespace_name`；若未找到则立即返回空向量。随后遍历该命名空间条目所持有的符号标识符集合，通过 `extract::lookup_symbol` 解析每个标识符得到符号指针，并依次检查该符号是否为页面级符号（`is_page_level_symbol`）以及是否满足外部传入的 `predicate` 谓词，符合条件的符号被收集到结果向量中。最后对所有收集到的符号按 `qualified_name` 字段进行字典序排序并返回。此过程依赖于 `extract` 命名空间中的符号查找与模型结构，并借助 `std::sort` 完成排序。
 
 #### Side Effects
 
@@ -400,14 +429,23 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `model` (const `extract::ProjectModel`&)
-- `namespace_name` (`std::string_view`)
-- `predicate` (Predicate&)
+- `model` parameter of type `const extract::ProjectModel&`
+- `model.namespaces` map
+- `ns_it->second.symbols` container of symbol `IDs`
+- `extract::lookup_symbol` function
+- `is_page_level_symbol` function
+- `predicate` callable argument
+- `qualified_name` of each `extract::SymbolInfo`
+
+#### Writes To
+
+- local `std::vector<const extract::SymbolInfo*>` variable `symbols`
+- the returned vector (ownership transferred to caller)
 
 #### Usage Patterns
 
-- Used to gather symbols for namespace page generation
-- Called with `is_page_level_symbol` and custom predicates
+- Used to gather all page-level symbols for a namespace during documentation generation.
+- Likely called by functions that build namespace pages or analyze symbol lists.
 
 ### `clore::generate::doc_label`
 
@@ -417,9 +455,9 @@ Definition: `generate/render/common.cppm:279`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::doc_label` 将一个 `SymbolDocView` 枚举值映射到对应的文档标签字符串，其实现是一个直接的 switch 语句。根据传入的 `view` 参数，它分别返回 `"Declaration"`、`"Implementation"` 或 `"Details"`，分别对应 `SymbolDocView::Declaration`、`SymbolDocView::Implementation` 和 `SymbolDocView::Details` 三个枚举成员。
+函数 `clore::generate::doc_label` 的核心逻辑是一个基于 `SymbolDocView` 枚举值的直接映射。它通过 `switch` 语句将每个枚举成员（`SymbolDocView::Declaration`、`SymbolDocView::Implementation`、`SymbolDocView::Details`）分别对应到固定的字符串 `"Declaration"`、`"Implementation"`、`"Details"`。`switch` 的 `default` 分支同样返回 `"Details"`，保证所有输入都能产生合法的输出字符串。
 
-该函数没有外部依赖，所有字符串字面量均为硬编码。对于未匹配的枚举值，它通过一个 fallback 路径返回 `"Details"` 作为默认值。这一简单映射在其他需要生成章节标题或标签的上下文中被引用（如变量 `section`、`heading` 等），但函数自身不涉及复杂的算法或控制流。
+该函数不依赖任何外部模块或复杂数据结构；它的运行完全由编译时已知的枚举值驱动，控制流为单一入口的简单跳转。由于返回值类型为 `std::string_view`，实际字符串字面量由编译器嵌入到目标文件中。
 
 #### Side Effects
 
@@ -427,12 +465,11 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- view parameter of type `SymbolDocView`
+- `view` parameter of type `SymbolDocView`
 
 #### Usage Patterns
 
-- Used to obtain display labels for `SymbolDocView` values in documentation generation
-- Likely called when rendering section headings or labels for symbol documentation views
+- Obtain a display label for a documentation section based on the symbol view kind
 
 ### `clore::generate::find_declaration_page`
 
@@ -442,7 +479,7 @@ Definition: `generate/render/common.cppm:473`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::find_declaration_page` 尝试为给定符号定位一个可链接的“声明页面”。它首先通过调用 `links.resolve` 在 `LinkResolver` 中查找该符号的完全限定名，如果找到的目标路径与 `current_page_path` 不同，则立即构造一个 `LinkTarget`——标签取自 `sym.enclosing_namespace`（若存在）或通过 `namespace_of` 计算出的命名空间名称，格式为 `"Namespace " + ns_name`，若命名空间为空则直接使用 `"Declaration"`。若第一次查找失败或指向当前页面，则回退到检查符号的命名空间：仅当 `ns_name` 非空时，调用 `links.resolve_namespace` 查找该命名空间的页面，若找到则构造对应的 `LinkTarget`。若两次尝试均未找到合适的页面，函数返回 `std::nullopt`。该实现依赖于 `LinkResolver` 的两种解析方法以及 `namespace_of` 和 `make_link_target` 辅助函数。
+函数 `clore::generate::find_declaration_page` 首先尝试通过调用 `links.resolve(sym.qualified_name)` 直接定位符号的声明页面。如果解析结果非空且目标路径不等于当前页面路径 `current_page_path`，则基于 `sym.enclosing_namespace` 或 `namespace_of(sym.qualified_name)` 构造标签（格式为 `"Declaration"` 或 `"Namespace "` 加上命名空间名），并通过 `make_link_target` 生成并返回一个链接目标。若直解析失败，函数转而提取符号的命名空间名：优先使用 `sym.enclosing_namespace`，否则使用 `namespace_of(sym.qualified_name)`。若命名空间非空，则通过 `links.resolve_namespace(ns_name)` 尝试查找该命名空间的声明页面；若找到则返回以 `"Namespace " + ns_name` 为标签的链接目标。上述两种情况均未产生结果时，函数返回 `std::nullopt`。该实现依赖于 `LinkResolver` 的两个解析方法、`namespace_of` 辅助函数以及 `make_link_target` 构造器，内部逻辑仅涉及两次条件分支和标签格式的简单字符串拼接。
 
 #### Side Effects
 
@@ -450,15 +487,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- sym`.qualified_name`
-- sym`.enclosing_namespace`
-- links (via resolve and `resolve_namespace` methods)
+- `sym.qualified_name`
+- `sym.enclosing_namespace`
 - `current_page_path`
+- `links` (`LinkResolver`)
 
 #### Usage Patterns
 
-- Used internally during page generation to locate a link to a symbol's declaration page.
-- Often invoked when rendering pages that need to provide a cross-reference to the declaration of a symbol.
+- Used to generate a navigation link to a symbol's declaration page
+- Invoked during page rendering to provide a "Declaration" or namespace page link
+- Callers pass the current page path to avoid self-referencing links
 
 ### `clore::generate::find_implementation_pages`
 
@@ -468,9 +506,9 @@ Definition: `generate/render/common.cppm:433`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数首先将结果存入一个 `std::vector<LinkTarget>`，并使用一个 `std::unordered_set<std::string>` 记录已添加的链接路径以避免重复。核心逻辑由一个 lambda `try_add` 驱动，它接受一个 `file_path`：如果文件路径非空，则尝试通过 `extract::find_module_by_source` 查找文件所属的模块；若找到模块，则通过 `links.resolve_module` 获取模块目标路径，并通过 `make_link_target` 构造带模块名称的链接；否则直接通过 `links.resolve` 解析原始文件路径，并使用 `make_source_relative` 生成相对路径作为标签。随后按顺序处理 `sym.definition_location` 的可选文件以及 `sym.declaration_location` 的必然文件，依次调用 `try_add`。最终返回 `results`。
+该函数通过收集与符号相关的源文件路径并解析为目标页面的超链接，构造一个去重的 `LinkTarget` 列表。算法核心是一个局部 lambda `try_add`，它对每个非空文件路径依次尝试两种解析策略：首先调用 `extract::find_module_by_source` 检查文件是否属于某个模块，如果找到则使用 `links.resolve_module` 将模块名映射为页面路径，并调用 `make_link_target` 生成 `code_style` 为 `true` 的链接；否则回退到 `links.resolve` 直接通过文件路径获取页面链接。两种情形都使用 `seen` 集合（`std::unordered_set<std::string>`）保证同一页面不会被重复添加。之后，函数先尝试处理 `sym.definition_location` 中的文件路径（若存在），再处理 `sym.declaration_location` 中的文件路径，最终返回收集到的 `results` 向量。
 
-控制流简洁：先尝试添加定义文件（若存在），再尝试添加声明文件。依赖的外部函数包括 `extract::find_module_by_source`、`links.resolve_module` 与 `links.resolve`，以及构建 `LinkTarget` 的 `make_link_target` 和路径格式化的 `make_source_relative`。整个过程中 `seen` 集合确保同一目标路径不会被重复插入。
+内部依赖主要包括符号信息类型 `extract::SymbolInfo` 的字段 `definition_location` 与 `declaration_location`、模型类型 `extract::ProjectModel`、链接解析器 `LinkResolver` 的 `resolve_module` 和 `resolve` 方法、辅助函数 `extract::find_module_by_source`、`make_link_target` 以及 `make_source_relative`。该函数不处理符号分析或文档生成的其他阶段，仅专注于从文件路径到页面链接的翻译与去重。
 
 #### Side Effects
 
@@ -478,17 +516,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- sym`.definition_location`
-- sym`.declaration_location``.file`
-- model (via `extract::find_module_by_source`)
-- links (resolve and `resolve_module` methods)
-- `current_page_path`
-- `project_root`
+- `sym` (symbol info, specifically `sym.definition_location` and `sym.declaration_location.file`)
+- `model` (project model, used in `extract::find_module_by_source`)
+- `links` (link resolver, used for `resolve_module` and `resolve`)
+- `current_page_path` (used in `make_link_target`)
+- `project_root` (used in `make_source_relative`)
 
 #### Usage Patterns
 
-- Generates implementation page links for symbol documentation
-- Used in page rendering to provide navigation to implementation details
+- Called during page generation to find implementation pages for a symbol
+- Used to gather links to a symbol's definition or declaration in generated documentation
 
 ### `clore::generate::find_module_for_file`
 
@@ -498,9 +535,7 @@ Definition: `generate/render/common.cppm:496`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::find_module_for_file` 的实现仅做单一委托：它调用 `extract::find_module_by_source`，传入 `model` 与 `file_path`。若该调用返回指向模块对象的非空指针，则函数提取其 `name` 字段并包装成 `std::optional<std::string>` 返回；否则直接返回 `std::nullopt`。
-
-内部控制流极简，无循环或分支嵌套。依赖关系集中于 `extract` 命名空间下的 `ProjectModel` 类型与 `find_module_by_source` 查询函数，后者负责执行实际的模块查找逻辑。
+该函数将给定的 `file_path` 委托给 `extract::find_module_by_source`，以在 `model` 中查找所属模块。如果找到匹配的模块（非空指针），则返回其 `name`；否则返回 `std::nullopt`。整个实现仅依赖于 `extract::find_module_by_source` 的查找结果，没有额外的控制流分支或处理逻辑。
 
 #### Side Effects
 
@@ -508,13 +543,12 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `extract::ProjectModel` object passed as `model`
-- `std::string_view` parameter `file_path`
+- `model`
+- `file_path`
 
 #### Usage Patterns
 
-- Determining module membership for a source file
-- Mapping file paths to module names for documentation generation
+- Used to map source files to their containing module for documentation generation.
 
 ### `clore::generate::make_link_target`
 
@@ -524,27 +558,29 @@ Definition: `generate/render/common.cppm:81`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::make_link_target` 的实现在构造一个 `LinkTarget` 实例时依次填充其三个字段：`label` 通过 `std::move` 直接接管传入的 `std::string` 参数，避免拷贝；`target` 通过调用 `make_relative_link_target` 计算并生成从 `current_page_path` 到 `target_page_path` 的相对路径；`code_style` 则直接复制 `bool` 参数。整个函数无分支或循环，唯一的依赖是对 `make_relative_link_target` 的调用，该调用假定已正确链接并返回可用于 `LinkTarget::target` 的类型，以及 `LinkTarget` 结构体本身的定义。
+函数 `clore::generate::make_link_target` 接受当前页面路径 `current_page_path`、标签 `label`、目标页面路径 `target_page_path` 以及可选的代码样式标记 `code_style`，并返回一个 `LinkTarget` 对象。该函数使用 `make_relative_link_target` 将 `current_page_path` 与 `target_page_path` 规约化为相对目标路径，再以聚合初始化方式构造返回的 `LinkTarget`，直接将其 `label`、`target` 和 `code_style` 字段赋值。整个实现不包含任何分支或循环，完全依赖于 `LinkTarget` 的指定初始化器语法以及 `make_relative_link_target` 的路径规约逻辑。
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- moves the label string argument, leaving the original empty or unspecified
 
 #### Reads From
 
-- `current_page_path`
-- `label`
-- `target_page_path`
-- `code_style`
+- `current_page_path` parameter
+- label parameter (before move)
+- `target_page_path` parameter
+- `code_style` parameter
+- `make_relative_link_target` (internal, unspecified)
 
 #### Writes To
 
-- 返回的 `LinkTarget` 对象的 `.label`、`.target` 和 `.code_style` 字段
+- returned `LinkTarget` object's `.label` field (set via move)
+- returned `LinkTarget` object's `.target` field
+- returned `LinkTarget` object's `.code_style` field
 
 #### Usage Patterns
 
-- 在生成文档页面时创建链接目标
-- 配合 `make_relative_link_target` 使用以生成相对路径
+- called to create link targets for page navigation or cross-references in documentation generation
 
 ### `clore::generate::make_relative_link_target`
 
@@ -554,7 +590,7 @@ Definition: `generate/render/common.cppm:57`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数根据两个文件系统路径计算相对链接目标。它首先将 `current_page_path` 和 `target_page_path` 分别通过 `std::filesystem::path::lexically_normal` 标准化，然后以 `current` 的父目录（若无父目录则用 `"."`）作为 `base`，调用 `target.lexically_relative(base)` 生成相对路径。若 `rel` 为空（即 `base` 与 `target` 相同或无法表达为相对关系），则直接返回 `target.generic_string()`；否则返回 `rel.generic_string()`。整个实现依赖 `std::filesystem` 提供的路径操纵原语，无其他外部依赖。
+函数 `clore::generate::make_relative_link_target` 通过 `std::filesystem` 计算从 `current_page_path` 到 `target_page_path` 的相对路径。首先使用 `lexically_normal()` 对两个路径进行规范化，然后以 `current` 的父路径（若无父路径则使用当前目录的 `"."`）作为基路径，调用 `lexically_relative(base)` 获取相对关系。若结果为空（即目标不在基路径的子树上），则直接返回 `target.generic_string()`；否则返回相对路径的通用字符串形式。该函数完全不依赖其他 `clore::generate` 内部函数，仅借助标准库文件系统接口。
 
 #### Side Effects
 
@@ -562,13 +598,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `current_page_path`
-- parameter `target_page_path`
+- `current_page_path` parameter
+- `target_page_path` parameter
 
 #### Usage Patterns
 
-- generates relative href attributes in page links
-- used when constructing cross-references between documentation pages
+- Used by page generation logic to create relative links between markdown pages
+- Called during link resolution for documentation cross-references
 
 ### `clore::generate::make_source_link_target`
 
@@ -578,7 +614,7 @@ Definition: `generate/render/common.cppm:383`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数首先通过 `make_source_relative` 将 `location.file` 转换为相对于 `config.project_root` 的路径，并与行号拼接构造出 `label` 字符串。随后尝试调用 `links.resolve(location.file)` 查找该源文件是否在链接解析器中有对应的目标页面；若找到，则委托 `make_link_target` 构造一个包含目标路径的完整 `LinkTarget`（并强制设置 `code_style` 为 `true`）。若解析失败，则直接返回一个 `LinkTarget`，其 `label` 为上述拼接结果，`target` 为空，`code_style` 同样置为 `true`，表示该链接仅用于代码风格展示而不生成超链接。
+该函数首先构造一个人类可读的标签，方法是将 `location.file` 通过 `make_source_relative` 转换为相对路径，再拼接行号。然后调用 `links.resolve` 尝试将源文件路径映射到文档目标路径；若解析成功，则通过 `make_link_target` 生成一个包含完整链接目标的 `LinkTarget`，并设置代码样式标记为 `true`。若解析失败，则返回一个仅包含标签、空目标路径且同样标记代码样式的 `LinkTarget`。整个过程依赖 `LinkResolver` 的路径解析能力以及 `LinkTarget` 的三字段结构，没有分支以外的复杂控制流。
 
 #### Side Effects
 
@@ -589,12 +625,13 @@ No observable side effects are evident from the extracted code.
 - `location.file`
 - `location.line`
 - `config.project_root`
-- `links`
 - `current_page_path`
+- `links` (via `LinkResolver::resolve`)
 
 #### Usage Patterns
 
-- Used in page rendering to create source code links
+- Creating source link targets for documentation page rendering
+- Generating clickable links from code locations to rendered output
 
 ### `clore::generate::namespace_of`
 
@@ -604,7 +641,7 @@ Definition: `generate/render/common.cppm:53`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::namespace_of` 的实现直接委托给 `extract::namespace_prefix_from_qualified_name`，二者具有相同的签名并共享相同的语义。内部无分支或循环，仅通过参数 `qualified_name` 进行一次转发调用。依赖仅限于 `extract` 命名空间下的该工具函数，用于从完全限定名称中提取命名空间前缀。该函数在生成过程中被其他组件（如 `symbol_analysis_markdown_for`）间接使用，用于构造页面路径或标签，但其自身不承载任何额外的算法逻辑。
+`clore::generate::namespace_of` 是一个轻量包装函数，它将限定名称解析委托给 `extract::namespace_prefix_from_qualified_name`。实现直接返回该底层函数的结果，自身不包含任何算法或控制流逻辑。这一设计将命名空间前缀提取的细节隔离在 `extract` 命名空间中的独立工具函数内，而此函数则为文档生成流程的其他部分提供了统一的调用接口。
 
 #### Side Effects
 
@@ -612,11 +649,15 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `qualified_name` parameter
+- `qualified_name` parameter of type `std::string_view`
+
+#### Writes To
+
+- returned `std::string` value containing the namespace prefix
 
 #### Usage Patterns
 
-- Used to compute the namespace portion of a qualified symbol name for page generation or analysis.
+- extracts namespace prefix from qualified names in the documentation generation pipeline
 
 ### `clore::generate::prompt_output_of`
 
@@ -626,7 +667,7 @@ Definition: `generate/render/common.cppm:71`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::prompt_output_of` 的实现核心是一个键值查找操作。它接受一个输出映射 `outputs`（类型为 `std::unordered_map<std::string, std::string>`）、一个 `PromptKind` 枚举值 `kind` 以及一个可选的 `target_key`（默认空字符串）。内部首先构造一个 `PromptRequest` 对象，将 `kind` 和 `target_key` 填入其对应的字段，然后调用 `prompt_request_key` 将此请求序列化为一个字符串键。随后，使用 `std::unordered_map::find` 在该键上查找 `outputs` 映射：若找到，则返回指向对应字符串值的常量指针；否则返回 `nullptr`。该函数依赖于 `prompt_request_key` 函数的键生成逻辑以及 `PromptRequest` 结构体的定义，而不涉及其他复杂的控制流或外部依赖。
+函数 `clore::generate::prompt_output_of` 封装了从预生成的 prompt 输出集合中按类型和可选目标键查找对应文本的逻辑。它接受一个 `const std::unordered_map<std::string, std::string>&` 类型的 `outputs` 映射、一个 `PromptKind` 枚举值 `kind`，以及一个 `std::string_view` 类型的默认空 `target_key`。内部首先使用 `prompt_request_key` 构造一个 `PromptRequest` 对象（其中 `target_key` 被转换为 `std::string`），生成唯一的搜索键，然后在 `outputs` 中执行 `find` 操作。若找到对应条目，则返回指向该值的指针；否则返回 `nullptr`。该函数依赖于 `PromptKind`、`PromptRequest` 和 `prompt_request_key` 的定义，不涉及额外控制流或副作用。
 
 #### Side Effects
 
@@ -634,16 +675,15 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `outputs` parameter of type `const std::unordered_map<std::string, std::string>&`
-- `kind` parameter of type `PromptKind`
-- `target_key` parameter of type `std::string_view`
-- result of `prompt_request_key(PromptRequest{...})`
+- `outputs`
+- `kind`
+- `target_key`
+- result of `prompt_request_key`
 
 #### Usage Patterns
 
-- Used to retrieve prompt output for a specific kind and target key
-- Called by `build_evidence_for_*` functions to access cached analysis results
-- Checked for `nullptr` to handle missing outputs
+- retrieving cached prompt output for a specific prompt kind
+- checking if a prompt output already exists in a generation pipeline
 
 ### `clore::generate::short_name_of`
 
@@ -653,7 +693,7 @@ Definition: `generate/render/common.cppm:45`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::short_name_of` 从给定的限定名中提取最短的名称部分。它首先调用 `extract::split_top_level_qualified_name` 将 `qualified_name` 分割成作用域组成部分，存储在 `parts` 中。若 `parts` 为空，函数立即返回一个空字符串。否则，返回 `parts` 的最后一个元素，即限定名中末级标识符。这一实现完全依赖 `extract::split_top_level_qualified_name` 的语义来完成分割任务，其控制流简洁。
+函数 `clore::generate::short_name_of` 的实现完全依赖于 `extract::split_top_level_qualified_name` 对输入的 `qualified_name` 进行分割。它首先检查分割后得到的字符串列表是否为空，若为空则直接返回一个空字符串；否则返回列表的最后一个元素。整个控制流仅包含一个简单的条件分支，无其他循环或递归。该函数不涉及任何外部依赖或模块级状态，所有逻辑均围绕标准库的字符串视图和向量操作展开。
 
 #### Side Effects
 
@@ -661,13 +701,12 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `qualified_name` parameter
+- parameter `qualified_name`
 
 #### Usage Patterns
 
-- Used to obtain a symbol's simple name for display purposes
-- Can be used in formatting documentation output
-- Likely called by rendering functions needing short names
+- Extract the short (unqualified) name from a fully qualified name
+- Used wherever only the local name of a symbol is needed
 
 ### `clore::generate::strip_inline_markdown`
 
@@ -677,27 +716,19 @@ Definition: `generate/render/common.cppm:33`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数的实现通过一个简单的单遍扫描算法，在输出字符串中剔除常见的内联 Markdown 格式字符。它依次检查输入中的每个字符，如果当前字符是 `` ` ``、`*`、`_`、`[`、`]` 或 `#` 之一，则直接跳过；否则就将该字符追加到结果中。这种过滤方式保留了所有其他字符，包括普通文本和特殊对 Markdown 无影响的符号。在循环结束后，结果字符串会通过 `clore::generate::trim_ascii` 去除首尾的空白字符，最终返回处理后的字符串。
-
-内部控制流完全依赖于基于范围的 `for` 循环和条件跳转（`continue`），没有任何嵌套分支或复杂的数据结构。依赖方面，除了标准库类型 `std::string_view` 和 `std::string`，本函数只调用了同一模块的辅助函数 `clore::generate::trim_ascii`，该函数负责最终的空白修剪。整个实现体现了极简的过滤逻辑，并未涉及其他生成基础设施中的成员或类型。
+函数 `clore::generate::strip_inline_markdown` 实现了一个简洁的字符级过滤算法。它遍历输入字符串 `text` 中的每个字符，跳过所有属于 Markdown 内联语法的字符：`` ` ``、`*`、`_`、`[`、`]` 和 `#`；其余字符则追加到输出字符串中。过滤完成后，调用 `clore::generate::trim_ascii` 对结果进行首尾空白修剪并返回。该算法不涉及 Markdown 的解析或上下文判断，仅依赖标准库字符串操作和 `trim_ascii` 函数。
 
 #### Side Effects
 
-- allocates a new string via the standard library
-- calls `clore::generate::trim_ascii`
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `text` parameter
-
-#### Writes To
-
-- returned `std::string`
+- parameter `text`
 
 #### Usage Patterns
 
-- cleaning markdown for plain text output
-- preprocessing text for display in contexts where markdown is not allowed
+- producing plain text from Markdown fragments for contexts that disallow inline formatting
 
 ### `clore::generate::symbol_analysis_markdown_for`
 
@@ -707,7 +738,7 @@ Definition: `generate/render/common.cppm:161`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::symbol_analysis_markdown_for` 根据页面计划的类型将符号分析结果分派到不同的 Markdown 生成路径。它首先检查 `plan.page_type` 是否为 `PageType::Namespace`，若是则调用 `analysis_overview_markdown` 生成命名空间级别的总览；否则调用 `analysis_details_markdown` 生成单个符号的详细分析。该函数依赖 `PagePlan`、`SymbolAnalysisStore` 和 `extract::SymbolInfo` 这三个核心输入类型，并通过内部分支函数 `analysis_overview_markdown` 与 `analysis_details_markdown` 完成实际的 Markdown 构建，后者自身又依赖 `SymbolDocView` 枚举和多个辅助工具（如 `build_list_section`、`push_link_paragraph` 等）来组合不同视图下的输出段落。控制流简单直接，但通过 `page_type` 的判定实现了两种截然不同的内容组织逻辑，体现了对模块化与关注点分离的设计意图。
+函数 `clore::generate::symbol_analysis_markdown_for` 根据 `PagePlan` 的 `page_type` 字段决定输出格式。当页面类型为 `PageType::Namespace` 时，将当前符号的摘要信息委托给 `analysis_overview_markdown` 处理；否则调用 `analysis_details_markdown` 生成更详细的视图。这两个辅助函数均接收 `SymbolAnalysisStore` 和 `SymbolInfo` 作为参数，分别产出面向命名空间总览或单符号详情的内容。该函数本身不涉及循环或深层嵌套，仅通过一次 `if` 分支路由到正确的实现路径，并返回生成的 Markdown 字符串指针。
 
 #### Side Effects
 
@@ -715,14 +746,15 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `analyses` (const `SymbolAnalysisStore`&)
-- `plan` (const `PagePlan`&)
-- `sym` (const `extract::SymbolInfo`&)
+- `analyses` (const `SymbolAnalysisStore&`)
+- `plan` (const `PagePlan&`, specifically `plan.page_type`)
+- `sym` (const `extract::SymbolInfo&`)
+- `analysis_overview_markdown(analyses, sym)` and `analysis_details_markdown(analyses, sym)`
 
 #### Usage Patterns
 
-- Called to produce symbol analysis markdown for a page
-- Uses page type to choose between overview and detailed analysis
+- Called during page generation to retrieve precomputed analysis markdown for a symbol.
+- Dispatches to overview or detailed analysis based on the page type.
 
 ### `clore::generate::symbol_doc_view_for`
 
@@ -732,9 +764,7 @@ Definition: `generate/render/common.cppm:269`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数根据页面类型 `plan.page_type` 和符号类别 `sym.kind` 决定返回哪种 `SymbolDocView` 枚举值。核心逻辑是一个 `switch` 分支：若页面类型为 `PageType::Namespace`，则直接返回 `SymbolDocView::Declaration`；若为 `PageType::Module`，则调用 `is_variable_kind` 检查符号类型，变量返回 `SymbolDocView::Details`，否则返回 `SymbolDocView::Implementation`；其他所有情况均默认返回 `SymbolDocView::Details`。
-
-实现仅依赖 `PageType` 枚举、`is_variable_kind` 辅助谓词以及 `SymbolDocView` 枚举定义。整个函数没有额外的循环或条件嵌套，控制流清晰直接，完全由计划页面类型主导，符号类型仅在模块页面中起次要筛选作用。
+函数 `clore::generate::symbol_doc_view_for` 根据给定的 `plan.page_type` 决定符号文档应采用的视图模式。其逻辑是一个基于 `PagePlan` 枚举的 `switch` 语句：若页面类型为 `PageType::Namespace`，立即返回 `SymbolDocView::Declaration`；若为 `PageType::Module`，则进一步检查符号的 `kind`——通过调用 `is_variable_kind(sym.kind)` 判断是否为变量类型，是则返回 `SymbolDocView::Details`，否则返回 `SymbolDocView::Implementation`；对于所有其他页面类型，默认返回 `SymbolDocView::Details`。该函数仅依赖 `PagePlan`、`extract::SymbolInfo`、`PageType` 枚举、`SymbolDocView` 枚举以及 `is_variable_kind` 工具函数，无额外分支或循环。
 
 #### Side Effects
 
@@ -742,12 +772,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- plan`.page_type`
-- sym`.kind`
+- `plan.page_type`
+- `sym.kind`
 
 #### Usage Patterns
 
-- Determining symbol documentation view during page generation
+- Used in page rendering to choose documentation mode for symbols
+- Called in contexts where page type and symbol kind influence presentation
 
 ### `clore::generate::trim_ascii`
 
@@ -757,7 +788,7 @@ Definition: `generate/render/common.cppm:23`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该实现通过两个独立的 `while` 循环移除 `text` 的前导和尾随空白字符。每个循环在每次迭代中调用 `std::isspace`（参数经 `static_cast<unsigned char>` 转换以避免未定义行为）检查首或尾字符，并分别通过 `remove_prefix(1)` 或 `remove_suffix(1)` 缩小 `std::string_view` 的范围。函数最终返回一个引用原字符串中非空白子序列的新视图，所有操作均不涉及内存分配或复制。
+`clore::generate::trim_ascii` 的实现采用两步扫描策略：首先通过 `while` 循环与 `std::isspace` 检查并移除字符串视图 `text` 的前导空白（将字符强制转换为 `unsigned char` 以避免未定义行为），每次调用 `text.remove_prefix(1)`；随后以相同方式检测尾部空白，每次调用 `text.remove_suffix(1)`。该算法仅依赖 `std::string_view` 的 `remove_prefix` 与 `remove_suffix` 成员函数，以及标准库的 `std::isspace` 函数，未使用任何项目内部依赖。由于空白判定直接针对 ASCII 子集（由 `std::isspace` 在默认 C 语言环境下保证），函数无需处理多字节字符或 Unicode 空白，整体开销仅与空白字符数量线性相关。
 
 #### Side Effects
 
@@ -765,18 +796,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the `text` parameter (a `std::string_view`)
+- `text` parameter
 
 #### Usage Patterns
 
-- Used as a utility to sanitize or normalize text input before further processing
-- Likely called by other generate functions to trim whitespace from strings
+- used to clean up whitespace from string views before further processing
+- called to normalize text for markdown rendering or comparison
 
 ## Internal Structure
 
-模块 `generate:common` 是文档生成层中的共享基础设施模块，专注于提供符号渲染所需的通用工具函数与类型。该模块公开了文本清洗（`trim_ascii`、`strip_inline_markdown`）、名称解析（`short_name_of`、`namespace_of`）、链接目标构造（`make_link_target`、`make_relative_link_target`、`make_source_link_target`、`LinkTarget` 结构体）、符号收集与过滤（`collect_namespace_symbols`、`collect_implementation_symbols`）、页面定位（`find_declaration_page`、`find_implementation_pages`、`find_module_for_file`、`build_related_page_targets`）以及文档片段生成（`build_symbol_link_list`、`build_symbol_source_locations`、`symbol_analysis_markdown_for`、`build_prompt_section` 等）等一系列功能。其内部通过无状态函数和少量值类型（如 `SymbolDocView` 枚举）实现，依赖 `extract`、`generate:model` 和 `generate:markdown` 模块提供的数据结构与渲染能力，并通过 `config` 模块获取配置参数。
-
-在实现结构上，`generate:common` 遵循平面函数群组的设计：所有公共接口均声明于同一模块单元 `generate/render/common.cppm` 中，并通过显式导入外部模块实现解耦。模块内部没有复杂的类层次，而是以面向过程的风格将不同职责（如链接计算、符号收集、文档片段组装）拆分为独立的函数，每个函数处理具体的一小步变换。这种分层使得上层页面生成器可以按需组合这些工具，无需关心内部状态管理或全局数据流，从而保持整体架构的清晰与可测试性。
+模块 `generate:common` 是文档生成管线中的共享工具层，专注于提供跨渲染步骤的可复用函数与数据结构。它通过导入 `config`、`extract`、`generate:model` 和 `generate:markdown` 模块，将项目配置、符号模型及 Markdown 生成原语组装成更高级的构建块——例如链接目标构造、符号文档视图判定、命名空间符号收集、分析详情节生成、字符串列表构建、内联 Markdown 清理以及相对页面路径解析。这些函数不直接处理具体页面布局，而是作为底层能力被 `generate:render` 下的各个页面生成模块调用，从而实现分解清晰、职责单一的内部实现结构。该模块本身不引入复杂的内部层次，所有工具函数均置于单一推送单元（`common.cppm`）中，通过全局变量或公共函数对外暴露，模块的导入边界已明确区分配置、提取、模型与渲染输出，确保了上下游依赖的正向流动。
 
 ## Related Pages
 

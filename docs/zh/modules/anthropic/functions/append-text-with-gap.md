@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::anthropic::protocol::detail::appendtextwithgap'
-description: '该函数在目标字符串 target 尾部追加给定的 text，并在 target 已有内容时插入两个换行符 \n\n 作为分隔符，以确保不同文本块之间保持视觉间隔。内部控制流首先检查 text 是否为空，若为空则直接返回，避免无意义操作；若 text 非空，则判断 target 是否非空，若非空则在追加前先写入 "\n\n"，最后执行实际的字符串拼接。函数没有外部依赖，仅依赖 std::string 和 std::string_view 的基本操作，实现紧凑的文本块拼接逻辑。'
+description: '该函数实现向目标字符串追加文本，并在存在已有内容时插入一个双换行分隔符。算法首先检查输入 text 是否为空，若为空则直接返回；否则判断 target 是否非空，若非空则在 target 末尾追加 "\n\n" 作为间隙，最后将 text 内容追加到 target 中。整个过程仅依赖标准字符串操作，不涉及外部库或复杂依赖。'
 layout: doc
 template: doc
 ---
@@ -29,24 +29,25 @@ auto append_text_with_gap(std::string& target, std::string_view text) -> void {
 }
 ```
 
-该函数在目标字符串 `target` 尾部追加给定的 `text`，并在 `target` 已有内容时插入两个换行符 `\n\n` 作为分隔符，以确保不同文本块之间保持视觉间隔。内部控制流首先检查 `text` 是否为空，若为空则直接返回，避免无意义操作；若 `text` 非空，则判断 `target` 是否非空，若非空则在追加前先写入 `"\n\n"`，最后执行实际的字符串拼接。函数没有外部依赖，仅依赖 `std::string` 和 `std::string_view` 的基本操作，实现紧凑的文本块拼接逻辑。
+该函数实现向目标字符串追加文本，并在存在已有内容时插入一个双换行分隔符。算法首先检查输入 `text` 是否为空，若为空则直接返回；否则判断 `target` 是否非空，若非空则在 `target` 末尾追加 `"\n\n"` 作为间隙，最后将 `text` 内容追加到 `target` 中。整个过程仅依赖标准字符串操作，不涉及外部库或复杂依赖。
 
 ## Side Effects
 
-- modifies `target` string by appending newlines and text
+- mutates the `target` string by appending `text` and possibly a separator
 
 ## Reads From
 
-- parameter `target` (reads its empty state)
-- parameter `text` (reads entire content)
+- text parameter
+- target parameter (for emptiness check)
 
 ## Writes To
 
-- parameter `target` (appends to it)
+- target parameter
 
 ## Usage Patterns
 
-- called in `build_request_json` to accumulate text blocks with gaps
+- called by `build_request_json` to assemble request body
+- used for appending text blocks with a separating gap
 
 ## Called By
 

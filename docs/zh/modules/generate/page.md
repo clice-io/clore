@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:page'
-description: '该模块是文档生成管线中负责页面渲染的核心模块，归属 generate/render/page.cppm。它提供了一组公共函数，用于构建各种类型页面（如文件页、模块页、命名空间页、索引页）的根结构（build_file_page_root、build_module_page_root、build_namespace_page_root、build_index_page_root），并将这些根结构渲染为 Markdown（render_page_markdown）或页面捆绑包（render_page_bundle），最终通过 write_page 持久化到输出目标。模块内部依赖 generate:model、generate:symbol、generate:markdown 等下层模块提供的数据结构和渲染工具，同时依赖 config 获取配置、extract 获取符号提取结果、support 获取基础文件和文本处理能力。其公开范围涵盖了从页面计划构建到渲染输出的完整流程，调用者只需提供符合内部约定的资源标识符即可驱动页面生成。'
+description: '模块 generate:page 承担文档生成管线中页面构建与渲染的核心职责。它接收来自分析阶段的结构化数据（符号分析、页面计划、配置等），为索引、文件、模块、命名空间及符号等不同页面类型构造顶层结构（根节点），并将这些结构化的页面内容生成为 Markdown 格式的文档。随后通过写入操作持久化到目标文件中。'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,9 @@ template: doc
 
 ## Summary
 
-该模块是文档生成管线中负责页面渲染的核心模块，归属 `generate/render/page.cppm`。它提供了一组公共函数，用于构建各种类型页面（如文件页、模块页、命名空间页、索引页）的根结构（`build_file_page_root`、`build_module_page_root`、`build_namespace_page_root`、`build_index_page_root`），并将这些根结构渲染为 Markdown（`render_page_markdown`）或页面捆绑包（`render_page_bundle`），最终通过 `write_page` 持久化到输出目标。模块内部依赖 `generate:model`、`generate:symbol`、`generate:markdown` 等下层模块提供的数据结构和渲染工具，同时依赖 `config` 获取配置、`extract` 获取符号提取结果、`support` 获取基础文件和文本处理能力。其公开范围涵盖了从页面计划构建到渲染输出的完整流程，调用者只需提供符合内部约定的资源标识符即可驱动页面生成。
+模块 `generate:page` 承担文档生成管线中页面构建与渲染的核心职责。它接收来自分析阶段的结构化数据（符号分析、页面计划、配置等），为索引、文件、模块、命名空间及符号等不同页面类型构造顶层结构（根节点），并将这些结构化的页面内容生成为 Markdown 格式的文档。随后通过写入操作持久化到目标文件中。
+
+其公开接口覆盖页面生成的全流程：包括 `build_index_page_root`、`build_file_page_root`、`build_module_page_root`、`build_namespace_page_root` 及通用的 `build_page_root` 用于构建各类页面的根节点；`render_page_markdown` 用于将页面内容渲染为 Markdown 文本；`render_page_bundle` 用于协调一组逻辑相关联的页面（如同一模块下的所有页面）的渲染；以及 `write_page` 负责将构建完毕的页面写入文件系统。模块内部依赖 `generate:model`、`generate:symbol`、`generate:markdown` 等子模块完成数据表示与格式转换。
 
 ## Imports
 
@@ -49,8 +51,9 @@ Definition: `generate/render/page.cppm:345`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数按结构组装一个 `SemanticSection` 节点树，其根节点使用 `make_section` 以 `SemanticKind::File` 创建，以表示文件页面的顶层内容。控制流首先检查 `plan.owner_keys.front()` 是否存在于 `model.files` 中，若存在则依次生成“Includes”和“Included By”两个列表节：前者遍历当前文件的所有 `include` 项并通过 `append_file_item` 构建条目，后者遍历 `model.files` 中所有其他文件，筛选出包含当前文件的候选路径，经 `std::sort` 排序后再用 `append_file_item` 填充列表。随后，若 `render_file_dependency_diagram_code` 返回非空字符串，则嵌入一个“Dependency Diagram”节并插入 Mermaid 代码块。核心符号部分由 `append_standard_symbol_sections` 完成，它通过 `collect_implementation_symbols` 谓词收集符号，并利用两个回调处理声明链接和附加内容。接着，如果 `find_module_for_file` 成功找到模块名称，则创建一个“Module Information”节，根据 `links.resolve_module` 的结果选择纯文本或超链接形式显示模块名。最后，通过 `build_related_page_targets` 填充“Related Pages”列表节。`root` 的最终结构反映了自上而下的文件信息组织顺序，依赖于 `model`、`analyses`、`links` 及 `config` 中的项目根路径等数据，并广泛调用匿名命名空间中的辅助函数。
-该函数按结构组装一个 `SemanticSection` 节点树，其根节点使用 `make_section` 以 `SemanticKind::File` 创建，以表示文件页面的顶层内容。控制流首先检查 `plan.owner_keys.front()` 是否存在于 `model.files` 中，若存在则依次生成“Includes”和“Included By”两个列表节：前者遍历当前文件的所有 `include` 项并通过 `append_file_item` 构建条目，后者遍历 `model.files` 中所有其他文件，筛选出包含当前文件的候选路径，经 `std::sort` 排序后再用 `append_file_item` 填充列表。随后，若 `render_file_dependency_diagram_code` 返回非空字符串，则嵌入一个“Dependency Diagram”节并插入 Mermaid 代码块。核心符号部分由 `append_standard_symbol_sections` 完成，它通过 `collect_implementation_symbols` 谓词收集符号，并利用两个回调处理声明链接和附加内容。接着，如果 `find_module_for_file` 成功找到模块名称，则创建一个“Module Information”节，根据 `links.resolve_module` 的结果选择纯文本或超链接形式显示模块名。最后，通过 `build_related_page_targets` 填充“Related Pages”列表节。`root` 的最终结构反映了自上而下的文件信息组织顺序，依赖于 `model`、`analyses`、`links` 及 `config` 中的项目根路径等数据，并广泛调用匿名命名空间中的辅助函数。
+该函数通过依次组装一系列子章节来构造文件页面的根语义区域。它首先调用 `make_section` 创建一个 `SemanticKind::File` 类型的根节点，然后根据 `PagePlan` 中提供的文件信息在 `ProjectModel` 中查找该文件。若找到，则先后调用内部辅助函数 `append_file_item` 和 `build_list_section` 生成“Includes”与“Included By”两个 bullet 列表，其中路径排序和相对化依赖于 `config.project_root` 与 `make_source_relative`。接着通过 `render_file_dependency_diagram_code` 尝试渲染 Mermaid 格式的依赖关系图，若结果非空则包装为一个“Dependency Diagram”子章节。
+
+随后调用 `append_standard_symbol_sections`（来自匿名命名空间）注入标准符号章节，该函数接收配置、模型、分析存储、链接解析器以及两个回调：一个用于筛选实现符号（`collect_implementation_symbols`），另一个用于为每个符号添加声明链接段落。之后使用 `find_module_for_file` 查找文件所属模块，若存在则创建“Module Information”子章节，通过 `links.resolve_module` 决定是否将模块名渲染为超链接。最后调用 `build_related_page_targets` 构造“Related Pages”列表，并将所有子节点依次挂接到根节点后返回。
 
 #### Side Effects
 
@@ -58,26 +61,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `plan` (`PagePlan`)
-- `config` (`config::TaskConfig`)
-- `model` (`extract::ProjectModel`)
-- `analyses` (`SymbolAnalysisStore`)
-- `links` (`LinkResolver`)
-- `model.files`
-- `plan.owner_keys`
-- `plan.title`
-- `plan.relative_path`
-- `config.project_root`
-
-#### Writes To
-
-- Constructed `SemanticSectionPtr` (return value)
-- Intermediate `make_section`, `make_mermaid`, `make_link`, etc. objects
+- plan
+- config
+- model
+- analyses
+- links
 
 #### Usage Patterns
 
-- Called during file page generation to create the root section.
-- Used as part of the page building pipeline for file documentation.
+- Called during page root construction for file pages
+- Used to assemble includes, included-by, dependency diagram, symbol sections, module info, and related pages
 
 ### `clore::generate::build_index_page_root`
 
@@ -87,38 +80,33 @@ Definition: `generate/render/page.cppm:447`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::build_index_page_root` 构造索引页面的语义根节。它首先调用 `make_section` 创建 `SemanticKind::Index` 类型的根节点，然后依次追加子节：一个从 `prompt_output_of` 提取 `PromptKind::IndexOverview` 输出的概述区；若 `model.uses_modules` 为真，则构建“Modules”列表，过滤出接口模块且可通过 `links` 解析的名称，排序后生成链接项；接着构造“Files”列表，按相对路径排序并检查 `links.resolve` 的有效性；随后是“Namespaces”列表，排除匿名命名空间；再后是“Types”列表，筛选 `is_type_kind` 为真的符号并排序，调用 `build_symbol_link_list` 生成链接。最后，若 `render_module_dependency_diagram_code` 返回非空字符串，则追加一个包含 Mermaid 图的“Module Dependency Diagram”子节。整个函数依赖于 `plan.relative_path`、`config` 以及 `links` 解析器来生成正确的相对链接，控制流完全由条件判断和排序后的迭代驱动。
+函数 `clore::generate::build_index_page_root` 负责构造索引页的语义树根节点。它首先创建一个 `SemanticKind::Index` 根节，并根据 `plan.title` 设置标题。随后依次插入多个子节：一个基于 `PromptKind::IndexOverview` 的概述提示节；当 `model.uses_modules` 为真时，遍历 `model.modules` 收集所有可链接的接口模块名称，排序后生成为项目链接列表；接着遍历 `model.files` 生成按源相对路径排序的文件列表；再遍历 `model.namespaces`，过滤掉匿名命名空间后生成命名空间列表；最后遍历 `model.symbols`，筛选出类型符号（`is_type_kind`）且非匿名命名空间内的符号，经排序后通过 `build_symbol_link_list` 生成符号链接列表。如果 `render_module_dependency_diagram_code` 返回非空字符串，额外添加一个包含 Mermaid 代码的节。所有列表均通过 `build_list_section` 生成，其中链接目标通过 `make_relative_link_target` 拼接相对路径。
 
 #### Side Effects
 
-- allocates and populates `SemanticSection` and `MarkdownNode` objects via `make_section`, `build_list_section`, `build_symbol_link_list`, `make_mermaid`, and `make_link`
+- Allocates and returns a new `SemanticSection` hierarchy with multiple child nodes
 
 #### Reads From
 
-- `plan`
-- `config`
-- `model`
-- `outputs`
-- `links`
-- `plan.relative_path`
 - `plan.title`
+- `plan.relative_path`
+- `config.project_root`
 - `model.uses_modules`
 - `model.modules`
 - `model.files`
 - `model.namespaces`
 - `model.symbols`
-- `config.project_root`
+- `outputs` (keyed by `PromptKind::IndexOverview`)
+- `links` via `resolve_module`, `resolve`, `resolve` (for files and namespaces)
 
 #### Writes To
 
-- the returned `SemanticSectionPtr` root
-- `root->children` (via `push_back`)
-- `section->children` for module diagram
+- Returned `SemanticSection` root and its child nodes
 
 #### Usage Patterns
 
-- called to generate the top-level index page of a documentation site
-- produces the root `SemanticSection` for index page rendering
+- Called when building the root section of a top-level index page
+- Part of a family of page builders (`build_page_root`, `build_namespace_page_root`, `build_file_page_root`, `build_module_page_root`)
 
 ### `clore::generate::build_module_page_root`
 
@@ -128,29 +116,34 @@ Definition: `generate/render/page.cppm:255`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::build_module_page_root` 首先创建一个 `SemanticKind::Module` 类型的 `root` 部分，其标题由 `plan.title` 确定，并从 `plan.owner_keys.front()` 获取模块标识。接着，它立即添加一个由 `build_prompt_section` 生成的 "Summary" 提示节。通过 `find_module_by_name` 在 `model` 中查找该模块；若存在，则依次添加 "Imports" 和 "Imported By" 列表节，其中 “Imported By” 列表通过遍历所有模块收集引用当前模块的名称，并去重排序后使用 `append_module_item` 生成链接。随后，基于 `render_import_diagram_code` 产生的非空 mermaid 代码，插入一个 "Dependency Diagram" 小节，其中包含一个 mermaid 节点。
+该函数首先构造一个以 `SemanticKind::Module` 为类型的根节点，并通过 `build_prompt_section` 嵌入由 `PromptKind::ModuleSummary` 生成的摘要提示。随后，若能在模型中通过 `extract::find_module_by_name` 定位到当前模块，则分别构建 `Imports` 与 `Imported By` 两个列表章节：前者直接遍历模块的 `imports` 集合，后者遍历所有模块，筛选出那些导入了当前模块的候选，经去重排序后通过 `append_module_item` 填充。同时，若有有效的 `import_diagram`，则创建一个 `SemanticKind::Section` 类型的 `Dependency Diagram` 章节，并用 `make_mermaid` 嵌入图内容。
 
-接下来，调用 `append_standard_symbol_sections` 向 `root->children` 追加标准符号部分。该调用依赖三个回调：一个通过 `collect_implementation_symbols` 在 `plan` 和 `model` 中收集符号；一个利用 `find_declaration_page` 与 `push_optional_link_paragraph` 为每个符号添加声明链接；另一个使用 `add_symbol_doc_links` 根据 `symbol_doc_view_for` 添加文档链接。随后添加 "Internal Structure" 提示节。最后，通过 `build_related_page_targets` 生成 "Related Pages" 列表节，使用 `make_link` 创建每个目标链接。整体流程依赖于 `build_prompt_section`、`build_list_section`、`append_module_item`、`append_standard_symbol_sections`、`render_import_diagram_code`、`collect_implementation_symbols`、`find_declaration_page`、`add_symbol_doc_links`、`symbol_doc_view_for` 以及 `build_related_page_targets` 等辅助函数，并依赖 `plan`、`config`、`model`、`analyses`、`links` 和 `layout` 参数完成上下文组装。
+在模块相关的静态信息之后，调用 `append_standard_symbol_sections` 统一添加标准符号章节，该函数接收多个回调以控制符号收集（基于 `collect_implementation_symbols`）、声明页链接（通过 `find_declaration_page`）以及文档链接（通过 `symbol_doc_view_for`）。最后，函数追加 `Internal Structure` 提示章节和 `Related Pages` 列表，后者由 `build_related_page_targets` 动态生成链接条目。整个流程依赖 `PagePlan`、`config::TaskConfig`、`extract::ProjectModel`、`SymbolAnalysisStore`、`LinkResolver` 及 `PageDocLayout` 等外部对象，并通过一系列匿名命名空间中的辅助函数完成章节构建与内容填充。
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- Allocates heap memory for the constructed `SemanticSectionPtr` and its children
+- Reads from the `outputs` map via calls to `prompt_output_of`
+- Reads the `model` to iterate over modules and imports
 
 #### Reads From
 
-- Reads from the `plan`, `config`, `model`, `outputs`, `analyses`, `links`, and `layout` parameters
-- Reads module data from `model.modules` and `module->imports`
-- Reads from `find_declaration_page` and `build_related_page_targets`
+- `plan`
+- `config`
+- `model`
+- `outputs`
+- `analyses`
+- `links`
+- `layout`
 
 #### Writes To
 
-- Constructs and returns a `SemanticSectionPtr` representing the root section of a module page
-- Writes to the `children` vector of the root section
+- Returned `SemanticSectionPtr` (root) and its `children` sequence
 
 #### Usage Patterns
 
-- Called during documentation generation to produce the page content for a module
-- Used by higher-level page rendering functions
+- Called during page generation for module documentation
+- Used to assemble the top-level structure of a module page in the renderer
 
 ### `clore::generate::build_namespace_page_root`
 
@@ -160,36 +153,7 @@ Definition: `generate/render/page.cppm:165`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数首先通过 `make_section` 构造一个语义类型为 `SemanticKind::Namespace` 的根节点，并将其深度设为一级标题。接着调用 `build_prompt_section` 生成一个名为“Summary”的二级提示输出节，从 `outputs` 中选取 `PromptKind::NamespaceSummary` 对应的内容。然后尝试通过 `render_namespace_diagram_code` 渲染命名空间内类型的继承关系图（Mermaid 格式），若结果非空则创建一个名为“Diagram”的二级节并插入。随后通过 `build_list_section` 构建“Subnamespaces”列表，遍历模型的 `namespaces` 字典，排除匿名命名空间，利用 `links.resolve` 解析每个子命名空间的相对链接，生成带链接的列表项。核心部分调用 `append_standard_symbol_sections`，该函数接受两个回调：一个用 `collect_namespace_symbols` 收集该命名空间下的所有符号（函数、类、变量等）；另一个回调分别通过 `find_implementation_pages` 和 `add_symbol_doc_links` 为每个符号添加实现链接和文档链接。最后，调用 `build_related_page_targets` 收集相关页面（如父命名空间、模块等），生成“Related Pages”列表作为节点的最后一个子元素，整体返回构造好的 `SemanticSectionPtr`。
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- `plan` (`PagePlan`)
-- `config` (`config::TaskConfig`)
-- `model` (`extract::ProjectModel`)
-- `outputs` (`std::unordered_map<std::string, std::string>`)
-- `analyses` (`SymbolAnalysisStore`)
-- `links` (`LinkResolver`)
-- `layout` (`PageDocLayout`)
-
-#### Usage Patterns
-
-- Used as the entry point for building the namespace page root.
-- Called from higher-level page generation logic to compose the namespace documentation tree.
-
-### `clore::generate::build_page_root`
-
-Declaration: `generate/render/page.cppm:546`
-
-Definition: `generate/render/page.cppm:546`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-函数 `clore::generate::build_page_root` 充当页面类型分发的中心调度器。它接收 `PagePlan`、`config::TaskConfig`、`extract::ProjectModel`、输出映射、`SymbolAnalysisStore`、`LinkResolver` 和 `PageDocLayout` 共七个参数，通过检查 `plan.page_type` 的枚举值将调用转发至四个具体的构建函数：`build_index_page_root`、`build_namespace_page_root`、`build_module_page_root` 或 `build_file_page_root`。每个分支仅传递该函数所需的相关参数子集，并依赖这些函数完成不同页面根节点的生成。如果页面类型无法识别，则回退到调用 `make_section` 创建一个通用的 `SemanticSection`。该函数本身不执行数据计算或格式化，其全部逻辑是围绕页面类型的 switch 分派，外部依赖就是这四个构建函数以及默认的段创建函数。
+`clore::generate::build_namespace_page_root` 通过构造一个以 `SemanticKind::Namespace` 为类型的 `SemanticSectionPtr` 根节点来编排命名空间页面的布局。该根节点的标题和所有者键从 `plan` 中提取。函数依次向根节点追加多个子部分：一个由 `build_prompt_section` 生成的摘要提示部分（从 `outputs` 中按 `PromptKind::NamespaceSummary` 提取内容）；一个可选的名字空间图部分，该部分仅在 `render_namespace_diagram_code` 返回非空字符串时才插入，图内容通过 `make_mermaid` 包装为 Markdown 节点；一个由 `build_list_section` 构造的子命名空间列表，该列表从 `model.namespaces` 中获取当前命名空间的所有子命名空间，过滤掉包含 `“(anonymous namespace)”` 的条目，并按字典序排序，每个条目通过 `links.resolve` 解析为目标路径并生成 `make_link`；随后调用 `append_standard_symbol_sections` 添加标准符号部分，该调用通过 `collect_namespace_symbols` 收集当前命名空间下的符号，并利用两个 lambda 分别为每个符号添加实现页面链接（通过 `find_implementation_pages`）和文档关联链接（通过 `add_symbol_doc_links`）；最后，追加一个由 `build_related_page_targets` 生成的“相关页面”列表，该列表基于 `plan`、`links` 和相对路径构建链接。整体流程依赖 `config`、`model`、`analyses`、`layout` 等参数，并通过多个内部辅助函数（如 `make_section`、`build_prompt_section`、`render_namespace_diagram_code`、`build_list_section`、`append_standard_symbol_sections`、`collect_namespace_symbols`、`find_implementation_pages`、`add_symbol_doc_links`、`build_related_page_targets`）完成模块化组装。
 
 #### Side Effects
 
@@ -204,19 +168,26 @@ No observable side effects are evident from the extracted code.
 - `analyses`
 - `links`
 - `layout`
+- `plan.owner_keys`
+- `plan.title`
+- `plan.relative_path`
+- `model.namespaces`
+- `links.resolve`
 
 #### Usage Patterns
 
-- Called by page generation routines to obtain the root `SemanticSectionPtr` for a given page plan.
-- Used in the rendering pipeline to construct the top-level section of a page.
+- Called from higher-level page generation functions such as `render_page_markdown` or `build_module_page_root`.
+- Used as the primary builder for namespace page root sections in the documentation generation pipeline.
 
-### `clore::generate::render_page_bundle`
+### `clore::generate::build_page_root`
 
-Declaration: `generate/render/page.cppm:565`
+Declaration: `generate/render/page.cppm:546`
+
+Definition: `generate/render/page.cppm:546`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数首先通过 `PagePlan` 遍历所有待渲染的页面条目，按计划顺序依次处理。对于每个页面，它调用内部渲染器，该渲染器将 `TaskConfig` 中的模板与 `ProjectModel` 提供的源代码实体合并，并利用 `prompt_outputs` 映射中的 AI 生成文本进行内容填充。随后通过 `SymbolAnalysisStore` 执行跨文件符号的依赖分析，确保所有内联链接（由 `LinkResolver` 处理）被正确解析为目标 URL。渲染过程中遇到任何错误（如模板缺失、符号未解析）会立即短路，返回 `std::expected` 的错误状态。所有成功渲染的页面最后被打包为 `render::PageBundle`，该过程依赖外部配置 `config` 控制输出文件的总数和布局顺序。
+函数 `clore::generate::build_page_root` 充当一个中央调度器，根据 `plan.page_type` 枚举值将页面树的构建委托给四个专用函数。内部控制流仅包含一个 `switch` 语句：对于 `PageType::Index`，它调用 `build_index_page_root`；对于 `PageType::Namespace`，调用 `build_namespace_page_root`；对于 `PageType::Module`，调用 `build_module_page_root`；对于 `PageType::File`，调用 `build_file_page_root`。每种情况都从相同的参数集中传递必要的依赖项——包括 `plan`、`config`、`model`、`outputs`、`analyses`、`links` 和 `layout`——但每个专门函数只接收它所需的子集。如果页面类型不匹配任何已知情况，则回退到通过 `make_section` 创建一个默认的 `SemanticSection`。该函数不执行任何自有的渲染逻辑；它完全依赖下游构建器来生成小节结构，这些构建器又进一步调用 `render_page_markdown`、`render_page_bundle` 及匿名命名空间中的辅助函数（如 `append_module_item`、`append_file_item`、`prompt_output_of_local_page` 和 `build_frontmatter_page`）。
 
 #### Side Effects
 
@@ -224,17 +195,50 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `PagePlan` `plan`
-- `config::TaskConfig` `config`
-- `extract::ProjectModel` `model`
-- `std::unordered_map<std::string, std::string>` `prompt_outputs`
-- `SymbolAnalysisStore` `analyses`
-- `LinkResolver` `links`
+- `plan.page_type`
+- `plan.title`
+- `plan`
+- `config`
+- `model`
+- `outputs`
+- `analyses`
+- `links`
+- `layout`
 
 #### Usage Patterns
 
-- Called from page generation pipeline (e.g., `generate_pages` or `generate_pages_async`) to produce a single page bundle.
-- Used as the main rendering step after all analysis and link resolution is available.
+- Used as a top-level dispatcher to generate the root `SemanticSectionPtr` for a documentation page based on its type
+- Called by page generation infrastructure after preparing `PagePlan`, `TaskConfig`, `ProjectModel`, outputs, analyses, link resolver, and layout
+
+### `clore::generate::render_page_bundle`
+
+Declaration: `generate/render/page.cppm:565`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+函数 `clore::generate::render_page_bundle` 将接收的 `PagePlan`、`config::TaskConfig`、`extract::ProjectModel`、`prompt_outputs` 映射、`SymbolAnalysisStore` 以及 `LinkResolver` 作为输入，协调生成某一组页面的完整渲染结果。其内部实现首先解析 `PagePlan` 中的页面条目，依据 `config::TaskConfig` 指定的输出格式与优化选项，逐个对计划中的页面调用底层的渲染引擎。在渲染每个页面时，函数会利用 `extract::ProjectModel` 获取结构化模型数据，借助 `SymbolAnalysisStore` 提供的符号分析结果以及 `LinkResolver` 实现的跨实体链接解析，并将 `prompt_outputs` 中的用户提示输出作为增强上下文注入。渲染过程中遇到任何错误或缺失的依赖都会通过返回的 `std::expected` 封装为错误状态，从而允许调用方在整体流程中集中处理失败情况。
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- `const PagePlan& plan`
+- `const config::TaskConfig& config`
+- `const extract::ProjectModel& model`
+- `const std::unordered_map<std::string, std::string>& prompt_outputs`
+- `const SymbolAnalysisStore& analyses`
+- `const LinkResolver& links`
+
+#### Writes To
+
+- the returned `std::expected` object
+
+#### Usage Patterns
+
+- called by page generation entry points
+- orchestrates page bundle rendering
 
 ### `clore::generate::render_page_bundle`
 
@@ -242,29 +246,24 @@ Declaration: `generate/render/page.cppm:573`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数通过依次遍历 `PagePlan` 中的页面定义，从 `ProjectModel` 中提取对应的模型数据，并根据 `TaskConfig` 中的模板与渲染参数生成每个页面的内容。内部依赖 `prompt_outputs` 映射提供动态提示结果的替换，并借助 `LinkResolver` 解析跨页面链接和锚点，从而保证生成文档中引用的正确性。所有页面的渲染结果被组合为一个完整的页面捆绑包，最终以 `std::expected` 的形式返回，错误路径由内部校验和异常捕获机制统一处理。
+函数 `clore::generate::render_page_bundle` 接收五个 `const int&` 参数并返回 `int`。由于实现源码未在证据部分提供，其内部算法与控制流无法具体分析。依据函数命名推测，该函数可能用于根据一组整数参数生成页面捆绑（page bundle）的渲染结果，但具体依赖关系及设计意图不明。
 
 #### Side Effects
 
-- Writes rendered pages to the filesystem
-- May create directories for output
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- const `PagePlan`& plan
-- const `config::TaskConfig`& config
-- const `extract::ProjectModel`& model
-- const `std::unordered_map<std::string, std::string>`& `prompt_outputs`
-- const `LinkResolver`& links
-
-#### Writes To
-
-- Filesystem (output pages)
+- `plan` parameter
+- `config` parameter
+- `model` parameter
+- `prompt_outputs` parameter
+- `links` parameter
 
 #### Usage Patterns
 
-- Called by higher-level page generation functions like `generate_pages`
-- Used to render a single page bundle as part of a larger documentation generation pipeline
+- Called by higher-level page generation functions like `generate_pages` and `generate_pages_async`
+- Used to render a single page bundle after planning and prompt resolution
 
 ### `clore::generate::render_page_markdown`
 
@@ -274,7 +273,41 @@ Definition: `generate/render/page.cppm:602`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数通过对 `plan`、`config`、`model` 和 `prompt_outputs` 的组合解析，将页面内容逐步构建为最终的 Markdown 字符串。内部控制流围绕 `plan` 中的结构进行迭代：首先调用 `build_page_root` 生成页面根节点，接着根据 `plan` 的组件类型（如模块项、文件项或命名空间分支）分发到 `append_module_item`、`append_file_item` 或 `build_*_page_root` 系列函数。每个分支会利用 `select_primary_description_source_page` 选取主描述源，再通过 `render_page_bundle` 或 `prompt_output_of_local_page` 组装子章节。所有生成的片段经由 `write_page` 函数写入最终的布局输出。依赖包括 `LinkResolver` 和 `SymbolAnalysisStore`，后者用于在部分重载中提供符号分析数据；若未提供，则默认传入空存储。
+该函数是六参数重载的薄包装：接收 `PagePlan`、`TaskConfig`、`ProjectModel`、prompt 输出映射以及 `LinkResolver`，然后将空 `SymbolAnalysisStore` 转发给实际实现。六参数版本是生成 Markdown 的核心，它协调多个构建步骤：首先调用 `clore::generate::build_page_root`（根据页面类型选择 `clore::generate::build_namespace_page_root`、`clore::generate::build_module_page_root`、`clore::generate::build_file_page_root` 或 `clore::generate::build_index_page_root`）构造页面根节点，随后依次调用 `clore::generate::(anonymous namespace)::append_standard_symbol_sections`、`clore::generate::(anonymous namespace)::append_module_item` 和 `clore::generate::(anonymous namespace)::append_file_item` 填充符号列表、模块成员和文件条目。过程中还会集成 `from_prompt` 内容，通过 `select_primary_description_source_page` 选取主描述源，并利用 `prompt_output_of_local_page` 获取本地 prompt 输出。
+
+整个渲染流程依赖 `text` 构建器逐步拼接 Markdown 片段，并处理 `kind`、`section`、`layout` 等属性来生成附加图表（如命名空间图、依赖图、模块图）。最终结果通过 `clore::generate::write_page` 写出，若任一构建步骤失败则返回 `RenderError`。该实现紧密耦合于项目模型、配置和链接解析器，通过精心设计的匿名命名空间中的辅助函数将页面计划转化为结构化文档。
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- `plan`（`const PagePlan&`）
+- `config`（`const config::TaskConfig&`）
+- `model`（`const extract::ProjectModel&`）
+- `prompt_outputs`（`const std::unordered_map<std::string, std::string>&`）
+- `links`（`const LinkResolver&`）
+
+#### Writes To
+
+- 返回的字符串（生成的 Markdown 内容）
+
+#### Usage Patterns
+
+- 作为页面生成管道的入口点
+- 由其他渲染函数如 `render_page_bundle` 调用
+- 用于生成单个页面的完整 Markdown 输出
+
+### `clore::generate::render_page_markdown`
+
+Declaration: `generate/render/page.cppm:582`
+
+Definition: `generate/render/page.cppm:582`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+该函数首先生成完整的页面包（bundle），委托给 `clore::generate::render_page_bundle`，将传入的 `plan`、`config`、`model`、`prompt_outputs`、`analyses` 和 `links` 转发给它。若 bundle 生成失败，则直接向上传播错误。成功获取 bundle 后，函数在返回的页面集合中执行线性查找，依据 `plan` 的 `relative_path` 字段，使用 `std::ranges::find_if` 找出匹配的 `GeneratedPage` 对象。如果未找到（即 bundle 中缺少计划页），则构造一个 `RenderError` 并返回 `std::unexpected`。否则，直接提取并返回该页面的 `content` 字段。整个流程依赖 `render_page_bundle` 完成实际的多页渲染逻辑，自身仅承担索引与提取的职责。
 
 #### Side Effects
 
@@ -286,38 +319,14 @@ No observable side effects are evident from the extracted code.
 - `config`
 - `model`
 - `prompt_outputs`
+- `analyses`
 - `links`
+- `plan.relative_path`
+- `bundle` elements
 
 #### Usage Patterns
 
-- Used when no precomputed symbol analysis data is available
-
-### `clore::generate::render_page_markdown`
-
-Declaration: `generate/render/page.cppm:582`
-
-Definition: `generate/render/page.cppm:582`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-该函数的核心实现围绕两步：调用 `clore::generate::render_page_bundle` 生成完整的页面集合（bundle），然后根据调用方传入的 `plan.relative_path` 在 bundle 中定位当前页面的内容。若 bundle 生成失败（`std::unexpected`），或 bundle 中不存在与 `plan.relative_path` 匹配的 `GeneratedPage` 对象，函数都会立即返回一个 `RenderError` 错误。成功时则直接返回匹配页面的 `content` 字段。这一设计使得 `render_page_markdown` 复用 `render_page_bundle` 的整页生成逻辑，同时仅提取调用者所需的那一页内容。
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- plan
-- config
-- model
-- `prompt_outputs`
-- analyses
-- links
-
-#### Usage Patterns
-
-- Used in page generation pipeline to retrieve the final Markdown string for a specific page
+- Used in page generation to produce markdown for a specific page plan.
 
 ### `clore::generate::write_page`
 
@@ -327,35 +336,35 @@ Definition: `generate/render/page.cppm:666`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::write_page` 实现将渲染后的页面持久化到文件系统的核心逻辑。它首先对输入参数进行严格的路径安全性校验：验证 `page.relative_path` 为相对路径且不包含 `"."` 或 `".."` 片段，若无效则立即返回 `RenderError`。通过校验后，将输出根路径 `output_root` 与相对路径拼接并归一化得到目标文件路径，然后调用 `std::filesystem::create_directories` 创建父目录（忽略已存在目录，失败时返回错误）。最后委托 `clore::support::write_utf8_text_file` 将 `page.content` 写入目标文件，并透传该函数的错误信息。
+函数 `clore::generate::write_page` 接收一个 `GeneratedPage` 和输出根目录，负责将页面的内容落地到文件系统。内部先校验 `page.relative_path` 的合法性：若为绝对路径或包含 `.` 或 `..` 片段，立即返回 `std::unexpected<RenderError>`。通过校验后，将输出根目录与相对路径拼接并进行词法规范化得到目标路径，再创建其父目录（若不存在），最后调用 `clore::support::write_utf8_text_file` 写入文件内容，任何写入失败也会包装为 `RenderError` 返回。
 
-该函数无复杂分支，依赖标准库文件系统操作和内部工具函数，其设计将路径验证、目录创建与文件写入分离，确保输出文件的路径安全性与目标目录的自动创建。
+该函数依赖 `std::filesystem` 进行路径操作与目录创建，以及 `clore::support::write_utf8_text_file` 完成实际写入。错误传播完全通过 `std::expected<void, RenderError>` 实现，所有异常路径均被显式处理，保证了写入操作的原子性（目录创建与文件写入之间无状态残留风险）。
 
 #### Side Effects
 
 - creates directories on the filesystem
-- writes a UTF-8 text file to disk
+- writes file content to disk
 
 #### Reads From
 
-- the `page.relative_path` field
-- the `page.content` field
-- the `output_root` parameter
-- the filesystem to check for existing directories
+- `page.relative_path`
+- `page.content`
+- `output_root`
 
 #### Writes To
 
-- the filesystem (directories and file)
-- the `RenderError` value via `std::unexpected` on failure
+- filesystem at the derived output path
 
 #### Usage Patterns
 
-- called to output a single generated page file
-- used in the page generation pipeline after building the page content
+- Called after generating page content to persist the page to disk
+- Used in batch document generation pipeline
 
 ## Internal Structure
 
-`generate:page` 模块是文档生成管线中页面渲染的核心实现，它通过导入 `config`、`extract`、`generate:model` 等模块获取页面计划、符号分析与配置数据，并依赖 `generate:markdown` 和 `generate:common` 提供的结构化文档节点与链接工具来构建最终输出。模块内部采用清晰的分层结构：一组公共构建函数（ `build_namespace_page_root`、`build_module_page_root`、`build_file_page_root`、`build_index_page_root` 以及通用的 `build_page_root`）分别负责不同页面类型根节点的装配；在此之上，`render_page_markdown` 和 `render_page_bundle` 将页面根转换为完整的 Markdown 内容，而 `write_page` 则负责将结果持久化。这些公共接口通过匿名命名空间中封装的辅助例程（如 `append_module_item`、`append_file_item`、`build_frontmatter_page`、`select_primary_description_source_page` 以及模板化的 `append_standard_symbol_sections`）实现逻辑复用，从而在保持内聚性的同时，将页面组装与输出细节与底层模型和符号处理分离。
+模块 `generate:page` 是文档生成管线中负责组织、构建并输出最终 Markdown 页面的核心单元。在分解上，它按页面类型（索引、命名空间、模块、文件、符号）显式拆分为多个 `build_*_root` 函数，每个函数接收一组标识该页面上下文（如计划、分析、布局）的句柄，并返回页面树的根节点。随后由 `render_page_markdown` 或 `render_page_bundle` 将这些结构化内容转化为 Markdown 文本并交由 `write_page` 持久化。引入的辅助函数（如 `append_module_item`、`build_frontmatter_page`、`prompt_output_of_local_page`）封装了特定子任务，且多数位于匿名命名空间内以实现内部隐藏。
+
+在依赖关系上，该模块导入了 `generate:model`（获取页面计划与符号分析）、`generate:common`（共享字符串、链接工具）、`generate:markdown`（工厂函数和渲染入口）、`generate:symbol`（符号文档布局）以及底层支持模块（`support`）和 `extract`。内部采用清晰的三层结构：上层入口函数（如 `build_*_root`）协调数据获取与节点创建，中层为匿名命名空间中的辅助函数承担具体的列表生成、描述来源选择等子逻辑，底层则直接调用 `generate:markdown` 中的文本构建原语。这种分层隔离了职责，使页面构建与渲染格式解耦，便于维护和扩展。
 
 ## Related Pages
 

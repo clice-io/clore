@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::logging'
-description: 'The clore::logging namespace provides a structured logging framework built on top of spdlog. Its core declarations include a LogProxy template struct used to create constant proxy objects such as trace, debug, info, warn, and err―each statically bound to a specific severity level for compile‑time log filtering. The central dispatcher function log accepts a severity enum and a message string, routing entries to the appropriate sinks. Additional utilities include stderr_logger for immediate output to standard error and cache_hit_rate for monitoring cache effectiveness. A global optional g_log_level allows runtime level overrides. Architecturally, clore::logging serves as the single point of contact for all logging in the codebase, abstracting away the underlying logging implementation and promoting consistent, type‑safe, and performance‑aware logging.'
+description: 'The clore::logging namespace encapsulates the project’s logging infrastructure, providing a centralized, severity‑based logging system built on top of spdlog. It exposes a main log function that accepts a severity level and a string message, dispatching the output to a configurable backend. A global optional variable g_log_level controls the minimum severity threshold, allowing runtime filtering of log output. Additional utility functions such as stderr_logger and cache_hit_rate offer specialized logging sinks and higher‑level logging helpers.'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,9 @@ template: doc
 
 ## Summary
 
-The `clore::logging` namespace provides a structured logging framework built on top of spdlog. Its core declarations include a `LogProxy` template struct used to create constant proxy objects such as `trace`, `debug`, `info`, `warn`, and `err`―each statically bound to a specific severity level for compile‑time log filtering. The central dispatcher function `log` accepts a severity enum and a message string, routing entries to the appropriate sinks. Additional utilities include `stderr_logger` for immediate output to standard error and `cache_hit_rate` for monitoring cache effectiveness. A global optional `g_log_level` allows runtime level overrides. Architecturally, `clore::logging` serves as the single point of contact for all logging in the codebase, abstracting away the underlying logging implementation and promoting consistent, type‑safe, and performance‑aware logging.
+The `clore::logging` namespace encapsulates the project’s logging infrastructure, providing a centralized, severity‑based logging system built on top of spdlog. It exposes a main `log` function that accepts a severity level and a string message, dispatching the output to a configurable backend. A global optional variable `g_log_level` controls the minimum severity threshold, allowing runtime filtering of log output. Additional utility functions such as `stderr_logger` and `cache_hit_rate` offer specialized logging sinks and higher‑level logging helpers.
+
+The namespace also defines several `constexpr inline` instances of the `LogProxy` structure (e.g., `debug`, `trace`, `info`, `warn`, `err`). These stateless proxy objects serve as compile‑time entry points for emitting messages at specific severity levels, simplifying call‑site code and ensuring consistent level usage. Together, these elements form a modular logging subsystem that supports both flexible runtime configuration and concise, type‑safe invocation.
 
 ## Types
 
@@ -25,19 +27,19 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- template parameter `Level` is a `spdlog::level::level_enum`
-- `operator()` overloads always call `log(Level, ...)`
-- format-based overload requires `sizeof...(Args) > 0`
+- The logging level `Level` is fixed at compile time via a non-type template parameter.
+- All messages are forwarded to a free function `log` that must be defined in the surrounding scope.
+- The variadic overload requires at least one argument (`sizeof...(Args) > 0`).
 
 #### Key Members
 
-- `operator()(std::string_view msg)`
-- `operator()(std::format_string<Args...> fmt, Args&&... args)`
+- `void operator()(std::string_view msg) const`
+- `void operator()(std::format_string<Args...> fmt, Args&&... args) const` (template, requires `sizeof...(Args) > 0`)
 
 #### Usage Patterns
 
-- used to create type-safe log callables for different log levels
-- instances of `LogProxy` can be stored and passed as logging handlers, ensuring consistent level handling
+- Instantiated with a specific log level (e.g., `LogProxy<spdlog::level::info>`) to create a level‑specific logger object.
+- Called with either a plain string or a format string and arguments to produce a formatted log message at the predetermined level.
 
 #### Member Functions
 
@@ -77,12 +79,12 @@ Declaration: `support/logging.cppm:125`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-A constant log proxy object for debug severity level, specialized with `spdlog::level::debug`. It provides a compile-time fixed log level for conditional logging.
+Inline `constexpr` variable `clore::logging::debug` of type `LogProxy<spdlog::level::debug>` providing a stateless entry point for emitting debug-level log messages within the `clore::logging` namespace.
 
 #### Usage Patterns
 
-- used to log debug messages
-- invoked with format string and arguments
+- invoked as a log proxy for `spdlog::level::debug` messages
+- used alongside other severity-level proxies in `clore::logging`
 
 ### `clore::logging::err`
 
@@ -90,11 +92,7 @@ Declaration: `support/logging.cppm:128`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-`clore::logging::err` is a `constexpr inline` variable of type `LogProxy<spdlog::level::err>`, serving as a constant proxy object for logging messages at the error severity level.
-
-#### Usage Patterns
-
-- logged via call `operator` with format string and arguments
+The variable `clore::logging::err` is a `constexpr inline LogProxy<spdlog::level::err>` object, declared in `support/logging.cppm` at line 128. It is a compile-time constant that provides a logging proxy for error-level log messages.
 
 ### `clore::logging::g_log_level`
 
@@ -102,12 +100,12 @@ Declaration: `support/logging.cppm:102`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-The variable `clore::logging::g_log_level` is a global `std::optional<spdlog::level::level_enum>` that provides an optional override for the log level used by the logging system.
+The variable `clore::logging::g_log_level` is a public inline `std::optional<spdlog::level::level_enum>` declared at `support/logging.cppm:102`. It provides a global configuration point for controlling the minimum log severity threshold.
 
 #### Usage Patterns
 
-- Read by `clore::logging::log` to check for a global log level override
-- Read by `clore::logging::stderr_logger` to check for a global log level override
+- read by `clore::logging::log` to decide message output
+- read by `clore::logging::stderr_logger` to control logging behavior
 
 ### `clore::logging::info`
 
@@ -115,11 +113,13 @@ Declaration: `support/logging.cppm:126`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-A constant inline proxy object for logging messages at the info severity level. It is declared as `constexpr inline LogProxy<spdlog::level::info> info` in the `clore::logging` namespace.
+`clore::logging::info` is a `constexpr inline` instance of `LogProxy<spdlog::level::info>` declared at `support/logging.cppm:126`, providing a compile-time logging entry point for messages at the `spdlog::level::info` severity within the `clore::logging` namespace.
 
 #### Usage Patterns
 
-- used as a logging proxy for info level messages
+- invoked from `clore::logging::cache_hit_rate` to report informational messages
+- used as a severity-tagged dispatcher built on `LogProxy<spdlog::level::info>`
+- serves as the info-level counterpart to other `LogProxy` instances in the namespace
 
 ### `clore::logging::trace`
 
@@ -127,11 +127,12 @@ Declaration: `support/logging.cppm:124`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-The variable `clore::logging::trace` is a `constexpr inline` object of type `LogProxy<spdlog::level::trace>`, declared in the `clore::logging` namespace.
+A `constexpr inline` instance of `LogProxy<spdlog::level::trace>` exposed at namespace scope as `clore::logging::trace`, providing a convenient entry point for emitting trace-level log messages.
 
 #### Usage Patterns
 
-- emitting trace-level log messages
+- invoked as a namespace-scope entry point for trace-level logging
+- parallels other severity proxies like `debug`, `info`, `warn`, and `err`
 
 ### `clore::logging::warn`
 
@@ -139,11 +140,13 @@ Declaration: `support/logging.cppm:127`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-`clore::logging::warn` is a `constexpr inline` variable of type `LogProxy<spdlog::level::warn>`, serving as a logging proxy for warning-level messages.
+Compile-time logging proxy for warning-level messages within the `clore::logging` namespace.
 
 #### Usage Patterns
 
-- used as a logging proxy for warning messages
+- invoked as a logging entry point for warning-level messages
+- used by `clore::support::enable_utf8_console`
+- parallels other level proxies (`debug`, `trace`, `info`, `err`) in the namespace
 
 ## Functions
 
@@ -155,12 +158,12 @@ Definition: `support/logging.cppm:138`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-Logs the cache hit rate for the operation or component identified by the given label. The caller provides two size parameters representing the number of cache hits and the total number of cache lookups (or equivalently, hits and misses). The function calculates the rate and records the result, typically at an informational logging level, allowing callers to monitor cache effectiveness without manually computing the ratio.
+This function records and emits a log message indicating the current cache hit rate. The caller supplies a cache identifier as a `std::string_view`, the number of cache hits as a `std::size_t`, and the total number of cache accesses as a `std::size_t`. The hit rate is internally calculated from these two counts and logged at the appropriate severity level.
 
 #### Usage Patterns
 
-- Called to report cache hit/miss statistics
-- Typically used in performance monitoring sections
+- reporting cache hit rates
+- logging after cache lookups
 
 ### `clore::logging::log`
 
@@ -172,12 +175,12 @@ Implementation: [`Module support`](../../../modules/support/index.md)
 
 Declaration: [Declaration](functions/log.md)
 
-The function `clore::logging::log` accepts a `spdlog::level::level_enum` indicating the severity of the log message and a `std::string_view` containing the message content. The caller is responsible for providing a valid log level and the message to be recorded; the function then dispatches the message to the appropriate logging sinks. This function serves as the central logging entry point and is invoked by higher‑level logging proxies such as `clore::logging::LogProxy::operator()`.
+The function `clore::logging::log` accepts a severity level of type `spdlog::level::level_enum` together with a `std::string_view` message. It is the central logging sink in the `clore::logging` module, responsible for emitting the formatted message at the given severity. Callers must supply a valid level enumerator and a non-null message; the function guarantees that the message is dispatched to the configured logging backend (e.g., stderr, file, or other sinks) without further transformation. No special ownership of the string view is required—the function consumes the data synchronously before returning.
 
 #### Usage Patterns
 
-- called by `LogProxy::operator()(std::string_view)`
-- used directly for logging with an explicit level
+- Invoked by `clore::logging::LogProxy::operator()(std::string_view)` to route formatted messages to `spdlog`
+- Used as the underlying logging primitive that respects the `g_log_level` threshold
 
 ### `clore::logging::stderr_logger`
 
@@ -187,13 +190,12 @@ Definition: `support/logging.cppm:130`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-The function `clore::logging::stderr_logger` is a simple logging callable that writes a given message to the standard error stream. It accepts a single `std::string_view` argument containing the text to be logged and returns `void`. This function is intended for use as a lightweight, immediate-output logger, typically within the logging framework or as a default sink for situations where no other logging backend is configured. The caller is responsible for providing a valid string view; no formatting or additional context is added by this function.
+The function `clore::logging::stderr_logger` accepts a `std::string_view` message and logs it to the standard error stream. It serves as a simple, direct logging sink for callers that need to output a text message to stderr without additional formatting or level filtering. The caller supplies only the message; the function handles output synchronously.
 
 #### Usage Patterns
 
-- Called at startup to configure stderr logging with a specific logger name
-- Used to switch the default logger to stderr output
-- Invocations optionally apply a previously stored log level
+- Initializing logging configuration at startup
+- Switching global logging to stderr with a specific logger name
 
 ## Related Pages
 

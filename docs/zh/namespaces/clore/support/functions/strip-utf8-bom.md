@@ -1,6 +1,6 @@
 ---
 title: 'clore::support::striputf8bom'
-description: '接受一个 std::string_view 输入，返回一个新的 std::string_view，该视图指向移除头部 UTF-8 字节顺序标记（BOM）后的原始数据。如果输入不以 BOM 开头，则返回与输入相同的视图。函数不分配内存也不修改数据；调用者必须确保输入视图的生命周期覆盖返回的视图。'
+description: 'clore::support::strip_utf8_bom 接受一个以 std::string_view 表示的 UTF-8 编码文本，并移除可能出现在开头的 UTF-8 字节顺序标记（BOM, 0xEF 0xBB 0xBF）。如果输入的开始处存在 BOM，函数返回指向紧随 BOM 之后内容的 std::string_view；否则返回与输入相同的 std::string_view。调用者保证输入字符串在返回的视图生命周期内保持有效，且函数本身不复制或修改底层数据。'
 layout: doc
 template: doc
 ---
@@ -21,11 +21,11 @@ Implementation: [`Module support`](../../../../modules/support/index.md)
 auto (std::string_view) -> std::string_view;
 ```
 
-接受一个 `std::string_view` 输入，返回一个新的 `std::string_view`，该视图指向移除头部 UTF-8 字节顺序标记（BOM）后的原始数据。如果输入不以 BOM 开头，则返回与输入相同的视图。函数不分配内存也不修改数据；调用者必须确保输入视图的生命周期覆盖返回的视图。
+`clore::support::strip_utf8_bom` 接受一个以 `std::string_view` 表示的 UTF-8 编码文本，并移除可能出现在开头的 UTF-8 字节顺序标记（BOM, `0xEF 0xBB 0xBF`）。如果输入的开始处存在 BOM，函数返回指向紧随 BOM 之后内容的 `std::string_view`；否则返回与输入相同的 `std::string_view`。调用者保证输入字符串在返回的视图生命周期内保持有效，且函数本身不复制或修改底层数据。
 
 ## Usage Patterns
 
-- 用于从文件读取的 UTF-8 文本中剥离 BOM 前缀
+- used by `clore::support::read_utf8_text_file` to remove a BOM before further text processing
 
 ## Called By
 

@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::anthropic::detail'
-description: '命名空间 clore::net::anthropic::detail 封装了与 Anthropic API 通信的内部实现细节。其中核心结构 Protocol 提供了构建请求 URL（build_url）、请求头（build_headers）、请求 JSON（build_request_json）、解析响应（parse_response）以及读取环境配置（read_environment）等底层方法。该命名空间还定义了表示 API 版本（kAnthropicVersion）和用于读取环境变量（如 kAnthropicApiKeyEnv、kAnthropicBaseUrlEnv）的常量。这些元素共同构成了与 Anthropic 服务交互的基础设施，其职责被限制在实现层面，为上层 clore::net::anthropic 模块提供稳定的协议处理支持。'
+description: '该命名空间封装了与 Anthropic API 通信的内部实现细节。其核心是结构体 Protocol，提供了构建请求 JSON、解析响应、管理环境变量（如 kAnthropicApiKeyEnv、kAnthropicBaseUrlEnv 以及 API 版本常量）等基础功能。detail 层将协议实现与上层公共接口分离，确保架构的整洁性与扩展性。'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-命名空间 `clore::net::anthropic::detail` 封装了与 Anthropic API 通信的内部实现细节。其中核心结构 `Protocol` 提供了构建请求 URL（`build_url`）、请求头（`build_headers`）、请求 JSON（`build_request_json`）、解析响应（`parse_response`）以及读取环境配置（`read_environment`）等底层方法。该命名空间还定义了表示 API 版本（`kAnthropicVersion`）和用于读取环境变量（如 `kAnthropicApiKeyEnv`、`kAnthropicBaseUrlEnv`）的常量。这些元素共同构成了与 Anthropic 服务交互的基础设施，其职责被限制在实现层面，为上层 `clore::net::anthropic` 模块提供稳定的协议处理支持。
+该命名空间封装了与 Anthropic API 通信的内部实现细节。其核心是结构体 `Protocol`，提供了构建请求 JSON、解析响应、管理环境变量（如 `kAnthropicApiKeyEnv`、`kAnthropicBaseUrlEnv` 以及 API 版本常量）等基础功能。`detail` 层将协议实现与上层公共接口分离，确保架构的整洁性与扩展性。
 
 ## Types
 
@@ -25,11 +25,11 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- All methods are static and stateless.
-- `read_environment` requires environment variables `kAnthropicBaseUrlEnv` and `kAnthropicApiKeyEnv` to be set.
-- `build_url` expects a valid `base_url` from the environment config.
-- `build_headers` always sets the same `Content-Type` and `anthropic-version` headers.
-- `parse_response` treats non-empty body and HTTP status < 400 as success; otherwise returns `LLMError`.
+- All member functions are static and have no side effects beyond their return values
+- No mutable state is stored in the struct
+- Credentials are obtained exclusively from environment variables specified by `kAnthropicBaseUrlEnv` and `kAnthropicApiKeyEnv`
+- API version is fixed via `kAnthropicVersion`
+- Delegation to `clore::net::anthropic::protocol` functions is consistent for request building and response parsing
 
 #### Key Members
 
@@ -39,11 +39,13 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 - `build_request_json`
 - `parse_response`
 - `provider_name`
+- `capability_probe_key`
 
 #### Usage Patterns
 
-- Used as a policy class for the Anthropic provider in the networking layer.
-- Called by higher-level code to perform each step of an API request lifecycle.
+- Used as a protocol policy in generic LLM networking code that expects static methods for each lifecycle step
+- Provides a uniform interface for Anthropic so that higher‑level machinery can be provider‑agnostic
+- Expected to be thread‑safe because it holds no state and all methods are stateless
 
 #### Member Functions
 
@@ -87,6 +89,20 @@ Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
 ```cpp
 auto (const int &) -> std::string;
+```
+
+##### `clore::net::anthropic::detail::Protocol::capability_probe_key`
+
+Declaration: `network/anthropic.cppm:717`
+
+Definition: `network/anthropic.cppm:717`
+
+Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
+
+###### Declaration
+
+```cpp
+auto (const int &, const int &) -> std::string;
 ```
 
 ##### `clore::net::anthropic::detail::Protocol::parse_response`
@@ -139,11 +155,7 @@ Declaration: `network/anthropic.cppm:651`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-常量 `clore::net::anthropic::detail::kAnthropicApiKeyEnv` 是一个 `constexpr std::string_view`，存储环境变量名称 `"ANTHROPIC_API_KEY"`。
-
-#### Usage Patterns
-
-- 作为环境变量名称传递给环境变量查询函数
+The variable `kAnthropicApiKeyEnv` is a `constexpr std::string_view` initialized with the string `"ANTHROPIC_API_KEY"`.
 
 ### `clore::net::anthropic::detail::kAnthropicBaseUrlEnv`
 
@@ -151,12 +163,7 @@ Declaration: `network/anthropic.cppm:650`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-Constant that holds the name of the environment variable used to configure the Anthropic API base URL.
-
-#### Usage Patterns
-
-- Environment variable lookup
-- URL configuration
+`clore::net::anthropic::detail::kAnthropicBaseUrlEnv` 是一个 `constexpr std::string_view` 常量，值为 `"ANTHROPIC_BASE_URL"`。它定义了一个环境变量名称，用于配置 Anthropic API 的基础 URL。
 
 ### `clore::net::anthropic::detail::kAnthropicVersion`
 
@@ -164,12 +171,11 @@ Declaration: `network/anthropic.cppm:652`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-A `constexpr std::string_view` constant `clore::net::anthropic::detail::kAnthropicVersion` initialized to `"2023-06-01"`, representing the Anthropic API version.
+A `constexpr std::string_view` constant that defines the Anthropic API version string.
 
 #### Usage Patterns
 
-- used as API version in request headers
-- referenced when creating Anthropic API calls
+- Used as API version identifier in HTTP requests
 
 ## Related Pages
 

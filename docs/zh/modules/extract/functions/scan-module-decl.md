@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::scanmoduledecl'
-description: '函数 clore::extract::scan_module_decl 利用 Clang 的依赖指令扫描器（clang::scanSourceForDependencyDirectives）对给定的文件内容进行快速模块声明分析，避免运行完整预处理器。内部首先将源文本解析为 tokens 和 directives 向量；若扫描失败则直接返回，不修改 ScanResult。随后遍历每个指令：对于 cxx_export_module_decl 或 cxx_module_decl 类型的指令，跳过 export 和 module 关键字，通过收集后续标识符（排除空白和纯标点）构建模块名称，并据此设置 result.module_name 和 result.is_interface_unit（仅 export module 表示接口单元）；对于 cxx_import_decl 类型的指令，跳过 import 关键字后收集导入名称，调用 normalize_partition_import 进行规范化，并在去重后加入 result.module_imports。该函数依赖 ScanResult 结构体字段和 normalize_partition_import 辅助函数，同时借助两个内联 lambda（is_whitespace_only 和 is_punctuation_only）辅助令牌分类。'
+description: '函数首先调用 clang::scanSourceForDependencyDirectives，将文件内容解析为令牌与指令列表；若扫描失败则直接返回。随后定义 is_whitespace_only 和 is_punctuation_only 两个辅助 lambda，用于识别令牌类型。遍历每条指令：对于 cxx_export_module_decl 或 cxx_module_decl，跳过 export 和 module 关键字，收集后续令牌（连接标识符、点、冒号）作为模块名称；遇到分号或纯标点时终止，并将纯标点情形视为全局模块片段。若收集到有效名称，则设置 result.module_name，并根据指令类型设置 result.is_interface_unit。对于 cxx_import_decl，跳过 import 关键字，收集后续令牌作为导入名称，调用 normalize_partition_import 进行规范化，并仅在 result.module_imports 中尚未存在时添加该导入。整个算法的核心依赖是 Clang 的依赖指令扫描基础设施，无需运行完整预处理器即可快速提取模块声明信息。'
 layout: doc
 template: doc
 ---
@@ -116,29 +116,27 @@ auto scan_module_decl(std::string_view file_content, ScanResult& result) -> void
 }
 ```
 
-函数 `clore::extract::scan_module_decl` 利用 Clang 的依赖指令扫描器（`clang::scanSourceForDependencyDirectives`）对给定的文件内容进行快速模块声明分析，避免运行完整预处理器。内部首先将源文本解析为 `tokens` 和 `directives` 向量；若扫描失败则直接返回，不修改 `ScanResult`。随后遍历每个指令：对于 `cxx_export_module_decl` 或 `cxx_module_decl` 类型的指令，跳过 `export` 和 `module` 关键字，通过收集后续标识符（排除空白和纯标点）构建模块名称，并据此设置 `result.module_name` 和 `result.is_interface_unit`（仅 `export module` 表示接口单元）；对于 `cxx_import_decl` 类型的指令，跳过 `import` 关键字后收集导入名称，调用 `normalize_partition_import` 进行规范化，并在去重后加入 `result.module_imports`。该函数依赖 `ScanResult` 结构体字段和 `normalize_partition_import` 辅助函数，同时借助两个内联 lambda（`is_whitespace_only` 和 `is_punctuation_only`）辅助令牌分类。
+函数首先调用 `clang::scanSourceForDependencyDirectives`，将文件内容解析为令牌与指令列表；若扫描失败则直接返回。随后定义 `is_whitespace_only` 和 `is_punctuation_only` 两个辅助 lambda，用于识别令牌类型。遍历每条指令：对于 `cxx_export_module_decl` 或 `cxx_module_decl`，跳过 `export` 和 `module` 关键字，收集后续令牌（连接标识符、点、冒号）作为模块名称；遇到分号或纯标点时终止，并将纯标点情形视为全局模块片段。若收集到有效名称，则设置 `result.module_name`，并根据指令类型设置 `result.is_interface_unit`。对于 `cxx_import_decl`，跳过 `import` 关键字，收集后续令牌作为导入名称，调用 `normalize_partition_import` 进行规范化，并仅在 `result.module_imports` 中尚未存在时添加该导入。整个算法的核心依赖是 Clang 的依赖指令扫描基础设施，无需运行完整预处理器即可快速提取模块声明信息。
 
 ## Side Effects
 
-- Modifies the `ScanResult` parameter by setting `module_name`, `is_interface_unit`, and `module_imports`.
-- Allocates memory for `std::string` and `std::vector` members of `ScanResult`.
+- Modifies the `ScanResult` object passed by reference, setting `module_name`, `is_interface_unit`, and appending to `module_imports`.
 
 ## Reads From
 
-- `file_content` (`string_view`) - source text of a translation unit.
-- `result` (`ScanResult`&) - reads `module_name` and `module_imports` for duplicate checking.
-- Directives and tokens produced by `clang::scanSourceForDependencyDirectives`.
+- `file_content` parameter (string view of file source)
+- `result.module_imports` member (to avoid duplicate entries)
 
 ## Writes To
 
-- `result.module_name` - set to the extracted module name.
-- `result.is_interface_unit` - set to `true` if `export module` declaration, else `false`.
-- `result.module_imports` - appended with normalized import names.
+- `result.module_name`
+- `result.is_interface_unit`
+- `result.module_imports`
 
 ## Usage Patterns
 
-- Called by `clore::extract::scan_file` to perform fast module scanning on source files.
-- Used as a lightweight alternative to full preprocessing for module dependency discovery.
+- Called by `clore::extract::scan_file` during source file scanning to populate module metadata.
+- Used as a lightweight alternative to full preprocessing for extracting module information.
 
 ## Called By
 

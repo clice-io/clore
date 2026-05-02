@@ -699,7 +699,7 @@ struct Protocol {
                 return std::unexpected(
                     LLMError(std::format("Anthropic request failed with HTTP {}: {}",
                                          raw_response.http_status,
-                                         raw_response.body)));
+                                         clore::net::detail::excerpt_for_error(raw_response.body))));
             }
             return std::unexpected(std::move(parsed.error()));
         }
@@ -712,6 +712,13 @@ struct Protocol {
 
     static auto provider_name() -> std::string_view {
         return "Anthropic";
+    }
+
+    static auto capability_probe_key(const clore::net::detail::EnvironmentConfig& environment,
+                                     const CompletionRequest& request) -> std::string {
+        return clore::net::make_capability_probe_key(provider_name(),
+                                                     environment.api_base,
+                                                     request.model);
     }
 };
 

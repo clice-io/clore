@@ -1,6 +1,6 @@
 ---
 title: 'clore::generate::cache::normalizetextforhashing'
-description: '该函数接受一个 std::string_view 并返回一个 std::string，用于将输入文本规范化为可预测、可重复的格式，以便后续用于哈希运算。调用者可以期望：对于内容相同但细微差异（如空白字符、大小写或标点）的两个输入，函数能生成相同的规范化输出，从而确保哈希键的一致性。此函数是 make_prompt_response_cache_key 内部流程的一部分，用于生成缓存键的组件。'
+description: '函数 clore::generate::cache::normalize_text_for_hashing 将输入的文本转换为适合哈希运算的规范化形式。它接受一个 std::string_view 并返回一个 std::string；调用者应传入需要保证哈希一致性的文本，例如在构造缓存键之前对提示或响应文本进行预处理。规范化后的输出是确定性的，对于逻辑上等价的不同输入（例如忽略大小写或空白差异），会生成相同的字符串，从而确保缓存查找的正确性。该函数不涉及外部状态，也不抛出异常，适用于性能敏感的路径。'
 layout: doc
 template: doc
 ---
@@ -21,12 +21,11 @@ Implementation: [`Module generate:cache`](../../../../../modules/generate/cache.
 auto (std::string_view) -> std::string;
 ```
 
-该函数接受一个 `std::string_view` 并返回一个 `std::string`，用于将输入文本规范化为可预测、可重复的格式，以便后续用于哈希运算。调用者可以期望：对于内容相同但细微差异（如空白字符、大小写或标点）的两个输入，函数能生成相同的规范化输出，从而确保哈希键的一致性。此函数是 `make_prompt_response_cache_key` 内部流程的一部分，用于生成缓存键的组件。
+函数 `clore::generate::cache::normalize_text_for_hashing` 将输入的文本转换为适合哈希运算的规范化形式。它接受一个 `std::string_view` 并返回一个 `std::string`；调用者应传入需要保证哈希一致性的文本，例如在构造缓存键之前对提示或响应文本进行预处理。规范化后的输出是确定性的，对于逻辑上等价的不同输入（例如忽略大小写或空白差异），会生成相同的字符串，从而确保缓存查找的正确性。该函数不涉及外部状态，也不抛出异常，适用于性能敏感的路径。
 
 ## Usage Patterns
 
-- called by `clore::generate::cache::make_prompt_response_cache_key` to normalize prompt or response text before hashing
-- used to ensure consistent cache keys regardless of whitespace variation
+- Called by `make_prompt_response_cache_key` to normalize input strings before combining into a cache key.
 
 ## Called By
 

@@ -1,6 +1,6 @@
 ---
 title: 'Module network'
-description: 'The network module provides the asynchronous networking infrastructure for interacting with large language model (LLM) providers, specifically Anthropic and OpenAI. It encapsulates provider detection from environment variables, configuration validation, and the initiation of non‑blocking LLM requests and completion operations. The public interface consists of three key functions: validate_llm_provider_environment ensures the runtime environment is correctly set up, call_llm_async dispatches an LLM request, and call_completion_async handles completion‑style calls. All asynchronous operations are scheduled on a kota::event_loop and return an integer handle or status code. Internally, the module uses a Provider enum (with Anthropic and OpenAI members), environment variable constants for API keys and base URLs, and helper functions to detect the active provider and route requests accordingly.'
+description: 'The network module provides a portable abstraction for sending asynchronous requests to large language model (LLM) providers, currently supporting OpenAI and Anthropic. Its public interface consists of three primary functions: call_llm_async and call_completion_async for initiating asynchronous LLM and generic completion requests on a kota::event_loop, and validate_llm_provider_environment for checking that necessary environment variables (such as API keys and base URLs) are properly configured before making any network calls.'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,9 @@ template: doc
 
 ## Summary
 
-The `network` module provides the asynchronous networking infrastructure for interacting with large language model (LLM) providers, specifically Anthropic and `OpenAI`. It encapsulates provider detection from environment variables, configuration validation, and the initiation of non‑blocking LLM requests and completion operations. The public interface consists of three key functions: `validate_llm_provider_environment` ensures the runtime environment is correctly set up, `call_llm_async` dispatches an LLM request, and `call_completion_async` handles completion‑style calls. All asynchronous operations are scheduled on a `kota::event_loop` and return an integer handle or status code. Internally, the module uses a `Provider` enum (with `Anthropic` and `OpenAI` members), environment variable constants for API keys and base `URLs`, and helper functions to detect the active provider and route requests accordingly.
+The `network` module provides a portable abstraction for sending asynchronous requests to large language model (LLM) providers, currently supporting `OpenAI` and Anthropic. Its public interface consists of three primary functions: `call_llm_async` and `call_completion_async` for initiating asynchronous LLM and generic completion requests on a `kota::event_loop`, and `validate_llm_provider_environment` for checking that necessary environment variables (such as API keys and base `URLs`) are properly configured before making any network calls.
+
+Beneath this surface, the module owns the logic for detecting and selecting an LLM provider from environment settings, dispatching completion events, and furnishing human-readable labels for each supported provider. Internal enumerations (`Provider`) and helper functions manage provider-specific configuration and environment checks, while the public functions return integer handles or status codes that allow callers to track operations and verify readiness.
 
 ## Imports
 
@@ -30,24 +32,35 @@ Definition: `network/network.cppm:150`
 
 Declaration: [`Namespace clore::net`](../../namespaces/clore/net/index.md)
 
-The implementation of `clore::net::call_completion_async` follows a straightforward sequential coroutine flow. It first invokes the internal helper `detect_provider_from_environment` to determine the LLM provider (e.g., `Provider::Anthropic` or `Provider::OpenAI`) by inspecting environment variables such as `kAnthropicApiKeyEnv` and `kOpenAIApiKeyEnv`. If provider detection fails (returns an error), the function immediately `co_awaits` `kota::fail` to propagate the error. Otherwise, it moves the detected `provider` and delegates the actual network request to `dispatch_completion`, passing the provider, the `CompletionRequest`, and the `kota::event_loop`. The result of this dispatch is then wrapped through `detail::unwrap_caught_result` to convert a cancellation (via `catch_cancel`) into a structured `LLMError` with a descriptive message, before being `co_returned` as a `kota::task<CompletionResponse, LLMError>`.
+The function first determines the appropriate LLM provider by calling `detect_provider_from_environment()`, which returns an expected `Provider` value. If this detection fails (i.e., no compatible environment variables are set), it immediately `co_awaits` `kota::fail` with the contained error, propagating the failure as a `kota::task<CompletionResponse, LLMError>`. Otherwise, it moves the resolved `Provider` into a local variable and invokes `dispatch_completion` with that provider, the forwarded `CompletionRequest`, and the given `kota::event_loop`. The resulting coroutine is chained with `.catch_cancel()` to intercept cancellation, and the final result is unwrapped via `detail::unwrap_caught_result`, which maps a cancellation into a descriptive `LLMError`.
 
-Key dependencies include the anonymous-namespace helper functions `detect_provider_from_environment`, `dispatch_completion`, and `detail::unwrap_caught_result`. The `detect_provider_from_environment` function itself relies on `has_provider_env` and `has_nonempty_env` to check for provider‑specific environment variables like `kAnthropicBaseUrlEnv` and `kOpenAIBaseUrlEnv`. The overall control flow is entirely linear: environment validation first, then provider‑aware completion dispatch, each step using coroutine `co_await` or `co_return` for asynchronous error handling.
+Internally, control flow is entirely coroutine‑based, depending on the `kota::task` framework for asynchronous execution, error propagation, and cancellation handling. The key dependencies are the anonymous‑namespace helpers `detect_provider_from_environment`, `dispatch_completion`, and the utility `unwrap_caught_result`, which together encapsulate provider selection and the actual network request logic.
 
 #### Side Effects
 
-- Initiates an asynchronous network request via `dispatch_completion`.
+- Reads environment variables via `detect_provider_from_environment`
+- Moves the `request` parameter, transferring ownership
+- Initiates asynchronous network I/O via `dispatch_completion`
+- May modify internal state of the event loop
 
 #### Reads From
 
-- Environment variables via `detect_provider_from_environment`
-- `CompletionRequest` parameter `request`
-- `kota::event_loop` reference `loop`
+- `request` parameter (moved from)
+- `loop` parameter
+- Environment variables (implied by `detect_provider_from_environment`)
+- Possibly global or static state in `dispatch_completion`
+
+#### Writes To
+
+- Network output (send request)
+- Event loop internal state
+- Ownership transfer of `request` (move)
 
 #### Usage Patterns
 
-- Used to start an async LLM completion request.
-- Called within a coroutine context where `co_await` is available.
+- Called to asynchronously perform an LLM completion
+- Used in coroutine contexts with `co_await`
+- Typically invoked when a user issues a completion request
 
 ### `clore::net::call_llm_async`
 
@@ -57,24 +70,32 @@ Definition: `network/network.cppm:126`
 
 Declaration: [`Namespace clore::net`](../../namespaces/clore/net/index.md)
 
-The implementation of `clore::net::call_llm_async` begins by invoking the anonymous-namespace helper `detect_provider_from_environment()`, which inspects environment variables (such as `kAnthropicApiKeyEnv` and `kOpenAIApiKeyEnv`) to determine the intended LLM provider. If detection fails (e.g., no recognized API key is set), the function propagates the error via `kota::fail`. On success, it retrieves a human-readable label for the provider using `provider_label`, then delegates the actual asynchronous request to `request_provider_text_async`. That function is called with a completion lambda that maps a `CompletionRequest` to a `CompletionResponse` by calling `dispatch_completion`, which handles the per-provider network interaction (e.g., Anthropic or `OpenAI`). The entire coroutine chain is wrapped with `.or_fail()` to convert internal errors into the expected `LLMError` type. The returned `kota::task` yields a plain `std::string` upon success.
+The implementation of `clore::net::call_llm_async` begins by invoking the anonymous‑namespace helper `detect_provider_from_environment` to determine which LLM provider (e.g., `Provider::OpenAI` or `Provider::Anthropic`) should handle the request, based on the presence and non‑emptiness of environment variables such as `kAnthropicApiKeyEnv` or `kOpenAIApiKeyEnv`. If detection fails, the function immediately fails the coroutine via `kota::fail`. On success, it calls `provider_label` to obtain a human‑readable label for the provider, then passes control to `request_provider_text_async`.
+
+The central control flow delegates the actual work to `request_provider_text_async`, which is given a lambda that, for each completion request, calls `dispatch_completion` with the detected `provider`, the request data, and the event loop. The lambda uses `or_fail()` to convert the result of `dispatch_completion` into the expected error type. The outer call to `request_provider_text_async` is also chained with `.or_fail()`, ensuring that any error from the provider‑specific dispatch propagates upward as the final result of `call_llm_async`. Key internal dependencies include the environment‑detection logic (`detect_provider_from_environment`, `has_nonempty_env`, `has_provider_env`) and the provider‑specific dispatch function `dispatch_completion`, which ultimately selects the correct HTTP endpoint and serialization logic based on the `Provider` enum member.
 
 #### Side Effects
 
-- Initiates HTTP request via `dispatch_completion`
-- Reads environment variables for provider detection
+- performs asynchronous network I/O via `dispatch_completion`
+- reads environment variables to detect the LLM provider
+- may propagate or create `LLMError` instances on failure
 
 #### Reads From
 
-- model parameter
-- `system_prompt` parameter
-- request parameter
-- environment variables for provider detection
+- environment variables via `detect_provider_from_environment`
+- parameters: `model`, `system_prompt`, `request`
+- the event loop reference `loop`
+
+#### Writes To
+
+- returns a `kota::task` whose eventual resolution writes either a `std::string` or an `LLMError`
+- may write to error state via `co_await` of `kota::fail`
 
 #### Usage Patterns
 
-- Used for async text completion requests to LLM providers
-- Called within event loop coroutines
+- initiate an asynchronous LLM completion from a coroutine context
+- call with a `PromptRequest`, model name, system prompt, and an event loop
+- use as part of a higher-level async pipeline that consumes `kota::task<std::string, LLMError>`
 
 ### `clore::net::validate_llm_provider_environment`
 
@@ -84,7 +105,9 @@ Definition: `network/network.cppm:118`
 
 Declaration: [`Namespace clore::net`](../../namespaces/clore/net/index.md)
 
-The function `clore::net::validate_llm_provider_environment` delegatess all validation logic to the anonymous‑namespace helper `detect_provider_from_environment`. This helper probes for a supported provider by checking environment variables such as `kAnthropicApiKeyEnv`, `kAnthropicBaseUrlEnv`, `kOpenAIApiKeyEnv`, and `kOpenAIBaseUrlEnv` via `has_provider_env` and `has_nonempty_env`. It returns a `std::expected<void, LLMError>` that either indicates success or carries an error describing which provider environment is misconfigured or absent. The outer function simply propagates that result without additional processing, making its control flow a straight pass‑through to the detection step.
+The implementation of `clore::net::validate_llm_provider_environment` delegates entirely to the anonymous‑namespace helper `detect_provider_from_environment`. This inner function probes the process environment for known LLM provider credentials and base‑URL variables (such as `kAnthropicApiKeyEnv`, `kOpenAIApiKeyEnv`, `kAnthropicBaseUrlEnv`, and `kOpenAIBaseUrlEnv`) using `has_provider_env` and `has_nonempty_env`. It returns a `std::expected` over an internally defined `Provider` enum (`Provider::Anthropic` or `Provider::OpenAI`) on success, or an `LLMError` if no supported provider’s environment variables are set.
+
+The outer function captures the `provider_result` from `detect_provider_from_environment` and, if it is not a valid value, immediately returns `std::unexpected` with the moved error. A successful detection yields an empty `std::expected<void, LLMError>`. No other control flow or dependency is present; every possible path terminates at either a successful void result or an error propagation.
 
 #### Side Effects
 
@@ -92,15 +115,14 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- environment variables via `detect_provider_from_environment()`
+- environment variables (through `detect_provider_from_environment`)
 
 #### Usage Patterns
 
-- Called to check whether the LLM provider environment is properly configured before making API calls
+- early validation before LLM operations
+- ensuring provider configuration exists
 
 ## Internal Structure
 
-The `network` module is implemented as a C++20 module in `network.cppm` and exposes three public entry points: `validate_llm_provider_environment`, `call_llm_async`, and `call_completion_async`. These form a thin asynchronous API for interacting with large language model (LLM) providers (Anthropic and `OpenAI`). The module imports the standard library and relies on an external `kota::event_loop` abstraction for scheduling non‑blocking operations.
-
-Internally, the module uses an anonymous namespace to encapsulate the provider detection and dispatch machinery. An enumeration `Provider` distinguishes between `Anthropic` and `OpenAI`, and a set of static helpers—such as `detect_provider_from_environment`, `has_provider_env`, `has_nonempty_env`, `provider_label`, and `dispatch_completion`—handle environment variable validation, provider selection, and generic completion dispatching. The template function `request_provider_text_async` bridges the public API to the concrete provider‑specific logic. This layering keeps the public interface clean while allowing the implementation to be extended with additional providers or backends without affecting callers.
+The `network` module provides asynchronous network abstractions for LLM interactions, importing only the C++ standard library. Its public interface consists of `call_llm_async`, `call_completion_async`, and `validate_llm_provider_environment`, each accepting a `kota::event_loop` reference to drive completion callbacks. Internally, the module is decomposed into an anonymous namespace that encapsulates provider-specific logic: an enumeration of supported providers (`Anthropic`, `OpenAI`), environment variable detection and validation functions, a provider label utility, and a generic `request_provider_text_async` template for dispatching requests. This layered design isolates provider detection and request assembly from the public API, allowing new providers to be added by extending the internal helpers without altering the external interface.
 

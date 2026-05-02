@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:model'
-description: 'The generate:model module defines the core data structures and analysis models that drive the documentation generation pipeline. It owns the types representing page plans (PagePlan, PagePlanSet, GeneratedPage), symbol analyses (FunctionAnalysis, TypeAnalysis, VariableAnalysis), error conditions (GenerateError, RenderError, PathError), and the stateful link resolver (LinkResolver) used to produce cross‑references in generated output. Enumerations such as PageType and PromptKind categorize pages and AI‑generated content requests, while utility functions like compute_page_path, make_symbol_target_key, and the find_*_analysis family provide the public API for building, resolving, and inspecting the document‑generation model.'
+description: 'The generate:model module defines the core data types and supporting functions for the documentation generation pipeline. It owns the intermediate representation used to plan, analyze, and produce output pages, including enums like PageType and PromptKind, data structures such as PagePlan, PageIdentity, GeneratedPage, and per‑symbol analysis containers (FunctionAnalysis, TypeAnalysis, VariableAnalysis, and SymbolAnalysisStore), and infrastructure types for cross‑reference resolution (LinkResolver), error handling (GenerateError, RenderError, PathError), and prompt requests (PromptRequest, MarkdownFragmentResponse). The module also provides public utility functions to query, compute, and transform these models, such as retrieving specific analyses, computing page paths, building link resolvers, classifying prompts, and validating output paths. This set of types and functions forms the contract between earlier extraction phases and later rendering phases within the generation system.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-The `generate:model` module defines the core data structures and analysis models that drive the documentation generation pipeline. It owns the types representing page plans (`PagePlan`, `PagePlanSet`, `GeneratedPage`), symbol analyses (`FunctionAnalysis`, `TypeAnalysis`, `VariableAnalysis`), error conditions (`GenerateError`, `RenderError`, `PathError`), and the stateful link resolver (`LinkResolver`) used to produce cross‑references in generated output. Enumerations such as `PageType` and `PromptKind` categorize pages and AI‑generated content requests, while utility functions like `compute_page_path`, `make_symbol_target_key`, and the `find_*_analysis` family provide the public API for building, resolving, and inspecting the document‑generation model.
-
-The module’s public implementation scope covers all symbol analysis storage (`SymbolAnalysisStore`), page identity and planning logic (`PageIdentity`), markdown fragment generation helpers (`analysis_overview_markdown`, `analysis_details_markdown`, `analysis_markdown`), and the key‑based identification and caching infrastructure (`SymbolTargetKeyView`, `SourceRelativeCache`). It serves as the authoritative representation of the generation state, bridging the extraction phase and the rendering phase by supplying a rich set of types that describe what pages to produce and how symbols should be documented.
+The `generate:model` module defines the core data types and supporting functions for the documentation generation pipeline. It owns the intermediate representation used to plan, analyze, and produce output pages, including enums like `PageType` and `PromptKind`, data structures such as `PagePlan`, `PageIdentity`, `GeneratedPage`, and per‑symbol analysis containers (`FunctionAnalysis`, `TypeAnalysis`, `VariableAnalysis`, and `SymbolAnalysisStore`), and infrastructure types for cross‑reference resolution (`LinkResolver`), error handling (`GenerateError`, `RenderError`, `PathError`), and prompt requests (`PromptRequest`, `MarkdownFragmentResponse`). The module also provides public utility functions to query, compute, and transform these models, such as retrieving specific analyses, computing page paths, building link resolvers, classifying prompts, and validating output paths. This set of types and functions forms the contract between earlier extraction phases and later rendering phases within the generation system.
 
 ## Imports
 
@@ -42,12 +40,12 @@ Definition: `generate/model.cppm:81`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::FunctionAnalysis` is a plain data aggregate that holds the results of analyzing a single function. Its fields capture both high‑level textual summaries (`overview_markdown`, `details_markdown`) and a fine‑grained breakdown of side‑effect behaviour. The boolean `has_side_effects` acts as a pre‑computed flag, and the vectors `side_effects`, `reads_from`, `writes_to`, and `usage_patterns` enumerate the specific resources or patterns discovered. An important invariant is that `has_side_effects` is true if and only if `side_effects` is non‑empty; similarly, entries in `reads_from`, `writes_to`, and `usage_patterns` must correspond to identifiers recorded during the analysis pass. Because the struct is a simple aggregate with user‑provided default member initializers (e.g. `has_side_effects = false`), it is typically list‑initialized or aggregate‑initialised directly, with no custom constructors or member functions.
+The struct aggregates analysis results for a function, with a set of fields that capture distinct aspects. The boolean member `has_side_effects` defaults to `false`, and an invariant requires that when it is `false` the vector `side_effects` remains empty, though the struct does not enforce this automatically. The string members `overview_markdown` and `details_markdown` hold descriptive text, while the string vectors `reads_from`, `writes_to`, and `usage_patterns` enumerate external resources, modified state, and observed invocation patterns. The implementation is a plain aggregate without custom constructors, destructors, or member functions, so all fields are default-initialized as per their types and the struct supports trivial copy, move, and aggregate initialization.
 
 #### Invariants
 
-- `overview_markdown` and `details_markdown` are expected to contain markdown-formatted text.
-- `has_side_effects` is `true` whenever `side_effects` is non-empty, but this relationship is not enforced by the type.
+- All members are public and mutable.
+- `has_side_effects` defaults to `false` and is independent of the contents of `side_effects`.
 
 #### Key Members
 
@@ -61,9 +59,7 @@ The struct `clore::generate::FunctionAnalysis` is a plain data aggregate that ho
 
 #### Usage Patterns
 
-- Populated by analysis passes that examine function behavior.
-- Consumed by documentation generators to produce human-readable function descriptions.
-- Used to determine if a function has side effects or which resources it accesses.
+- The struct is used as a cacheable result container for per-function analysis, populated by analysis passes and consumed by documentation generation.
 
 ### `clore::generate::GenerateError`
 
@@ -73,7 +69,20 @@ Definition: `generate/model.cppm:69`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::GenerateError` is an implementation detail consisting of a single public data member `message` of type `std::string`. It serves as a lightweight error representation, likely used to convey a textual error description. No additional constructors, assignment `operator`s, or methods are defined beyond the implicitly generated ones, making the struct a simple aggregate. Its invariants are limited to whatever invariants the `std::string` member maintains.
+The structure is minimal, consisting solely of a public `std::string` member named `message`. No constructors, assignment `operator`s, or other special members are explicitly declared, so the compiler implicitly provides them (default constructor, copy/move constructors, copy/move assignment, destructor). The sole invariant is that `message` holds a valid `std::string` at all times; it is the responsibility of the code that constructs or modifies a `clore::generate::GenerateError` to ensure the string content accurately describes the error condition. There are no additional constraints, allocator customization, or non‑trivial member functions to manage.
+
+#### Invariants
+
+- Message contains a descriptive error string
+
+#### Key Members
+
+- `message` - a `std::string` holding the error description
+
+#### Usage Patterns
+
+- Constructed with an error description when a generation fails
+- Likely thrown as an exception or returned from a function indicating an error
 
 ### `clore::generate::GeneratedPage`
 
@@ -83,24 +92,24 @@ Definition: `generate/model.cppm:55`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::GeneratedPage` is a simple aggregate containing three `std::string` members: `title`, `relative_path`, and `content`. Each member is default-initialized to an empty string, ensuring that every instance starts in a well-defined state with no pointer or memory hazards. The struct imposes no invariants beyond those of its string members; all fields are publicly accessible and can be modified independently. Because it provides no custom constructors, assignment `operator`s, or member functions, its implementation is trivial and relies entirely on the compiler-generated special member functions.
+The struct `clore::generate::GeneratedPage` is a plain data aggregate that bundles the results of page generation. It holds three `std::string` fields: `title`, `relative_path`, and `content`, all default‑initialized to empty strings. As a lightweight value type, it transfers generated page data between pipeline stages. The intended invariant is that `relative_path` is a valid relative file path and `content` contains the rendered page output, though no runtime checks enforce this contract. Its simplicity supports straightforward composition and manipulation of generated pages without additional overhead.
 
 #### Invariants
 
-- All string members are default-initialized to empty.
-- No invariants are enforced beyond standard string validity.
+- all fields are `std::string` values, possibly empty
+- the struct has no other invariants beyond the default string invariants
 
 #### Key Members
 
-- `title` – the display title of the page
-- `relative_path` – the target file path relative to output root
-- `content` – the rendered HTML or text content
+- `title` – the page title
+- `relative_path` – the relative file path for the generated page
+- `content` – the full page content
 
 #### Usage Patterns
 
-- Created and filled by page generators.
-- Consumed by output writers that serialize to disk.
-- Passed by value or const reference in generation pipelines.
+- constructed using aggregate initialization `GeneratedPage{...}`
+- fields are read or modified directly to configure a generated page
+- passes completed page data from generation logic to output or serialization
 
 ### `clore::generate::GenerationSummary`
 
@@ -110,12 +119,15 @@ Definition: `generate/model.cppm:61`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The `clore::generate::GenerationSummary` struct aggregates counters that track key performance metrics during a generation pass. Every data member is a `std::size_t` initialized to zero, ensuring that a default‑constructed instance represents a clean, baseline state. The fields `written_output_count` records the number of output files or documents produced; `symbol_analysis_cache_hits` and `symbol_analysis_cache_misses` measure cache efficiency for symbol analysis lookups; and `page_prompt_cache_hits` and `page_prompt_cache_misses` capture analogous statistics for page prompt caching. The invariant that all counters start at zero and are only incremented over the lifetime of a generation run provides a simple, unidirectional accumulation model. No explicit constructors or mutators are needed beyond the default member initializers and the natural increment operations external to the struct.
+The struct `clore::generate::GenerationSummary` is an aggregate data container that accumulates counters tracking the performance and output of the generation process. Its five public fields — `written_output_count`, `symbol_analysis_cache_hits`, `symbol_analysis_cache_misses`, `page_prompt_cache_hits`, and `page_prompt_cache_misses` — are all of type `std::size_t` and are default‑initialized to zero. This guarantees that every new instance starts with all metrics at a neutral baseline, and the use of unsigned integer types enforces the non‑negative invariant that these counters must never hold negative values.
+
+Because the struct has no explicit constructors, assignment `operator`s, or non‑static member functions, its behavior is entirely defined by the compiler‑generated special members. The sole internal invariant is that each counter may only increase through external mutation; no member implementation provides higher‑level logic such as resetting or summing. This design makes `GenerationSummary` a lightweight, trivially copyable record that can be safely aggregated across multiple generation runs, typically by copying or adding the counters of separate summary instances.
 
 #### Invariants
 
-- All fields are non-negative integers of type `std::size_t`.
-- Fields are default-initialized to zero.
+- All counter members are non-negative integers.
+- Every counter begins at zero on default construction.
+- Cache hit and miss counts for a given category are independent (no enforced relationship).
 
 #### Key Members
 
@@ -127,8 +139,8 @@ The `clore::generate::GenerationSummary` struct aggregates counters that track k
 
 #### Usage Patterns
 
-- Used to accumulate generation and caching statistics.
-- Likely populated by generation logic and inspected for performance or debugging purposes.
+- Instances are populated during generation to record performance metrics.
+- Consumers read these values to report or log generation statistics.
 
 ### `clore::generate::LinkResolver`
 
@@ -138,14 +150,13 @@ Definition: `generate/model.cppm:174`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The `clore::generate::LinkResolver` holds four `std::unordered_map<std::string, std::string>` lookup tables: `name_to_path` for general entity names, `namespace_to_path` for qualified namespace names, `module_to_path` for module names, and `page_id_to_title` for page identifiers. Each table maps a string key to a relative output path or title string, and is populated before resolution. All `resolve`, `resolve_namespace`, `resolve_module`, and `resolve_page_title` member functions are `const`-qualified and `[[nodiscard]]`; they perform a `find` in the corresponding map and return a `const std::string*`, either pointing to the stored value or `nullptr` if the key is absent. This design avoids copying strings while clearly indicating lookup failure through the nullable pointer.
+The struct stores four separate `std::unordered_map<std::string, std::string>` fields: `name_to_path`, `namespace_to_path`, `module_to_path`, and `page_id_to_title`. Each map holds a distinct category of entity name (e.g., a type name, a namespace, a module, or a page identifier) as key and its corresponding relative output path or page title as value. The lookup methods—`resolve`, `resolve_namespace`, `resolve_module`, and `resolve_page_title`—each perform a hash lookup on the appropriate map and return a `const std::string*` pointing to the stored string if found, or `nullptr` otherwise. This design keeps all lookups O(1) average-case and prevents accidental cross-category mapping. The maps are typically populated externally before resolution begins; the struct does not modify them during its lifetime.
 
 #### Invariants
 
-- Maps are populated before any resolve call.
-- Resolve methods are const and do not modify maps.
-- Each key maps to at most one path or title.
-- Returned pointer is valid as long as the map is not modified.
+- Each `unordered_map` is keyed by a string representing an entity name, page ID, or similar identifier.
+- All lookup methods return `nullptr` when the key is not present in the respective map.
+- The maps are read-only after construction; no mutating methods are provided.
 
 #### Key Members
 
@@ -160,9 +171,9 @@ The `clore::generate::LinkResolver` holds four `std::unordered_map<std::string, 
 
 #### Usage Patterns
 
-- Populated by other parts of the codebase with entity-to-path mappings.
-- Called during markdown generation to resolve links for entities.
-- Used to look up paths for namespaces, modules, and page identifiers.
+- Used by link generation code to resolve entity names to relative paths for markdown cross-reference links.
+- Typically populated by a builder component that collects namespace, module, and type information.
+- Queried via the four `resolve*` methods during documentation page generation.
 
 #### Member Functions
 
@@ -242,21 +253,21 @@ Definition: `generate/model.cppm:77`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::MarkdownFragmentResponse` is implemented as a plain aggregate type with a single public data member `markdown` of type `std::string`. This design imposes no invariants beyond those inherent to the string itself, allowing direct aggregate initialization and assignment. The `markdown` field is intended to hold the generated Markdown content, and the struct serves as a lightweight, transparent container that can be easily constructed, moved, or copied without additional logic. No special member functions are defined, so the compiler‑generated defaults handle all object lifecycle operations.
+The struct `clore::generate::MarkdownFragmentResponse` is an aggregate type consisting of a single public data member `markdown` of type `std::string`. It serves as a lightweight container for the generated markdown content. The struct imposes no structural invariants beyond the standard validity of the underlying string; any content that constitutes valid markup or plain text is acceptable. As an aggregate, it supports direct member initialization and structured bindings, enabling straightforward construction and deconstruction without additional runtime overhead or validation.
 
 #### Invariants
 
-- The `markdown` string may be empty or contain valid markdown.
-- No other constraints are implied by the evidence.
+- No documented invariants; the struct is trivially copyable and movable.
+- The `markdown` member holds any valid `std::string` value.
 
 #### Key Members
 
-- `markdown`
+- `std::string markdown`
 
 #### Usage Patterns
 
-- Used as the return type for functions that generate Markdown fragments.
-- Other code can directly access the `markdown` member to obtain the generated text.
+- Used as a return type for functions that produce markdown fragments.
+- Can be aggregate-initialized with a string literal or `std::string`.
 
 ### `clore::generate::PageIdentity`
 
@@ -266,11 +277,12 @@ Definition: `generate/model.cppm:207`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::PageIdentity` is a flat aggregate of four data members that together identify a generated documentation page. Its internal structure consists of a `PageType` enumerator `page_type` (defaulting to `PageType::File`), a `normalized_owner_key` string for recording the owning entity's key, a `qualified_name` string holding the fully qualified name, and a `source_relative_path` string storing the path relative to the source root. No invariants are enforced beyond those provided by the default member initializers, making it a plain data carrier. The `normalized_owner_key` and `qualified_name` fields are expected to be non-empty for most page identities, while `source_relative_path` may be empty for synthetic pages.
+The struct `clore::generate::PageIdentity` is a plain aggregate that bundles four fields to represent the identity of a generated documentation page. Its internal structure consists of `page_type` (a `PageType` enumerator defaulting to `PageType::File`), `normalized_owner_key`, `qualified_name`, and `source_relative_path`, all of which are `std::string` defaulting to empty. The key invariant is that `qualified_name` and `source_relative_path` together uniquely identify a page within a module; `normalized_owner_key` may be empty for pages that are not nested under an owner. No custom constructors, destructors, or member functions are defined, so the struct relies entirely on default member initializers and aggregate initialization. This design allows callers to construct a `PageIdentity` using brace initiation or designated initializers without exposing any internal logic beyond the field definitions.
 
 #### Invariants
 
-- Fields are default-initialized; `page_type` defaults to `PageType::File`, string fields to empty.
+- `page_type` should be a valid member of the `PageType` enumeration
+- All string members may be empty unless set externally
 
 #### Key Members
 
@@ -281,8 +293,7 @@ The struct `clore::generate::PageIdentity` is a flat aggregate of four data memb
 
 #### Usage Patterns
 
-- Used as a data transfer object to carry page identity information during documentation generation.
-- Likely constructed and passed to other components that generate or index pages.
+- Not evident from provided context; used as a data container for page identification
 
 ### `clore::generate::PagePlan`
 
@@ -292,13 +303,13 @@ Definition: `generate/model.cppm:39`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The `clore::generate::PagePlan` struct is an internal aggregate that holds all metadata and configuration for a single page to be generated. Its fields are all default-initialized: `page_id` and `title` are empty strings, `page_type` defaults to `PageType::File`, `relative_path` is an empty string, and the four vector fields (`owner_keys`, `depends_on_pages`, `linked_pages`, `prompt_requests`) are initially empty. The `depends_on_pages` and `linked_pages` vectors encode the page’s position in the dependency and cross‑reference graph, while `prompt_requests` stores the collection of `PromptRequest` objects that will drive content generation. `owner_keys` records authorship or ownership identifiers, and `relative_path` holds the intended output path. The struct itself imposes no invariants beyond the default values; validation and well‑formedness constraints (such as uniqueness of `relative_path` or acyclic dependency relationships) are enforced externally during the planning phase. All members are directly settable, making `PagePlan` a straightforward data carrier between the planning and generation stages.
+The struct `clore::generate::PagePlan` is a data‑carrying aggregate that captures all metadata and configuration needed to generate a single page. The core fields fall into three categories: identification and navigation (e.g. `page_id`, `title`, `relative_path`); dependency and linkage lists (`depends_on_pages` and `linked_pages`); and generation‑specific data (`prompt_requests` and `owner_keys`). The `page_id` is expected to be unique across plans, and the `relative_path` must be consistent with the output directory structure. `depends_on_pages` encodes a topological ordering constraint, while `prompt_requests` holds the sequence of LLM or template calls required to produce the page content. All vector fields are empty by default, and `page_type` defaults to `PageType::File`, making a minimal plan valid only when `page_id`, `title`, and `relative_path` are subsequently set before use.
 
 #### Invariants
 
-- `page_id` uniquely identifies the page
-- `page_type` defaults to `PageType::File`
-- vectors are initially empty
+- `page_type` defaults to `PageType::File` if not otherwise set.
+- All string and vector fields are default-initialized to empty values.
+- The struct itself does not enforce inter-field consistency; it is a plain aggregate.
 
 #### Key Members
 
@@ -313,9 +324,9 @@ The `clore::generate::PagePlan` struct is an internal aggregate that holds all m
 
 #### Usage Patterns
 
-- populated by generation frontend
-- consumed by page generator
-- stores inter-page dependencies and prompt specifications
+- Used as a data container to specify all attributes needed to generate a page.
+- Consumed by page generation logic to determine the page's identity, dependencies, and content requests.
+- Likely populated by other components (e.g., parsing, planning) before being passed to generation.
 
 ### `clore::generate::PagePlanSet`
 
@@ -325,20 +336,22 @@ Definition: `generate/model.cppm:50`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::PagePlanSet` consists of two public data members: `plans`, a `std::vector<PagePlan>`, and `generation_order`, a `std::vector<std::string>`. These two vectors are maintained as parallel sequences: the element at index `i` in `generation_order` records the identifier (typically a page name) that corresponds to the plan at the same index in `plans`. This design couples the ordered sequence of generated pages with their associated plan objects, allowing callers to iterate or index them together. The implicit default constructor initializes both vectors to empty, which is the only valid starting state; no invariants are enforced beyond the implicit correspondence of indices, which must be preserved by any code that adds or removes elements in tandem.
+The internal structure of `clore::generate::PagePlanSet` consists of two parallel containers: `plans`, a vector of `PagePlan` objects, and `generation_order`, a vector of strings. The `plans` member stores the actual page plan data, while `generation_order` holds the sequence of plan identifiers—typically page names or keys—that defines the order in which the plans should be generated.
+
+A key invariant is that the two vectors are maintained in corresponding order: the string at index `i` in `generation_order` identifies the plan at the same index `i` in `plans`. This alignment ensures that iterating through `generation_order` yields a deterministic ordering of plans without requiring a separate key lookup. No additional state or synchronization logic is present; the struct acts as a simple aggregate that bundles the generation sequence with its associated plan data.
 
 #### Invariants
 
-- plans and `generation_order` may be empty
+- No explicit invariants are provided in the evidence.
 
 #### Key Members
 
-- plans
-- `generation_order`
+- `plans` – the container of `PagePlan` instances
+- `generation_order` – a sequence of strings tracking generation order
 
 #### Usage Patterns
 
-- used to store page plans and their generation order
+- No usage patterns are shown in the evidence.
 
 ### `clore::generate::PageType`
 
@@ -348,24 +361,26 @@ Definition: `generate/model.cppm:9`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The `clore::generate::PageType` enum is defined with an underlying type of `std::uint8_t` to reduce memory footprint in the generation pipeline. The four enumerators (`Index`, `Module`, `Namespace`, `File`) form a closed set of page categories, and each value uniquely identifies the kind of documentation page being produced. No implicit ordering invariants are imposed beyond the exclusivity of each enumerator; the internal logic relies on these values to dispatch to appropriate page‑building routines or to influence template selection during code generation.
+The enumeration `clore::generate::PageType` is defined as a scoped enumeration with underlying type `std::uint8_t`, ensuring a compact storage footprint. Its four enumerators—`Index`, `Module`, `Namespace`, and `File`—are declared in that specific order. This ordering encodes an implicit priority or processing sequence used internally: `Index` appears first, followed by `Module`, `Namespace`, and finally `File`. The integer values assigned by the compiler therefore increase in that order, which may be exploited for ordered iteration, comparison, or dispatch in page-generation logic. No other members or operations are defined, so the enumeration serves purely as a fixed set of discriminants for categorizing generated pages.
 
 #### Invariants
 
-- Each enumerator represents a distinct page type.
-- The enum is scoped (`enum class`), so values must be qualified with `PageType::`.
+- Only four distinct page types exist
+- Each enumerator maps to a unique `std::uint8_t` value
+- The enum is stored in `uint8_t` for space efficiency
 
 #### Key Members
 
-- `PageType::Index`
-- `PageType::Module`
-- `PageType::Namespace`
-- `PageType::File`
+- `clore::generate::PageType::Index`
+- `clore::generate::PageType::Module`
+- `clore::generate::PageType::Namespace`
+- `clore::generate::PageType::File`
 
 #### Usage Patterns
 
-- Used to select or identify the type of a page during documentation generation.
-- May be used in switch statements or as a parameter to generation functions.
+- Used as a parameter or field to indicate the kind of page being generated
+- Switched on to produce different layout or content logic
+- Passed to page creation functions to specialize output
 
 #### Member Variables
 
@@ -425,21 +440,21 @@ Definition: `generate/model.cppm:203`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::PathError` is a simple wrapper around a `std::string` member named `message`. No special invariants are enforced by the type itself; the `message` is expected to be populated with a human-readable description of the error that occurred during path generation. The implementation is trivial, as the struct has no user‑defined constructors, destructors, or member functions – it relies on the default compiler‑generated special members. There are no additional data members or base classes, making `PathError` a straightforward aggregate that serves only to convey error information.
+The struct `clore::generate::PathError` is a minimal error type implemented as a simple value object. Its only data member is `message`, a `std::string` that stores a human-readable description of the error. No special member functions are user-declared; the compiler-generated default constructor, destructor, copy, and move operations are relied upon. Consequently, the invariants are those of `std::string`: the `message` member always holds a valid string object, and the struct itself can be copied, moved, and destroyed trivially. The type serves exclusively as a lightweight wrapper for an error string within the generation subsystem.
 
 #### Invariants
 
-- `message` should contain a human-readable description of the error.
-- `message` is expected to be non-empty for meaningful errors.
+- `message` contains a human-readable error description
+- the struct is default-constructible and copyable via implicit compiler-generated special members
 
 #### Key Members
 
-- `message` of type `std::string`
+- `message`
 
 #### Usage Patterns
 
-- Returned or thrown by generation functions to indicate failure.
-- Checked by callers to obtain error details.
+- returned or thrown to indicate a path-related error
+- used in contexts where a descriptive string error is sufficient
 
 ### `clore::generate::PromptKind`
 
@@ -449,32 +464,33 @@ Definition: `generate/model.cppm:18`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The enum `clore::generate::PromptKind` is implemented as a scoped enumeration with an underlying type of `std::uint8_t`. It defines eleven distinct enumerators that represent categories of prompts used during code generation. The enumerators cover summaries (e.g., `NamespaceSummary`, `ModuleSummary`), analyses (e.g., `TypeAnalysis`, `FunctionAnalysis`, `VariableAnalysis`), declarations (e.g., `TypeDeclarationSummary`, `FunctionDeclarationSummary`), implementations (e.g., `TypeImplementationSummary`, `FunctionImplementationSummary`), and high‑level overviews (`ModuleArchitecture`, `IndexOverview`). While the enumeration does not enforce any particular invariant on the values themselves, the ordering of the enumerators is fixed and used by internal dispatch logic to select appropriate prompt templates for different code elements. The small underlying type and finite set of values allow the enum to be compactly stored and efficiently compared in switch statements and lookup structures.
+The enum `clore::generate::PromptKind` is defined with an underlying type of `std::uint8_t`, ensuring a compact representation suitable for storage or serialization. Its enumerators—`NamespaceSummary`, `ModuleSummary`, `ModuleArchitecture`, `IndexOverview`, `FunctionAnalysis`, `TypeAnalysis`, `VariableAnalysis`, `FunctionDeclarationSummary`, `FunctionImplementationSummary`, `TypeDeclarationSummary`, and `TypeImplementationSummary`—are listed sequentially and cover the complete set of distinct prompt categories used within the generation system. The order is fixed and does not rely on any bit‑flag or combinatorial semantics; each value uniquely identifies a specific kind of analysis or summary prompt. No additional member functions or overloads are provided, as the enum serves solely as a discriminated type for dispatch logic rather than a stateful object. No invariants beyond the defined values exist; the set is intentionally exhaustive for its purpose.
 
 #### Invariants
 
-- All enumerator values are distinct
-- Enum fits in `uint8_t` storage
+- Each enumerator value corresponds to a specific kind of prompt.
+- The underlying type is `std::uint8_t`, ensuring compact storage.
+- All enumerators are mutually exclusive and distinct.
 
 #### Key Members
 
-- `NamespaceSummary`
-- `ModuleSummary`
-- `ModuleArchitecture`
-- `IndexOverview`
-- `FunctionAnalysis`
-- `TypeAnalysis`
-- `VariableAnalysis`
-- `FunctionDeclarationSummary`
-- `FunctionImplementationSummary`
-- `TypeDeclarationSummary`
-- `TypeImplementationSummary`
+- `clore::generate::PromptKind::NamespaceSummary`
+- `clore::generate::PromptKind::ModuleSummary`
+- `clore::generate::PromptKind::ModuleArchitecture`
+- `clore::generate::PromptKind::FunctionAnalysis`
+- `clore::generate::PromptKind::TypeAnalysis`
+- `clore::generate::PromptKind::VariableAnalysis`
+- `clore::generate::PromptKind::FunctionDeclarationSummary`
+- `clore::generate::PromptKind::FunctionImplementationSummary`
+- `clore::generate::PromptKind::TypeDeclarationSummary`
+- `clore::generate::PromptKind::TypeImplementationSummary`
+- `clore::generate::PromptKind::IndexOverview`
 
 #### Usage Patterns
 
-- Used as a tag to select the appropriate prompt template or generation logic
-- Passed to functions that construct or format prompts for LLM queries
-- Enables `switch` statements to handle each kind distinctly
+- Used to select generation behavior in switch or if-else chains.
+- Passed as a parameter to indicate which type of prompt to generate.
+- May be stored in configuration or state to drive the generation process.
 
 #### Member Variables
 
@@ -618,22 +634,25 @@ Definition: `generate/model.cppm:34`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::PromptRequest` is a simple aggregate used internally within the `clore::generate` module. It holds two data members: `kind` of type `PromptKind` (defaulting to `PromptKind::NamespaceSummary`) and `target_key` of type `std::string` (defaulting to an empty string). There are no invariants enforced beyond the language‑provided defaults; the struct relies on the caller to set the fields appropriately before use. The default member initialisers ensure that a `PromptRequest` constructed without explicit arguments represents a request for a namespace summary with no specific target.
+`clore::generate::PromptRequest` is a plain data class that aggregates the parameters for a code-generation prompt. Its internal structure consists of exactly two public fields: `kind` (type `PromptKind`) and `target_key` (type `std::string`). The design enforces no invariants beyond the default initialization: `kind` defaults to `PromptKind::NamespaceSummary` and `target_key` defaults to an empty string, ensuring that a default-constructed object is always in a well‑defined state ready for use. Because both members are directly accessible, callers are free to mutate them without going through accessor functions, making the struct lightweight and suitable as a value‑type message payload.
 
 #### Invariants
 
-- Default values provide stable initial state for both fields.
-- `target_key` may be empty; no constraints on its content.
+- `kind` is always a valid `PromptKind` value
+- `target_key` is a string, possibly empty
+- Default initialization sets `kind` to `PromptKind::NamespaceSummary` and `target_key` to an empty string
+- Both fields are publicly accessible for direct manipulation
 
 #### Key Members
 
-- `clore::generate::PromptRequest::kind`
-- `clore::generate::PromptRequest::target_key`
+- `kind` field
+- `target_key` field
 
 #### Usage Patterns
 
-- Passed to generation functions to specify what to document.
-- Default-constructed for requests without a specific target.
+- Instances are constructed with specific `kind` and `target_key` values to request a prompt for a particular entity
+- The struct is passed to functions that generate prompts based on its contents
+- Default-constructed instances represent a request for a namespace summary with an unspecified target
 
 ### `clore::generate::RenderError`
 
@@ -643,19 +662,7 @@ Definition: `generate/model.cppm:73`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::RenderError` is a simple error type that stores a human-readable description of a rendering failure in its single data member `message`. No invariants are enforced beyond those of `std::string` itself—the string may be empty if no specific error text is provided, but in practice callers supply a meaningful message. The struct is publicly aggregate-initializable and implicitly defines all special member functions, so no constructors, assignment `operator`s, or destructors are explicitly implemented; the compiler-generated defaults suffice.
-
-#### Invariants
-
-- The `message` field is expected to be non-empty when an error is present, but this is not enforced.
-
-#### Key Members
-
-- `message` (`std::string`)
-
-#### Usage Patterns
-
-- Returned or thrown to indicate a failure in rendering; typically caught or handled by checking the message contents.
+The struct `clore::generate::RenderError` is a simple error type that encapsulates a diagnostic string via its single public member `message` of type `std::string`. It has no invariants beyond the validity of the underlying string; any non-null string (including the empty string) is a valid state. The implementation relies entirely on `std::string` for storage and management, so the struct is implicitly default-constructible, copyable, and movable with no special member functions. Its purpose is to serve as a lightweight, self-contained error representation for rendering operations, carrying a human-readable description of what went wrong.
 
 ### `clore::generate::SymbolAnalysisStore`
 
@@ -665,12 +672,12 @@ Definition: `generate/model.cppm:125`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::SymbolAnalysisStore` is a simple aggregate serving as the central container for all analysis results generated during a symbol-processing pass. Its three public fields—`functions` (`FunctionAnalysisCache`), `types` (`TypeAnalysisCache`), and `variables` (`VariableAnalysisCache`)—are each a dedicated cache that holds the extracted metadata for the corresponding symbol kind. The struct imposes no specific invariant beyond the consistency guaranteed by the code that populates these caches; the fields are always filled together by the analysis pipeline and are only read after that pipeline completes. No explicit constructors or member functions are defined, so the object relies on default member initialization and aggregate initialization.
+The `clore::generate::SymbolAnalysisStore` aggregates three distinct analysis caches: `FunctionAnalysisCache`, `TypeAnalysisCache`, and `VariableAnalysisCache`. Each of these caches stores precomputed analysis results for the corresponding symbol category, allowing efficient lookup during code generation. The struct itself serves as a homogeneous owner of these independent caches; it does not impose dependencies between them. The contained caches are expected to be fully populated before generation begins, and their contents are not modified after construction, ensuring a stable snapshot of the analysis state.
 
 #### Invariants
 
-- All three cache members are always initialized
-- Each cache corresponds exclusively to a specific symbol category
+- Each cache is expected to be fully populated before use.
+- The struct is intended to be shared across multiple documentation generation contexts.
 
 #### Key Members
 
@@ -680,8 +687,8 @@ Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index
 
 #### Usage Patterns
 
-- Used as a container for symbol analysis results in the generate module
-- Accessed by other components to retrieve cached analysis data for functions, types, and variables
+- Accessed as a shared cache by documentation generators.
+- Populated once and then reused for multiple pages.
 
 ### `clore::generate::SymbolTargetKeyView`
 
@@ -691,12 +698,12 @@ Definition: `generate/model.cppm:136`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::SymbolTargetKeyView` is an aggregate struct that serves as a lightweight, non-owning key for identifying a symbol target. It holds two public `std::string_view` members: `qualified_name` and `signature`. The intended invariant is that both string views remain valid for the lifetime of the view instance, as they are assumed to point to externally managed strings (e.g., internal registries or computed values). No special member functions, constructors, or assignment `operator`s are defined; the struct relies on the compiler-generated defaults. Because it is a simple aggregate, initialization is performed via brace-enclosed list or designated initializers, and comparison or hashing behavior must be provided externally if needed. The implementation is purely a composition of two string views with no additional logic or runtime checks.
+The struct `clore::generate::SymbolTargetKeyView` is a lightweight, aggregate view type that holds two `std::string_view` members: `qualified_name` and `signature`. As a simple aggregate, it relies on compiler‑generated default construction, copy, and move operations; no custom constructors, assignment `operator`s, or other member functions are defined. The key invariant of this type is that the character data referred to by each `string_view` must remain valid and unmodified for the entire lifetime of the view instance. This design avoids copying the underlying string content and is intended for use as a lookup key or map inserter where the actual string storage is managed elsewhere. The struct itself does not enforce any relationship between the two views—they are treated as independent, opaque references.
 
 #### Invariants
 
-- The struct is an aggregate and can be initialized with brace initialization.
-- Both `qualified_name` and `signature` are non-owning views; the caller must ensure the underlying character data remains valid for the lifetime of the view.
+- The underlying character data for both `qualified_name` and `signature` must outlive the `SymbolTargetKeyView` instance.
+- The struct has no owning or allocating behavior; it is a passive view into externally managed strings.
 
 #### Key Members
 
@@ -705,8 +712,9 @@ Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index
 
 #### Usage Patterns
 
-- Used as a key or identifier for symbol targets, likely in lookup or comparison operations.
-- Expected to be used in contexts where both the qualified name and signature are needed without copying strings.
+- Used as a key type for symbol identification in maps or sets without copying qualified names or signatures.
+- Likely constructed by passing pointers or string views from persistent symbol tables or string storage.
+- Expected to be compared or hashed for efficient lookup of symbol targets.
 
 ### `clore::generate::TypeAnalysis`
 
@@ -716,25 +724,25 @@ Definition: `generate/model.cppm:91`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The `clore::generate::TypeAnalysis` struct is a plain aggregate data container that captures the results of analyzing a C++ type. Its internal structure consists of two `std::string` fields, `overview_markdown` and `details_markdown`, which hold human-readable prose summaries at different levels of granularity, and three `std::vector<std::string>` fields: `invariants` documents constraints that must hold for the type, `key_members` lists noteworthy members, and `usage_patterns` records typical ways the type is used. There are no custom constructors, destructors, or member functions—the members are default-initialized and can be populated directly after instantiation. The invariants of the struct itself are minimal: each vector is expected to contain logically grouped, non‑duplicate entries that correspond to the category it represents, though no runtime checks enforce this contract. All important member implementations are implicit, relying on the compiler‑generated special member functions.
+The struct `clore::generate::TypeAnalysis` is a plain data aggregate that stores the decomposition of a type's documentation output. Its five public fields hold distinct categories of generated content: `overview_markdown` and `details_markdown` contain Markdown prose at two levels of granularity, while the three `std::vector<std::string>` fields — `invariants`, `key_members`, and `usage_patterns` — collect lists of textual items that describe the type’s logical guarantees, prominent interface elements, and common use cases, respectively. No invariants link the fields; each vector is independently populated during analysis, and the struct imposes no constraints beyond the types of its members. It serves exclusively as a container for the results of the generation pipeline.
 
 #### Invariants
 
-- `overview_markdown` and `details_markdown` are Markdown fragments without headings or code fences
-- invariants, `key_members`, and `usage_patterns` contain short phrases
+- Fields are of standard library types (`std::string` and `std::vector<std::string>`).
+- Each field holds independently maintained documentation text.
 
 #### Key Members
 
 - `overview_markdown`
 - `details_markdown`
-- invariants
+- `invariants`
 - `key_members`
 - `usage_patterns`
 
 #### Usage Patterns
 
-- Cached and reused across documentation pages for namespace, module, file, and symbol contexts
-- Populated by an analysis process that extracts information from source code
+- Cached and reused across namespace, module, file, and symbol documentation pages.
+- Stores analysis output for later retrieval by documentation generation.
 
 ### `clore::generate::VariableAnalysis`
 
@@ -744,28 +752,26 @@ Definition: `generate/model.cppm:99`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::VariableAnalysis` is a plain data record that bundles all information produced during variable analysis into a single object. Its boolean `is_mutated` flags whether the variable undergoes any mutation, while `mutation_sources` lists the locations or reasons for those mutations; an invariant is that when `is_mutated` is false, `mutation_sources` must be empty, and when true the vector should contain at least one entry. The `usage_patterns` vector enumerates how the variable is used (e.g., reads, writes, or passing to functions), and the two markdown fields, `overview_markdown` and `details_markdown`, hold pre‑formatted textual summaries for different levels of presentation detail. No member functions modify these fields beyond construction or direct assignment, so the struct functions as a simple aggregator that the analysis pass fills and later stages consume unchanged.
+The `clore::generate::VariableAnalysis` struct is an aggregate data carrier that bundles the results of analysing a single variable. Its internal state consists of two textual summaries (`overview_markdown` and `details_markdown`), a boolean flag `is_mutated` (initialised to `false`), and two vectors of strings: `mutation_sources` and `usage_patterns`. The invariant of `is_mutated` implies that when `true`, the `mutation_sources` vector is expected to contain at least one entry describing how the variable is mutated; conversely, when `false`, `mutation_sources` should be empty. The `usage_patterns` vector collects descriptions of how the variable is referenced, and may be empty even when `is_mutated` is `true`. No member functions are provided; all fields are publicly accessible and default-initialised, making the struct a plain data object with no custom copy, move, or comparison logic.
 
 #### Invariants
 
-- `overview_markdown` and `details_markdown` hold Markdown text
-- `is_mutated` reflects mutation state
-- `mutation_sources` lists sources of mutation
-- `usage_patterns` lists usage patterns
+- `is_mutated` is initialized to `false`
+- `mutation_sources` and `usage_patterns` start as empty vectors
+- All fields are expected to be populated by an analysis pass before use
 
 #### Key Members
 
-- `overview_markdown` field
-- `details_markdown` field
-- `is_mutated` flag
-- `mutation_sources` vector
-- `usage_patterns` vector
+- `overview_markdown`
+- `details_markdown`
+- `is_mutated`
+- `mutation_sources`
+- `usage_patterns`
 
 #### Usage Patterns
 
-- Populated by variable analysis routines
-- Cached across module and file documentation
-- Queried for generated documentation content
+- Created and populated by variable analysis routines within the `clore::generate` library
+- Consumed by documentation generation to produce structured content for variable symbols
 
 ## Functions
 
@@ -777,7 +783,56 @@ Definition: `generate/model.cppm:373`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::analysis_details_markdown` delegates its implementation entirely to the generic helper `analysis_markdown`, passing a field-accessor lambda that extracts the `details_markdown` member from the concrete analysis struct (one of `FunctionAnalysis`, `TypeAnalysis`, or `VariableAnalysis`). This mirrors the pattern of `analysis_overview_markdown`, which retrieves `overview_markdown` instead. The internal control flow is thus determined by `analysis_markdown`: it uses the `extract::SymbolInfo` to look up the appropriate analysis record from the `SymbolAnalysisStore`, then returns a pointer to the string obtained via the provided accessor. The only dependency beyond the store and symbol is the existence of `details_markdown` fields on the three analysis types and the correct dispatch in `analysis_markdown`.
+The function `clore::generate::analysis_details_markdown` is a thin wrapper around `analysis_markdown` specialized to extract the `details_markdown` field from the appropriate analysis struct. It accepts a `SymbolAnalysisStore` and a `extract::SymbolInfo` (referred to as `symbol` in the implementation) and returns a pointer to a string. Internally, it calls `analysis_markdown` with a lambda that returns `&analysis.details_markdown` for the resolved analysis object. The control flow delegates to `analysis_markdown`, which dispatches based on the symbol kind (function, type, or variable) to locate the corresponding `FunctionAnalysis`, `TypeAnalysis`, or `VariableAnalysis` within the store; if the analysis is found, the lambda retrieves the `details_markdown` member, otherwise `nullptr` is returned. This function depends on `analysis_markdown`, the `details_markdown` field present in each analysis struct, and the `SymbolAnalysisStore` that maps symbol identifiers to their analysis data.
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- `const SymbolAnalysisStore &` `analyses`
+- `const extract::SymbolInfo &` `symbol`
+
+#### Usage Patterns
+
+- Called to retrieve the details markdown for rendering in documentation pages
+
+### `clore::generate::analysis_markdown`
+
+Declaration: `generate/model.cppm:342`
+
+Definition: `generate/model.cppm:342`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The function `clore::generate::analysis_markdown` first constructs a `SymbolTargetKeyView` from the supplied symbol using `make_symbol_target_key`. It then dispatches on the symbol’s kind: for function symbols it calls `find_function_analysis`; for type symbols `find_type_analysis`; for variable symbols `find_variable_analysis`. Each lookup uses the computed target key against the `analyses` store. If a matching analysis object is found, the templated `field_accessor` functor is invoked on that object (for example to extract `overview_markdown` or `details_markdown`) and a pointer to the resulting string is returned. When no analysis is available for the given kind, the function returns `nullptr`. The control flow is a straightforward chain of kind tests with early returns, relying on the helper functions `is_function_kind`, `is_type_kind`, and `is_variable_kind` to classify the symbol.
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- `SymbolAnalysisStore` `analyses`
+- `extract::SymbolInfo` `symbol`
+- `FieldAccessor` `field_accessor`
+
+#### Usage Patterns
+
+- accessing overview or details markdown for function, type, or variable analysis
+- template used with field accessors like `&FunctionAnalysis::overview` or `&TypeAnalysis::details`
+- lookup by symbol key in analysis store
+
+### `clore::generate::analysis_overview_markdown`
+
+Declaration: `generate/model.cppm:154`
+
+Definition: `generate/model.cppm:366`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The function `clore::generate::analysis_overview_markdown` delegates to `clore::generate::analysis_markdown`, passing a field‑accessor lambda that returns the address of the `overview_markdown` member from the appropriate analysis type. Internally, `analysis_markdown` dispatches on the symbol kind by calling one of `clore::generate::find_function_analysis`, `clore::generate::find_type_analysis`, or `clore::generate::find_variable_analysis` to locate the corresponding `FunctionAnalysis`, `TypeAnalysis`, or `VariableAnalysis` object, then applies the given accessor to retrieve the overview text. This design unifies the retrieval of overview content across all symbol categories while keeping the per‑type field access logic within the caller.
 
 #### Side Effects
 
@@ -790,55 +845,7 @@ No observable side effects are evident from the extracted code.
 
 #### Usage Patterns
 
-- Used to fetch the detailed analysis markdown for symbol documentation pages
-- Called during page generation to include details in analysis sections
-
-### `clore::generate::analysis_markdown`
-
-Declaration: `generate/model.cppm:342`
-
-Definition: `generate/model.cppm:342`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The function `clore::generate::analysis_markdown` first constructs a `target_key` by calling `make_symbol_target_key` on the provided `symbol`. It then examines `symbol.kind` through three kind‑predicate checks in order: `is_function_kind`, `is_type_kind`, and `is_variable_kind`. For each matching kind, it performs a lookup into the `analyses` store using the corresponding `find_function_analysis`, `find_type_analysis`, or `find_variable_analysis` helper. If a valid `analysis` pointer is obtained, the function applies the `field_accessor` functor to that analysis object and returns the resulting `const std::string*`. On any lookup failure or if the symbol kind does not fall into one of the three categories, the function returns `nullptr`. This dispatching relies on the `make_symbol_target_key` function, the kind‑testing predicates (`is_function_kind`, `is_type_kind`, `is_variable_kind`), and the respective `find_*_analysis` functions defined in the same module.
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- analyses
-- symbol
-- `field_accessor`
-
-#### Usage Patterns
-
-- Used to extract overview or details markdown by passing a corresponding member pointer or lambda.
-
-### `clore::generate::analysis_overview_markdown`
-
-Declaration: `generate/model.cppm:154`
-
-Definition: `generate/model.cppm:366`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The implementation of `clore::generate::analysis_overview_markdown` is a thin delegation to the generic template `clore::generate::analysis_markdown`. It passes a field accessor lambda that, given a symbol analysis object (of any supported kind), returns a pointer to that object’s `overview_markdown` member. The internal control flow is entirely governed by `analysis_markdown`, which uses the provided `extract::SymbolInfo` and `SymbolAnalysisStore` to dispatch to the correct analysis struct—`TypeAnalysis`, `FunctionAnalysis`, or `VariableAnalysis`—based on the symbol’s kind, and then invokes the lambda on that struct. If the symbol is not found or the analysis lacks an overview, the lambda yields `nullptr` and the function returns `nullptr`. Dependencies include the `analysis_markdown` template, the analysis store, and the `overview_markdown` field present on each of the three analysis struct types.
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- `clore::generate::SymbolAnalysisStore&`
-- `clore::extract::SymbolInfo&`
-
-#### Usage Patterns
-
-- Called by documentation generation code to obtain the overview section for a symbol.
+- Used as a convenience accessor for the overview markdown of a symbol's analysis.
 
 ### `clore::generate::build_link_resolver`
 
@@ -848,9 +855,9 @@ Definition: `generate/model.cppm:471`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function iterates over each `plan` in `plan_set.plans` and populates a `LinkResolver` by recording the `plan.title` under `plan.page_id` in `resolver.page_id_to_title`. For every key in `plan.owner_keys`, it uses `emplace` on `resolver.name_to_path` so that the first mapping for any given key is preserved, preventing later duplicates from overwriting. If `plan.page_type` equals `PageType::Namespace`, it additionally registers the same path in `resolver.namespace_to_path`; if it equals `PageType::Module`, it does so in `resolver.module_to_path`. After processing the owner keys, if `plan.page_id` contains a colon, the function extracts the substring after the colon and repeats the same insertion logic—including the type‑specific conditional maps—for that suffix. This two‑phase registration ensures that abbreviated names (e.g., a symbol name without its enclosing namespace) are also resolvable.
+The function iterates over each plan in `plan_set.plans`. For every plan, it records a title mapping in `resolver.page_id_to_title` by associating `plan.page_id` with `plan.title`. Then, for each key in `plan.owner_keys`, it uses `emplace` on `resolver.name_to_path` so that the first registration wins; if the plan’s `page_type` is `PageType::Namespace` it also inserts into `resolver.namespace_to_path`, and if `PageType::Module` into `resolver.module_to_path`. After processing all owner keys, it checks `plan.page_id` for a colon delimiter. If found, the substring following the colon (the suffix) is treated as an additional symbolic name and inserted into the same three maps with the same type‑specific disambiguation logic. This suffix extraction supports paths like `module:some_component` where only `some_component` is stored as an extra key.
 
-The function relies on the `emplace` semantics of the internal maps to implement a first‑mapping‑wins policy, which avoids overwriting when a module and namespace share the same qualified name. No validation or conflict detection is performed beyond this implicit deduplication, and the returned `LinkResolver` is built directly from the provided `PagePlanSet` without further transformation.
+The algorithm depends on `PagePlanSet` and `PagePlan`, and uses `PageType` enumerators (`PageType::Namespace`, `PageType::Module`) to decide which specialized map to populate. No source‑relative path computation or analysis lookups occur inside the loop; all path and identity information is assumed to be precomputed in the `plan` objects. The returned `LinkResolver` provides both a generic `name_to_path` map and type‑keyed maps (`namespace_to_path`, `module_to_path`) to allow callers to disambiguate identical names from different scopes.
 
 #### Side Effects
 
@@ -858,22 +865,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `plan_set` (parameter)
-- `plan_set.plans`
-- each plan's `page_id`, `title`, `owner_keys`, `relative_path`, `page_type`
+- `plan_set` parameter, specifically `plan_set.plans`, and each plan's `page_id`, `title`, `owner_keys`, `relative_path`, `page_type`
 
 #### Writes To
 
-- `resolver.page_id_to_title`
-- `resolver.name_to_path`
-- `resolver.namespace_to_path`
-- `resolver.module_to_path`
+- Local `resolver` object's maps: `page_id_to_title`, `name_to_path`, `namespace_to_path`, `module_to_path` (these become part of the return value)
 
 #### Usage Patterns
 
-- called to create a `LinkResolver` from a `PagePlanSet` before link resolution
-- used in page generation pipeline to enable ID-to-path and key-to-path lookups
-- callers should use `resolve_module`/`resolve_namespace` for disambiguation when generic `name_to_path` may conflict
+- Building a `LinkResolver` from a `PagePlanSet`
+- Used by page generation to provide a mapping from `IDs` to titles and paths
 
 ### `clore::generate::compute_page_path`
 
@@ -883,9 +884,7 @@ Definition: `generate/model.cppm:576`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function dispatches on `identity.page_type` to construct the output path. For `PageType::Index`, it directly assigns the constant `kIndexPath`. For `PageType::Module`, it splits `identity.qualified_name` on `"."` using `split_qualified`, optionally extracts a partition after a colon from the last segment, then prepends `kModulePrefix` and normalizes each part via `normalize_name`, finally appending either `"index.md"` or a partition-based filename. The `PageType::Namespace` branch follows a similar pattern: split on `"::"`, prepend `kNamespacePrefix`, normalize each component, and append `"index.md"`. For `PageType::File`, it strips the extension from `identity.source_relative_path` (using the last dot) and prepends `kFilePrefix` plus a slash and appends `".md"`.
-
-After path construction, `sanitize_path_chars` modifies the path in place, and `validate_path_component` performs final validation, returning `std::unexpected(PathError)` if invalid. The function depends on helpers in the anonymous namespace: `split_qualified`, `normalize_name`, `join_path`, and the constants `kIndexPath`, `kModulePrefix`, `kNamespacePrefix`, and `kFilePrefix`. It also relies on `sanitize_path_chars` and `validate_path_component` for post-processing.
+The function `clore::generate::compute_page_path` implements a switch on `identity.page_type` to construct a filesystem path string from a `PageIdentity`. For each page type, it decomposes the identity's `qualified_name` or `source_relative_path` into components, normalizes them via `normalize_name`, and assembles a path using helper constants such as `kIndexPath`, `kModulePrefix`, `kNamespacePrefix`, and `kFilePrefix`. Internal control flow handles partition extraction for module pages (splitting on `:`), extension stripping for file pages, and inserting an `"index.md"` suffix for namespace and module pages without a partition. After path construction, the function applies `sanitize_path_chars` to replace disallowed characters and calls `validate_path_component` to check the result; if validation fails, it returns a `PathError` via `std::unexpected`. The implementation relies on `split_qualified`, `join_path`, and the anonymous namespace helpers, and depends on the `PageType` enum to dispatch the correct logic for index, module, namespace, and file identities.
 
 #### Side Effects
 
@@ -893,21 +892,14 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `identity` of type `const PageIdentity &`
-- global constant `kIndexPath`
-- global constant `kModulePrefix`
-- global constant `kNamespacePrefix`
-- global constant `kFilePrefix`
-- helper function `split_qualified`
-- helper function `normalize_name`
-- helper function `join_path`
-- helper function `sanitize_path_chars`
-- helper function `validate_path_component`
+- `identity.page_type`
+- `identity.qualified_name`
+- `identity.source_relative_path`
 
 #### Usage Patterns
 
-- called during page generation to determine output file paths
-- used by `write_page` and related functions
+- Called during page generation to determine the output file path for a given `PageIdentity`.
+- Used by page building functions such as `build_page_root` and `write_page` to produce the final file location.
 
 ### `clore::generate::find_function_analysis`
 
@@ -917,7 +909,7 @@ Definition: `generate/model.cppm:323`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function performs a single map lookup on `analyses.functions` using the provided `symbol_target_key`. If the key is present, it returns a pointer to the associated `FunctionAnalysis`; otherwise it returns `nullptr`. The only dependency is the `SymbolAnalysisStore` structure and its member `functions`, which is assumed to be an associative container keyed by symbol target key strings.
+The function performs a lookup in the `analyses.functions` associative container using the provided `symbol_target_key` as the key. If a matching entry exists, it returns a pointer to the corresponding `FunctionAnalysis` object; otherwise it returns `nullptr`. This is a straightforward map lookup — typically a hash‑based or tree‑based search — with no additional control flow or side effects beyond the single `find` operation. The implementation depends on the `SymbolAnalysisStore` type (specifically its `functions` member, which is expected to be a mapping from key strings to `FunctionAnalysis` values) and the `FunctionAnalysis` type definition.
 
 #### Side Effects
 
@@ -925,12 +917,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `analyses.functions` map
+- `analyses.functions` via `std::map::find` using `symbol_target_key`
 
 #### Usage Patterns
 
-- retrieve cached function analysis
-- check if analysis exists for a function symbol target key
+- Retrieve existing `FunctionAnalysis` for a symbol key
+- Check if a function analysis has been cached
+- Used by other generation functions to access analysis data
 
 ### `clore::generate::find_type_analysis`
 
@@ -940,7 +933,7 @@ Definition: `generate/model.cppm:329`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-Inside, `clore::generate::find_type_analysis` directly invokes `analyses.types.find(symbol_target_key)` to locate a previously stored `TypeAnalysis` record. If the iterator `it` does not equal `analyses.types.end()`, the function returns a pointer to `it->second`; otherwise it returns `nullptr`. No other container lookups or branching occur. This implementation mirrors its counterparts `find_function_analysis` and `find_variable_analysis`, relying entirely on the associative container’s lookup performance and the correctness of the `symbol_target_key` identifier.
+The function performs a direct lookup in the `analyses.types` associative container using the provided `symbol_target_key`. If the key is present, it returns a pointer to the corresponding `TypeAnalysis` object; otherwise it returns `nullptr`. The implementation has no additional branching or side effects—it is a simple accessor that depends only on the structure of `SymbolAnalysisStore`, specifically that its `types` member supports `find` and stores `TypeAnalysis` values keyed by string view. This lookup is used downstream to retrieve precomputed type analysis data during documentation generation, and the returned pointer is treated as non‑owning (the store maintains ownership).
 
 #### Side Effects
 
@@ -948,12 +941,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- analyses`.types`
+- `analyses.types`
+- `symbol_target_key`
 
 #### Usage Patterns
 
-- Retrieving type analysis from store
-- Looking up type analysis by key
+- Look up an existing type analysis for rendering
+- Called from other analysis retrieval functions
 
 ### `clore::generate::find_variable_analysis`
 
@@ -963,7 +957,7 @@ Definition: `generate/model.cppm:335`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function performs a single map lookup on the `analyses.variables` member, which is a container keyed by symbol target key (a `std::string_view`). It returns a pointer to the corresponding `VariableAnalysis` if found, or `nullptr` otherwise. The control flow is linear: a direct call to `find` on the map, followed by a ternary condition on the iterator equality with `end`. Dependencies are limited to the `SymbolAnalysisStore` data structure and its `variables` field; no other external functions or complex branching is involved.
+The function performs a straightforward lookup into the `variables` member of the provided `SymbolAnalysisStore`. It uses the `symbol_target_key` parameter—expected to be a `std::string_view`—as the key for a map search via `analyses.variables.find(symbol_target_key)`. If the key exists in the container, the function returns a pointer to the corresponding `VariableAnalysis`; otherwise it returns `nullptr`. No iteration, validation, or fallback logic is involved; the implementation depends entirely on the map’s associative lookup and the invariant that the caller supplies a correctly formatted target key. This minimal accessor is leveraged by higher-level generation routines to retrieve variable-specific analysis data without repeating the map query.
 
 #### Side Effects
 
@@ -971,12 +965,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `analyses.variables` map
-- `symbol_target_key` parameter
+- `analyses.variables`
+- `symbol_target_key`
 
 #### Usage Patterns
 
-- Look up variable analysis by symbol target key
+- Retrieve variable analysis for a given symbol target key
+- Used by functions that build evidence or markdown for variable symbols
 
 ### `clore::generate::is_function_kind`
 
@@ -986,7 +981,7 @@ Definition: `generate/model.cppm:393`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::is_function_kind` implements a simple classification switch over an `extract::SymbolKind` value. The switch explicitly matches `extract::SymbolKind::Function` and `extract::SymbolKind::Method`, returning `true` for those two cases; all other `extract::SymbolKind` enumerators fall through to the `default` branch, which returns `false`. This internal control flow is a straightforward discriminative check with no additional dependencies or side effects, making the function suitable for use in filter predicates or as part of a dispatch chain that distinguishes function-like symbols from other symbol kinds.
+The function `clore::generate::is_function_kind` implements a simple classification over the `extract::SymbolKind` enumeration. Internally, it uses a `switch` statement that yields `true` for the `Function` and `Method` enumerators, and `false` for any other value (the `default` branch). The only dependency is the `extract::SymbolKind` enum, which must define at least those two members. No additional algorithms, data structures, or control flow beyond the single switch are present.
 
 #### Side Effects
 
@@ -994,11 +989,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `kind`
+- parameter `kind` (integer representing an `extract::SymbolKind`)
 
 #### Usage Patterns
 
-- Called to determine if a symbol kind corresponds to a function or method.
+- Checking if a symbol kind corresponds to a function (including method)
+- Filtering symbols in meta-programming or generation logic
+- Branching on symbol classification in `SymbolAnalysisStore` processing
 
 ### `clore::generate::is_page_level_symbol`
 
@@ -1008,7 +1005,7 @@ Definition: `generate/model.cppm:405`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function applies a series of rejection checks to decide whether a given `extract::SymbolInfo` should be treated as a page-level symbol. It first examines `sym.lexical_parent_kind`: if the value is not `extract::SymbolKind::Unknown` and not `extract::SymbolKind::Namespace`, the symbol is considered nested inside a function or type and the function returns `false`. Next it searches both `sym.enclosing_namespace` and `sym.lexical_parent_name` for the substring `"(anonymous namespace)"`; if found, the symbol is treated as an implementation detail and rejected. Finally, if `sym.parent` is present, it uses `extract::lookup_symbol` to retrieve the parent symbol; if the parent’s `kind` is classified as a type or function via `is_type_kind` or `is_function_kind`, the function returns `false`. Only when all these conditions are satisfied does it return `true`, indicating that the symbol is a top‑level public element suitable for its own generated page.
+The function first checks the lexical parent kind: if it is neither `extract::SymbolKind::Unknown` nor `extract::SymbolKind::Namespace`, it immediately returns `false`, filtering out symbols nested inside functions, types, or other non-namespace scopes. It then searches for the literal `"(anonymous namespace)"` in both the enclosing namespace string and the lexical parent name; if found, the symbol is considered an implementation detail and is excluded. If the symbol has a parent (obtained via `extract::lookup_symbol`), the function checks whether that parent’s kind is either a type or a function (using `is_type_kind` and `is_function_kind`); if so, it returns `false` because the symbol is nested inside a non–page-level declaration. Only symbols that pass all these filters are classified as page-level.
 
 #### Side Effects
 
@@ -1016,16 +1013,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `model`
-- `sym.lexical_parent_kind`
-- `sym.enclosing_namespace`
-- `sym.lexical_parent_name`
-- `sym.parent`
-- `extract::lookup_symbol(model, *sym.parent)`
+- `const extract::ProjectModel& model` (via `extract::lookup_symbol`)
+- `const extract::SymbolInfo& sym` (fields `lexical_parent_kind`, `enclosing_namespace`, `lexical_parent_name`, `parent`)
+- `extract::lookup_symbol`
+- `is_type_kind`
+- `is_function_kind`
 
 #### Usage Patterns
 
-- Used during page planning to decide which symbols should have dedicated documentation pages.
+- Filtering symbols for page-level documentation generation
+- Used in functions like `build_page_plan_set`, `collect_namespace_symbols`, and `collect_implementation_symbols`
 
 ### `clore::generate::is_page_summary_prompt`
 
@@ -1035,7 +1032,7 @@ Definition: `generate/model.cppm:297`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::is_page_summary_prompt` implements a simple predicate that returns `true` only when the input `kind` equals either `PromptKind::NamespaceSummary` or `PromptKind::ModuleSummary`. Its internal control flow consists of a single logical disjunction of two equality comparisons against the `PromptKind` enum members. The function depends solely on the `PromptKind` enumeration and serves as a discriminator to identify prompts that correspond to top‑level page summaries for namespaces or modules, as opposed to symbol‑level analysis prompts.
+The implementation of `clore::generate::is_page_summary_prompt` performs a straightforward categorical check. It evaluates the incoming `PromptKind` value and returns `true` exactly when `kind` matches either `PromptKind::NamespaceSummary` or `PromptKind::ModuleSummary`. The control flow consists of a single `return` statement using a logical OR, with no branching beyond the two equality comparisons. The function depends only on the `PromptKind` enumeration and its two named enumerators, serving as a quick predicate to distinguish page‑level summary prompts from other prompt kinds in the generation pipeline.
 
 #### Side Effects
 
@@ -1043,12 +1040,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `kind` parameter (`PromptKind`)
+- parameter "kind" of type "`PromptKind`"
+- enum values "`PromptKind::NamespaceSummary`" and "`PromptKind::ModuleSummary`"
 
 #### Usage Patterns
 
-- Used to identify page summary prompts in generation logic
-- Called to branch behavior for namespace or module summary prompts
+- Used as a predicate to distinguish page-level summary prompts from other prompt kinds.
+- Likely called when building prompts for namespace or module summary pages.
 
 ### `clore::generate::is_symbol_analysis_prompt`
 
@@ -1058,7 +1056,7 @@ Definition: `generate/model.cppm:301`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::is_symbol_analysis_prompt` implements a simple membership test against the `clore::generate::PromptKind` enumeration. Its algorithm consists of a single logical disjunction: it returns `true` if the input `kind` is equal to either `clore::generate::PromptKind::FunctionAnalysis`, `clore::generate::PromptKind::TypeAnalysis`, or `clore::generate::PromptKind::VariableAnalysis`; otherwise it returns `false`. The control flow is direct and uses no branching beyond the short-circuit evaluation of the `||` `operator`s. The only dependency is the `clore::generate::PromptKind` enum and its three relevant enumerators, making the function a lightweight compile‑time constant check.
+The function `clore::generate::is_symbol_analysis_prompt` implements a simple classification query. It accepts a `PromptKind` enumerator and returns `true` if the value matches any of the three symbol‑focused analysis kinds: `PromptKind::FunctionAnalysis`, `PromptKind::TypeAnalysis`, or `PromptKind::VariableAnalysis`. The implementation is a direct equality comparison against each of these constants, short‑circuiting with `||`. No additional state, branching, or dependencies beyond the `PromptKind` enumeration are involved. This predicate is used to distinguish prompts that request per‑symbol analysis content (e.g., overviews, details, usage patterns) from other prompt categories such as summary or overview prompts.
 
 #### Side Effects
 
@@ -1070,8 +1068,8 @@ No observable side effects are evident from the extracted code.
 
 #### Usage Patterns
 
-- used to categorize prompt kinds for symbol analysis
-- used in conditional logic to dispatch analysis generation
+- branching on prompt kind in build or dispatch logic
+- filtering symbol analysis prompts from other prompt kinds
 
 ### `clore::generate::is_type_kind`
 
@@ -1081,7 +1079,7 @@ Definition: `generate/model.cppm:380`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::is_type_kind` implements a mapping from a given `extract::SymbolKind` to a boolean value by means of a switch statement. The control flow enumerates the specific symbol kinds that represent type-level entities—`extract::SymbolKind::Class`, `extract::SymbolKind::Struct`, `extract::SymbolKind::Enum`, `extract::SymbolKind::Union`, `extract::SymbolKind::Concept`, `extract::SymbolKind::Template`, and `extract::SymbolKind::TypeAlias`—each of which yields a return of `true`. Any other value of `extract::SymbolKind` falls through to the default case and returns `false`. The function has no external dependencies beyond the underlying symbol-kind enumeration and serves as a simple classification dispatch for later branching in page planning or prompt generation logic.
+The function uses a switch statement over the `extract::SymbolKind` enumerator. It explicitly lists seven cases—Class, Struct, Enum, Union, Concept, Template, and `TypeAlias`—each returning true. All other symbol kinds fall through to the default branch, returning false. This logic mirrors the pattern used by sibling functions such as `is_function_kind` and `is_variable_kind`, and relies on the `extract::SymbolKind` enumeration defined in the extraction layer. No external state or complex branching is required; the function is purely deterministic and branch‑predictor friendly for the supported type‑like kinds.
 
 #### Side Effects
 
@@ -1089,11 +1087,12 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `kind` parameter of type `extract::SymbolKind`
+- `kind` (the `extract::SymbolKind` parameter)
 
 #### Usage Patterns
 
-- Used to classify symbol kinds as type definitions
+- Used as a predicate to filter or classify symbol kinds as type-like
+- Likely called in type analysis or evidence building functions
 
 ### `clore::generate::is_variable_kind`
 
@@ -1103,7 +1102,7 @@ Definition: `generate/model.cppm:401`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::is_variable_kind` performs a simple classification by comparing its `extract::SymbolKind` parameter against two specific enumeration members. It returns `true` only when the given `kind` is either `extract::SymbolKind::Variable` or `extract::SymbolKind::EnumMember`; otherwise it returns `false`. The logic uses a direct equality check and a logical OR, with no branching or additional state. Its sole dependency is the `extract::SymbolKind` enumeration, which is used to define the two recognized symbol kinds. This function is used internally by generation logic to differentiate variable‑like symbols from other symbol categories (e.g., types or functions) without requiring knowledge of the broader symbol analysis structures.
+The implementation of `clore::generate::is_variable_kind` performs a straightforward equality check against two enumerators of `extract::SymbolKind`. It accepts a single `extract::SymbolKind` parameter and returns `true` when the argument equals either `extract::SymbolKind::Variable` or `extract::SymbolKind::EnumMember`; otherwise it returns `false`. The function has no side effects, no control flow beyond the boolean expression, and depends solely on the definition of `extract::SymbolKind` and its two referenced enumerators. This predicate is used elsewhere in the generation pipeline to classify symbol kinds that should be treated as variable-like entities, enabling consistent branching for variable‑specific logic (e.g., selecting the appropriate `PromptKind::VariableAnalysis` or looking up `VariableAnalysis` records).
 
 #### Side Effects
 
@@ -1111,13 +1110,12 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `extract::SymbolKind kind` parameter
+- parameter `kind`
 
 #### Usage Patterns
 
-- categorizing symbols
-- filtering symbol kinds
-- checking if a symbol is variable-like
+- used as a predicate to classify symbol kinds
+- likely called in `clore::generate` symbol processing or filtering
 
 ### `clore::generate::make_source_relative`
 
@@ -1127,26 +1125,28 @@ Definition: `generate/model.cppm:432`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The implementation of `clore::generate::make_source_relative` computes a filesystem‑relative path from an absolute path to a project root directory. It first constructs a composite key from the two input strings and checks an internal LRU‑style cache (`source_relative_cache`) under a shared lock; if a cached result exists, it is returned immediately. Otherwise it normalises both paths via `std::filesystem::path::lexically_normal` and invokes `lexically_relative` on the root. If the produced relative path is empty or begins with `..`, the original absolute path is retained as a fallback; otherwise the relative path in generic form is used. The computed result is then stored in the cache under a unique lock before being returned. The function depends solely on the module‑local `source_relative_cache` singleton, which provides a thread‑safe `SourceRelativeCache` with a `mutex` and a `relative_by_key` map.
+The function `clore::generate::make_source_relative` implements a caching path-relativizer that transforms an absolute or already-relative `path` into a normalized form relative to `project_root`. It first constructs a composite `key` by concatenating `project_root`, a newline delimiter, and `path`. It then checks a thread‑safe module‑level cache obtained via `source_relative_cache()`: under a `shared_lock` it looks up `key` in `SourceRelativeCache::relative_by_key` and returns the cached result on a hit. On a miss, it performs the core path computation using `std::filesystem`. Both `path` and `project_root` are normalized via `lexically_normal`, then `lexically_relative` derives the relative path from the normalized root. If the relative result is empty or begins with `".."` (indicating no valid relative transformation), the original `path` is used as the resolved value; otherwise the relative path is converted to generic format. Finally, under a `unique_lock`, the resolved string is inserted into the cache with `insert_or_assign` and returned. The only dependency is the anonymous‑namespace helper `source_relative_cache`, which provides the shared `SourceRelativeCache` instance.
 
 #### Side Effects
 
-- Updates `source_relative_cache` by inserting a mapping from the constructed key to the resolved relative path.
+- caches the computed relative path in a static thread-safe cache (`source_relative_cache`)
+- mutates the cache by inserting or assigning a new entry
 
 #### Reads From
 
-- `path` parameter
-- `project_root` parameter
-- `source_relative_cache` cache store
+- parameter `path`
+- parameter `project_root`
+- static cache `source_relative_cache`
+- filesystem via `std::filesystem::path` normalization
 
 #### Writes To
 
-- `source_relative_cache` cache store (key-value pair added)
+- static cache `source_relative_cache`
 
 #### Usage Patterns
 
-- Used to convert absolute source paths to project-relative paths for documentation
-- Called during page generation to produce link targets or paths
+- computing relative source file paths for documentation generation
+- used by other generate functions to obtain relative paths from project root
 
 ### `clore::generate::make_symbol_target_key`
 
@@ -1156,7 +1156,7 @@ Definition: `generate/model.cppm:306`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The implementation of `clore::generate::make_symbol_target_key` produces a length-prefixed compound key from an `extract::SymbolInfo` object. It first uses `std::format` to write the size of `symbol.qualified_name` followed by a colon and the qualified name itself into a `std::string`. The formatted string is then extended by appending `symbol.signature` directly. The resulting key packs both the symbol’s fully qualified name (with its length for unambiguous parsing) and its signature into a single contiguous string, enabling later decomposition via `parse_symbol_target_key` into a `SymbolTargetKeyView`. The function has no control flow branches; its entire logic is a linear sequence of two concatenation operations, relying on `std::format` for the name portion and `std::string::operator+=` for the signature. It depends on the `extract::SymbolInfo` data type and the C++20 standard library formatting facility.
+The function constructs a string key from an `extract::SymbolInfo` object by first formatting the length of the symbol’s `qualified_name` followed by the name itself using `std::format`, then appending the `signature` member directly. The resulting key is returned as a `std::string`. The algorithm is purely linear and deterministic: it composes the key in two steps, relying on the `qualified_name` and `signature` fields of the input structure. No internal branching or iteration occurs, and the function has no dependencies beyond the standard library’s `std::format` and the definition of `extract::SymbolInfo`. This key is later used for lookup and caching in the symbol analysis pipeline.
 
 #### Side Effects
 
@@ -1165,13 +1165,14 @@ No observable side effects are evident from the extracted code.
 #### Reads From
 
 - symbol`.qualified_name`
+- symbol`.qualified_name``.size()`
 - symbol`.signature`
 
 #### Usage Patterns
 
-- generating lookup keys for symbol caches
-- creating unique identifiers for symbols
-- building keys for prompt requests
+- Generating unique keys for symbol targets in page plan or link resolution
+- Creating cache keys for symbol analysis requests
+- Mapping symbol identifiers to stable strings for output generation
 
 ### `clore::generate::page_type_name`
 
@@ -1181,7 +1182,7 @@ Definition: `generate/model.cppm:263`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function implements a direct mapping from the `PageType` enumerator to its string representation. It uses a `switch` statement over the given `type` and returns a `std::string_view` literal for each known enumerator: `PageType::Index` maps to `"index"`, `PageType::Module` to `"module"`, `PageType::Namespace` to `"namespace"`, and `PageType::File` to `"file"`. If an unrecognized value is passed, the fallback `"unknown"` is returned. The control flow is a straightforward single-level dispatch with no branching or external dependencies; the function is essentially a static lookup table.
+The function `clore::generate::page_type_name` maps each enumerator of the `PageType` enum to a corresponding string literal via a `switch` statement. For `PageType::Index`, `PageType::Module`, `PageType::Namespace`, and `PageType::File`, it returns `"index"`, `"module"`, `"namespace"`, and `"file"` respectively. If none of those cases match—for example, if an unknown enumerator value is passed—it falls back to returning `"unknown"`. Its only dependency is the `PageType` enumeration defined in the same module.
 
 #### Side Effects
 
@@ -1189,11 +1190,12 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the input parameter `type` of type `PageType`
+- parameter `type` of type `PageType`
 
 #### Usage Patterns
 
-- Used to convert a `PageType` to a string for documentation page naming or diagnostics.
+- used to obtain a string label for a page type during page generation
+- likely called in functions such as `build_page_root` or `compute_page_path` to derive path components or metadata
 
 ### `clore::generate::parse_symbol_target_key`
 
@@ -1203,7 +1205,9 @@ Definition: `generate/model.cppm:312`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function attempts to decode a length‑prefixed encoding first by calling `parse_length_prefixed_symbol_target_key`. If that helper returns a value, the result is forwarded directly as the `SymbolTargetKeyView`. Otherwise, the fallback path constructs a `SymbolTargetKeyView` by assigning the entire `target_key` to the `qualified_name` member and leaving the `signature` member empty. This two‑branch strategy enables the function to handle both compact encoded keys (where qualified name and signature are separated and length‑prefixed) and plain qualified names that lack an explicit signature component. The fallback relies solely on the default member initialization of `SymbolTargetKeyView`, and the only external call is to `parse_length_prefixed_symbol_target_key`.
+The function delegates to the private helper `parse_length_prefixed_symbol_target_key` to attempt a structured parse of the incoming `target_key`. If that helper returns a populated `std::optional<SymbolTargetKeyView>`, the parsed view—containing separate `qualified_name` and `signature` fields—is returned directly.
+
+When the length‑prefixed parse fails (i.e., the key is not in the prefixed form), the function constructs a fallback `SymbolTargetKeyView` that assigns the entire `target_key` to the `qualified_name` member and leaves the `signature` empty. This two‑path control flow accommodates both a compact encoded representation for known symbol keys and a simple string‑based fallback for arbitrary qualified names.
 
 #### Side Effects
 
@@ -1211,12 +1215,11 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `target_key` parameter of type `std::string_view`
+- parameter `target_key`
 
 #### Usage Patterns
 
-- Parsing symbol target key strings into structured views
-- Used during symbol identification from input
+- Converting a raw target key string into a `SymbolTargetKeyView` for subsequent processing
 
 ### `clore::generate::prompt_kind_name`
 
@@ -1226,7 +1229,7 @@ Definition: `generate/model.cppm:273`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::prompt_kind_name` implements a straightforward mapping from the `PromptKind` enum to a human-readable `std::string_view`. Its internal control flow consists of a single `switch` statement that covers every known enumerator — from `PromptKind::NamespaceSummary` through `PromptKind::TypeImplementationSummary` — each returning a corresponding `snake_case` literal (e.g., `"function_analysis"`, `"module_summary"`). After the switch, a default fallback returns `"unknown_prompt"`, handling any unrecognized or future `PromptKind` values gracefully. The only dependency is the `PromptKind` enum itself, and the function contains no branching, loops, or external calls; it is a pure, O(1) lookup suitable for serialization, logging, or prompt key generation throughout the generation pipeline.
+The function `clore::generate::prompt_kind_name` maps each enumerator of `clore::generate::PromptKind` to a corresponding string literal. It uses a flat `switch` statement over `kind`, returning a hard‑coded `std::string_view` for every known prompt category (e.g., `"namespace_summary"`, `"function_analysis"`, `"type_implementation_summary"`). If `kind` doesn’t match any case, the function falls through to a `default` path that returns `"unknown_prompt"`. This translation is used for serialisation, logging, or identification purposes; it has no dependencies beyond the `PromptKind` enumeration and the C++ standard library.
 
 #### Side Effects
 
@@ -1234,12 +1237,12 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the `kind` parameter
+- `kind` (the `PromptKind` parameter)
 
 #### Usage Patterns
 
-- called to obtain string key for prompt kind in caching or evidence-building logic
-- used in context where prompt kind needs to be logged or stored as text
+- obtain a string name for a `PromptKind`
+- map enum value to corresponding string constant
 
 ### `clore::generate::prompt_request_key`
 
@@ -1249,7 +1252,7 @@ Definition: `generate/model.cppm:290`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::prompt_request_key` computes a unique string key for a given `PromptRequest` by evaluating its `target_key` field. If `request.target_key` is empty, the key is simply the result of `prompt_kind_name(request.kind)`. Otherwise, it returns the concatenation `prompt_kind_name(request.kind) + ":" + request.target_key`. This branch-then-concatenate pattern ensures that requests without a specific target (e.g., index or module overviews) are identified solely by their `PromptKind`, while symbol‑specific requests include the target‑key suffix for precise caching and lookup. The function depends on the `prompt_kind_name` helper to convert the `PromptKind` enumerator to a string and on the `PromptRequest` structure’s `kind` and `target_key` fields.
+The function `clore::generate::prompt_request_key` constructs a unique string key for a given `PromptRequest` by combining its `kind` and `target_key`. If `request.target_key` is empty, it returns just the result of `clore::generate::prompt_kind_name(request.kind)`; otherwise it returns that name concatenated with a colon separator and the `request.target_key` value. This key is used to identify and cache prompt responses, with the `target_key` portion typically representing a fully qualified symbol name or other page identifier.
 
 #### Side Effects
 
@@ -1259,12 +1262,13 @@ No observable side effects are evident from the extracted code.
 
 - `request.kind`
 - `request.target_key`
-- the `prompt_kind_name` function (called internally)
+- `prompt_kind_name(request.kind)`
 
 #### Usage Patterns
 
-- generating a cache key or identifier for a prompt request
-- used when a unique string representation of a `PromptRequest` is needed
+- caching prompt responses
+- creating lookup keys for prompt requests
+- generating identifiers for page key computation
 
 ### `clore::generate::validate_no_path_conflicts`
 
@@ -1274,7 +1278,7 @@ Definition: `generate/model.cppm:644`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function iterates over a collection of `(path, id)` pairs stored in `path_to_id` and uses an `std::unordered_map<std::string, std::string> seen` to detect collisions. For each pair, it calls `seen.emplace(path, id)`; if the returned `inserted` flag is `false`, a duplicate path has been encountered. In that case, it returns `std::unexpected(PathError{.message = ...})` containing a formatted string that identifies both the existing ID (`it->second`) and the conflicting ID along with the duplicate path. If all paths are unique, the function returns an empty `std::expected<void, PathError>`. The algorithm is a straightforward linear scan with unordered‑map lookup, relying on `std::format` for error message construction and on the `PathError` struct for conveying the conflict.
+The implementation of `clore::generate::validate_no_path_conflicts` performs a single linear scan over the input `path_to_id` vector, using a local `std::unordered_map<std::string, std::string> seen` to record each encountered path. For each `(path, id)` pair, it attempts to insert the mapping; if the insertion fails (i.e., the path already exists in `seen`), the function immediately returns `std::unexpected` containing a `PathError` whose `message` is constructed via `std::format` to report the conflicting identifiers and the shared path. On successful completion of the loop with no duplicates, it returns a default-constructed `std::expected<void, PathError>` representing success. The only dependencies are `std::unordered_map`, `std::unexpected`, `std::format`, and the `PathError` struct with its `message` field.
 
 #### Side Effects
 
@@ -1282,16 +1286,18 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `path_to_id` parameter (vector of path-id pairs)
+- `path_to_id` parameter
 
 #### Usage Patterns
 
-- Called before page generation to ensure unique output paths
-- Used to validate configuration or mapping inputs
+- validate path uniqueness before building page plans
+- ensure no duplicate keys in symbol-to-page mapping
 
 ## Internal Structure
 
-The `generate:model` module defines the core data types and interfaces that represent the state and structure of the documentation generation pipeline. It is decomposed into several logical groups: page identity and page type enumerations (`PageIdentity`, `PageType`), prompt request and prompt kind descriptions (`PromptRequest`, `PromptKind`), symbol analysis records for functions, types, and variables (`FunctionAnalysis`, `TypeAnalysis`, `VariableAnalysis`), planning structures that describe which pages to produce (`PagePlan`, `PagePlanSet`), error types for distinct failure modes (`GenerateError`, `PathError`, `RenderError`), and the link resolver that maps entity names to output paths (`LinkResolver`). The module imports `extract` for analysis data, `std` for standard library facilities, and `support` for utilities. Internally, it employs anonymous namespaces to encapsulate helper types and functions (e.g., `SourceRelativeCache` for path computations) and provides a set of free functions (`find_*_analysis`, `analysis_markdown`, `compute_page_path`, etc.) that operate on these model types, forming a well‑separated layer between extraction and rendering.
+The `generate:model` module provides the data‑model layer for the documentation generation pipeline. It defines the core structs and enumerations — such as `PageType`, `PromptKind`, `PagePlan`, `GeneratedPage`, and a family of analysis types (`FunctionAnalysis`, `TypeAnalysis`, `VariableAnalysis`, `SymbolAnalysisStore`) — that represent extracted symbol information, page plans, and generation results. These types are consumed by higher‑level generation logic to produce output. The module imports `extract` and `support` for foundational metadata and utilities, and relies on the standard library.
+
+Internally, the module is split into a public interface and an anonymous namespace. The public section contains the main data types, along with utility functions for analysis lookups, markdown generation, and path resolution (e.g., `LinkResolver`, `analysis_markdown`, `compute_page_path`, `make_symbol_target_key`). The anonymous namespace encapsulates caching details, prefix constants, and helpers for string manipulation and path sanitisation (`SourceRelativeCache`, `normalize_name`, `split_qualified`, `sanitize_path_chars`, `join_path`). This layering keeps the internal caching and metadata‑specific logic private, while exposing a clean set of types and functions for the rest of the generation infrastructure.
 
 ## Related Pages
 

@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::anthropic::protocol::detail::appendtextwithgap'
-description: 'The function checks whether text is empty and exits immediately if so, avoiding unnecessary work. When text is non‑empty, it inspects target: if target already contains some content, a double newline ("\n\n") separator is appended first, ensuring the new text is visually separated from any prior text. Finally, the content of text is appended to target. No external dependencies beyond the standard library’s std::string and std::string_view are required; the control flow is a straightforward linear sequence with a single conditional branch for the gap insertion.'
+description: 'The function clore::net::anthropic::protocol::detail::append_text_with_gap appends a given std::string_view text to a std::string& target while inserting a gap separator when both strings are non‑empty. The control flow begins with an early return if text is empty, preserving the existing content of target. If target is not already empty, a double newline ("\n\n") is appended to separate the previously stored content from the incoming text. Finally, the text itself is appended. This ensures that accumulated text blocks are visually separated by a blank line, while avoiding leading whitespace for the first block. The implementation relies solely on std::string and std::string_view operations, with no external dependencies beyond the standard library.'
 layout: doc
 template: doc
 ---
@@ -29,24 +29,24 @@ auto append_text_with_gap(std::string& target, std::string_view text) -> void {
 }
 ```
 
-The function checks whether `text` is empty and exits immediately if so, avoiding unnecessary work. When `text` is non‑empty, it inspects `target`: if `target` already contains some content, a double newline (`"\n\n"`) separator is appended first, ensuring the new text is visually separated from any prior text. Finally, the content of `text` is appended to `target`. No external dependencies beyond the standard library’s `std::string` and `std::string_view` are required; the control flow is a straightforward linear sequence with a single conditional branch for the gap insertion.
+The function `clore::net::anthropic::protocol::detail::append_text_with_gap` appends a given `std::string_view text` to a `std::string& target` while inserting a gap separator when both strings are non‑empty. The control flow begins with an early return if `text` is empty, preserving the existing content of `target`. If `target` is not already empty, a double newline (`"\n\n"`) is appended to separate the previously stored content from the incoming `text`. Finally, the `text` itself is appended. This ensures that accumulated text blocks are visually separated by a blank line, while avoiding leading whitespace for the first block. The implementation relies solely on `std::string` and `std::string_view` operations, with no external dependencies beyond the standard library.
 
 ## Side Effects
 
-- Modifies target string by appending text and optionally a gap
+- Mutates the `target` string by appending `text` and optionally inserting a double-newline separator.
 
 ## Reads From
 
-- Parameter `target` (to check emptiness)
-- Parameter `text` (to read content)
+- `target` parameter (reads its current content to check if empty for separator insertion)
+- `text` parameter (reads its content and checks emptiness)
 
 ## Writes To
 
-- Parameter `target` (modified in place)
+- `target` parameter (appends separator and `text` content)
 
 ## Usage Patterns
 
-- Used in `build_request_json` to assemble text blocks with gaps
+- Used by `build_request_json` to accumulate JSON text blocks with gap separation.
 
 ## Called By
 

@@ -1,6 +1,6 @@
 ---
 title: 'Module extract:scan'
-description: 'The extract:scan module is responsible for scanning C++ source files to extract module declaration and include information, as well as constructing inter-file dependency graphs. Its primary public functions are scan_file, which returns a ScanResult or a ScanError for a single file; scan_module_decl, which quickly populates module name, interface unit status, and imports using Clang’s dependency directives scanner; and build_dependency_graph_async, which asynchronously builds a complete DependencyGraph from a compilation database handle, optionally using a ScanCache for persistent caching across scans. A helper function topological_order computes a topological ordering of the graph’s nodes.'
+description: 'The extract:scan module is responsible for scanning C++ source files to extract module declarations, #include directives, and dependency information using Clang’s dependency directives scanner. It provides the core data structures for representing scan results (ScanResult, ScanError, IncludeInfo), dependency graphs (DependencyGraph, DependencyEdge), and a persistent cache (ScanCache) to avoid redundant scanning across successive runs. The module owns the public functions scan_module_decl (fast module declaration scan without full preprocessing), scan_file (full file scan returning a ScanResult or ScanError), and the asynchronous build_dependency_graph_async (constructs a dependency graph from a compilation database). It also exposes topological_order for computing a topological ordering of a dependency graph. The implementation includes internal helpers (ScanPPCallbacks, ScanAction, PreparedScanEntry) and relies on the extract:compiler and support modules for compilation database access and foundational utilities.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-The `extract:scan` module is responsible for scanning C++ source files to extract module declaration and include information, as well as constructing inter-file dependency graphs. Its primary public functions are `scan_file`, which returns a `ScanResult` or a `ScanError` for a single file; `scan_module_decl`, which quickly populates module name, interface unit status, and imports using Clang’s dependency directives scanner; and `build_dependency_graph_async`, which asynchronously builds a complete `DependencyGraph` from a compilation database handle, optionally using a `ScanCache` for persistent caching across scans. A helper function `topological_order` computes a topological ordering of the graph’s nodes.
-
-The module owns the public types `ScanResult` (holding module name, interface flag, imports, includes, and errors), `ScanCache` (shared cache invalidated on compilation DB or filesystem changes), `DependencyGraph` (with file lists and directed edges), `DependencyEdge` (representing a single dependency), `IncludeInfo` (with path and angled flag), and `ScanError` (with a message string). Supporting internal machinery includes `ScanAction`, `ScanPPCallbacks`, `PreparedScanEntry`, and `MissingScanTask`, all of which work together to drive the scanning and graph-building pipeline.
+The `extract:scan` module is responsible for scanning C++ source files to extract module declarations, `#include` directives, and dependency information using Clang’s dependency directives scanner. It provides the core data structures for representing scan results (`ScanResult`, `ScanError`, `IncludeInfo`), dependency graphs (`DependencyGraph`, `DependencyEdge`), and a persistent cache (`ScanCache`) to avoid redundant scanning across successive runs. The module owns the public functions `scan_module_decl` (fast module declaration scan without full preprocessing), `scan_file` (full file scan returning a `ScanResult` or `ScanError`), and the asynchronous `build_dependency_graph_async` (constructs a dependency graph from a compilation database). It also exposes `topological_order` for computing a topological ordering of a dependency graph. The implementation includes internal helpers (`ScanPPCallbacks`, `ScanAction`, `PreparedScanEntry`) and relies on the `extract:compiler` and `support` modules for compilation database access and foundational utilities.
 
 ## Imports
 
@@ -33,24 +31,22 @@ Definition: `extract/scan.cppm:51`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The struct `clore::extract::DependencyEdge` models a directed dependency relationship between two named entities. It aggregates two `std::string` members, `from` and `to`, indicating the source and target of the dependency edge. The structure imposes no invariants beyond standard string validity; both fields can be empty, but in practice they are expected to contain non-empty identifiers to form meaningful edges. This aggregate type provides no custom constructors or member functions, relying on default copy, move, and comparison semantics. Its primary purpose is to serve as a lightweight value type within dependency graph construction and traversal logic.
+The internal structure of `clore::extract::DependencyEdge` is a simple aggregate containing two public `std::string` data members, `from` and `to`. These strings represent the source and target nodes of a directed edge within a dependency graph. There are no explicit invariants enforced: the struct imposes no constraints on the contents of `from` or `to` beyond what `std::string` itself provides, and it has no custom constructors, assignment `operator`s, or any other member functions. The implementation is therefore entirely trivial, serving as a lightweight, value-oriented container for edge data that can be aggregate-initialized or default-constructed.
 
 #### Invariants
 
-- `from` and `to` are distinct identifiers (implied by edge semantics, not enforced)
-- Members are public and may be mutated directly
-- No ownership or lifetime constraints beyond those of `std::string`
+- both `from` and `to` are `std::string` objects with no additional constraints
+- the struct has no user‑defined constructors, destructors, or member functions
 
 #### Key Members
 
-- `from`: the source node identifier
-- `to`: the target node identifier
+- `from`
+- `to`
 
 #### Usage Patterns
 
-- Used to construct dependency graphs or lists
-- Stored in containers such as `std::vector<DependencyEdge>`
-- Iterated over to extract source/target pairs for further processing
+- used to model a directed dependency from `from` to `to` in dependency analysis
+- likely aggregated into collections or graphs for further processing
 
 ### `clore::extract::DependencyGraph`
 
@@ -60,22 +56,22 @@ Definition: `extract/scan.cppm:56`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The struct serves as a flat container for the extracted dependency graph, holding two parallel vectors: `files` stores the canonical paths of all source files encountered, and `edges` stores the directed dependencies between them. The invariant that each `DependencyEdge` must reference indices valid within `files` is expected to be maintained by the functions that populate the graph. No special construction or assignment logic is provided; the struct is a plain aggregate.
+The struct is implemented as a flat adjacency representation using two parallel vectors: `files` holds each unique file path as a `std::string`, and `edges` stores a sequence of `DependencyEdge` objects that define directed dependencies between those files. Each `DependencyEdge` is expected to contain source and target indices that refer to entries in `files`. A key invariant is that all such indices remain within the bounds of `files` for the lifetime of the graph. The implementation relies on this separation of node storage and edge storage to keep lookups by index cheap and to simplify serialisation. Core operations typically manage the integrity of these two vectors, ensuring that `files` is populated before `edges` are added and that no duplicate file paths are inserted.
 
 #### Invariants
 
-- No explicitly documented invariants.
-- All members are public and default-initialized to empty vectors.
+- All dependency information is stored in the two vectors.
+- No additional constraints on the ordering or content of `files` or `edges` are indicated.
 
 #### Key Members
 
-- `files`
-- `edges`
+- `files`: the list of file names involved
+- `edges`: the list of dependency connections between files
 
 #### Usage Patterns
 
-- Instantiated and populated by dependency extraction routines.
-- Consumed by downstream analysis or serialization code.
+- Filled by extraction logic and consumed by downstream processing steps.
+- Expected to be passed by value or reference as a complete dependency snapshot.
 
 ### `clore::extract::IncludeInfo`
 
@@ -85,14 +81,12 @@ Definition: `extract/scan.cppm:24`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-`clore::extract::IncludeInfo` is a lightweight aggregate data structure that captures the two essential characteristics of a C++ `#include` directive: the included `path` and whether the directive used angle brackets (`<>`) versus quotes (`""`), stored in the `is_angled` flag. The default member initializers ensure that a default‑constructed instance holds an empty `path` and `is_angled` set to `false`.
-
-As an implementation detail, the struct imposes no invariants beyond the natural constraints of its members: `path` is an arbitrary `std::string`, and `is_angled` is a `bool`. No custom constructors, assignment `operator`s, or other special member functions are defined, so the compiler‑generated defaults apply. The primary role of this type is to serve as a simple data carrier between parsing steps, where its fields are populated by the include‑directive recognition logic and later consumed by higher‑level extraction routines.
+The `clore::extract::IncludeInfo` struct aggregates two data members: `path` of type `std::string` and `is_angled` of type `bool`. Its default initialisation guarantees that `path` is an empty string and `is_angled` is false, establishing a consistent base state before any value is assigned. Internal invariants are minimal: `path` may hold any valid file‑path string, and `is_angled` should reflect whether the include directive used angle brackets (`<...>`) rather than quotes (`"..."`). No additional member functions or special member definitions are provided, so all construction and assignment rely on compiler‑generated defaults.
 
 #### Invariants
 
-- `is_angled` distinguishes angle-bracket includes from quoted includes.
-- `path` can be any string, including empty.
+- `path` may be empty or contain a file path string.
+- `is_angled` is `true` for angle-bracket includes, `false` otherwise.
 
 #### Key Members
 
@@ -101,8 +95,8 @@ As an implementation detail, the struct imposes no invariants beyond the natural
 
 #### Usage Patterns
 
-- Returned by parsing functions to represent a single include directive.
-- Consumed by downstream logic to determine include search behavior.
+- Used as a record type to store include directive data during scanning.
+- Likely populated by parsing include lines and then consumed for further processing or reporting.
 
 ### `clore::extract::ScanCache`
 
@@ -112,21 +106,23 @@ Definition: `extract/scan.cppm:40`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The struct contains a single data member: an `std::unordered_map<std::string, ScanResult>` named `scan_results`. This map serves as the persistent storage for previously computed scan outcomes, keyed by the file path (as a `std::string`). The only invariant is that the map’s entries remain valid only while the compilation database and file system state are unchanged; when either of those changes, the entire cache must be cleared or discarded. Because the struct has no other members, all operations are forwarded to the underlying unordered map, and the implementation’s correctness depends on callers respecting the invalidation contract.
+The struct `clore::extract::ScanCache` is implemented as a thin wrapper around an `std::unordered_map<std::string, ScanResult>` stored in the `scan_results` member. This map serves as the sole internal storage, keying previously computed scan outcomes by file path (or another string identifier). The central invariant is that each entry remains valid and reusable across successive dependency scans only as long as the underlying compilation database and file system state are unchanged. When those external states are invalidated, the entire cache must be cleared or discarded. No additional logic or housekeeping is present; the implementation relies entirely on the caller to enforce this lifetime invariant.
 
 #### Invariants
 
-- Cache entries are valid only until compilation DB or file system state changes.
-- The `scan_results` map is unordered; iteration order is not guaranteed.
+- Cache entries remain valid only while the compilation DB and file system state are unchanged.
+- The `scan_results` map is initially empty.
+- Callers are responsible for invalidating the cache when external state changes.
 
 #### Key Members
 
-- `scan_results`: maps file paths to cached `ScanResult` objects.
+- `scan_results` (`std::unordered_map<std::string, clore::extract::ScanResult>`)
 
 #### Usage Patterns
 
-- Shared across successive dependency scans to avoid redundant work.
-- Callers must clear or discard the cache when compilation DB or file system state changes.
+- Stores and retrieves previously computed scan results by file path to avoid redundant scans.
+- Passed into scan functions to provide cached results across successive invocations.
+- Cleared or replaced by callers upon compilation DB or file system changes.
 
 ### `clore::extract::ScanError`
 
@@ -136,20 +132,19 @@ Definition: `extract/scan.cppm:20`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The struct `clore::extract::ScanError` is defined with a single data member `message` of type `std::string`. It is an aggregate, so all special member functions (default constructor, copy, move, and assignment) are implicitly declared and defined by the compiler. No invariants are enforced within the struct; the content of `message` is arbitrary and is stored exactly as provided. This minimal implementation serves as a lightweight container for error descriptions, intended to be used as the error type in return values or thrown objects without any additional logic or validation.
+The `ScanError` struct is implemented as a simple aggregate containing a single `std::string message` field. There are no custom constructors, destructors, or assignment `operator`s; all special member functions are implicitly defined, making the type trivially copyable and movable through its string member. The only invariant is that `message` holds a human‑readable description of the error condition that occurred during extraction. Because the struct has no internal logic, its role is purely to bundle error text for propagation through the error‑handling path. No custom member implementations exist—the field provides direct access to the error string, and the default compiler‑generated operations handle all lifetime and copy semantics.
 
 #### Invariants
 
-- `message` may be empty or contain any valid string
+- No explicit invariants documented.
 
 #### Key Members
 
-- `std::string message`
+- `message`
 
 #### Usage Patterns
 
-- Returned as an error result from scanning functions
-- Likely used with `std::expected` or similar error-handling mechanisms
+- No usage patterns documented in the evidence.
 
 ### `clore::extract::ScanResult`
 
@@ -159,23 +154,23 @@ Definition: `extract/scan.cppm:29`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The struct `clore::extract::ScanResult` is an aggregate data container designed to hold the outcome of scanning a C++ source file for module and dependency information. Its internal structure consists of four public fields: `module_name` (a `std::string` defaulting to empty), `is_interface_unit` (a `bool` defaulting to `false`), `includes` (a `std::vector<IncludeInfo>` defaulting to empty), and `module_imports` (a `std::vector<std::string>` defaulting to empty). The default member initializers ensure that every default‑constructed `ScanResult` starts with a cleared state, avoiding any uninitialized values. No invariants are enforced beyond the guarantees of the underlying types; the fields are directly mutable and intended to be populated during scanning and read afterward. There are no custom constructors, assignment `operator`s, or member functions, making the struct a plain data carrier that serves as the output from the extraction process.
+The struct `clore::extract::ScanResult` is a plain aggregate designed to hold the output of a scanning pass over a translation unit. Its data members — `module_name`, `is_interface_unit`, `includes`, and `module_imports` — are all default‑initialized to empty or false values, ensuring that every `ScanResult` begins in a well‑defined, zero‑overhead state before population. No custom constructors, destructors, or assignment `operator`s are declared; the class relies entirely on implicit compiler‑generated special members, and there are no internal invariants beyond the natural consistency of the aggregate fields (e.g., `is_interface_unit` should be `true` only if `module_name` is non‑empty). Member functions are absent, making `ScanResult` a pure data container that is filled incrementally during extraction and consumed by later processing stages.
 
 #### Invariants
 
-- Fields are default-initialized to empty strings, false, or empty vectors.
+- Fields are default-initialized when the struct is value-initialized.
+- No additional invariants are enforced by the struct.
 
 #### Key Members
 
 - `module_name`
 - `is_interface_unit`
-- includes
+- `includes`
 - `module_imports`
 
 #### Usage Patterns
 
-- Used as a return type from scanning functions
-- Consumed to process module information
+- Used as a return type for scanning operations.
 
 ## Functions
 
@@ -187,32 +182,32 @@ Definition: `extract/scan.cppm:370`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function first clears the existing `graph.files` and `graph.edges`, then iterates over each compilation database entry to call `prepare_scan_entry` and populate a vector of `PreparedScanEntry` objects. During this pass it deduplicates normalized file paths into `graph.files`. It then partitions entries into those with cached results (looked up in `ScanCache::scan_results` if a `cache` pointer is provided) and those requiring re‑scanning. For the latter, it deduplicates by `cache_key` to create a set of `MissingScanTask` objects.
+The function first clears the output `graph.files` and `graph.edges`, then iterates over each entry in the `CompilationDatabase` to prepare a `PreparedScanEntry` via `prepare_scan_entry`. It deduplicates normalized file paths into `graph.files` and stores per‑entry cache keys. For each entry, it checks the optional `ScanCache` for a cached `ScanResult`; if a cache hit is found, the result is retained; otherwise, a `MissingScanTask` is recorded, deduplicated by cache key. All missing tasks are launched concurrently using `run_scan_task` on the given `kota::event_loop`. The function awaits `kota::when_all` on the task collection, propagating any `ScanError` or a size mismatch via `kota::fail`.
 
-For each distinct missing task, it launches an asynchronous `run_scan_task` on the provided `kota::event_loop` and collects the resulting `kota::task` objects into a vector. The function then co‑awaits `kota::when_all` on all those tasks, handling a possible `ScanError` and verifying the result count. With all scan results available (either from cache or from the newly scanned batch), it iterates over every original entry. For each entry it normalizes include paths (from `scan_result->includes`) and adds a `DependencyEdge` to `graph.edges` if the target file is among the entry files and the edge has not already been emitted (deduplicated via a compound key). Finally, if a cache pointer exists, it stores every scan result back into `cache->scan_results`. The function co‑returns `void` upon success.
+After all scans complete, the function iterates over every original entry, retrieves the corresponding `ScanResult` (from cache or the scanned results). For each include directive in the result, it normalizes the include path and, if that path is in the set of entry files and the edge has not been emitted before, appends a `DependencyEdge` from the normalized source file to the normalized include file in `graph.edges`. Finally, the function writes each used `ScanResult` back into the `ScanCache` (if provided) and returns via `co_return`.
 
 #### Side Effects
 
-- Clears and populates `graph.files` and `graph.edges`
-- Inserts or assigns scan results into `cache->scan_results` if cache is non-null
+- Modifies `graph` by clearing and adding files and edges
+- Modifies `ScanCache` if provided by inserting scan results
+- Performs asynchronous file I/O and dependency scanning via `co_await`
 
 #### Reads From
 
-- `db` (compilation database entries)
-- `cache` (previously cached scan results)
-- `prepared_entries` (normalized file paths and cache keys)
-- `cached_results` and `scanned_results` vectors
+- `db.entries` from `CompilationDatabase`
+- `cache->scan_results` if `cache` is non-null
+- `prepared_entries[i].cache_key`
 
 #### Writes To
 
 - `graph.files`
 - `graph.edges`
-- `cache->scan_results` (if cache is non-null)
-- Local containers: `entry_files`, `file_set`, `prepared_entries`, `cached_results`, `missing_task_indices`, `missing_task_by_cache_key`, `missing_tasks`, `scanned_results`, `seen_files`, `emitted_edges`
+- `cache->scan_results` if `cache` is non-null
 
 #### Usage Patterns
 
-- Called to asynchronously compute a dependency graph for a project given a compilation database
+- Called to asynchronously build a dependency graph for a set of compilation entries
+- Used in pipeline that constructs project model for code analysis
 
 ### `clore::extract::scan_file`
 
@@ -222,33 +217,29 @@ Definition: `extract/scan.cppm:238`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function first validates that the compile entry has a non-empty argument list, returning a `ScanError` if not. It then reads the source file content from `entry.normalized_file` (falling back to `normalize_entry_file`) and passes it to `scan_module_decl` to extract the module declaration and module name, populating the `ScanResult` early. Next, it creates a compiler instance via `create_compiler_instance`, configures it for preprocessor‑only execution, and instantiates a `ScanAction` bound to the `ScanResult`. The `ScanAction` (which internally uses `ScanPPCallbacks`) is called to preprocess the file, capturing include directives and module imports into `ScanResult::includes` and `ScanResult::module_imports`. After successful execution, the result is returned; any failure at any stage—file I/O errors, compiler instance creation failure, or preprocessor errors—produces a `ScanError` describing the issue. Dependencies include `scan_module_decl`, `normalize_entry_file`, `ScanAction`/`ScanPPCallbacks`, and the `CompileEntry`/`ScanResult`/`ScanError` types.
+The function first validates that `entry.arguments` is non-empty, returning a `ScanError` on failure. It then attempts a fast pre‑scan by reading the source file content from `entry.normalized_file` and invoking `scan_module_decl` to populate module‑related fields in the `ScanResult`. After this, a compiler instance is created via `create_compiler_instance`; a null instance causes an immediate `ScanError` return. The instance is reconfigured for preprocessor‑only mode by adjusting `frontend_opts`. A `ScanAction` is constructed against the `result`, and preprocessing proceeds through `BeginSourceFile` and `Execute`. Any preprocessing errors are wrapped in a `ScanError` and returned; otherwise the function returns the fully populated `ScanResult`. The internal control flow relies on `scan_module_decl`, the `ScanAction` and `ScanPPCallbacks` types, and the `kota::event_loop` infrastructure for asynchronous tasks if triggered by downstream functions (e.g., `build_dependency_graph_async`), though this entry point itself is synchronous.
 
 #### Side Effects
 
-- reads source file content from the filesystem
-- creates a compiler instance (may allocate resources or spawn processes)
-- modifies the `ScanResult` object passed via the action
-- modifies frontend options on the compiler instance
+- Reads the source file from disk using `std::ifstream`
+- Creates a Clang compiler instance (`create_compiler_instance`) which may load toolchain and system include files
+- Executes `ScanAction` which performs preprocessor scanning (I/O for included headers)
+- Allocates strings and other objects via `std::format` and Clang `APIs`
 
 #### Reads From
 
 - `entry.arguments`
 - `entry.file`
 - `entry.normalized_file`
-- source file content via `std::ifstream`
-
-#### Writes To
-
-- `result` (of type `ScanResult`)
-- `instance->getInvocation().getFrontendOpts()` fields
+- Source file content from disk
+- Clang compiler instance state via `instance`
+- `ScanAction` internal state
 
 #### Usage Patterns
 
-- called for each source file during project extraction
-- used in conjunction with `extract_project_async` and dependency graph building
-- typically invoked after compiling a compilation database entry
-- may be called from worker threads in a parallel extraction pipeline
+- Called to scan a single compile entry during project extraction
+- Used after `normalize_entry_file` to process source files
+- Part of the extraction pipeline that populates `ScanResult` with module and symbol information
 
 ### `clore::extract::scan_module_decl`
 
@@ -260,16 +251,19 @@ Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.m
 
 Implementation: [Implementation](functions/scan-module-decl.md)
 
-The implementation of `clore::extract::scan_module_decl` relies entirely on Clang's dependency directives scanner (`clang::scanSourceForDependencyDirectives`) to quickly tokenize the file content without running the full preprocessor. This produces a list of `dependency_directives_scan::Directive` entries, which are then iterated to identify module and import declarations. For each `cxx_module_decl` or `cxx_export_module_decl` directive, the function walks the associated tokens past the `module` keyword, collecting name tokens (identifiers, dots, colons) while skipping whitespace and ignoring punctuation-only tokens that indicate a module fragment. The collected name becomes `result.module_name`, and `result.is_interface_unit` is set based on whether the declaration was `export module`. For each `cxx_import_decl` directive, tokens after the `import` keyword are concatenated into an import name, which is then normalized via `normalize_partition_import` and inserted into `result.module_imports` after a duplicate check. If the scanner fails (returns non‑zero), the function silently returns without modifying the result, leaving it in its default state.
+The implementation of `clore::extract::scan_module_decl` relies on Clang’s dependency directives scanner to quickly parse a source file’s module-related constructs without invoking the full preprocessor. It calls `clang::scanSourceForDependencyDirectives` on the input `file_content`, producing vectors of `Token` and `Directive`. If the scanner fails (returns a non‑zero value), the function returns early, leaving the provided `ScanResult` unchanged. Otherwise, it iterates over each directive. For directives of kind `cxx_export_module_decl` or `cxx_module_decl`, the function extracts the module name by skipping the `export` and `module` keywords and concatenating subsequent non‑whitespace, non‑punctuation tokens until a semicolon. It checks for a global module fragment (e.g., a `:`) and, if the fragment is absent and a module name was found, sets `result.module_name` and `result.is_interface_unit` (true only for `cxx_export_module_decl`). For directives of kind `cxx_import_decl`, the function collects the import name after the `import` keyword, normalizes it using `normalize_partition_import` (which handles partition specifiers), and appends the result to `result.module_imports` if it is not already present. Helper lambdas `is_whitespace_only` and `is_punctuation_only` are used to filter tokens during both module‑name and import‑name extraction.
 
 #### Side Effects
 
-- modifies the `module_name`, `is_interface_unit`, and `module_imports` fields of the provided `ScanResult` object
+- populates the provided `ScanResult` with module name, interface unit flag, and imports list
+- calls `normalize_partition_import` to normalize import names
 
 #### Reads From
 
-- the `file_content` string parameter
-- tokens and directives produced by `clang::scanSourceForDependencyDirectives`
+- `file_content` (`string_view`)
+- `result.module_imports` (when checking for duplicate imports)
+- `result.module_name` (passed to `normalize_partition_import`)
+- directives and tokens returned by `clang::scanSourceForDependencyDirectives`
 
 #### Writes To
 
@@ -279,8 +273,8 @@ The implementation of `clore::extract::scan_module_decl` relies entirely on Clan
 
 #### Usage Patterns
 
-- called by `clore::extract::scan_file` to extract module information from source content
-- used as a fast alternative to full preprocessing for module detection
+- called by `scan_file` to fill `ScanResult` fields without full preprocessing
+- used as a fast module detection step before heavy parsing
 
 ### `clore::extract::topological_order`
 
@@ -290,7 +284,7 @@ Definition: `extract/scan.cppm:495`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function constructs an adjacency list and an in‑degree map from the provided `graph.files` and `graph.edges`. Each file is initialized with an in‑degree of zero, then every `DependencyEdge` is processed by adding `edge.from` to the adjacency list of `edge.to` and incrementing the in‑degree of `edge.from`. This inverted adjacency (mapping a file to its dependents) matches the expected interface of `clore::support::topological_order`, which receives the file list, the adjacency map, and the in‑degree map. If the support function returns a cycle (no valid order), the function returns a `std::unexpected` containing a `ScanError` with a descriptive message. Otherwise, the computed topological order is forwarded to the caller.
+The function first initializes an in-degree map for each file in `graph.files` to zero. It then iterates over every `DependencyEdge` in `graph.edges`, building an adjacency list (`adj`) where each target (`edge.to`) records its dependencies (`edge.from`), and increments the in-degree for each source (`edge.from`). This constructs a directed graph representing file dependencies. Finally, it delegates to `clore::support::topological_order`, passing the full file list, the adjacency map, and the in-degree map. If the delegated function fails to produce a topological ordering (indicating a cycle), the function returns a `ScanError` with a descriptive message; otherwise, it returns the computed order vector.
 
 #### Side Effects
 
@@ -298,18 +292,19 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- graph`.files`
-- graph`.edges`
+- `graph.files`
+- `graph.edges`
 
 #### Usage Patterns
 
-- Ordering files for sequential processing according to include dependencies.
+- used to obtain a dependency-resolved sequence of files for compilation or analysis
+- topological sort with cycle detection in a build system context
 
 ## Internal Structure
 
-The `extract:scan` module builds on three direct imports—`extract:compiler` for compilation database entries, `support` for file I/O and cache-key utilities, and the C++ standard library—to provide the core scanning pipeline. Its public surface is split into two major operations: synchronous file scanning via `scan_file` and `scan_module_decl` for lightweight module declaration extraction, and asynchronous dependency‑graph construction through `build_dependency_graph_async` and `topological_order`. These functions rely on shared data types (`ScanResult`, `ScanError`, `DependencyGraph`, `DependencyEdge`, `IncludeInfo`) and a persistent `ScanCache` that callers must invalidate when the compilation database or filesystem state changes.
+The `extract:scan` module is responsible for scanning translation units to extract module declarations, import directives, and file inclusion relationships. It is decomposed into a small public API — `scan_file`, `build_dependency_graph_async`, and `topological_order` — and an internal implementation layer residing in an anonymous namespace. The internal layer contains several helper types and functions: `ScanAction` drives per‑file scanning via Clang’s preprocessor, `ScanPPCallbacks` captures inclusion and import directives, `PreparedScanEntry` normalizes file paths and computes deterministic cache keys, and `MissingScanTask` tracks entries that must be scanned before the full graph can be constructed. This decomposition isolates the asynchronous, callback‑driven scanning logic from the public interface and enables reuse across successive scans.
 
-Internally, the module is layered into an anonymous‑namespace implementation that encapsulates the Clang‑based preprocessor interaction. A `ScanPPCallbacks` class captures inclusion directives and module imports during a preprocessor run, driven by a `ScanAction` that wraps the scanning logic for a single file. Preparation and deduplication are handled by `PreparedScanEntry` and `MissingScanTask` structures, while `normalize_partition_import` and `prepare_scan_entry` provide lightweight normalization and cache‑key computation. The asynchronous graph builder uses a `kota::event_loop` to schedule scan tasks, manage a work queue of missing entries, and produce a topological ordering, with all intermediate state kept in local variables (e.g., `prepared_entries`, `missing_task_by_cache_key`, `scanned_results`) rather than exposed in the public interface.
+The module imports `extract:compiler` for compilation database entries and compile signatures, `support` for path normalization, line‑ending handling, and cache key computation, and the C++ standard library for data structures and algorithms. Internally, the implementation is layered: first, raw file content or compilation entries are normalized into `PreparedScanEntry` objects; then, scanning is performed by invoking Clang’s dependency directives scanner (via `scan_module_decl`) or the full preprocessor (via `ScanAction`). Results are stored in a `ScanCache` to avoid redundant work when the compilation database or file system is unchanged. Finally, the collected `ScanResult` objects are assembled into a `DependencyGraph`, and a topological ordering can be computed to guide further processing. This layered design separates the concerns of file preparation, Clang integration, caching, and graph construction, keeping each phase testable and maintainable.
 
 ## Related Pages
 

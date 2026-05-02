@@ -1,6 +1,6 @@
 ---
 title: 'clore::support::ensureutf8'
-description: 'The function clore::support::ensure_utf8 accepts a std::string_view and returns a std::string that is guaranteed to be a valid UTF-8 representation of the input. Callers can rely on the result being well-formed UTF-8, suitable for downstream operations that require UTF-8 encoding, such as writing to a file or performing truncation. The caller is responsible for providing the input text; the function handles any necessary normalization or conversion to ensure UTF-8 validity.'
+description: 'The function clore::support::ensure_utf8 accepts a std::string_view and returns a std::string. It is responsible for ensuring that the returned string is a valid UTF-8 encoding of the input. The caller can rely on the result being a correctly encoded UTF-8 string, suitable for further processing or output. This function is used by other utilities such as clore::support::write_utf8_text_file and clore::support::truncate_utf8 to guarantee UTF-8 validity before performing operations that require correct encoding.'
 layout: doc
 template: doc
 ---
@@ -21,12 +21,12 @@ Implementation: [`Module support`](../../../../modules/support/index.md)
 auto (std::string_view) -> std::string;
 ```
 
-The function `clore::support::ensure_utf8` accepts a `std::string_view` and returns a `std::string` that is guaranteed to be a valid UTF-8 representation of the input. Callers can rely on the result being well-formed UTF-8, suitable for downstream operations that require UTF-8 encoding, such as writing to a file or performing truncation. The caller is responsible for providing the input text; the function handles any necessary normalization or conversion to ensure UTF-8 validity.
+The function `clore::support::ensure_utf8` accepts a `std::string_view` and returns a `std::string`. It is responsible for ensuring that the returned string is a valid UTF-8 encoding of the input. The caller can rely on the result being a correctly encoded UTF-8 string, suitable for further processing or output. This function is used by other utilities such as `clore::support::write_utf8_text_file` and `clore::support::truncate_utf8` to guarantee UTF-8 validity before performing operations that require correct encoding.
 
 ## Usage Patterns
 
-- called by `write_utf8_text_file` to ensure output is valid UTF-8
-- called by `truncate_utf8` to sanitize input before truncation
+- Used by `write_utf8_text_file` to sanitize input before writing
+- Used by `truncate_utf8` to ensure truncated result is valid UTF-8
 
 ## Calls
 

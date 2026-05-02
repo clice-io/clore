@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::openai::schema'
-description: 'Insufficient evidence to summarize; provide more EVIDENCE.'
+description: 'Insufficient evidence to summarize; provide more EVIDENCE'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+Insufficient evidence to summarize; provide more EVIDENCE
 
 ## Subnamespaces
 

@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::openai'
-description: 'The clore::net::openai namespace provides an asynchronous client for interacting with OpenAI-compatible language model APIs. It defines a set of non-blocking functions—call_completion_async, call_llm_async, and call_structured_async—that each accept a kota::event_loop reference and return an integer handle for tracking or cancelling the pending request. These functions abstract the details of HTTP communication and JSON serialization, allowing callers to submit prompts, system messages, model identifiers, and optional schema descriptors while offloading the asynchronous lifecycle management to the event loop.'
+description: 'The clore::net::openai namespace provides an asynchronous interface for interacting with the OpenAI API. Its public functions include call_completion_async, which initiates a completion request; two overloads of call_llm_async, which send prompts to a language model; and call_structured_async, which requests a structured response for a specified type. All functions accept a kota::event_loop reference for non‑blocking execution and return an integer representing a unique request identifier, allowing callers to monitor or cancel pending operations.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-The `clore::net::openai` namespace provides an asynchronous client for interacting with `OpenAI`-compatible language model `APIs`. It defines a set of non-blocking functions—`call_completion_async`, `call_llm_async`, and `call_structured_async`—that each accept a `kota::event_loop` reference and return an integer handle for tracking or cancelling the pending request. These functions abstract the details of HTTP communication and JSON serialization, allowing callers to submit prompts, system messages, model identifiers, and optional schema descriptors while offloading the asynchronous lifecycle management to the event loop.
+The `clore::net::openai` namespace provides an asynchronous interface for interacting with the `OpenAI` API. Its public functions include `call_completion_async`, which initiates a completion request; two overloads of `call_llm_async`, which send prompts to a language model; and `call_structured_async`, which requests a structured response for a specified type. All functions accept a `kota::event_loop` reference for non‑blocking execution and return an integer representing a unique request identifier, allowing callers to monitor or cancel pending operations.
 
-Architecturally, this namespace forms the `OpenAI` integration layer within the `clore::net` networking module. By centralizing the async request patterns and returning opaque handles, it decouples the application logic from the specifics of the `OpenAI` API, enabling consistent error handling, cancellation, and result dispatch through the event loop’s callback mechanism.
+Architecturally, this namespace encapsulates the HTTP communication and request management for `OpenAI` services, enabling the rest of the codebase to make asynchronous API calls without blocking. The return value and parameter conventions (e.g., `int` for request context and token limits) are internal to the module, while the event loop ensures asynchronous completion is processed correctly.
 
 ## Diagram
 
@@ -36,65 +36,66 @@ graph TD
 
 ### `clore::net::openai::call_completion_async`
 
-Declaration: `network/openai.cppm:748`
-
-Definition: `network/openai.cppm:775`
-
-Implementation: [`Module openai`](../../../../modules/openai/index.md)
-
-Submits an asynchronous completion request to the `OpenAI` API, using an integer argument to identify a predefined prompt or configuration. The function accepts a reference to a `kota::event_loop` for managing the asynchronous lifecycle; the caller must ensure the loop remains active until the request completes.
-
-Returns an integer handle that uniquely identifies the pending request. This handle can later be used to monitor or cancel the operation. The caller is responsible for providing a valid event loop and for handling the result through the loop's event dispatch mechanism.
-
-#### Usage Patterns
-
-- called with a `CompletionRequest` and an event loop reference
-- typically `co_await`ed within another coroutine
-
-### `clore::net::openai::call_llm_async`
-
-Declaration: `network/openai.cppm:752`
+Declaration: `network/openai.cppm:755`
 
 Definition: `network/openai.cppm:782`
 
 Implementation: [`Module openai`](../../../../modules/openai/index.md)
 
-Initiates an asynchronous request to a large language model, sending the provided prompt and system message as parameters along with an integer argument (such as a token limit or temperature). The function returns an integer identifier that can be used to track or cancel the pending request. The caller must supply an active `kota::event_loop` reference; the asynchronous result is delivered through the event loop's callback mechanism.
+The function `clore::net::openai::call_completion_async` initiates an asynchronous request to the `OpenAI` completion API. It is one of several public async call functions in the `clore::net::openai` module, alongside `call_llm_async` and `call_structured_async`.
+
+The caller must provide an `int` argument (typically a request context identifier) and a `kota::event_loop` reference for scheduling the asynchronous operation. The function returns an `int` that serves as a unique identifier for the submitted completion request, which can be used to monitor or cancel the operation. The exact semantics of the integer parameter and return value are defined by the module's internal request management.
 
 #### Usage Patterns
 
-- Called with a model name, system prompt, integer parameter, and event loop to start an async LLM call
-- Used to submit a request to an LLM endpoint asynchronously
+- Used to asynchronously request a text completion from an `OpenAI` model
+- Called when integrating with an event loop for concurrent or non-blocking LLM inference
 
 ### `clore::net::openai::call_llm_async`
 
-Declaration: `network/openai.cppm:758`
+Declaration: `network/openai.cppm:759`
 
-Definition: `network/openai.cppm:793`
+Definition: `network/openai.cppm:789`
 
 Implementation: [`Module openai`](../../../../modules/openai/index.md)
 
-The function `clore::net::openai::call_llm_async` initiates an asynchronous request to an `OpenAI`-compatible language model. It accepts three `std::string_view` parameters (commonly a model identifier, a user prompt, and a system message) and a reference to a `kota::event_loop`. The caller must ensure that the event loop is running and that the passed string views remain valid for the duration of the operation. The function returns an `int` that serves as a handle for the request (e.g., a request ID or error indicator), allowing the caller to track or cancel the operation.
+The function `clore::net::openai::call_llm_async` provides an asynchronous interface for sending a prompt to an `OpenAI` language model. Callers supply two `std::string_view` arguments (interpreted as the system and user prompts), an `int` value that controls a request-level setting (such as token limit or temperature), and a `kota::event_loop` reference that will manage the asynchronous lifecycle. The function returns an `int` that acts as a unique identifier for the pending request; this identifier may be used later for cancellation or status queries. The operation is non‑blocking: the caller retains ownership of the prompt strings until the event loop signals completion.
 
 #### Usage Patterns
 
-- Used to invoke large language models asynchronously in a coroutine context
-- Commonly called from other async functions that compose LLM calls
+- called with model identifier, system prompt, prompt request, and event loop
+- returns a task that resolves to a string or `LLMError`
 
-### `clore::net::openai::call_structured_async`
+### `clore::net::openai::call_llm_async`
 
 Declaration: `network/openai.cppm:765`
 
-Definition: `network/openai.cppm:805`
+Definition: `network/openai.cppm:800`
 
 Implementation: [`Module openai`](../../../../modules/openai/index.md)
 
-`clore::net::openai::call_structured_async` is a template function that initiates an asynchronous request to the `OpenAI` API to obtain a structured response of the type specified by the template parameter `T`. The caller supplies three `std::string_view` arguments — typically representing a system prompt, a user message, and an output schema or format descriptor — along with a reference to a `kota::event_loop` for driving the async operation. The function returns an `int`, which may serve as a request identifier or status code for subsequent cancellation or completion tracking.
+The function `clore::net::openai::call_llm_async` initiates an asynchronous call to an `OpenAI`‑compatible large language model. The caller provides the model identifier, the user message, an optional system message, and a reference to a `kota::event_loop` for dispatching the asynchronous operation. The function returns an `int` handle that can be used with `clore::net::openai::call_completion_async` to await the completion of the request. The caller is responsible for ensuring the `kota::event_loop` remains active until the call completes.
 
 #### Usage Patterns
 
-- Used to obtain structured outputs from an `OpenAI` language model in an asynchronous context
-- Called from other coroutines that require structured data from LLM completions
+- Asynchronously invoke an LLM model with a system prompt and user prompt
+- Integrate with `kota::event_loop` for non-blocking operation
+- Wrap lower-level LLM call with error handling via `.or_fail()`
+
+### `clore::net::openai::call_structured_async`
+
+Declaration: `network/openai.cppm:772`
+
+Definition: `network/openai.cppm:812`
+
+Implementation: [`Module openai`](../../../../modules/openai/index.md)
+
+The template function `call_structured_async` initiates an asynchronous request to the `OpenAI` API to obtain a structured response of template type `T`. It accepts three `std::string_view` arguments that specify the model, a system message, and a user message, along with a reference to a `kota::event_loop`. The function returns an `int` acting as a unique identifier for the pending operation. The caller must ensure that the event loop is active so that the asynchronous completion can be processed, and is responsible for supplying the correct structured type `T` that matches the expected response format.
+
+#### Usage Patterns
+
+- used to request structured output from an `OpenAI` model asynchronously
+- called by higher-level functions when a typed response is required from the language model
 
 ## Related Pages
 

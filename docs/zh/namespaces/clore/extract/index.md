@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::extract'
-description: 'clore::extract 命名空间负责从 C++ 项目中提取符号、模块和依赖关系，是代码提取工具的核心。它声明了若干关键类型与函数：ProjectModel 表示项目模型，SymbolInfo 和 SymbolKind 描述提取的符号；CompilationDatabase、CompileEntry 管理编译配置；ModuleUnit、DependencyGraph 处理模块及依赖图谱；ScanCache、ASTResult 支持缓存和高效解析。此外，还提供了用于规范化路径、清理编译参数、重建索引和异步提取的实用工具（如 normalize_entry_file、sanitize_driver_arguments、rebuild_lookup_maps、extract_project_async 等）。在架构上，该命名空间将原始编译数据转化为结构化的符号与依赖信息，为上层分析工具提供统一的查询接口。'
+description: 'clore::extract 命名空间是代码提取管线的主工作区，负责将编译数据库、源文件与工具链信息转换为结构化的项目模型和符号集合。其核心职责涵盖编译数据库的加载与规范化（如 load_compdb、sanitize_driver_arguments）、源文件的独立扫描与分析（scan_file、scan_module_decl）、符号提取与合并（extract_symbols、extract_project_async）、依赖图构建（build_dependency_graph_async）、以及基于模块或名称的查找辅助（find_module_by_name、find_symbol、lookup_symbol）。命名空间中定义的关键数据类型（如 ProjectModel、CompilationDatabase、CompileEntry、ModuleUnit、SymbolInfo）协同描述了一个完整的 C++ 项目结构。extract 命名空间在 clore 体系中扮演中间层的角色：它上接命令行或外部配置输入，下连具体的 AST 解析与缓存系统，通过异步接口（如 extract_project_async）和确定性辅助函数（如 build_compile_signature、matches_filter）将多步提取任务解耦为可组合的单元，从而支持增量、并行和可重入的项目分析流程。'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-`clore::extract` 命名空间负责从 C++ 项目中提取符号、模块和依赖关系，是代码提取工具的核心。它声明了若干关键类型与函数：`ProjectModel` 表示项目模型，`SymbolInfo` 和 `SymbolKind` 描述提取的符号；`CompilationDatabase`、`CompileEntry` 管理编译配置；`ModuleUnit`、`DependencyGraph` 处理模块及依赖图谱；`ScanCache`、`ASTResult` 支持缓存和高效解析。此外，还提供了用于规范化路径、清理编译参数、重建索引和异步提取的实用工具（如 `normalize_entry_file`、`sanitize_driver_arguments`、`rebuild_lookup_maps`、`extract_project_async` 等）。在架构上，该命名空间将原始编译数据转化为结构化的符号与依赖信息，为上层分析工具提供统一的查询接口。
+`clore::extract` 命名空间是代码提取管线的主工作区，负责将编译数据库、源文件与工具链信息转换为结构化的项目模型和符号集合。其核心职责涵盖编译数据库的加载与规范化（如 `load_compdb`、`sanitize_driver_arguments`）、源文件的独立扫描与分析（`scan_file`、`scan_module_decl`）、符号提取与合并（`extract_symbols`、`extract_project_async`）、依赖图构建（`build_dependency_graph_async`）、以及基于模块或名称的查找辅助（`find_module_by_name`、`find_symbol`、`lookup_symbol`）。命名空间中定义的关键数据类型（如 `ProjectModel`、`CompilationDatabase`、`CompileEntry`、`ModuleUnit`、`SymbolInfo`）协同描述了一个完整的 C++ 项目结构。`extract` 命名空间在 `clore` 体系中扮演中间层的角色：它上接命令行或外部配置输入，下连具体的 AST 解析与缓存系统，通过异步接口（如 `extract_project_async`）和确定性辅助函数（如 `build_compile_signature`、`matches_filter`）将多步提取任务解耦为可组合的单元，从而支持增量、并行和可重入的项目分析流程。
 
 ## Diagram
 
@@ -86,15 +86,15 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `message` 成员始终包含有效的错误描述字符串。
+- `message` 成员持有有效的字符串对象
 
 #### Key Members
 
-- `message`
+- message
 
 #### Usage Patterns
 
-- 作为 `clore::extract` 命名空间中错误处理的结果类型使用。
+- 作为错误类型传递给调用者或存储在异常中
 
 ### `clore::extract::ASTResult`
 
@@ -108,8 +108,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- 字段均为公共向量，可自由读写
-- 无显式不变量约束
+- 各向量成员可能为空
+- 成员之间没有隐含的顺序或一致性约束
 
 #### Key Members
 
@@ -119,9 +119,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- 作为提取管道的输出类型
-- 由分析函数填充并返回
-- 消费者遍历各向量以获取提取结果
+- 作为 `clore::extract` 模块中提取操作的返回类型
+- 调用方通过访问 `symbols`、`relations`、`dependencies` 字段获取提取结果
 
 ### `clore::extract::CompDbError`
 
@@ -135,15 +134,17 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- The `message` member is always default-constructible and movable.
+- Contains only a `std::string` member for the error message
+- No enforced invariants beyond the string being present
 
 #### Key Members
 
-- `message`
+- `message` member
 
 #### Usage Patterns
 
-- Caught or checked by callers of `clore::extract` functions that may fail.
+- Used as a return type or exception type to report errors in extraction logic
+- The `message` string is expected to be consumed by logging or error handling code
 
 ### `clore::extract::CompilationDatabase`
 
@@ -181,10 +182,6 @@ Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
-#### Invariants
-
-- 字段的默认值为空字符串、空向量、零或 `std::nullopt`，表示使用前应被填充。
-
 #### Key Members
 
 - `file`
@@ -197,8 +194,7 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- 用于表示从编译数据库或构建系统中提取的单个编译条目。
-- 可能用于编译缓存或重新执行的输入。
+- Used to store and pass compilation command details generated during extraction.
 
 ### `clore::extract::DependencyEdge`
 
@@ -212,18 +208,16 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- The struct has exactly two `std::string` members: `from` and `to`.
-- Both members are publicly accessible.
+- No invariants are documented beyond the default properties of `std::string`.
 
 #### Key Members
 
-- `from`: the source node identifier.
-- `to`: the target node identifier.
+- `from`
+- `to`
 
 #### Usage Patterns
 
-- Used in the `clore::extract` module to represent dependencies between extracted symbols.
-- Edges are combined into lists or sets to form dependency graphs.
+- Acts as a data container for a dependency edge in extraction processes.
 
 ### `clore::extract::DependencyGraph`
 
@@ -237,17 +231,18 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Each element in `edges` references indices or paths in `files` (implied by typical dependency graph usage, but not explicitly guaranteed by the evidence).
+- The `files` vector contains paths of all scanned source files.
+- The `edges` vector contains all discovered dependency relationships.
 
 #### Key Members
 
-- `files`: a `std::vector<std::string>` of file paths.
-- `edges`: a `std::vector<DependencyEdge>` of dependency relationships.
+- `clore::extract::DependencyGraph::files`
+- `clore::extract::DependencyGraph::edges`
 
 #### Usage Patterns
 
-- Used to represent the complete dependency information extracted from source files.
-- Consumed by downstream analysis or transformation passes.
+- Populated by the extraction pipeline when scanning source modules.
+- Consumed by downstream consumers to analyze or visualize dependencies.
 
 ### `clore::extract::ExtractError`
 
@@ -258,6 +253,20 @@ Definition: `extract/extract.cppm:21`
 Implementation: [`Module extract`](../../../modules/extract/index.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
+
+#### Invariants
+
+- 包含错误描述字符串
+- 无其他约束或保证
+
+#### Key Members
+
+- `message` 成员
+
+#### Usage Patterns
+
+- 作为提取函数的错误返回类型
+- 调用者通过读取 `message` 获取错误详情
 
 ### `clore::extract::ExtractedRelation`
 
@@ -271,21 +280,22 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `from` 和 `to` 必须为有效的 `SymbolID`
-- `is_call` 和 `is_inheritance` 至少一个为 true 或均为 false
+- `from` 和 `to` 应为有效的 `SymbolID`
+- 默认情况下，两个布尔标志均为 `false`，表示未分类的关系
+- 当 `is_inheritance == true` 时，`from` 代表派生符号，`to` 代表基类符号
 
 #### Key Members
 
-- `from`：关系的源符号标识
-- `to`：关系的目标符号标识
-- `is_call`：是否为调用关系
-- `is_inheritance`：是否为继承关系
+- `from`
+- `to`
+- `is_call`
+- `is_inheritance`
 
 #### Usage Patterns
 
-- 用于构建符号之间的调用图
-- 用于记录继承层次结构
-- 在提取阶段填充此结构体以描述符号间依赖
+- 设置 `is_call` 或 `is_inheritance` 以标识边的语义
+- 通过 `from` 和 `to` 遍历或查询符号间的关系
+- 在提取流程中存储调用图或继承图的边
 
 ### `clore::extract::FileInfo`
 
@@ -299,9 +309,9 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Each `symbols` entry corresponds to a distinct symbol extracted from the file
-- `path` uniquely identifies the source file within the extraction context
-- `includes` lists the immediate file dependencies as seen by the extractor
+- 成员 `path` 为 `std::string` 类型，无隐含约束
+- 成员 `symbols` 为 `std::vector<SymbolID>` 类型，表示可能为空的符号列表
+- 成员 `includes` 为 `std::vector<std::string>` 类型，表示可能为空的包含路径列表
 
 #### Key Members
 
@@ -311,9 +321,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Used to represent the result of extracting symbols and dependencies from a single file
-- Collected into lists or maps keyed by file path for downstream analysis
-- Consumed by tools that transform or visualize include hierarchies and symbol definitions
+- 用于表示提取操作的结果，将文件路径与其符号和包含项关联起来
+- 可能被传递给其他处理函数或序列化
 
 ### `clore::extract::IncludeInfo`
 
@@ -327,18 +336,18 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- The `path` member holds the include path as specified in the source
-- The `is_angled` member distinguishes between `#include <...>` (true) and `#include "..."` (false)
+- `path` is a valid `std::string` (may be empty)
+- `is_angled` is either `true` or `false`
 
 #### Key Members
 
-- `path`
-- `is_angled`
+- `path`: the textual representation of the include target
+- `is_angled`: indicates whether the include uses angle brackets (`#include <...>`) or quotes (`#include "..."`)
 
 #### Usage Patterns
 
-- Created when parsing include directives from source code
-- Used to reconstruct or analyze include statements
+- Used as a building block for representing parsed include directives in the `clore::extract` module
+- Likely consumed by higher-level extraction logic that processes include chains
 
 ### `clore::extract::ModuleUnit`
 
@@ -348,28 +357,7 @@ Definition: `extract/model.cppm:135`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-`clore::extract::ModuleUnit` 表示一个单一的 C++20 模块单元，即模块接口单元或模块分区单元。该类型是 `clore::extract` 命名空间中模型结构的一部分，用于在提取工具中描述和操作模块系统的组成单元，通常与其他模型类型（如 `ProjectModel`、`DependencyGraph` 等）配合使用，以构建对项目结构的理解。
-
-#### Invariants
-
-- `name`是完整的模块名，例如"foo"或"foo:bar"
-- `is_interface`为真表示导出模块，为假表示非导出模块
-- `source_file`是归一化后的源文件路径
-- `imports`列出该模块单元的导入
-- `symbols`列出在该模块单元中声明的`SymbolID`
-
-#### Key Members
-
-- `name`
-- `is_interface`
-- `source_file`
-- `imports`
-- `symbols`
-
-#### Usage Patterns
-
-- 用于在提取过程中表示每个模块单元
-- 作为模块信息的元数据容器
+结构体 `clore::extract::ModuleUnit` 表示一个 C++20 模块单元，可以是模块接口单元或分区单元。它在提取流程中用于建模编译单元所属的模块结构，常与 `clore::extract::ProjectModel` 等类型配合，以支持模块间依赖分析和符号解析。
 
 ### `clore::extract::NamespaceInfo`
 
@@ -383,20 +371,20 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `name` is the fully qualified or relative namespace name
-- `symbols` contains `SymbolIDs` of entities directly declared in this namespace
-- `children` lists the names of immediately nested namespaces
+- `name` 是命名空间的标识字符串
+- `symbols` 和 `children` 可能为空向量
+- `symbols` 中的每个元素是有效的 `SymbolID` 值
 
 #### Key Members
 
-- `name` identifies the namespace
-- `symbols` stores direct symbol references
-- `children` holds child namespace names
+- `name`
+- `symbols`
+- `children`
 
 #### Usage Patterns
 
-- Populated by extraction code to represent namespace hierarchy
-- Consumed by documentation generators to produce namespace pages
+- 在提取过程中由相关逻辑填充
+- 在文档生成或其他下游处理中遍历 `symbols` 和 `children` 以构建命名空间树
 
 ### `clore::extract::PathResolveError`
 
@@ -407,19 +395,6 @@ Definition: `extract/filter.cppm:8`
 Implementation: [`Module extract:filter`](../../../modules/extract/filter.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
-
-#### Invariants
-
-- The `message` member contains a description of the error.
-
-#### Key Members
-
-- `message`
-
-#### Usage Patterns
-
-- Returned by functions that perform path resolution to indicate failure.
-- Calling code can inspect `message` to display or log the error.
 
 ### `clore::extract::ProjectModel`
 
@@ -433,29 +408,29 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `symbols` 中的每个 `SymbolID` 唯一标识一个符号。
-- `files` 和 `modules` 的键都是规范化的源文件路径。
-- `file_order` 保持源文件的解析顺序。
-- `symbol_ids_by_qualified_name` 允许一个限定名对应多个重载。
-- `uses_modules` 仅在检测到至少一个模块声明时为 true。
+- `symbols` 中的每个 `SymbolID` 映射到唯一 `SymbolInfo`。
+- `files` 和 `modules` 的键是标准化源文件路径。
+- `symbol_ids_by_qualified_name` 中一个限定名可对应多个 `SymbolID`（存在重载时）。
+- `module_name_to_sources` 中一个模块名可对应多个源文件路径。
+- `uses_modules` 为 `true` 当且仅当项目中发现至少一个模块声明。
 
 #### Key Members
 
 - `symbols`
 - `files`
 - `namespaces`
-- `file_order`
 - `modules`
 - `symbol_ids_by_qualified_name`
 - `module_name_to_sources`
+- `file_order`
 - `uses_modules`
 
 #### Usage Patterns
 
-- 提取阶段填充模型，后续生成代码或证据时查询。
-- 通过 `symbol_ids_by_qualified_name` 进行符号的精确限定名查找。
-- 通过 `modules` 和 `module_name_to_sources` 处理 C++20 模块依赖。
-- `uses_modules` 用于判断是否采用模块化编译策略。
+- 作为 `clore::extract::ProjectExtractor` 的输出结果，填充后传递给代码生成阶段。
+- 其他组件通过 `symbol_ids_by_qualified_name` 进行符号的精确限定名查找。
+- 模块依赖分析和交叉链接依赖 `modules` 和 `module_name_to_sources`。
+- 文档生成、代码补全等功能读取 `symbols`、`namespaces` 等字段获取项目信息。
 
 ### `clore::extract::ScanCache`
 
@@ -465,23 +440,22 @@ Definition: `extract/scan.cppm:40`
 
 Implementation: [`Module extract:scan`](../../../modules/extract/scan.md)
 
-`clore::extract::ScanCache` 是一个持久化的缓存结构，用于在多次连续的依赖扫描之间共享数据。其设计目的是避免重复计算，从而提高扫描效率。当编译数据库或文件系统状态发生变化时，调用方必须主动清除或丢弃该缓存，以确保扫描结果与当前环境一致。
+`clore::extract::ScanCache` 是一个持久化的缓存，用于在连续的依赖扫描之间共享状态，以避免重复计算。当编译数据库或文件系统状态发生变更时，调用者应清空或丢弃此缓存来保证扫描结果的正确性。
 
 #### Invariants
 
-- Cache entries are valid only as long as the compilation database and file system state remain unchanged.
-- The map key uniquely identifies a scan target (e.g., source file or header).
-- The cache should be cleared or replaced when external state changes.
+- 缓存中的扫描结果在依赖关系稳定时保持有效
+- 编译数据库或文件系统变化后缓存可能失效
+- 调用者负责在环境变化时丢弃缓存
 
 #### Key Members
 
-- `scan_results`: the underlying hash map storing cached scan results.
+- `scan_results`
 
 #### Usage Patterns
 
-- Used by scan functions to avoid redundant re‑scanning of unchanged input files.
-- Callers are responsible for clearing or discarding the cache when the compilation DB or file system is modified.
-- Typically passed by reference to scan utilities so that results accumulate across multiple calls.
+- 扫描函数通过此缓存避免重复扫描相同的依赖项
+- 调用者在环境变化时创建新的 `ScanCache` 实例或清空现有实例
 
 ### `clore::extract::ScanError`
 
@@ -491,11 +465,21 @@ Definition: `extract/scan.cppm:20`
 
 Implementation: [`Module extract:scan`](../../../modules/extract/scan.md)
 
-证据不足，无法总结；请提供更多证据。
+Insufficient evidence to summarize; provide more EVIDENCE.
+
+#### Invariants
+
+- The `message` member always contains a valid string (may be empty).
+- The struct has no other state or constraints beyond the string.
 
 #### Key Members
 
-- `message` field (type `std::string`)
+- `message`
+
+#### Usage Patterns
+
+- Returned from `clore::extract` scanning functions to indicate failure.
+- Inspected by callers to obtain the error description.
 
 ### `clore::extract::ScanResult`
 
@@ -509,9 +493,10 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- All vectors are properly initialized (default-constructed empty).
-- `module_name` is a valid empty or non-empty string.
-- `is_interface_unit` is either `true` or `false`.
+- `module_name` may be empty if no module name was declared
+- `is_interface_unit` defaults to `false`
+- `includes` and `module_imports` are initially empty vectors
+- No guarantees about the ordering or uniqueness of elements in the vectors
 
 #### Key Members
 
@@ -522,8 +507,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Returned from scanning functions to represent the parsed module data.
-- Inspected by callers to access the module name, imports, includes, and interface status.
+- Returned by scanning functions to represent a parsed C++ module unit
+- Consumed by downstream extraction or analysis code to access module metadata
 
 ### `clore::extract::SourceLocation`
 
@@ -534,23 +519,6 @@ Definition: `extract/model.cppm:64`
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
-
-#### Invariants
-
-- `line == 0` indicates the source location is unknown; otherwise `line >= 1`
-- `file` and `column` have no guaranteed constraints (may be empty/0)
-
-#### Key Members
-
-- `file` field
-- `line` field
-- `column` field
-- `is_known()` method
-
-#### Usage Patterns
-
-- Returned or accepted by extraction `APIs` to describe where source content was found
-- Checked via `is_known()` before using the location
 
 #### Member Functions
 
@@ -578,6 +546,21 @@ Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
+#### Invariants
+
+- `begin` 和 `end` 分别是范围的起始和结束位置
+- 范围通常是左闭右开或左右均包含，但具体语义由使用上下文决定
+
+#### Key Members
+
+- `begin`：起始位置的 `SourceLocation`
+- `end`：结束位置的 `SourceLocation`
+
+#### Usage Patterns
+
+- 用于表示解析器、词法分析器或错误报告中的源代码区间
+- 作为其他结构体或函数的成员，传递代码片段范围
+
 ### `clore::extract::SymbolID`
 
 Declaration: `extract/model.cppm:28`
@@ -590,23 +573,21 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `hash` 为 0 表示无效标识符，有效标识符的 `hash` 必为非零
-- `signature` 用于在极小概率的 64 位哈希碰撞时进行区分
-- 默认比较操作符比较所有字段（先 `hash`，后 `signature`）
+- 有效 `SymbolID` 的 `hash` 必须非零
+- `hash` 为 0 时 `signature` 应被忽略，是无效哨兵
 
 #### Key Members
 
-- `hash`
-- `signature`
-- `is_valid()`
-- `operator==`
-- `operator<=>`
+- `hash`: 主要哈希值，非零表示有效
+- `signature`: 附加签名，用于消除哈希碰撞
+- `is_valid()`: 通过检查 `hash != 0` 判断是否有效
+- `operator==` 和 `operator<=>`: 默认实现的比较操作
 
 #### Usage Patterns
 
-- 作为符号的唯一标识符被其他代码使用
-- 通过 `is_valid()` 检查标识符是否有效
-- 利用默认比较操作符进行排序或集合操作
+- 作为符号的唯一键在集合或映射中使用
+- 通过 `is_valid()` 快速判断标识是否初始化
+- 依赖默认比较进行排序和去重
 
 #### Member Functions
 
@@ -660,40 +641,40 @@ Definition: `extract/model.cppm:80`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-`clore::extract::SymbolInfo` 表示提取过程中遇到的单个符号的完整元数据。它通常结合 `clore::extract::SymbolKind` 枚举以描述符号种类（如变量、函数、类型等），并可能通过 `clore::extract::SymbolID` 提供唯一标识，同时引用 `clore::extract::SourceLocation` 或 `clore::extract::SourceRange` 记录其在源代码中的位置。该结构是构建 `clore::extract::ProjectModel` 和 `clore::extract::DependencyGraph` 等高层模型的基础组件，用于在 C++ 项目提取结果中表示符号的层级关系与上下文信息。
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `id` uniquely identifies the symbol
-- `declaration_location` is always set
-- `source_snippet` may be empty, in which case `source_snippet_offset`, `source_snippet_length`, `source_snippet_file_size`, and `source_snippet_hash` reference the raw source text in `declaration_location.file`
-- `parent` and `children` form a tree hierarchy
-- `bases` and `derived` reflect inheritance relationships
-- `calls` and `called_by` are symmetric directed edges from call graph
-- `references` and `referenced_by` are symmetric directed edges from reference graph
+- `id` is a unique identifier for the symbol
+- `kind` defaults to `SymbolKind::Unknown`
+- `declaration_location` always stores a valid `SourceLocation`
+- If `source_snippet` is empty, the snippet text can be retrieved from the file indicated by `declaration_location.file` using the offset/length/`file_size`/hash fields
+- `parent` is empty for top-level symbols; `children` lists immediate child symbols
+- `bases` and `derived` are only populated for class types
+- `calls` and `called_by` are used for functions and callable objects
+- `references` and `referenced_by` indicate cross-references between symbols
 
 #### Key Members
 
-- `id`
-- `name`
-- `qualified_name`
-- `kind`
-- `declaration_location`
-- `parent`
-- `children`
-- `bases`
-- `derived`
-- `calls`
-- `called_by`
-- `references`
-- `referenced_by`
+- `id`: unique identifier for the symbol
+- `kind`: enum indicating the symbol type
+- `name`: the simple name of the symbol
+- `qualified_name`: fully qualified name
+- `declaration_location`: `SourceLocation` of the declaration
+- `parent`: optional `SymbolID` of the enclosing symbol
+- `children`: list of direct child `SymbolID`s
+- `bases` and `derived`: inheritance relationships
+- `calls` and `called_by`: call graph edges
+- `references` and `referenced_by`: reference graph edges
+- `source_snippet_offset`, `source_snippet_length`, `source_snippet_file_size`, `source_snippet_hash`: lazy snippet resolution metadata
 
 #### Usage Patterns
 
-- Serialized as part of extracted symbol database
-- Consumed by tools for code navigation, dependency analysis, and documentation generation
-- Populated by the extraction pass that processes AST nodes
-- Queried via `SymbolID` to traverse relationships
+- Filled by the extraction engine when traversing translation units
+- Used by documentation generators to render symbol pages
+- Consumed by graph analysis tools to build dependency or call trees
+- Referenced by other structures via `SymbolID` lists (e.g. `children`, `bases`, `calls`)
+- The optional lazy-snippet fields allow on-demand reading of source text to reduce memory footprint
 
 ### `clore::extract::SymbolKind`
 
@@ -895,7 +876,7 @@ Declaration: `extract/merge.cppm:12`
 
 Implementation: [`Module extract:merge`](../../../modules/extract/merge.md)
 
-`clore::extract::append_unique` is a public template variable declared in `extract/merge.cppm` at line 12, accepting a type parameter `typename T`. It resides in the `clore::extract` namespace and is listed alongside other variables used in symbol extraction and merging logic.
+`clore::extract::append_unique` is a public function template declared in `extract/merge.cppm`. Its purpose is to append a value to a collection only if it is not already present, ensuring uniqueness.
 
 ### `clore::extract::append_unique_range`
 
@@ -903,7 +884,7 @@ Declaration: `extract/merge.cppm:19`
 
 Implementation: [`Module extract:merge`](../../../modules/extract/merge.md)
 
-This is a public template variable `clore::extract::append_unique_range` declared in `extract/merge.cppm`. The available snippet `void append_unique_range` indicates it is defined as a function taking no arguments and returning void, but the exact nature as a variable is unclear.
+The variable `clore::extract::append_unique_range` is a public template variable declared in `extract/merge.cppm` at line 19. Its exact type is not discernible from the evidence, which only shows the fragment `void append_unique_range`.
 
 ### `clore::extract::deduplicate`
 
@@ -911,13 +892,11 @@ Declaration: `extract/merge.cppm:49`
 
 Implementation: [`Module extract:merge`](../../../modules/extract/merge.md)
 
-{
-  "`overview_markdown`": "A template function `deduplicate` is declared as `void deduplicate`.",
-  "`details_markdown`": "No additional details are available from the evidence.",
-  "`is_mutated`": false,
-  "`mutation_sources`": "",
-  "`usage_patterns`": ""
-}
+`clore::extract::deduplicate` 是一个返回 `void` 的函数，属于 `clore::extract` 命名空间。
+
+#### Usage Patterns
+
+- 作为函数被调用
 
 ## Functions
 
@@ -929,14 +908,14 @@ Definition: `extract/compiler.cppm:110`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-函数 `clore::extract::build_compile_signature` 为给定的 `CompileEntry` 计算一个唯一的 64 位编译签名。该签名可用于快速识别或区分编译配置，常用于缓存、去重或索引场景。调用者应预期该签名对编译条目中的关键属性（如源文件路径、编译选项、宏定义等）敏感，且对同一逻辑配置始终返回相同的值。
+调用者使用 `clore::extract::build_compile_signature` 将一个 `CompileEntry` 对象转换为一个 `std::uint64_t` 类型的编译签名。该签名旨在唯一标识一次编译调用的特征，在提取管线的后续步骤（如缓存查询、依赖图构建）中作为轻量级键值使用。函数不修改传入的条目，返回的签名值具有确定性和可重复性。
 
-调用者应假设 `build_compile_signature` 的返回值在 `CompileEntry` 的生存期内稳定，并适用于作为哈希表键或相等性比较的依据。该函数不会抛出异常，并提供强确定性输出；若需对编译条目进行标准化处理，函数内部依赖 `normalize_entry_file` 来规范化文件路径，从而提升签名的稳定性。
+调用者必须保证提供的 `CompileEntry` 是已规范的（例如通过 `normalize_entry_file` 完成路径归一化），因为签名隐式依赖条目的规范化状态。对于等价的编译配置，无论原始条目如何表示，函数都应当产生相同的签名。如果条目的语义发生变更（如更改源文件或编译选项），签名将随之改变。
 
 #### Usage Patterns
 
-- Used to obtain a stable identifier for a compile entry.
-- Likely used for caching or detecting changes in compile configurations.
+- Cache-aware computation of compile signatures
+- Called before further extraction steps that depend on unique compile identity
 
 ### `clore::extract::build_dependency_graph_async`
 
@@ -946,13 +925,12 @@ Definition: `extract/scan.cppm:370`
 
 Implementation: [`Module extract:scan`](../../../modules/extract/scan.md)
 
-函数 `clore::extract::build_dependency_graph_async` 异步地构建模块依赖图。调用者必须提供一个引用标识符（`const int &`）、一个用于接收结果的可修改 `DependencyGraph &` 对象、一个可选的 `ScanCache *` 指针（允许为 `nullptr`），以及一个 `kota::event_loop &` 来调度异步任务。函数将依赖图填充到提供的 `DependencyGraph` 中，并通过返回的非负 `int` 值指示操作是否成功发起。调用者负责确保 `DependencyGraph` 和 `ScanCache`（若提供）在异步操作完成前保持有效，且事件循环持续运行直至任务结束。未提供 `ScanCache` 时，函数会从头扫描；提供时则可利用缓存加速重复构建。
+`clore::extract::build_dependency_graph_async` 依据给定的标识符（`const int &`）在指定的事件循环（`kota::event_loop &`）上异步构建依赖图。调用者需提供可变的 `DependencyGraph &` 用于存储构建结果，并可选择传入 `ScanCache *` 以复用已有的扫描缓存。该函数返回一个 `int` 值，指示操作的成功状态或错误码；在操作完成前，调用者必须确保依赖图对象保持有效。
 
 #### Usage Patterns
 
-- called to asynchronously construct a dependency graph before topological ordering
-- used in build or analysis pipelines where concurrency is needed
-- invoked with a `ScanCache*` to accelerate repeated scans
+- 作为依赖图构建阶段的核心入口，通常在 `extract_project_async` 或类似提取流程中调用
+- 配合 `CompilationDatabase` 和可选缓存，用于增量或全量分析
 
 ### `clore::extract::canonical_graph_path`
 
@@ -962,12 +940,13 @@ Definition: `extract/filter.cppm:103`
 
 Implementation: [`Module extract:filter`](../../../modules/extract/filter.md)
 
-函数 `clore::extract::canonical_graph_path` 接受一个 `const int &` 参数（通常表示一个路径的索引或标识），并返回一个 `int`（表示该路径的规范化形式）。其职责是将输入的路径标识转换为该路径在提取的工具（如依赖图或符号查找）中使用的唯一、规范化的表示。调用者有责任确保传入的参数对应一个有效的、已知的图路径；返回的规范值可用于在图结构内进行一致且无歧义的比较或查找。
+`clore::extract::canonical_graph_path` 接受一个 `const int &` 参数（表示原始图形路径的某种标识或索引），并返回一个 `int` 值，代表该路径的规范化（canonical）形式。调用方负责传递有效的原始路径标识，函数根据当前模块内的路径解析规则返回一个唯一确定的规范化结果，供后续过滤或路径匹配场景使用。
 
 #### Usage Patterns
 
-- used to obtain a unique, normalised graph path for file-based nodes
-- called during graph construction to canonicalize source file paths
+- Normalizing file paths for consistent representation in a graph
+- Canonicalizing paths for use as identifiers or keys
+- Handling filesystem errors gracefully by falling back to lexical normalization
 
 ### `clore::extract::create_compiler_instance`
 
@@ -977,11 +956,12 @@ Definition: `extract/compiler.cppm:297`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-函数 `clore::extract::create_compiler_instance` 根据提供的 `CompileEntry` 创建一个新的编译器实例。它接受一个对 `CompileEntry` 的常量引用，并最终返回一个整数，该整数指示操作的结果（通常成功时返回 `0`，错误时返回非零错误码）。调用者必须确保 `CompileEntry` 包含有效的编译参数（如编译器路径、源文件路径和编译选项），因为该函数依赖这些信息来正确配置和初始化编译器。
+调用者通过向 `clore::extract::create_compiler_instance` 传入一个 `const CompileEntry &` 来请求创建编译器实例。返回值 `int` 代表所创建实例的句柄或状态码，调用者应将其用于后续提取操作或根据其语义进行错误处理。该函数不修改传入的 `CompileEntry`。
 
 #### Usage Patterns
 
-- Typically called by extraction pipeline to obtain a compiler instance for parsing source files
+- used as a helper to instantiate a clang-based compiler for a compile entry
+- called during project extraction to prepare a compiler instance
 
 ### `clore::extract::ensure_cache_key`
 
@@ -993,11 +973,11 @@ Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md
 
 Declaration: [Declaration](functions/ensure-cache-key.md)
 
-函数 `clore::extract::ensure_cache_key` 确保给定的 `CompileEntry` 对象已具备可用于缓存查询的唯一键值。该函数会就地修改传入的条目，为后续的工具链参数缓存（例如由 `clore::extract::query_toolchain_cached` 执行的操作）建立正确的匹配依据。调用方应在依赖缓存机制的流程之前调用此函数，以保证缓存体系的一致性。
+函数 `clore::extract::ensure_cache_key` 负责为给定的 `CompileEntry` 建立可用于缓存查找的键值。它接收一个 `CompileEntry &` 类型参数并返回 `void`，通过修改该条目使其满足下游缓存函数（如 `clore::extract::query_toolchain_cached`）的契约要求。调用者应在对 `CompileEntry` 进行任何可能影响缓存一致性的更改后调用此函数，以确保后续的缓存操作基于正确的键值发生。该函数的调用不保证键的唯一性或完整性，但保证 `CompileEntry` 在缓存系统中具有可被识别的状态。
 
 #### Usage Patterns
 
-- Called by `query_toolchain_cached` before attempting to use cached toolchain information to ensure the entry has a valid cache key.
+- Called before `clore::extract::query_toolchain_cached` to ensure a cache key is present.
 
 ### `clore::extract::ensure_cache_key_impl`
 
@@ -1009,13 +989,11 @@ Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md
 
 Declaration: [Declaration](functions/ensure-cache-key-impl.md)
 
-该函数负责在给定的 `CompileEntry` 对象中建立或更新缓存键，确保后续对工具链参数的缓存操作（例如由 `clore::extract::query_toolchain_cached` 执行的操作）能够基于一致且唯一的键值进行匹配。调用方应预期该函数会就地修改传入的条目，使其具备可供缓存体系使用的标识信息。
-
-此函数是 `clore::extract::ensure_cache_key` 的内部实现，调用方通常应使用后者提供的公开接口。在需要直接控制缓存键生成流程或进行更精细的生命周期管理时，可以调用此实现函数，但必须保证在调用任何依赖缓存键的函数前完成调用。函数不返回任何值，仅通过引用参数施加副作用。
+函数 `clore::extract::ensure_cache_key_impl` 为给定的 `CompileEntry` 对象填充或更新用于缓存查找的内部键值。调用者应在对该 `CompileEntry` 执行任何可能改变其编译特征的操作之后调用此函数，以确保后续的缓存查询（例如通过 `clore::extract::query_toolchain_cached`）能够基于一致的键值工作。该函数不保证生成的键在所有上下文中唯一，但保证 `CompileEntry` 在缓存系统中处于可被识别的状态。
 
 #### Usage Patterns
 
-- Called by `clore::extract::ensure_cache_key`
+- Called by `clore::extract::ensure_cache_key` to populate cache metadata for a single compile entry
 
 ### `clore::extract::extract_project_async`
 
@@ -1025,15 +1003,15 @@ Definition: `extract/extract.cppm:539`
 
 Implementation: [`Module extract`](../../../modules/extract/index.md)
 
-调用者调用 `clore::extract::extract_project_async` 以启动指定项目的异步符号提取。该函数接受一个项目标识符（通过 `const int &` 参数传递）和一个 `kota::event_loop &` 事件循环引用，后者负责调度所有异步工作。函数立即返回一个 `int`，表示操作启动的结果（成功或错误码）。提取期间，调用者必须确保参数在操作完成前保持有效；具体完成或取消机制由底层事件循环驱动。
+`clore::extract::extract_project_async` 启动对指定项目的异步提取操作。第一个参数（类型 `const int &`）是唯一标识待提取项目的整数引用。第二个参数（类型 `kota::event_loop &`）是用于调度并处理异步操作的事件循环。函数返回一个 `int` 值，0 表示提取成功启动，非零值表示发生错误。
+
+调用者负责确保在异步操作完成之前，传递给第一个参数的对象保持有效且不被修改。该函数是非阻塞的；实际提取工作通过事件循环驱动。返回的 `int` 值就是操作的结果状态码，调用者应在事件循环中检查该值以确定提取是否成功。
 
 #### Usage Patterns
 
-- Called as the main entry point for extracting a project's symbols asynchronously
-- Uses coroutine pattern with `kota::task` and `co_await`
-- Cooperates with caching subsystem to avoid redundant AST extraction
-- Relies on parallel AST extraction batch task for performance
-- Handles errors via `kota::fail` and custom error type `ExtractError`
+- top-level extraction entry point
+- called in an asynchronous context with `co_await`
+- used to generate the project model for further analysis or IDE features
 
 ### `clore::extract::extract_symbols`
 
@@ -1043,13 +1021,13 @@ Definition: `extract/ast.cppm:669`
 
 Implementation: [`Module extract:ast`](../../../modules/extract/ast.md)
 
-调用 `clore::extract::extract_symbols` 以执行符号提取操作。此函数接收一个对 `int` 的 `const` 引用作为输入，通常代表已加载或已解析的项目模型标识符。调用方需确保传入的参数对应一个可用的项目状态，且该状态已满足提取前置条件（例如，依赖项已被解析、编译数据库已被加载）。函数返回一个 `int` 值，表示提取结果的状态码或提取到的符号数量，调用方应根据该返回值判断操作是否成功。
+`clore::extract::extract_symbols` 从一个由整数引用标识的源中提取符号。该函数同步执行提取操作，并返回一个整数，该整数表示操作的结果或提取的符号数量。调用者必须保证传入的 `const int &` 参数引用一个有效且已初始化的资源标识符。
 
 #### Usage Patterns
 
-- Used to extract symbols from a single compile entry
-- Called as part of a larger extraction pipeline (e.g., `extract_project_async`)
-- Returns an `expected` that callers handle for success or error
+- Called to extract symbols from a single `CompileEntry`
+- Used as a building block for project-wide extraction
+- Typically invoked per translation unit in an extraction pipeline
 
 ### `clore::extract::filter_root_path`
 
@@ -1059,12 +1037,12 @@ Definition: `extract/filter.cppm:161`
 
 Implementation: [`Module extract:filter`](../../../modules/extract/filter.md)
 
-`clore::extract::filter_root_path` 接受一个表示路径的整数标识，并返回该路径经过过滤后的根路径标识。该函数负责从给定的路径中提取或规约出一个对应于项目根或筛选后根目录的标识，用于后续的路径比较、依赖分析或相对路径计算。调用者应保证传入的路径标识有效且属于当前已知的路径集合；函数不修改外部状态，且假设输入标识对应的路径已正确解析或注册。
+`clore::extract::filter_root_path` 接受一个 `const int &` 参数，该参数代表一个路径的标识符，并返回一个 `int` 值作为过滤后的根路径的标识符。调用者有责任确保传入的标识符对应于一个有效的路径对象；函数的行为在输入无效时未定义。返回的整数结果应被视为一个资源句柄，其生命周期和所有权遵循 `clore::extract` 模块中针对此类标识符的约定。
 
 #### Usage Patterns
 
-- Used to obtain a canonical root path for filtering operations
-- Called when a normalized base directory is required
+- Used to obtain a normalized root directory path from task configuration
+- Provides the effective base path for filtering or extraction operations
 
 ### `clore::extract::find_module_by_name`
 
@@ -1074,13 +1052,13 @@ Definition: `extract/model.cppm:416`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-`clore::extract::find_module_by_name` 在给定的 `ProjectModel` 中查找与指定标识符对应的模块单元。第二个参数 `int` 表示模块名称的内部标识符；该标识符通常从 `ProjectModel` 的名称查找机制获得。函数返回指向匹配 `ModuleUnit` 的常量指针，如果未找到任何模块则返回空指针。调用者必须确保提供的标识符在 `ProjectModel` 的上下文中有意义，且函数不修改模型。调用者不应缓存返回指针的生存期，因为模型的生命周期由调用者管理。
+函数 `clore::extract::find_module_by_name` 在给定的 `ProjectModel` 中，根据一个整数标识符查找并返回指向对应 `ModuleUnit` 的常量指针。调用者有责任传入一个有效的模块标识符；如果指定名称的模块不存在于模型中，则返回空指针（即 `nullptr`）。
 
 #### Usage Patterns
 
-- Resolve a single module by name for symbol extraction
-- Disambiguate between multiple modules with the same name by preferring interface units
-- Fail gracefully when ambiguous module names exist
+- Resolve module ambiguity by preferring interface units
+- Lookup module by name in project model
+- Fallback to first unit when no interface
 
 ### `clore::extract::find_module_by_source`
 
@@ -1090,12 +1068,11 @@ Definition: `extract/model.cppm:449`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-`clore::extract::find_module_by_source` 接受一个 `ProjectModel` 引用和一个整数标识符（代表源文件或翻译单元），然后返回一个指向 `ModuleUnit` 的常量指针。如果项目模型中存在与给定源标识符关联的模块单元，则返回指向该单元的指针；否则返回 `nullptr`。调用方负责确保传入的整数标识符在项目模型的上下文中有效，但无需预判查找结果——该函数始终以安全的方式执行查询。
+函数 `clore::extract::find_module_by_source` 根据给定的项目模型和源标识符查找并返回对应的模块单元。调用者应确保传入的整数参数是一个有效的源文件索引或标识符，指向 project model 中某个已知的源文件。返回的指针指向 `ModuleUnit` 对象，该对象的生命周期由 `ProjectModel` 管理；如果找不到匹配的模块单元，则返回 `nullptr`。调用者在使用前必须检查返回值是否为空，且不得直接删除或修改返回的对象。
 
 #### Usage Patterns
 
-- Used to retrieve a module unit given its source file path
-- Often called after scanning or building the project model
+- Used to retrieve a module unit by its source file path during extraction or analysis.
 
 ### `clore::extract::find_modules_by_name`
 
@@ -1105,12 +1082,12 @@ Definition: `extract/model.cppm:395`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-`clore::extract::find_modules_by_name` 接受一个 `ProjectModel` 引用和一个整数参数，该整数代表要查找的模块名称的标识符或索引。它返回一个 `int`，指示操作的结果——通常是匹配的模块数量或状态码。调用者应确保传入的整数参数有效，并依据返回值判断是否成功找到指定的模块。该函数与 `clore::extract::find_module_by_name` 不同，后者返回单个 `const ModuleUnit *`，而此函数侧重于数量或批量结果。
+`clore::extract::find_modules_by_name` 接受一个 `const ProjectModel &` 引用和一个 `int` 参数，后者标识要查询的模块名称。该函数返回一个 `int`，调用者应将其解释为查找操作的执行结果或匹配模块的数量。返回值的确切语义由调用约定定义，调用者需据此采取相应后续动作，例如验证查找成功或根据数量进行迭代处理。
 
 #### Usage Patterns
 
-- retrieve modules by name from project model
-- look up module units by module name
+- Used to find all modules with a specific name in the project model
+- Called during extraction to collect module units for processing
 
 ### `clore::extract::find_symbol`
 
@@ -1120,7 +1097,13 @@ Definition: `extract/model.cppm:371`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-函数 `clore::extract::find_symbol` 在给定的 `ProjectModel` 中根据一个整数标识符查找对应的符号信息。调用方应传入有效的项目模型引用和表示符号唯一ID的整数值，函数返回指向 `SymbolInfo` 的常量指针，若未找到则返回空指针。返回的指针指向模型内部管理的生命周期，调用方不得持有超过模型更新或销毁的时间点。
+在给定的 `ProjectModel` 中，查找与整数符号标识符对应的符号。返回指向该符号的 `SymbolInfo` 的指针，若未找到则为 `nullptr`。调用者需确保提供的 `ProjectModel` 中包含有效的提取数据，且标识符对应于先前已知的符号。返回的指针在 `ProjectModel` 生命周期内有效，但若模型被修改（例如重新提取）则可能失效。
+
+#### Usage Patterns
+
+- single symbol lookup by qualified name
+- convenience wrapper around `clore::extract::find_symbols`
+- returns `nullptr` when no unique symbol is found
 
 ### `clore::extract::find_symbol`
 
@@ -1130,12 +1113,12 @@ Definition: `extract/model.cppm:379`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-函数 `clore::extract::find_symbol` 在给定的 `ProjectModel` 中根据两个整数参数定位一个符号，并返回指向对应 `SymbolInfo` 的指针。如果未找到匹配的符号，则返回空指针。调用方负责提供有效的 `ProjectModel` 引用以及含义明确的参数值（例如符号 ID 或索引）。返回的指针指向模型内部数据，调用方不得修改其内容。
+`clore::extract::find_symbol` 接受一个 `ProjectModel` 引用和两个整数参数，返回指向 `SymbolInfo` 的常量指针。它用于在项目模型中根据两个整数标识符定位特定符号的详细信息。如果找不到与提供标识符对应的符号，返回 `nullptr`。调用者需确保 `ProjectModel` 有效，且整数参数的含义由项目模型的索引约定决定。
 
 #### Usage Patterns
 
-- locate a specific symbol by both name and signature
-- fall back to name-only lookup when signature is not provided
+- Used to look up a symbol by both its qualified name and exact signature, typically to disambiguate overloaded names.
+- Called internally by other extraction logic that needs to identify a specific symbol instance.
 
 ### `clore::extract::find_symbols`
 
@@ -1145,11 +1128,12 @@ Definition: `extract/model.cppm:354`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-`clore::extract::find_symbols` 在提供的 `ProjectModel` 中执行符号查找。它接受一个 `int` 参数（通常用于指定符号的标识符或筛选条件），并返回一个 `int` 表示操作结果，例如匹配的符号数量或状态码。调用者应确保 `ProjectModel` 已正确初始化，并根据具体上下文解释返回的整数值。
+在 `ProjectModel` 中执行符号查找操作，并返回匹配的符号数量。调用者负责提供有效的 `ProjectModel` 以及一个整数参数，该参数通常表示指定的源文件索引或搜索标识符。返回的 `int` 值表示成功匹配的符号计数；如果未找到任何符号，则返回 `0`。
 
 #### Usage Patterns
 
-- Retrieve all symbols matching a given fully qualified name during extraction.
+- 按限定名称查找所有符号实例
+- 供符号搜索或重命名等工具使用
 
 ### `clore::extract::join_qualified_name_parts`
 
@@ -1159,11 +1143,11 @@ Definition: `extract/model.cppm:328`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-`clore::extract::join_qualified_name_parts` 接受两个不透明整数标识符作为参数，分别代表限定名称的两个组成部分（例如命名空间前缀和简单名称），并返回一个表示连接后完整限定名称的新整数标识符。调用者必须确保传入的标识符对应有效的名称部分；该函数仅执行纯粹的拼接操作，不进行验证或查找。返回值可用于后续的名称查询或比较操作。
+函数 `clore::extract::join_qualified_name_parts` 接收表示限定名称各组成部分的输入，并将它们连接成一个完整的限定名称返回。调用者负责提供需要合并的名称部分；函数保证返回符合命名空间/类限定语义的正确连接结果。具体参数与返回值的类型由实现决定，但函数的行为等同于拼接各部分并插入适当的分隔符。
 
 #### Usage Patterns
 
-- Reconstruct qualified names from a list of namespace or name parts
+- 构建命名空间前缀或完全限定类型名称
 
 ### `clore::extract::load_compdb`
 
@@ -1173,12 +1157,15 @@ Definition: `extract/compiler.cppm:127`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-`clore::extract::load_compdb` 接受一个表示编译数据库文件路径的 `std::string_view`，并返回一个 `int` 值指示操作结果。调用者应提供可访问的编译数据库路径；返回的整数通常表示成功（零）或错误代码，调用者应根据其含义进行相应处理。
+`clore::extract::load_compdb` 接受一个文件路径（以 `std::string_view` 形式传入），加载并解析对应的编译数据库（compilation database）。调用者需确保传入的路径指向一个有效的编译数据库文件（通常为 `compile_commands.json`）。函数返回一个 `int` 值，用非零错误码或零表示操作结果，调用者应检查该返回值以判断加载是否成功。
+
+该函数是 `clore::extract` 命名空间中获取编译数据库的入口点，在后续提取流程（如 `clore::extract::extract_project_async`）之前调用。调用者需保证在调用其他依赖编译数据库的函数之前先成功调用此函数。
 
 #### Usage Patterns
 
-- Typically invoked at the start of the extraction pipeline to obtain the compilation database
-- Used in conjunction with other extraction functions like `query_toolchain_cached` or `extract_project_async`
+- called by code that needs to load a compilation database for a project
+- typically used before extracting symbols or building dependency graphs
+- the returned `CompilationDatabase` is passed to other extraction functions like `query_toolchain_cached` or `extract_project_async`
 
 ### `clore::extract::lookup`
 
@@ -1188,11 +1175,12 @@ Definition: `extract/compiler.cppm:164`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-函数 `clore::extract::lookup` 在给定的 `CompilationDatabase` 中，基于一个 `std::string_view` 执行查找并返回一个整数。该整数表示与查询匹配的编译条目或结果的标识符。调用方应当将返回的整数值视为一个不透明的句柄，可将其传递给 `clore::extract` 命名空间中的其他函数（如 `find_symbol` 或 `lookup_symbol`）以进行后续的提取操作。
+`clore::extract::lookup` 在给定的 `CompilationDatabase` 中根据一个 `std::string_view` 描述符查找并返回一个整数标识符。调用者负责提供有效的数据库引用和非空字符串视图；返回值是查找结果的映射标识符，其具体语义由数据库状态决定。如果查询条件不匹配，行为是未指定的——调用者应在使用结果前检查其有效性。
 
 #### Usage Patterns
 
-- Lookup compile entries for a specific source file
+- Used to map a source file to its corresponding compile command entries in a compilation database.
+- Supports extraction pipelines that require entry lookup by file path.
 
 ### `clore::extract::lookup_symbol`
 
@@ -1202,12 +1190,15 @@ Definition: `extract/model.cppm:349`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-函数 `clore::extract::lookup_symbol` 负责在给定的 `ProjectModel` 中按 `SymbolID` 查找符号信息。它返回一个指向 `SymbolInfo` 的常量指针；如果指定的符号存在，则返回非空指针，否则返回空指针。调用者不应释放返回的指针，其生命周期由传入的 `ProjectModel` 管理。
+使用给定的 `ProjectModel` 和 `SymbolID` 查找对应的符号信息。如果存在匹配的符号，则返回指向该符号的 `SymbolInfo` 的指针；否则返回空指针。  
+
+调用者应确保 `SymbolID` 是有效的（例如通过 `SymbolID::is_valid` 检查），但函数本身对传入的标识符不做假设。返回值不为空时，指针在 `ProjectModel` 的生命周期内保持有效。
 
 #### Usage Patterns
 
-- Checking if a `SymbolID` exists in the model
-- Retrieving a symbol's details for further processing
+- check if a symbol exists in the model
+- retrieve symbol info for a given ID
+- used in symbol resolution and caching logic
 
 ### `clore::extract::matches_filter`
 
@@ -1217,13 +1208,13 @@ Definition: `extract/filter.cppm:124`
 
 Implementation: [`Module extract:filter`](../../../modules/extract/filter.md)
 
-`clore::extract::matches_filter` 接受三个 `const int &` 参数并返回一个 `bool` 值。它用于判定这些参数是否匹配某个内部定义的过滤条件，调用者可通过此函数决定是否保留或处理对应的元素。
-
-该函数的契约是：调用者拥有提供正确整数引用的责任；函数不会修改参数内容。返回 `true` 表示参数组合满足过滤条件，`false` 表示不满足。具体的过滤逻辑由实现定义，但返回值可以安全地用于条件分支或断言。
+函数 `clore::extract::matches_filter` 接受三个 `const int &` 参数并返回一个 `bool`。调用者使用它来判断给定的三个整数值是否满足某个内部的过滤条件。该函数的行为是纯函数式的：其结果完全取决于传入的参数，且不产生任何副作用。它旨在提供一种可复用的判断机制，让调用方在不暴露过滤实现细节的前提下，快速检查一组输入是否符合预先定义的标准。
 
 #### Usage Patterns
 
-- Used to determine if a source file should be processed based on filtering rules
+- Filtering source files during project extraction
+- Evaluating include/exclude rules for scanning
+- Deciding whether to process a compilation entry
 
 ### `clore::extract::merge_symbol_info`
 
@@ -1233,12 +1224,12 @@ Definition: `extract/merge.cppm:211`
 
 Implementation: [`Module extract:merge`](../../../modules/extract/merge.md)
 
-`clore::extract::merge_symbol_info` 将第二个符号信息对象的内容合并到第一个符号信息对象中。调用者需确保第一个参数（`int &`）是可修改的左值，用于接收合并结果；第二个参数（`int &&`）应为临时对象或通过 `std::move` 传入的右值，其数据将被提取并整合到第一个对象中。函数不返回值，合并完成后第一个对象持有来自两个来源的符号信息。
+函数 `clore::extract::merge_symbol_info` 将第二个参数（类型为 `int &&`）所表示的数据合并到第一个参数（类型为 `int &`）中。调用方应确保第一个参数指向一个有效且可修改的目标对象，第二个参数是一个即将被移动的临时对象。合并完成后，第一个参数将包含来自两个参数的整合结果，而第二个参数将处于有效但未指定的状态（由移动语义保证）。该函数不提供任何失败信号的返回方式（签名返回 `void`），因此调用方有责任确保参数在语义上可合并。
 
 #### Usage Patterns
 
-- 在符号提取过程中，用于将新解析的符号信息合并到已有的符号信息结构中
-- 作为高效更新接口，利用右值引用避免拷贝开销
+- Used to combine symbol information from two sources, such as when encountering duplicate symbols or applying incremental updates.
+- Typically called when a new `SymbolInfo` instance (rvalue) is available and its data should be incorporated into an existing one.
 
 ### `clore::extract::merge_symbol_info`
 
@@ -1248,12 +1239,15 @@ Definition: `extract/merge.cppm:215`
 
 Implementation: [`Module extract:merge`](../../../modules/extract/merge.md)
 
-`clore::extract::merge_symbol_info` 将来源符号信息合并到目标符号信息中。目标引用被就地更新以包含两个集合的并集。来源可以通过常量引用或右值引用传递，分别表示只读查看或移动语义。当来源为右值引用时，实现可能窃取资源以提高效率。调用者负责确保目标可修改且来源有效。
+`clore::extract::merge_symbol_info` 将源自符号信息合并到目标符号信息中。第一个参数 `int &` 指向被修改的目标，第二个参数 `const int &` 为源，合并过程中源不会被更改。此函数适用于将不同来源的符号信息聚合到单一实体中，例如处理重复符号或增量提取场景。
+
+调用者需保证目标参数所引用的符号信息对象已正确初始化且可被修改。对于临时源对象，存在一个接收 `int &&` 的重载，允许在合并后高效转移资源，避免不必要的复制。
 
 #### Usage Patterns
 
-- Updating an existing symbol info with data from another symbol info.
-- Consolidating symbol information from multiple sources.
+- updating symbol information during index merging
+- combining symbol details from multiple compilation units
+- callers that have a mutable symbol to augment with additional attributes
 
 ### `clore::extract::namespace_prefix_from_qualified_name`
 
@@ -1263,11 +1257,13 @@ Definition: `extract/model.cppm:341`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-函数 `clore::extract::namespace_prefix_from_qualified_name` 接受一个表示完全限定名称的整数参数，并返回其命名空间前缀对应的整数。调用者应提供有效的完全限定名称标识符，并预期返回的前缀标识符可用于进一步的名称解析或分层处理。该操作不修改输入参数，且不会抛出异常。
+`clore::extract::namespace_prefix_from_qualified_name` 接受一个限定名称，并提取其命名空间前缀部分。调用者提供完整的限定名称（例如 `"A::B::C"` 或 `"N::M::func"`），函数返回该名称中位于第一个或后续嵌套的命名空间层级之前的部分。此函数主要用于在符号解析、名称拆分或构建限定范围时，快速获取名称的命名空间上下文，而不涉及底层标识符本身。其返回值是限定名称中属于命名空间前缀的字符串；若名称无名空间前缀（即位于全局作用域），则返回空字符串。
 
 #### Usage Patterns
 
-- Used to obtain the namespace prefix of a qualified name during symbol extraction and name manipulation.
+- Extract namespace prefix before a symbol name
+- Check if a qualified name has a namespace prefix
+- Prepare namespace scope for name resolution
 
 ### `clore::extract::normalize_argument_path`
 
@@ -1277,14 +1273,12 @@ Definition: `extract/compiler.cppm:188`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-该函数接收两个 `std::string_view` 参数——通常是一个基路径和一个待处理的参数路径——并返回一个 `int` 值。其职责是将参数路径标准化为统一的内部表示，例如解析相对路径、处理冗余分隔符或统一目录分隔符，以供后续处理使用。
-
-调用者应保证两个输入字符串为合法的路径格式，且第一个参数（基路径）在需要时提供上下文。函数返回的 `int` 可能指示操作是否成功、一个错误码，或代表规范化后路径的某种标识符，具体含义由调用约定定义。返回值必须按函数实际契约进行解释，一般为非负值表示成功，负值表示错误。
+`clore::extract::normalize_argument_path` 接收两个 `std::string_view` 参数：第一个是待规范化的路径，第二个是用于解析相对路径的基路径。它规范化该路径（例如解析相对段、符号链接或路径别名），并返回一个 `int` 表示操作的状态。调用者应检查返回值以确定成功或失败；通常零表示成功，非零表示特定错误。
 
 #### Usage Patterns
 
-- Normalizes file paths from compilation database entries
-- Standardizes paths before comparison or indexing in extraction pipeline
+- Normalize file paths from compile entries
+- Resolve relative paths against a base directory
 
 ### `clore::extract::normalize_entry_file`
 
@@ -1296,12 +1290,12 @@ Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md
 
 Declaration: [Declaration](functions/normalize-entry-file.md)
 
-返回与指定 `clore::extract::CompileEntry` 关联的规范化源文件路径。该路径是条目的主要输入文件经过标准化后的表现形式，可用于唯一标识编译单元，并作为构建签名或缓存键的组成部分。调用方应依赖该函数提供的稳定标识符，而非原始的文件名或路径。
+`clore::extract::normalize_entry_file` 接受一个 `CompileEntry` 引用，并返回一个 `std::string`，表示该条目对应源文件的规范化路径。调用者可以依赖返回的字符串在文件系统的不同表示形式（如符号链接解析、路径分隔符统一、相对路径转换为绝对路径等）之间保持稳定且可重复，从而用于缓存键的生成或等价性检查。该函数不修改传入的 `CompileEntry`，其结果是纯函数式的。
 
 #### Usage Patterns
 
-- Used by `build_compile_signature` to create a stable file key
-- Used by `ensure_cache_key_impl` to normalize the file path before caching
+- used in `clore::extract::build_compile_signature` to generate a hash key
+- used in `clore::extract::ensure_cache_key_impl` to normalize the entry file before caching
 
 ### `clore::extract::path_prefix_matches`
 
@@ -1311,12 +1305,12 @@ Definition: `extract/filter.cppm:33`
 
 Implementation: [`Module extract:filter`](../../../modules/extract/filter.md)
 
-`clore::extract::path_prefix_matches` 检查一个路径是否以另一个路径作为前缀。它接受两个 `int` 参数，分别表示待检查的路径和期望的前缀，返回 `bool` 指示匹配结果：如果路径以给定前缀开头则返回 `true`，否则返回 `false`。
+函数 `clore::extract::path_prefix_matches` 判断第一个作为 `int` 传入的路径是否是以第二个 `int` 路径为前缀的。如果前者以后者开头则返回 `true`，否则返回 `false`。调用者需要确保两个参数均为有效的内部路径标识符，该函数常用于路径筛选或分组逻辑中。
 
 #### Usage Patterns
 
-- used to filter paths by a prefix pattern
-- likely called during project model filtering or path matching
+- used as a predicate to filter file paths that belong to a given directory prefix
+- likely called from path-matching logic in `clore::extract::matches_filter` or other filter functions
 
 ### `clore::extract::project_relative_path`
 
@@ -1326,14 +1320,12 @@ Definition: `extract/filter.cppm:64`
 
 Implementation: [`Module extract:filter`](../../../modules/extract/filter.md)
 
-调用方应提供两个表示路径标识符的整数参数：第一个是要转换的路径，第二个是项目根目录的路径标识符。函数 `clore::extract::project_relative_path` 计算从项目根目录到目标路径的相对路径，并返回表示该相对路径的整数标识符。返回的标识符可在该提取模块的其他路径操作函数中直接使用。
-
-调用方需确保传入的路径标识符均有效（即先前已通过本模块的路径解析或注册函数获得）。此函数本身不执行 I/O 或文件系统校验——它仅在内部声明的路径标识符空间内进行路径关系计算。如果输入路径不在项目根目录之下，行为取决于具体实现（可能返回表示根路径的标识符或特定错误码，但调用方应依据函数契约确定处理方式）。
+函数 `clore::extract::project_relative_path` 接受两个 `const int &` 参数，并返回一个 `int` 值。调用者应提供两个整数标识符，函数返回一个表示计算出的项目相对路径的整数值。该结果可用于后续的路径解析或过滤操作。具体的输入解释和输出约定由调用者与 `extract` 模块的协作上下文定义。
 
 #### Usage Patterns
 
-- `project_relative_path(file_path, project_root)`
-- determining whether a file is under a project root and its relative path
+- Compute a safe project-relative path for a file under a given root
+- Ensure a file path does not escape a project directory by rejecting `..` components
 
 ### `clore::extract::query_toolchain_cached`
 
@@ -1343,12 +1335,14 @@ Definition: `extract/compiler.cppm:233`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-函数 `clore::extract::query_toolchain_cached` 从编译数据库的缓存中检索与指定编译条目关联的工具链信息。它接受一个可修改的 `CompilationDatabase` 引用和一个 `CompileEntry`，并返回一个整数标识符，表示该条目匹配的缓存工具链。调用者应当确保编译条目已经通过 `ensure_cache_key` 初始化了缓存键，以便函数能够正确查找或创建对应的缓存记录。该函数是提取流程中工具链管理环节的公开入口，常用于避免重复解析编译器驱动程序参数。
+函数 `clore::extract::query_toolchain_cached` 查询与给定编译条目相关联的缓存工具链信息，使用提供的编译数据库作为缓存存储。它接受一个 `CompilationDatabase` 引用和一个 `CompileEntry` 引用，返回一个整数表示查询结果。
+
+调用者应确保传入的 `CompilationDatabase` 对象有效且包含对应的缓存条目。该函数可能在内部调用 `ensure_cache_key` 以保证缓存键已正确建立；返回值的具体含义由实现定义，通常可用于判断是否成功获取到缓存的工具链数据。
 
 #### Usage Patterns
 
-- Caching sanitized tool arguments for compile entries
-- Avoiding repeated sanitization of tool arguments
+- callers retrieve cached sanitized tool arguments for a compile entry
+- used to avoid repeated calls to `sanitize_tool_arguments` for the same entry
 
 ### `clore::extract::rebuild_lookup_maps`
 
@@ -1358,12 +1352,12 @@ Definition: `extract/merge.cppm:428`
 
 Implementation: [`Module extract:merge`](../../../modules/extract/merge.md)
 
-函数 `clore::extract::rebuild_lookup_maps` 负责重建内部查找映射，以确保后续查询操作（如 `lookup_symbol` 或 `find_symbol`）反映最新的提取数据。调用者应在项目模型或符号信息发生变更后调用此函数，以维护映射的一致性。它接受一个 `int &` 参数，该参数标识需要更新其映射的目标上下文或实体。
+函数 `clore::extract::rebuild_lookup_maps` 接受一个 `int &` 参数并返回 `void`。它负责重建与给定索引相关联的内部查找映射，以确保后续的查找操作（如 `lookup_symbol`、`find_symbol` 等）能够访问最新的已提取信息。调用者应提供一个有效的整数引用，该引用通常对应于待更新的映射标识符。调用该函数后，任何基于旧映射的缓存或指针都可能失效，调用者应避免保留对先前映射状态的依赖。
 
 #### Usage Patterns
 
-- called after symbol extraction to update lookup structures
-- called to prepare the model for subsequent lookups by qualified name or module name
+- Called after symbols or modules are added, removed, or modified to keep lookup maps consistent
+- Typically invoked during project model finalization or after merging extraction results
 
 ### `clore::extract::rebuild_model_indexes`
 
@@ -1373,12 +1367,13 @@ Definition: `extract/merge.cppm:219`
 
 Implementation: [`Module extract:merge`](../../../modules/extract/merge.md)
 
-`clore::extract::rebuild_model_indexes` 是一个公有函数，负责重建与指定模型关联的索引结构。它接受一个 `const int &` 参数表示模型标识符，以及一个 `int &` 参数作为输出索引。调用者应保证传入的模型标识符有效，并在函数返回后使用第二个参数中填充的更新后索引值。该函数不返回任何值，但通过引用参数提供结果。
+The function `clore::extract::rebuild_model_indexes` accepts a model identifier as `const int &` and an output reference `int &` for the rebuilt index. It performs the operation of reconstructing the index data for the specified model, updating the supplied reference with the resulting index. Callers must provide a valid model identifier and ensure the output parameter points to a writeable `int` variable that will receive the result of the rebuild. No return value is provided; success is conveyed by the updated output reference.
 
 #### Usage Patterns
 
-- Called after merging symbol data to rebuild all derived indexes
-- Part of the extraction pipeline to ensure model consistency
+- Called after extraction to rebuild indexes for efficient querying
+- Used to reinitialize index structures when model has been modified externally
+- Invoked after changes to `model.files`, `model.symbols`, or `model.namespaces`
 
 ### `clore::extract::resolve_path_under_directory`
 
@@ -1388,12 +1383,12 @@ Definition: `extract/filter.cppm:79`
 
 Implementation: [`Module extract:filter`](../../../modules/extract/filter.md)
 
-函数 `clore::extract::resolve_path_under_directory` 接受两个整数引用（`const int &`），分别表示待解析的路径标识和基础目录标识，并返回一个整数标识解析后的路径。调用方必须确保传入的标识符指向已注册的有效路径和目录实体；该函数根据内部映射将路径相对于给定目录进行规范化解析，返回的新整数标识代表解析结果。如果解析失败，返回的标识可能对应一个特殊值（如无效或不存在的路径）。
+函数 `clore::extract::resolve_path_under_directory` 确认或转换一个路径标识，使其相对于指定的目录标识。它接受两个 `const int &` 参数，第一个表示待解析的路径，第二个表示目标目录，返回一个 `int` 作为结果。调用者应提供有效的路径和目录标识，并依据返回值判断操作是否成功或获取解析后的路径标识。该函数不直接操作文件系统，而是处理内部的路径抽象表示。
 
 #### Usage Patterns
 
-- resolve compilation database file paths
-- normalize relative paths against a base directory
+- resolving file paths from `compile_commands.json` entries
+- normalizing relative paths against a project root directory
 
 ### `clore::extract::resolve_source_snippet`
 
@@ -1403,14 +1398,15 @@ Definition: `extract/model.cppm:455`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-函数 `clore::extract::resolve_source_snippet` 负责根据给定的 `SymbolInfo` 对象中记录的 `source_snippet_offset` 和 `source_snippet_length` 字段，从磁盘上的源文件读取对应的源码片段，并填充到该 `SymbolInfo` 的 `source_snippet` 成员中。调用者需要确保传入的 `SymbolInfo` 对象已经包含了有效的偏移量和长度信息，且对应的源文件可访问。
+函数 `clore::extract::resolve_source_snippet` 负责填充给定的 `SymbolInfo` 对象中的 `source_snippet` 字段。它利用该对象内记录的 `source_snippet_offset` 和 `source_snippet_length` 信息，从磁盘上的对应文件中读取源码片段。
 
-该函数的返回值指示解析结果：返回 `true` 表示成功（包括之前已缓存的情况），此时 `source_snippet` 包含有效的源码片段；返回 `false` 表示解析失败，`source_snippet` 的状态未定义（可能为空或未修改）。调用者应当先检查 `SymbolInfo` 中是否已存在 `source_snippet`（例如通过其他方式已缓存），以避免不必要的调用。
+调用者应当提供一个已经具备上述偏移量和长度字段的有效 `SymbolInfo`。该函数返回 `bool` 值：成功解析（或该片段已缓存）时返回 `true`，否则返回 `false`。调用者可通过返回值判断 `source_snippet` 是否已可用。
 
 #### Usage Patterns
 
-- Called to lazily resolve the textual source snippet for a symbol during navigation or display
-- Used after symbol extraction to load snippet on demand from disk
+- Populating source snippet for `SymbolInfo`
+- Used before accessing `sym.source_snippet`
+- Conditional resolution of snippet from disk
 
 ### `clore::extract::sanitize_driver_arguments`
 
@@ -1420,12 +1416,13 @@ Definition: `extract/compiler.cppm:207`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-`clore::extract::sanitize_driver_arguments` 接受一个 `CompileEntry` 引用并返回一个 `int`。调用者负责在调用任何依赖于驱动程序参数的编译‑相关函数之前调用此函数，以确保参数中的路径、标志和编译器‑特定设置被标准化为一致且可预测的形式。返回的 `int` 值指示操作是否成功——非零值表示无法对输入执行清理，此时不应继续使用该 `CompileEntry` 进行后续提取步骤。该函数不修改原始参数集的语义，仅移除冗余或无效的元素，并转换路径表示为统一的内部格式。
+函数 `clore::extract::sanitize_driver_arguments` 负责净化与规范化编译器驱动程序相关的命令行参数。调用者需传入一个有效的 `CompileEntry` 对象，函数会对其中的参数集合进行审查、标准化（如路径解析、选项去重或移除不安全内容），确保后续处理步骤可以基于一份干净的参数列表运行。返回值 `int` 表示操作结果，通常零表示成功，非零值对应具体的错误码。调用者应在依赖参数状态的其他函数（如 `clore::extract::build_compile_signature`）之前调用此函数，以保证参数的一致性。
 
 #### Usage Patterns
 
-- used to clean up compiler argument lists before invoking the driver
-- called to avoid duplicate source file arguments
+- preparing command-line arguments for compiler invocation
+- removing the source file from argument lists
+- obtaining compiler flags for analysis
 
 ### `clore::extract::sanitize_tool_arguments`
 
@@ -1435,11 +1432,11 @@ Definition: `extract/compiler.cppm:221`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-接受一个 `CompileEntry` 对象，并对其中的工具（编译器）命令行参数进行清理（sanitization）。该函数负责标准化参数表示，例如移除重复项、解析或规范化路径，或剥离与工具无关的选项。返回一个整数，通常为零表示成功，非零表示发生错误。调用者可以在查询编译数据库或创建编译器实例之前调用此函数，以确保后续处理与缓存逻辑能够基于一致的参数进行。
+`clore::extract::sanitize_tool_arguments` 负责清理并规范化给定编译条目（`CompileEntry`）中与工具链相关的参数。调用方传入一个编译条目，函数返回一个整型值，用于指示操作结果（通常为零表示成功，非零表示错误）。该函数不修改传入的编译条目本身，仅在其参数表上执行过滤、路径规范化等预处理，以确保后续工具调用使用一致、合法的参数形式。
 
 #### Usage Patterns
 
-- Used in the extraction pipeline to normalize compile commands before parsing or analysis
+- Used to obtain cleaned argument list for a compile entry before further processing
 
 ### `clore::extract::scan_file`
 
@@ -1449,12 +1446,14 @@ Definition: `extract/scan.cppm:238`
 
 Implementation: [`Module extract:scan`](../../../modules/extract/scan.md)
 
-函数 `clore::extract::scan_file` 负责对一个已打开的文件执行符号提取扫描。调用者须传入一个有效的整数引用作为文件标识（通常对应已打开的文件描述符或内部索引），该函数会尝试解析文件内容并返回一个 `std::expected<ScanResult, ScanError>`：成功时包含扫描结果，失败时包含详细的错误信息。调用者应检查返回值的有效性，并根据错误类型决定后续处理（如重试或跳过文件）。该函数是文件级扫描的入口，依赖于 `scan_module_decl` 等底层处理例程，但调用者无需关心内部实现细节。
+函数 `clore::extract::scan_file` 接受一个表示待扫描文件的整型标识符（例如文件描述符或句柄），并尝试进行提取扫描。成功时返回一个 `ScanResult` 对象，失败时返回一个 `ScanError` 对象，封装在 `std::expected<ScanResult, ScanError>` 中。
+
+调用者需保证传入的 `const int &` 引用一个有效的、可读的文件标识符；若标识符无效或文件不可访问，则函数返回表示错误的 `ScanError`。该函数不抛出异常，通过 `std::expected` 的接口向调用者报告成功或失败的结果。
 
 #### Usage Patterns
 
-- Called for each file in a compilation database during project scanning
-- Used as the primary entry point for extracting symbols from a single translation unit
+- Invoked for each `CompileEntry` in an extraction pipeline to gather module and symbol data
+- Combined with the fast text‑based scan to reduce reliance on full compilation for module detection
 
 ### `clore::extract::scan_module_decl`
 
@@ -1466,12 +1465,14 @@ Implementation: [`Module extract:scan`](../../../modules/extract/scan.md)
 
 Declaration: [Declaration](functions/scan-module-decl.md)
 
-函数 `clore::extract::scan_module_decl` 接收一个 `std::string_view` 表示的待扫描内容和一个可变的 `ScanResult` 引用。调用者负责提供有效的输入字符串，并确保 `ScanResult` 对象在其生命周期内有效；函数会向该结果中填充模块名称、是否为接口单元以及模块导入列表等字段，而无需运行完整的预处理器。此函数专为快速扫描模块声明而设计，是更高层函数（如 `clore::extract::scan_file`）的底层依赖，调用者无需关心其内部实现，但应使用 `ScanResult` 中填充的信息来构建模块依赖关系。
+函数 `clore::extract::scan_module_decl` 对给定的 C++ 源代码字符串执行快速的模块声明扫描，并将结果写入指定的 `ScanResult &` 对象。它使用 Clang 的依赖指令扫描器，只解析模块声明部分，而无需运行完整的预处理器，因此效率较高。函数会填充 `ScanResult` 中的 `module_name`、`is_interface_unit` 和 `module_imports` 字段，其余字段保持不变。
+
+调用者需提供包含有效 C++ 模块声明源代码的 `std::string_view`，并保证 `ScanResult` 对象在函数调用期间可被写入。该函数为无异常安全契约（`void` 返回），若输入字符串不包含可识别的模块声明，相关字段可能保持默认值，函数本身不报告错误。实际使用时通常由 `clore::extract::scan_file` 等上层函数将整体文件扫描的结果封装为 `std::expected` 形式。
 
 #### Usage Patterns
 
-- Called by `clore::extract::scan_file` to perform fast module scanning on source files.
-- Used as a lightweight alternative to full preprocessing for module dependency discovery.
+- Called by `clore::extract::scan_file` during source file scanning to populate module metadata.
+- Used as a lightweight alternative to full preprocessing for extracting module information.
 
 ### `clore::extract::split_top_level_qualified_name`
 
@@ -1481,13 +1482,13 @@ Definition: `extract/model.cppm:265`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-`clore::extract::split_top_level_qualified_name` 将一个完全限定名称（例如 `"A::B::C"`）分解为其最顶层组成部分。它返回一个整数，指示该顶层名称在输入中的边界（如长度或索引），使得调用者可以据此分离出该组件及剩余部分。该函数是名称解析流水线的一环，调用者应确保输入是合法格式的限定名称；结果依赖于该假设，否则未定义。
+`clore::extract::split_top_level_qualified_name` 从给定的完全限定名称中提取最顶层的名称部分。它返回由顶层名称组件和剩余的后缀部分组成的二元组，调用者可据此逐步深入嵌套的命名空间或作用域层次结构。该函数常用于分解模块、类或符号的完全限定名，以便进一步遍历或匹配。
 
 #### Usage Patterns
 
-- Parsing qualified names for symbol resolution
-- Extracting namespace prefixes
-- Caching parsed results for efficiency
+- Parsing qualified names during symbol extraction
+- Splitting names for namespace or module resolution
+- Caching parsed components to improve performance
 
 ### `clore::extract::strip_compiler_path`
 
@@ -1497,11 +1498,12 @@ Definition: `extract/compiler.cppm:181`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-函数 `clore::extract::strip_compiler_path` 接受一个 `const int &` 参数并返回 `int`。调用者需要提供一个表示编译器路径的整数值，函数负责剥离路径中的编译器相关信息并返回净化后的结果。该函数是提取管线中处理编译条目或路径数据时用于移除编译器特定部分的基础工具，其契约要求传入有效的路径标识符，并返回一个可用于后续操作的修正标识符。
+接受一个以`const int &`形式表示的路径标识符，并返回一个`int`，表示移除了编译器路径部分后的结果。此操作用于规范化或消除路径中对特定编译器的依赖，使后续处理（如比较或存储）不因编译器路径差异而受影响。调用者必须确保传入的整数有效且对应一个已注册的路径。
 
 #### Usage Patterns
 
-- Used to extract compiler flags from a compilation command, e.g., when processing `CompileEntry` arguments.
+- Used to extract compiler arguments from a full command line
+- Often called before sanitizing or normalizing arguments
 
 ### `clore::extract::symbol_kind_name`
 
@@ -1511,12 +1513,12 @@ Definition: `extract/model.cppm:244`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-`clore::extract::symbol_kind_name` 将给定的 `SymbolKind` 枚举值转换为一个整数，该整数唯一标识该符号种类的内部名称。调用者有责任传入一个有效的 `SymbolKind` 实例；行为在值无效时未定义。返回的整数可用于后续的名称解析或显示目的，但其具体含义（如是否是索引、哈希值或错误码）不在本函数契约范围内。
+函数 `clore::extract::symbol_kind_name` 接受一个 `SymbolKind` 值，并返回一个 `int`。此整数标识与给定符号种类关联的名称。调用方必须提供有效的 `SymbolKind` 枚举值；传递无效值会导致未定义行为。返回值旨在供 `clore::extract` 命名空间内的其他函数使用，以根据其种类名称引用符号种类。
 
 #### Usage Patterns
 
-- Retrieving a string label for a `SymbolKind` value
-- Used in logging, error messages, or display purposes
+- used to obtain a string representation of a symbol kind for display or logging
+- used when serializing symbol information to human-readable formats
 
 ### `clore::extract::topological_order`
 
@@ -1526,12 +1528,12 @@ Definition: `extract/scan.cppm:495`
 
 Implementation: [`Module extract:scan`](../../../modules/extract/scan.md)
 
-函数 `clore::extract::topological_order` 接受一个 `const DependencyGraph &` 并返回 `int`。调用者应提供一个完全构建好的依赖图，函数会尝试计算其拓扑排序。返回值表示结果的状态：通常成功时返回图中节点的数量，失败时返回错误码或特殊值以指示图中存在环。调用者负责确保依赖图在调用前已正确填充，并在调用后检查返回值以判断排序是否成功。
+接受一个 `const DependencyGraph &`，对其执行拓扑排序，并返回一个整数指示排序结果。调用者负责提供有效的、可排序的依赖图；返回值通常表示成功排序的元素数量，或在排序失败时指示错误状态。该函数不修改传入的图，纯粹用于导出节点间的线性顺序。
 
 #### Usage Patterns
 
-- Called after building a dependency graph to determine a valid compilation order
-- Used to detect cycles in the include graph
+- computes compilation order from include graph
+- validates acyclic dependency graph for projects
 
 ## Related Pages
 

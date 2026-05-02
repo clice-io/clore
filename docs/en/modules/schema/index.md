@@ -1,6 +1,6 @@
 ---
 title: 'Module schema'
-description: 'The schema module is responsible for generating OpenAI‑compatible JSON schema representations from C++ types. It provides type‑aware utilities that produce schema objects for structured‑output response formats and function‑tool definitions, enabling type‑safe integration with OpenAI’s tool‑calling and structured‑response protocols. The module also includes internal validation machinery to ensure constructed schemas conform to the expected shape and constraints.'
+description: 'The module schema is responsible for generating and validating JSON Schema definitions used for OpenAI API communication. It owns the public interface for producing structured schemas, including response_format and function_tool functions, which convert C++ types into OpenAI-compatible schema objects. Internally, the module provides a comprehensive set of utilities for schema construction, type trait introspection (detecting optional, vector, and array types), schema name sanitization, and validation of schema values, objects, and property constraints. By separating public schema tools from detailed implementation, it enables safe and automatic generation of API request schemas from C++ type definitions.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-The `schema` module is responsible for generating `OpenAI`‑compatible JSON schema representations from C++ types. It provides type‑aware utilities that produce schema objects for structured‑output response formats and function‑tool definitions, enabling type‑safe integration with `OpenAI`’s tool‑calling and structured‑response protocols. The module also includes internal validation machinery to ensure constructed schemas conform to the expected shape and constraints.
-
-The public‑facing scope of the module includes the `clore::net::schema::response_format` and `clore::net::schema::function_tool` template functions, which return integer handles representing a schema for a given C++ type. Supporting public validation functions, such as `clore::net::detail::validate_response_format` and `clore::net::detail::validate_tool_definition`, are also provided. Under the hood, the `openai::schema::detail` namespace contains metaprogramming traits and construction routines that handle containers, optionals, and scalar types, together with recursive validation passes that check properties, types, and structural completeness.
+The module `schema` is responsible for generating and validating JSON Schema definitions used for `OpenAI` API communication. It owns the public interface for producing structured schemas, including `response_format` and `function_tool` functions, which convert C++ types into `OpenAI`-compatible schema objects. Internally, the module provides a comprehensive set of utilities for schema construction, type trait introspection (detecting optional, vector, and array types), schema name sanitization, and validation of schema values, objects, and property constraints. By separating public schema tools from detailed implementation, it enables safe and automatic generation of API request schemas from C++ type definitions.
 
 ## Imports
 
@@ -49,7 +47,7 @@ Declaration: `network/schema.cppm:72`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The template struct `clore::net::openai::schema::detail::array_inner` is an implementation detail that captures the inner type information for array schemas. It is designed to provide a type alias or metadata for the element type contained within an array, supporting the broader schema machinery without exposing internal helpers. As a template parameterized by `T`, it maintains a conceptual invariant that `T` represents the value type of the array, enabling consistent type‑based dispatch or deduction within the detail namespace. The struct does not store runtime state; its purpose is purely compile‑time, typically exposing a nested type alias or static member to denote the contained type. This design isolates the array‑inner logic from the public API while preserving type safety and composability.
+The template struct `clore::net::openai::schema::detail::array_inner` serves as the internal representation of the inner schema of an array within the `OpenAI` schema machinery. Its single template parameter `T` models the item type of the array. Internal invariants ensure that the stored type information adheres to the constraints expected by the `OpenAI` specification for array schemas, and member implementations (such as constructors or accessors) are designed to preserve these invariants when constructing or querying the array’s element schema.
 
 ### `clore::net::openai::schema::detail::is_array`
 
@@ -59,22 +57,22 @@ Definition: `network/schema.cppm:63`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The template struct `clore::net::openai::schema::detail::is_array` is a type trait predicate that defaults to `std::false_type`. Its primary template provides a compile‑time constant `value` equal to `false` for any type `T`. This struct is intended to be specialised for array types, such that `is_array<T>::value` becomes `true` for those types. As a `detail` implementation helper, it supports the internal detection of array‑like categories within the schema module, typically used to dispatch or constrain template instantiations based on whether a type is an array. The struct itself contains no data members or custom logic beyond the inherited `std::false_type`; the invariants are maintained by the implicit `std::integral_constant` base, ensuring a consistent `value` member for all supported specialisations.
+The template struct `clore::net::openai::schema::detail::is_array` is a type trait whose primary template inherits from `std::false_type`, providing a static `value` constant equal to `false`. This default implementation establishes the baseline invariant that an arbitrary type `T` is not considered an array in the context of the Clore `OpenAI` schema. The struct contains no additional members or member functions; its sole functionality is derived from the base class. Specializations of `is_array` that inherit from `std::true_type` are expected to be defined separately to mark specific types as array-like, thereby enabling differentiated schema generation logic.
 
 #### Invariants
 
-- The primary template defines `value` as `false`.
-- Only specializations can change the boolean value.
+- Primary template always yields `false` for the `value` member
+- Inherits from `std::false_type`, not `std::integral_constant` directly
+- Template parameter `T` is unconstrained
 
 #### Key Members
 
-- Base class `std::false_type`
-- Inherited member `value` (static constexpr bool)
+- Inherited `static constexpr bool value` from `std::false_type`
 
 #### Usage Patterns
 
-- Used in compile-time type checking, e.g., with `std::enable_if`.
-- Expected to be specialized for array types to enable or disable template overloads.
+- Used as a type trait in compile-time checks for array types
+- Likely specialized for array forms (e.g., `T[]`, `T[N]`) to enable SFINAE or `enable_if` conditions
 
 ### `clore::net::openai::schema::detail::is_optional`
 
@@ -84,24 +82,23 @@ Definition: `network/schema.cppm:23`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The struct `clore::net::openai::schema::detail::is_optional` is a primary template type trait that inherits from `std::false_type`. As a default definition, it serves as a negative sentinel: its static member `value` is always `false`, indicating that any type `T` not covered by a specialization is not considered an optional. The internal structure is trivial—no additional members or base classes beyond the inherited `std::false_type`—and it functions as a detection hook. Specializations (not shown here) that derive from `std::true_type` are expected to be provided elsewhere for types that should be recognized as optionals, thereby establishing a compile-time predicate for conditional logic in the schema or serialization machinery.
+The primary template for `clore::net::openai::schema::detail::is_optional` inherits from `std::false_type`, establishing a default value of `false` for all types. This type trait is designed to be specialised for `std::optional<T>`, where the specialised form would inherit from `std::true_type`. The invariant enforced by the primary template is that any type not explicitly recognised as an `std::optional` is considered non‑optional. There are no member implementations beyond the inherited static constant `value` from `std::false_type`, making the trait a straightforward compile‑time flag.
 
 #### Invariants
 
-- Primary template always yields `value == false`
-- Specializations must be consistent with the detected optional type
-- Inheritance from `std::false_type` implies `value` is a compile-time constant
+- Inherits from `std::false_type`
+- Member `value` is always `false` for the primary template
+- Member `type` is `std::false_type`
 
 #### Key Members
 
-- `T` template parameter representing the type to test
-- Inherited `value` static constexpr bool member
+- Inherited constant `is_optional<T>::value`
+- Inherited type `is_optional<T>::type`
 
 #### Usage Patterns
 
-- Used in SFINAE or `if constexpr` to conditionally handle optional types
-- Specialized for `std::optional` to enable `value == true`
-- Consulted by serialization or conversion utilities to determine null handling
+- Used as a default trait in generic code that checks whether a type is optional
+- Expected to be specialized for `std::optional` and similar wrapper types
 
 ### `clore::net::openai::schema::detail::is_vector`
 
@@ -111,21 +108,22 @@ Definition: `network/schema.cppm:43`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The primary template of `clore::net::openai::schema::detail::is_vector` inherits from `std::false_type`, establishing a default `value` of `false` for any type `T`. This invariant ensures that unqualified types are not recognized as vectors unless an explicit specialization overrides the base class. No additional members or functions are defined; the sole implementation detail is the inheritance chain that provides the compile-time boolean constant. The type trait is intended to be specialized for `std::vector` (and potentially other container types) to yield `std::true_type`, enabling template metaprogramming decisions based on vector semantics.
+The struct `clore::net::openai::schema::detail::is_vector` is a template type trait serving as the primary (default) definition within a set of specializations that detect whether a given type `T` represents a vector. It inherits from `std::false_type`, establishing a constant member `value` equal to `false`. This base implementation provides the fallback for all types that are not recognized as vectors. Specializations of this trait (not shown) will inherit from `std::true_type` for specific vector-like types. The trait is defined in the `detail` namespace, indicating it is an internal implementation helper rather than part of the public API. Its key invariant is that the primary template always evaluates to false; the correct detection is achieved only through explicit specializations.
 
 #### Invariants
 
-- `is_vector<T>::value` is `false` for all types `T` in the primary template
-- The struct is trivially constructible and destructible
+- Always provides a `value` member constant of type `bool` (inherited from `std::false_type`).
+- The primary template unconditionally declares `value == false`.
 
 #### Key Members
 
-- Inherited `value` from `std::false_type` (static constexpr bool)
+- Inherited member `value` (static constexpr bool).
+- Inherited member `type` (alias for `std::false_type`).
 
 #### Usage Patterns
 
-- Used as a type trait to detect vector types via template specialization
-- Employed in template metaprogramming for conditional logic
+- Used within the `clore::net::openai::schema::detail` namespace as a type trait to distinguish vectors from other types.
+- Expected to be specialized for `std::vector` to enable compile-time branching on whether a type is a vector.
 
 ### `clore::net::openai::schema::detail::optional_inner`
 
@@ -133,7 +131,19 @@ Declaration: `network/schema.cppm:32`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The struct `clore::net::openai::schema::detail::optional_inner<T>` is a template implementation detail used internally to manage optional schema fields. It encapsulates a value of type `T` along with a presence flag, providing a storage layout that avoids unnecessary default construction when the value is absent. The class maintains the invariant that the stored object is only constructed when the flag is `true`, and it manually manages the lifetime of `T` through placement new and explicit destructor calls in its constructors, assignment `operator`s, and destructor. Accessor member functions such as `has_value` and `value` are provided, with `value` throwing an exception if the flag is `false`. The design supports copy and move semantics, ensuring proper handling of the underlying value’s state transitions.
+The `clore::net::openai::schema::detail::optional_inner` struct is a template parameterized by a single type `T`. It is declared within the `schema.cppm` module file and resides in the `detail` namespace, marking it as an internal implementation component not exposed through the public API. The struct’s definition provides the foundational type abstraction used by the optional schema facilities.
+
+#### Invariants
+
+- No invariants are evident from the provided source snippets.
+
+#### Key Members
+
+- No key members are evident from the provided source snippets.
+
+#### Usage Patterns
+
+- No usage patterns are evident from the provided source snippets.
 
 ### `clore::net::openai::schema::detail::schema_subject`
 
@@ -143,21 +153,22 @@ Definition: `network/schema.cppm:83`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The template struct `clore::net::openai::schema::detail::schema_subject` is a type‑level metafunction that normalises its template parameter `T` by removing top‑level `const`, `volatile`, and reference qualifiers. Its sole internal member is the alias `type`, defined as `std::remove_cvref_t<T>`. This ensures that any type passed through `schema_subject` is reduced to its cv‑unqualified, non‑reference form, providing a consistent base type for subsequent schema‑related operations. The implementation is trivial but carries the invariant that `type` always names the underlying type without any outer qualifiers or references.
+The `schema_subject` struct is a minimal type transformation wrapper. Its sole purpose is to expose a nested `type` alias defined as `std::remove_cvref_t<T>`. This strips any `const`, `volatile`, and reference qualifiers from the template parameter `T`, yielding the underlying unqualified type. The implementation contains no data members, no constructors, no member functions – only the `type` alias. There are no invariants to enforce because the struct is stateless; the correctness of the alias depends entirely on the standard library’s `std::remove_cvref_t` metafunction for any given `T`.
 
 #### Invariants
 
-- The `type` member always yields the decayed type without cv-ref qualifiers.
-- The struct is trivially constructible and empty.
+- The `type` alias is always `std::remove_cvref_t<T>`.
+- The struct has no other members or methods.
+- The template parameter `T` must be a complete type for alias resolution (though this is typical for type traits).
 
 #### Key Members
 
-- `using type = std::remove_cvref_t<T>`
+- `type` alias
 
 #### Usage Patterns
 
-- Used to obtain a canonical type from possibly qualified types.
-- Likely used in type traits or metaprogramming contexts within the namespace.
+- Used internally to obtain the canonical type of a schema subject.
+- Likely employed in template metaprogramming to normalize types before schema generation.
 
 ### `clore::net::openai::schema::detail::schema_subject_t`
 
@@ -165,22 +176,24 @@ Declaration: `network/schema.cppm:95`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The type alias `schema_subject_t` resolves to `typename schema_subject<T>::type`, providing a shorthand for accessing the nested `type` member of the `schema_subject` class template. Its definition is entirely dependent on the primary template or any partial/explicit specializations of `schema_subject<T>`, making it a compile-time alias whose concrete type is determined by the argument `T`. Internally, `schema_subject<T>` is expected to define a `type` member; the alias exists solely to simplify usage in template metaprogramming contexts within the detail namespace. As a dependent type alias, it carries the invariant that `schema_subject<T>::type` must be a valid type for the alias to be well‑formed; no additional constraints or implementations are introduced by the alias itself.
+The alias `schema_subject_t` is defined as `typename schema_subject<T>::type`, making it a dependent type that resolves the `type` member of the `schema_subject<T>` trait. This trait is a metafunction responsible for mapping a given C++ type `T` to its corresponding "subject" type used in schema computation (e.g., for `OpenAI` API request/response schemas). The alias simply shortens the pattern `typename schema_subject<T>::type` where the trait is expected to be specialized for various types.
+
+Internally, the correctness of `schema_subject_t` relies on `schema_subject<T>` being a complete type that defines a nested `type`. The trait resides in the `detail` namespace, indicating it is an implementation helper not intended for direct external use. Because it is an alias template, it inherits the template parameter `T` and does not introduce additional constraints or logic of its own; it merely re-exposes the result of the trait's specialization for `T`.
 
 #### Invariants
 
-- The alias is only valid for types `T` for which `schema_subject<T>` has a visible specialization defining a `type` member.
-- The resolved type must be a valid type; otherwise, compilation fails.
+- The type `schema_subject_t<T>` is well-defined only if `schema_subject<T>` is a complete type with an accessible `type` member.
+- The alias does not constrain the set of types `T` for which it is valid; validity is determined by the specialization of `schema_subject`.
 
 #### Key Members
 
-- `schema_subject<T>` trait class
-- `::type` nested type alias
+- The nested `type` alias in `schema_subject<T>`
+- The alias template `schema_subject_t<T>` itself
 
 #### Usage Patterns
 
-- Used to obtain the subject type of a schema type without requiring `typename`.
-- Likely used in template metaprogramming to constrain or transform types based on schema definitions.
+- Used wherever the subject type of a schema for a given type `T` needs to be referenced.
+- Often appears in return types or template arguments of other traits and utilities within the `detail` namespace.
 
 ### `clore::net::openai::schema::detail::vector_inner`
 
@@ -188,7 +201,12 @@ Declaration: `network/schema.cppm:52`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The template struct `clore::net::openai::schema::detail::vector_inner` is an implementation detail within the `OpenAI` schema representation. It is parameterized by type `T` and serves as an internal container or marker for vector‑like schema types. The struct’s exact member layout is not publicly exposed; it is intended solely to support schema generation for arrays or sequences where the element type is `T`.
+The struct `clore::net::openai::schema::detail::vector_inner` is a template implementation detail parameterized on `T`. It serves as the internal storage and management layer for contiguous sequences of elements used by higher‑level schema constructs. The type guarantees that the underlying buffer is properly allocated and deallocated via RAII, and that the element count remains consistent with the allocated capacity. All iteration and element access performed by the enclosing classes rely on the invariants maintained by `vector_inner`—most notably, that the pointer to the first element is always valid when the size is positive, and that no external mutation of the internal state is permitted outside the controlled member functions.
+
+#### Usage Patterns
+
+- Used internally by the `clore::net::openai::schema` module as a building block for vector schema types.
+- Templated on the inner element type `T`, likely to allow type-safe representation of vector elements in the schema.
 
 ## Variables
 
@@ -198,16 +216,11 @@ Declaration: `network/schema.cppm:69`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The variable is a `constexpr bool` that is evaluated at compile time, providing a type trait for array detection. It is read in template metaprogramming contexts to conditionally select or generate schema representations. No mutation is observed because it is defined as `constexpr`.
+As a `constexpr` constant, it is read-only and not mutated after initialization. It is intended to be used in template metaprogramming for compile-time type checks, similar to `std::is_array_v`. The evidence shows its declaration but does not provide explicit usage examples.
 
 #### Mutation
 
 No mutation is evident from the extracted code.
-
-#### Usage Patterns
-
-- Used as a compile-time type trait to check if a type is an array
-- Referenced in template metaprogramming for schema generation logic
 
 ### `clore::net::openai::schema::detail::is_optional_v`
 
@@ -215,7 +228,7 @@ Declaration: `network/schema.cppm:29`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-As a `constexpr` template variable, `is_optional_v` is evaluated at compile time and participates in template metaprogramming to conditionally enable or disable code paths based on whether `T` is an optional type. It is read by the compiler during template instantiation, but no explicit read or usage sites are shown in the provided evidence.
+This variable template evaluates to `true` at compile time if `T` satisfies the criteria for an optional type, likely based on specialization or SFINAE. As a `constexpr` boolean, it is used in template metaprogramming contexts to conditionally enable or disable certain code paths, particularly for JSON schema generation or validation logic. There is no evidence that `clore::net::openai::schema::detail::is_optional_v` is mutated after initialization; its value is determined entirely at compile time.
 
 #### Mutation
 
@@ -227,7 +240,7 @@ Declaration: `network/schema.cppm:49`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-As a compile-time constant, `is_vector_v` participates in template metaprogramming to conditionally select schema generation logic for vector types. It is read via template instantiation but not mutated.
+This `constexpr bool` is read at compile time to discriminate between vector and non-vector types within the schema parsing logic. It is never mutated after initialization, as it is defined as a constant expression.
 
 #### Mutation
 
@@ -235,8 +248,9 @@ No mutation is evident from the extracted code.
 
 #### Usage Patterns
 
-- type trait detection
-- compile-time conditional branching
+- checked in template conditional branches
+- used as a type trait in `enable_if` or `if constexpr`
+- referenced alongside traits like `is_optional_v` and `is_array_v`
 
 ## Functions
 
@@ -248,7 +262,7 @@ Definition: `network/schema.cppm:535`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The function `clore::net::detail::validate_response_format` implements a two‑step validation of a `ResponseFormat` object. It first performs trivial pre‑checks: if `format.schema` lacks a value, it returns an empty success; if `format.name` is empty, it returns a `std::unexpected` with an appropriate `LLMError`. Only after these checks pass does it delegate the actual schema compliance verification to `openai::schema::detail::validate_openai_schema`, passing the dereferenced `format.schema`, the `format.name` as the schema path, and `true` for the `is_root` flag. This delegation hands control to a recursive validator that traverses the JSON schema, resolves type markers, and enforces `OpenAI` Schema constraints. The outcome is a `std::expected<void, LLMError>` that signals either successful validation or a structured error containing the first violation encountered.
+The function begins by checking whether the optional `schema` member of the incoming `ResponseFormat` is absent; if so, it immediately returns a valid `std::expected<void, LLMError>`. Otherwise it validates that `format.name` is non‑empty, returning `std::unexpected(LLMError(...))` on failure. Finally it delegates to `openai::schema::detail::validate_openai_schema`, passing the dereferenced schema object, the format name as a `std::string_view` path, and `true` for the `is_root` parameter. This internal call relies on the full `OpenAI` schema validation pipeline defined in namespace `clore::net::openai::schema::detail`.
 
 #### Side Effects
 
@@ -256,13 +270,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `format.schema`
-- `format.name`
+- format`.schema`
+- format`.name`
 
 #### Usage Patterns
 
-- Called to validate response format parameters
-- Used before constructing a completion request
+- Called during completion request processing to validate the `response_format` part of a request.
+- Used in conjunction with `validate_completion_request` to ensure the response format specification is correct.
 
 ### `clore::net::detail::validate_tool_definition`
 
@@ -272,7 +286,7 @@ Definition: `network/schema.cppm:545`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The function first performs lightweight validation of the tool’s metadata: if `tool.name` is empty, it returns an `LLMError` indicating that the tool name must not be empty. If `tool.name` is present but `tool.description` is empty, it returns a formatted `LLMError` specifying which tool lacks a description. After these checks pass, the core validation is delegated to `openai::schema::detail::validate_openai_schema`, passing `tool.parameters`, the tool’s name as a path prefix, and the boolean `true` to indicate that this schema is a root definition. The return value of that call becomes the return value of the function. All non‑local dependencies are limited to the `openai::schema::detail` validation machinery and the `LLMError` type.
+The function first checks that the `name` field of the provided `FunctionToolDefinition` object is not empty, returning a `LLMError` with a descriptive message if it is. It then performs the same emptiness check on the `description` field, formatting the error message to include the tool `name`. After these two preconditions pass, it delegates the remaining validation of the tool’s parameters schema to `openai::schema::detail::validate_openai_schema`, passing `tool.parameters`, the `tool.name` as the schema path, and `true` for the `is_root` flag. The control flow is purely sequential: early returns on invalid input, then a single call to the schema validation subsystem.
 
 #### Side Effects
 
@@ -280,13 +294,14 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- tool`.name`
-- tool`.description`
-- tool`.parameters`
+- `tool.name`
+- `tool.description`
+- `tool.parameters`
 
 #### Usage Patterns
 
-- Called during tool registration or schema validation to ensure tool definitions are well-formed.
+- Validating tool definitions before registration or use
+- Ensuring required fields are present in `FunctionToolDefinition`
 
 ### `clore::net::openai::schema::detail::make_any_of_schema`
 
@@ -296,26 +311,29 @@ Definition: `network/schema.cppm:156`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The function `clore::net::openai::schema::detail::make_any_of_schema` assembles a JSON Schema `anyOf` combinator from a vector of pre‑built JSON schema values. It first attempts to create an empty JSON object via `clore::net::detail::make_empty_object`. If that operation fails, the error is forwarded immediately through `std::unexpected`. The same pattern is repeated for an empty JSON array via `clore::net::detail::make_empty_array`. After both containers are successfully created, the function moves each element of the `choices` vector into the array, then inserts the completed array into the object under the key `"anyOf"`. Finally, the object is wrapped in a `json::Value` and returned. No schema validation or type‑specific logic is performed here—the function solely handles ownership transfer and structural composition, relying on the standard library and the `clore::net::detail` utility functions for error‑aware resource creation.
+The function constructs a JSON schema object representing an `anyOf` composition. It first attempts to create an empty JSON object and an empty JSON array using `clore::net::detail::make_empty_object` and `clore::net::detail::make_empty_array`; if either helper fails, the error is immediately propagated as an `std::unexpected`. After both resources are successfully allocated, it iterates over the input `choices` vector, moving each schema value into the array. It then inserts the completed array under the key `"anyOf"` into the object and returns the resulting `json::Value`. The entire routine is a straightforward builder that delegates error handling to its dependencies and has no branching beyond the early-exit guards for allocation failures.
 
 #### Side Effects
 
-- Allocates memory for JSON object and array structures
-- Transfers ownership of elements from `choices` parameter into the created JSON array
+- Allocates dynamic memory for JSON object and array via `make_empty_object` and `make_empty_array`
+- Moves elements from the input `choices` vector into the created array
+- Modifies the created JSON object by inserting the array under the key `"anyOf"`
 
 #### Reads From
 
-- Parameter `choices` (elements are moved)
+- Input parameter `choices` (values moved from)
 
 #### Writes To
 
-- Returned `json::Value` containing the constructed schema
-- Modified `choices` vector (elements are moved out)
+- Allocated `json::Object` (via `make_empty_object`)
+- Allocated `json::Array` (via `make_empty_array`)
+- Returned `json::Value` (the constructed schema object)
 
 #### Usage Patterns
 
-- Called to wrap multiple schema alternatives into a single `anyOf` schema
-- Used in template metaprogramming for generating union type schemas
+- Used to construct `OpenAI`-compatible `anyOf` schema objects
+- Called when generating schema definitions for types with multiple alternatives
+- Part of the schema construction pipeline in `clore::net::openai::schema`
 
 ### `clore::net::openai::schema::detail::make_scalar_type_schema`
 
@@ -325,13 +343,13 @@ Definition: `network/schema.cppm:146`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The function `clore::net::openai::schema::detail::make_scalar_type_schema` begins by calling `clore::net::detail::make_empty_object` to allocate a new JSON object. If this allocation fails, the function immediately returns `std::unexpected` with the error from `make_empty_object`. Upon success, it inserts a `"type"` key into the object, setting its value to the provided `type_name` string (converted to `std::string`). The constructed object is then wrapped in a `json::Value` and returned as the function’s result. The implementation is straightforward and type‑agnostic; its only dependency is the `make_empty_object` helper, which supplies the initial empty JSON object and any associated error handling.
+The function `clore::net::openai::schema::detail::make_scalar_type_schema` constructs a minimal JSON Schema object representing a scalar type. It takes a `std::string_view` parameter `type_name` (e.g., `"string"` or `"number"`) and returns a `std::expected<json::Value, LLMError>`. Internally, it first calls `clore::net::detail::make_empty_object` to obtain a base JSON object. If that call fails (returning an `LLMError`), the error is immediately propagated via `std::unexpected`. Otherwise, the function inserts a key `"type"` with the value `type_name` into the object and wraps the result in a `json::Value`. The sole dependency beyond core JSON types is `make_empty_object`, which handles the initial object creation and error reporting. There are no loops, conditionals beyond the error check, or further branching—the control flow is linear: allocate object, insert field, return.
 
 #### Side Effects
 
-- allocates a new `json::Object`
-- inserts a key-value pair into the object
-- moves ownership of the object into a `json::Value`
+- allocates a JSON object
+- allocates a string for the type name
+- returns a JSON value that owns allocated memory
 
 #### Reads From
 
@@ -339,13 +357,12 @@ The function `clore::net::openai::schema::detail::make_scalar_type_schema` begin
 
 #### Writes To
 
-- the returned `std::expected<json::Value, LLMError>`
-- the internal `json::Object` created and returned
+- the returned JSON object (by inserting a `type` field)
 
 #### Usage Patterns
 
-- used to generate schema entries for scalar types
-- called when the element being schematized is a primitive
+- used to create JSON schema objects for scalar types like `"string"`, `"integer"`, `"boolean"`, etc.
+- likely called by higher-level schema generation functions that map C++ types to `OpenAI` API schema
 
 ### `clore::net::openai::schema::detail::make_schema_object`
 
@@ -355,9 +372,9 @@ Definition: `network/schema.cppm:132`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The function first delegates to `clore::net::openai::schema::detail::make_schema_value<T>` to generate the complete JSON schema representation for the type `T`. If that call fails, the error is immediately forwarded via `std::unexpected`. Otherwise, the resulting `json::Value` is inspected to ensure it contains a `json::Object`; if the top‑level value is not an object (e.g., it is an array or primitive), the function returns a `LLMError` indicating the generated schema root is not an object. On success, a copy of that object is returned as a `std::expected<json::Object, LLMError>`.
+The implementation of `clore::net::openai::schema::detail::make_schema_object` serves as a top-level entry point for generating a JSON Schema object from a C++ type `T`. Internally, it calls `make_schema_value<T>()` to produce a `json::Value`. If that call fails (returning an unexpected `LLMError`), the error is propagated immediately. Otherwise, it attempts to extract a `json::Object` pointer from the resulting `json::Value`; a null pointer indicates the generated schema root is not an object, leading to an `LLMError`. If both checks pass, a copy of the `json::Object` is returned.
 
-The algorithm is a thin wrapper that validates the shape of the schema produced by the internal schema‑generation machinery. Its control flow consists solely of two error‑handling steps: propagation of errors from `make_schema_value` and a null‑check on the extracted object pointer. The primary dependencies are the template‑level helper `make_schema_value` and the `json::Object` and `LLMError` types from the library.
+The function’s control flow is linear with two early-exit error paths. Its primary dependency is `make_schema_value`, which recursively builds the schema representation from the type `T`. Error handling relies on the `LLMError` type, and the JSON data structures (`json::Value`, `json::Object`) are provided by the library’s JSON layer.
 
 #### Side Effects
 
@@ -365,13 +382,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `make_schema_value<T>()` return value
-- `json::Value::get_object()` method
+- result of `clore::net::openai::schema::detail::make_schema_value<T>()`
+
+#### Writes To
+
+- returned `std::expected<json::Object, LLMError>` object
 
 #### Usage Patterns
 
-- Called to generate the top-level JSON schema object for a type `T`
-- Used in the schema creation pipeline, often after validation
+- used to generate a JSON schema object for type `T`
+- called within schema generation pipeline
 
 ### `clore::net::openai::schema::detail::make_schema_value`
 
@@ -381,20 +401,27 @@ Definition: `network/schema.cppm:225`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The function `make_schema_value` is a template that generates a JSON Schema representation for a given C++ type `T`, returning an `std::expected<json::Value, LLMError>`. Its internal control flow uses compile-time `if constexpr` branching based on the deduced `schema_subject_t<T>` type.
-
-For scalar types (`std::string`, `bool`, `integral`, `floating_point`), it delegates to `make_scalar_type_schema` with the appropriate JSON type string. For `std::optional`, it recursively invokes `make_schema_value` on the inner type and combines the result with a `"null"` schema via `make_any_of_schema`. Containers (`std::vector`, `std::array`) are handled by first generating the item schema recursively, then constructing an object with `"type": "array"` and an `"items"` field; fixed‑size arrays additionally add `"minItems"` and `"maxItems"`. For reflectable classes, it creates an empty JSON object and calls `populate_object_schema` to fill properties. Every step propagates errors from helper functions, ensuring the whole operation either produces a valid schema or an error.
+The function `clore::net::openai::schema::detail::make_schema_value` is a template that generates a JSON schema value for a given type `T`. It follows a compile-time dispatch pattern using `if constexpr` on the resolved `schema_subject_t<T>` type. For scalar types (e.g. `std::string`, `bool`, integral, floating-point), it delegates to `make_scalar_type_schema` with the appropriate JSON type string. When `T` is an `std::optional`, it recursively generates an inner schema and a `null` schema, then combines both into an `anyOf` schema via `make_any_of_schema`. For `std::vector` and `std::array`, it produces an array-type schema by first generating the item schema through recursion, then populating a JSON object with `"type": "array"`, the `"items"` key, and for arrays also `"minItems"` and `"maxItems"` equal to the compile‑time size. For reflectable class types, it creates an empty schema object using `clore::net::detail::make_empty_object` and fills it via `populate_object_schema` with a compile‑time index sequence over the class fields. Error handling uses `std::expected` throughout: each sub‑operation returns a value or an error, which is propagated by early returning `std::unexpected` on failure. The function depends on type traits (`is_optional_v`, `is_vector_v`, `is_array_v`), inner type aliases (e.g. `vector_inner_t`, `optional_inner_t`), and the `schema_subject_t` trait to determine the effective schema type.
 
 #### Side Effects
 
-- allocates heap memory for JSON objects and values
-- moves ownership of allocated JSON data
+- allocates new `json::Value` and `json::Object` objects
+- transfers ownership of error values via `std::move`
+
+#### Reads From
+
+- template parameter `T` through type traits `schema_subject_t`, `is_optional_v`, `is_vector_v`, `is_array_v`, `meta::reflectable_class`
+- `std::tuple_size_v` for fixed-size arrays
+
+#### Writes To
+
+- local variables of types `std::expected<json::Value, LLMError>`, `json::Value`, `json::Object`
+- returned `std::expected` object
 
 #### Usage Patterns
 
-- main entry for generating JSON schema from a type
-- recursively called for nested types inside optional, vector, array
-- used in higher-level schema generation functions
+- recursively called for inner types of `std::optional`, `std::vector`, `std::array`
+- used internally by other schema generation functions in the same namespace
 
 ### `clore::net::openai::schema::detail::populate_object_schema`
 
@@ -404,32 +431,31 @@ Definition: `network/schema.cppm:173`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The function begins by performing a compile-time validation of the field schema using `meta_attrs::validate_field_schema<Object>()`; a failed assertion halts compilation. It then allocates an empty JSON object for `properties` and an empty array for `required` via `clore::net::detail::make_empty_object` and `clore::net::detail::make_empty_array`, respectively, returning an error on failure.  
+The function `populate_object_schema` constructs a JSON schema object for use with `OpenAI` `APIs`. It first statically asserts that all field schemas within the target class `Object` are valid using `meta_attrs::validate_field_schema`. Two JSON containers—a properties object and a required array—are allocated via `clore::net::detail::make_empty_object` and `make_empty_array`, with early return on allocation failure.
 
-A local lambda `append_field` is defined to process each field index. For a given index constant, it calls `meta_attrs::resolve_field<Object, index>` to obtain the field’s schema attributes. If the field is marked `is_skipped`, it returns success immediately; if `is_flattened`, it returns an error because flattening is unsupported. Otherwise, it deduces the field type via `meta::field_type<Object, index>` and invokes `make_schema_value<field_type>()` to generate a JSON sub-schema. On success, the sub-schema is inserted into `properties` under the field’s `canonical_name`, and that name is appended to the `required` array.  
-
-The indices from the template parameter pack are expanded into an `std::array` of expected results by calling `append_field` for each index. The function then iterates over the array, returning early with an error if any element is invalid. Finally, the top-level `object` is populated with the `type` value `"object"`, the completed `properties` and `required` JSON values, and `"additionalProperties"` set to `false`. Dependencies include `meta_attrs` for field introspection, `meta::field_type`, `make_schema_value` for recursive schema generation, and the utility functions for creating empty JSON containers.
+A lambda `append_field` is defined to handle each field index from the provided `std::index_sequence`. For each index it resolves the field schema via `meta_attrs::resolve_field`; skipped fields are ignored, flattened fields cause an immediate error, and normal fields generate a schema value using `make_schema_value`. The resulting value is inserted into the properties object and the field’s canonical name is appended to the required array. The lambda is invoked for every index via pack expansion, and all results are collected into an array `statuses`; any failure aborts the operation and returns the error. On success, the outer object is populated with the required `OpenAI` keys: `"type": "object"`, the built properties object, the required array, and `"additionalProperties": false`.
 
 #### Side Effects
 
 - mutates the `json::Object` argument by inserting schema keys
-- allocates JSON objects and arrays via `make_empty_object` and `make_empty_array`
-- potentially creates `LLMError` values on failure (returned as unexpected)
+- allocates temporary `json::Object` and `json::Array` via `make_empty_object` and `make_empty_array`
+- moves resources into the output object
 
 #### Reads From
 
-- compile-time field metadata from `meta_attrs::resolve_field<Object, index>()`
-- template parameter `Object` for field types and names
-- parameter pack `Indices` for field indices
+- template parameters `Object` and `Indices`
+- field metadata via `meta_attrs::resolve_field`
 
 #### Writes To
 
-- the `json::Object& object` parameter (inserts `"type"`, `"properties"`, `"required"`, `"additionalProperties"` and their values)
+- the `json::Object` reference object (inserts keys `"type"`, `"properties"`, `"required"`, `"additionalProperties"`)
+- temporary local objects `properties` and `required` (later moved into `object`)
 
 #### Usage Patterns
 
-- called during automatic `OpenAI` schema generation for structured tool calls
-- used with a compile-time `std::index_sequence` from the object's field count
+- invoked during `OpenAI` JSON schema generation for C++ types
+- used with `std::index_sequence` to iterate over struct fields
+- called from higher-level schema-building functions
 
 ### `clore::net::openai::schema::detail::sanitize_schema_name`
 
@@ -439,26 +465,26 @@ Definition: `network/schema.cppm:97`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The implementation of `clore::net::openai::schema::detail::sanitize_schema_name` performs a simple character-by-character transformation on the input string view `raw_name`. It first reserves space for the output `sanitized` string to avoid reallocation, then iterates over each character `ch`. Each character is cast to `unsigned char` and checked against ASCII ranges for uppercase letters, lowercase letters, and digits. If the character falls within any of these ranges, it is appended unchanged; otherwise, an underscore is appended in its place. After the loop, any leading underscores are removed by erasing from the front, and any trailing underscores are removed by popping from the back. The final `sanitized` string is returned.
+The implementation of `sanitize_schema_name` follows a simple two‑pass algorithm. It first constructs a sanitized string by iterating over each character in the input `raw_name`. Each character is cast to `unsigned char` and tested for membership in the alphanumeric ranges (`'a'`–`'z'`, `'A'`–`'Z'`, `'0'`–`'9'`); characters that pass are copied verbatim, while all other characters are replaced with an underscore (`'_'`). After building this intermediate string, a pair of loops trim any leading or trailing underscores by erasing from the front or popping from the back, respectively. The function returns the resulting `std::string`.
 
-The algorithm is purely local and does not rely on any other functions or types from the codebase—it uses only standard library string operations (`std::string::reserve`, `push_back`, `erase`, `pop_back`). The control flow is a single `for` loop followed by two `while` loops for trimming. No external dependencies or validation logic are involved; the function’s purpose is to produce a valid identifier-like name from arbitrary input.
+The algorithm has no external dependencies beyond the C++ standard library (`std::string`, `std::string_view`). It uses `reserve` to preallocate memory equal to the input length, minimising reallocations during the linear scan. The control flow is purely sequential with no branches or recursion, making the function straightforward and predictable.
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- Allocates a new `std::string` object and returns it by value, transferring ownership
 
 #### Reads From
 
-- `raw_name` parameter
+- `raw_name` `string_view` parameter
 
 #### Writes To
 
-- return value (`std::string`)
+- Returned `std::string` object
 
 #### Usage Patterns
 
-- Sanitizing schema names for identifier generation
-- Converting arbitrary input strings to valid identifiers
+- Called to sanitize schema names for use in JSON schema property names
+- Replaces invalid characters with underscores before further schema processing
 
 ### `clore::net::openai::schema::detail::schema_type_name`
 
@@ -468,7 +494,9 @@ Definition: `network/schema.cppm:120`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The function `clore::net::openai::schema::detail::schema_type_name` generates a sanitized string name for a given type `T`. It first retrieves the raw, implementation-defined type name via `meta::type_name<T>()` and then passes it to `clore::net::openai::schema::detail::sanitize_schema_name`. If the sanitized result is an empty string, the function returns an error wrapped in `std::unexpected`. Otherwise, it returns the sanitized name. The implementation relies crucially on the reflection-like `meta::type_name<T>()` to obtain a string representation and on the name‑cleaning logic in `sanitize_schema_name` to produce a valid schema identifier.
+The implementation of `clore::net::openai::schema::detail::schema_type_name` first retrieves the human‑readable representation of the template parameter `T` by calling `meta::type_name<T>()`. This raw name is then passed to `sanitize_schema_name`, which cleans and normalizes it into a valid schema identifier. The result is stored in a local variable `sanitized`. If `sanitized` is empty, the function returns `std::unexpected` with an `LLMError` indicating the generated name is empty; otherwise it returns the sanitized string directly.
+
+The algorithm is straightforward: a single sanitization step followed by a validity check. Its primary dependency is the `sanitize_schema_name` helper, which itself relies on character‑by‑character processing of the type name string. The function does not perform any JSON construction or validation—those tasks are delegated to other functions in the `detail` namespace.
 
 #### Side Effects
 
@@ -476,13 +504,14 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- template parameter `T` via `meta::type_name<T>()`
-- string returned by `sanitize_schema_name`
+- `meta::type_name<T>()`
+- `sanitize_schema_name` result
 
 #### Usage Patterns
 
-- used by other schema detail functions to derive `OpenAPI` type names from C++ types
-- invoked in `make_scalar_type_schema` and similar conversion functions
+- used to generate a valid schema type name
+- called by schema construction functions
+- provides error handling for empty type names
 
 ### `clore::net::openai::schema::detail::validate_openai_schema`
 
@@ -492,7 +521,9 @@ Definition: `network/schema.cppm:373`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The function first checks if the input Object contains an `anyOf` field. If so, it rejects any root-level schema and otherwise validates each entry in the `anyOf` array by recursively calling `validate_openai_schema_value`. After that, it reads the `type` field, which may be a string or an array of strings; the first non-null string becomes the effective schema type. The root schema must have type `"object"`. For an object schema, the function requires `properties`, `required`, and `additionalProperties` (set to `false`), then calls `validate_required_properties` to ensure every required key exists in the properties object, and recurses into each property value. For an array schema, it validates the `items` field. Finally, if a `$defs` entry is present, the function recurses into each definition. All structural validation errors produce an `LLMError` via `std::unexpected`, and the function relies on `clore::net::detail::ObjectView`, `clore::net::detail::expect_array`, and `clore::net::detail::expect_object` for safe JSON traversal.
+The function begins by extracting an `ObjectView` from the input JSON object and immediately checking for an `anyOf` field. If present and `is_root` is true, it fails; otherwise it validates each entry in the `anyOf` array via repeated calls to `validate_openai_schema_value`, using formatted paths to track location. Next it retrieves the `type` field, which must be either a string or a string array. For an array type, it calls `validate_schema_array_of_types` and then selects the first non‑null type string as the effective `schema_type`. Should the `type` be missing or malformed, the function returns an error. If the schema is a root schema and `schema_type` is not `"object"`, validation fails immediately.
+
+When `schema_type` is `"object"`, the function requires `properties`, `required`, and `additionalProperties` (set to `false`). It validates that every required property exists in `properties` via `validate_required_properties`, then recursively validates each property value with `validate_openai_schema_value`. For `"array"` schemas, it retrieves `items` and validates that single sub‑schema recursively. After handling type‑specific logic, the function checks for a `$defs` key and recursively validates every definition. All sub‑validations rely on the helper `validate_openai_schema_value` and on utility functions such as `ObjectView::get`, `expect_array`, and `expect_object`. The overall algorithm is a depth‑first recursive descent with strict structural checks and immediate error propagation via `std::expected`.
 
 #### Side Effects
 
@@ -500,15 +531,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `object` (const `json::Object`&)
-- parameter `path` (`std::string_view`)
-- parameter `is_root` (bool)
-- JSON object fields: `anyOf`, `type`, `properties`, `required`, `additionalProperties`, `items`, `$defs` via `ObjectView::get`
+- the `object` parameter (`const json::Object&`)
+- the `path` parameter (`std::string_view`)
+- the `is_root` parameter (`bool`)
+- fields of the JSON object via `ObjectView` and `get` methods
 
 #### Usage Patterns
 
-- called to validate a schema before registration or API call
-- used in schema generation pipeline to ensure compliance
+- called to validate a top-level or nested `OpenAI` schema object
+- used during schema construction to ensure compliance
+- invoked from `validate_openai_schema_value` for recursive validation
 
 ### `clore::net::openai::schema::detail::validate_openai_schema_value`
 
@@ -518,7 +550,7 @@ Definition: `network/schema.cppm:331`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The implementation delegates the actual validation to `clore::net::openai::schema::detail::validate_openai_schema` after first unwrapping a JSON object from the given `json::Value`. It uses `clore::net::detail::expect_object` to extract an `json::Object` reference; if that extraction fails, it immediately returns the error from `expect_object`. Otherwise, it dereferences the returned optional and passes the underlying object, along with the original `path` and `is_root` flag, into the core schema validation routine. This function therefore serves as a thin adapter that normalises an arbitrary JSON value into the object‑typed expected by the downstream `validate_openai_schema`.
+The function first delegates to `clore::net::detail::expect_object` to verify that the input `value` is a JSON object and to extract that object. If the extraction fails, the resulting error is propagated immediately as `std::unexpected`. Otherwise, the function forwards the extracted object, along with `path` and `is_root`, to the core validation routine `clore::net::openai::schema::detail::validate_openai_schema`, which performs the actual schema‑conformance checks. The call chain thus reuses the object‑validation logic without duplication, keeping the entry point thin.
 
 #### Side Effects
 
@@ -526,15 +558,15 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- const `json::Value`& value
-- `std::string_view` path
-- bool `is_root`
+- `value` parameter
+- `path` parameter
+- `is_root` parameter
+- `json::Object` accessed via `expect_object`
 
 #### Usage Patterns
 
-- Called to validate a schema represented as a JSON value
-- Used when the input is not already a known object reference
-- Part of the validation pipeline for `OpenAI` schema endpoints
+- Validate a raw JSON value as an `OpenAI` schema object
+- Used at the root or nested schema validation entry point
 
 ### `clore::net::openai::schema::detail::validate_openai_schema_value`
 
@@ -544,7 +576,9 @@ Definition: `network/schema.cppm:340`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The function first invokes `clore::net::detail::expect_object` on the provided `json::Cursor` to obtain an expected `json::Object`. If that extraction fails, it immediately returns the resulting `LLMError` by moving the error out of the `std::expected`. On success, it dereferences the object and delegates the actual validation to `clore::net::openai::schema::detail::validate_openai_schema`, passing the extracted `json::Object` along with the `path` and `is_root` parameters, and forwarding whatever `std::expected<void, LLMError>` that call returns.
+This function validates that the JSON value referenced by a `clore::net::json::Cursor` is a JSON object, then hands off all further validation to `clore::net::openai::schema::detail::validate_openai_schema`. It first attempts to extract an object from the cursor by calling `clore::net::detail::expect_object`, passing the cursor and the current `path`. If that extraction fails, the error from `expect_object` is immediately wrapped into `std::unexpected` and returned. On success, the function dereferences the returned `std::expected` and invokes `validate_openai_schema` on the resulting `json::Object`, forwarding the same `path` and `is_root` parameters.
+
+The control flow is linear: a single early‑exit on object‑extraction failure, followed by delegation to the core validation routine. The only dependencies are the `expect_object` utility for converting a cursor into a validated object reference and the `validate_openai_schema` function that performs the actual schema‑structure checks. This function serves as the entry point for validation starting from a cursor, ensuring the input is an object before proceeding.
 
 #### Side Effects
 
@@ -552,14 +586,15 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- value (`json::Cursor`)
-- path (`std::string_view`)
+- `value` (`json::Cursor`)
+- `path` (`std::string_view`)
 - `is_root` (bool)
+- the underlying JSON object obtained from the cursor
 
 #### Usage Patterns
 
-- Used to validate a JSON value against `OpenAI` schema starting from a cursor
-- Called internally during schema validation pipeline
+- Validating a schema value from a JSON cursor at a given path
+- Used as a convenience wrapper around `validate_openai_schema` for cursor input
 
 ### `clore::net::openai::schema::detail::validate_required_properties`
 
@@ -569,22 +604,27 @@ Definition: `network/schema.cppm:349`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The function processes two views — `properties` as an `ObjectView` and `required` as an `ArrayView` — alongside the error-context string `path`. It first builds a `std::unordered_set<std::string>` named `required_names` by iterating over each element of `required`; each element is expected to be a string (via `clore::net::detail::expect_string`), and extraction failure causes an early return with the resulting `LLMError`. After populating the set, the function iterates over each entry in `properties`. For every property key (`entry.key`), it checks whether that key is present in `required_names`. If any key is missing, it returns an `LLMError` indicating that the property must be listed in `required` when using strict structured output. If all property names are covered, the function returns a success (an empty `std::expected<void, LLMError>`). The validation ensures exact correspondence between the properties defined in the schema object and the names declared in its `required` array, a constraint enforced for strict mode.
+The function constructs an `std::unordered_set<std::string>` of property names from the `required` array by iterating over each element, calling `clore::net::detail::expect_string` to extract a string value, and inserting it into the set. It then iterates over every entry in the `properties` object view. For each property, it checks whether its key is present in the set of required names; if any property is missing, it immediately returns an `std::unexpected` with an `LLMError` describing the path and key. If all properties are accounted for, it returns a success value.
+
+The algorithm relies on `clore::net::detail::expect_string` for safe string extraction and uses `std::format` to produce diagnostics. The dependency on `clore::net::detail::ObjectView` and `ArrayView` is limited to iteration and key access. The function serves as a validation step ensuring that every declared property in a schema object appears in the required list, a constraint typical of strict structured output modes.
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- allocates memory for the `unordered_set` and strings
+- moves an `LLMError` into the returned `std::expected` on failure
 
 #### Reads From
 
-- `properties` parameter (`clore::net::detail::ObjectView`)
-- `required` parameter (`clore::net::detail::ArrayView`)
-- `path` parameter (`std::string_view`)
+- parameter `properties`
+- parameter `required`
+- parameter `path`
+- elements of the `required` array via `clore::net::detail::expect_string`
+- keys of the `properties` entries
 
 #### Usage Patterns
 
-- Used in `OpenAI` schema validation pipeline
-- Called to enforce required property lists in structured output schemas
+- called during schema validation to enforce that all properties are required
+- used when constructing schemas for strict structured output mode in `OpenAI` API
 
 ### `clore::net::openai::schema::detail::validate_schema_array_of_types`
 
@@ -594,7 +634,7 @@ Definition: `network/schema.cppm:295`
 
 Declaration: [`Namespace clore::net::openai::schema::detail`](../../namespaces/clore/net/openai/schema/detail/index.md)
 
-The function iterates over each item in the input `json::Array` using a range-based `for` loop. For each value, it calls `clore::net::detail::expect_string` to obtain a validated string representation of a type name, returning an error immediately if that fails. If the type is the literal `"null"`, it sets a local `saw_null` flag and skips to the next element. Otherwise, if a `primary_type` has already been recorded (i.e., a non‑null type was seen earlier), the function returns an error because only one concrete non‑null type is permitted in the union. If `is_root` is `true`, any array‑of‑types is rejected outright since the root schema must be an object and cannot be nullable. After the loop, the function checks that exactly one concrete type was found and that `saw_null` is `true`; if either condition fails, an error is returned. On success, the function returns an empty expected result. The algorithm depends on `expect_string` for value extraction, `LLMError` for error representation, and `std::optional` to track the single allowed non‑null type.
+The function iterates over each element of the input `json::Array`, extracting the type string via `clore::net::detail::expect_string` and tracking whether a `"null"` type has been seen. It enforces that at most one non-null type appears in the union; if a second concrete type is encountered it returns an error indicating an unsupported multi-type union. After processing the entire array, it validates additional constraints: if `is_root` is `true` it rejects a nullable root schema, and if the union does not contain exactly one concrete type together with `"null"` (i.e., a single non-null type plus null) it returns an error. The function depends on `clore::net::detail::expect_string` for type extraction and `LLMError` for structured error reporting, and uses `std::format` to produce descriptive error messages that include the schema `path`.
 
 #### Side Effects
 
@@ -605,12 +645,11 @@ No observable side effects are evident from the extracted code.
 - `array` parameter
 - `path` parameter
 - `is_root` parameter
-- elements of `array`
 
 #### Usage Patterns
 
-- called from `validate_openai_schema` when handling an array type
-- used to validate type union constraints in schema definitions
+- called during schema validation to enforce type union constraints
+- typically invoked when processing a schema's `type` field that is an array
 
 ### `clore::net::schema::function_tool`
 
@@ -620,29 +659,25 @@ Definition: `network/schema.cppm:584`
 
 Declaration: [`Namespace clore::net::schema`](../../namespaces/clore/net/schema/index.md)
 
-The implementation begins by deducing the root type via `openai::schema::detail::schema_subject_t<T>` and verifying at compile time that it satisfies `kota::meta::reflectable_class`, ensuring automatic schema generation is possible. It then validates the supplied `name` and `description` strings, returning a `std::unexpected` with an `LLMError` message if either is empty. The core schema construction is delegated to `openai::schema::detail::make_schema_object<root_type>()`; if this call fails, the error is forwarded directly. On success, a `FunctionToolDefinition` is assembled, setting the `name`, `description`, and the generated `parameters` object, with `strict` unconditionally set to `true`.
+The function begins by validating that both `name` and `description` are non-empty, returning `std::unexpected` with an error message if either check fails. It then determines the root type via the alias `schema_subject_t<T>` and asserts, via a static assertion on `kota::meta::reflectable_class<root_type>`, that the type is reflectable. Next, it delegates schema construction to `openai::schema::detail::make_schema_object<root_type>()`, which generates a complete JSON Schema object for the reflectable type. If schema generation fails, the error is propagated. On success, the function builds a `FunctionToolDefinition` by moving the generated parameters schema into the `.parameters` field, setting `.name` and `.description` from the input arguments, and forcing `.strict` to `true`. The primary dependencies are the `openai::schema::detail` internal schema‑building utilities and the static reflection infrastructure provided by `kota::meta`.
 
 #### Side Effects
 
-- allocates memory for the returned `FunctionToolDefinition` and its string members
-- moves input strings `name` and `description`
-- calls `openai::schema::detail::make_schema_object` which may allocate and construct a schema object
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- function parameter `name`
-- function parameter `description`
-- template parameter `T` (via `root_type`)
-- result of `openai::schema::detail::make_schema_object<root_type>()`
+- parameter `name`
+- parameter `description`
+- the template parameter `T` (via `make_schema_object` and static reflection)
 
 #### Writes To
 
-- returns a new `FunctionToolDefinition` object by value (ownership transferred to caller)
+- returned `FunctionToolDefinition` object (including moved `name`, `description`, `parameters`)
 
 #### Usage Patterns
 
-- used to create function tool definitions for LLM calls with automatic schema generation
-- typically called with a reflectable type as the template argument
+- Instantiated with a reflectable type to generate a tool definition for an LLM function call
 
 ### `clore::net::schema::response_format`
 
@@ -652,9 +687,7 @@ Definition: `network/schema.cppm:561`
 
 Declaration: [`Namespace clore::net::schema`](../../namespaces/clore/net/schema/index.md)
 
-The function first resolves the root schema subject type via `clore::net::openai::schema::detail::schema_subject_t<T>` and statically asserts that it is a reflectable class. It then retrieves a sanitized schema name by calling `clore::net::openai::schema::detail::schema_type_name<root_type>()`. If that call fails, the function returns an error early. Otherwise, it proceeds to construct the complete JSON schema object by invoking `clore::net::openai::schema::detail::make_schema_object<root_type>()`. This internal function is responsible for recursively building the schema, validating property types, handling optional and array fields, and populating object properties. If schema construction fails, an error is returned; otherwise, the result is assembled into a `ResponseFormat` structure with the obtained name, the generated schema, and `strict` set to `true`.
-
-The main dependencies are the helper templates and functions within `clore::net::openai::schema::detail`, including `schema_subject_t`, `schema_type_name`, and `make_schema_object`. These rely on compile‑time reflection (`kota::meta::reflectable_class`) and the JSON value types (`json::Value`, `json::Object`, `json::Array`) used to represent the `OpenAI` schema structure. The function does not perform direct validation of the schema content but delegates that to the internal helpers; the overall flow is a linear sequence of type‑name extraction, schema object construction, and result packaging with error propagation at each step.
+The function first deduces the root type via the trait `clore::net::openai::schema::detail::schema_subject_t<T>` and statically asserts that it is a reflectable class. It then calls `clore::net::openai::schema::detail::schema_type_name<root_type>()` to derive a descriptive name for the schema; if this fails, the error is propagated immediately via `std::unexpected`. Next, `clore::net::openai::schema::detail::make_schema_object<root_type>()` constructs the full JSON Schema object, again forwarding any failure. On success, the two values are packed into a `clore::net::schema::ResponseFormat` with the `strict` field set to `true`. The entire flow is sequential and relies on the `std::expected` monadic pattern, unwinding early on any error from the internal JSON Schema generation or naming helpers.
 
 #### Side Effects
 
@@ -662,20 +695,18 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- template parameter `T`
-- static reflection metadata for `T`
-
-#### Writes To
-
-- return value (new `ResponseFormat` object)
+- `T` via template instantiation
+- `openai::schema::detail::schema_type_name`
+- `openai::schema::detail::make_schema_object`
 
 #### Usage Patterns
 
-- used to obtain a structured output schema for LLM API calls requiring a `ResponseFormat`
+- used to configure structured output for LLM calls
+- obtains a `ResponseFormat` for a reflectable type
 
 ## Internal Structure
 
-The `schema` module is an internal component within the `clore::net` library responsible for generating and validating `OpenAI`‑compatible JSON Schema representations from C++ types. It depends on the `http`, `protocol`, `support`, and standard library modules, and is organized into two primary namespaces: `clore::net::openai::schema` for `OpenAI`‑specific schema construction (including a `detail` sub‑namespace) and `clore::net::schema` for higher‑level integration that produces response formats and function tool definitions. Internally, the module is layered with a compile‑time metaprogramming layer (traits like `is_vector`, `is_optional`, `is_array`, and unwrapping helpers `vector_inner`, `optional_inner`, `array_inner`) that strips container wrappers to identify the core subject type via `schema_subject` / `schema_subject_t`, a schema object construction layer (functions such as `make_schema_object`, `make_scalar_type_schema`, `make_any_of_schema`, `populate_object_schema`) that builds JSON schema structures, and a validation layer (`validate_openai_schema`, `validate_openai_schema_value`, `validate_required_properties`, `validate_schema_array_of_types`) that checks conformance. Sanitization utilities (`sanitize_schema_name`) ensure names are safe for schema identifiers. This layered design keeps type introspection, schema generation, and validation concerns separated, while the public entry points `response_format` and `function_tool` provide the module’s primary API for integrating with the rest of the networking stack.
+The `schema` module is organised into a clear public API and an extensive internal detail layer. The public surface provides `response_format<T>()` and `function_tool<T>(string, string)` for constructing `OpenAI`-compatible schema representations of C++ types. All schema construction logic resides in the `detail` subnamespace, which is decomposed into three layers: compile‑time type traits (e.g., `is_optional`, `is_vector`, `is_array`, `optional_inner`, `vector_inner`, `array_inner`, `schema_subject_t`) that classify types and unwrap containers; schema generation functions (`make_scalar_type_schema`, `make_any_of_schema`, `make_schema_value`, `make_schema_object`, `populate_object_schema`) that build JSON‑Schema objects; and validation routines (`validate_openai_schema`, `validate_openai_schema_value`, `validate_required_properties`, `validate_schema_array_of_types`) that ensure correctness. The module imports `std`, `support`, `http`, and `protocol`, indicating its role in bridging fundamental type information with the network-facing protocol layer.
 
 ## Related Pages
 

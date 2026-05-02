@@ -1,6 +1,6 @@
 ---
 title: 'clore::support::ensureutf8'
-description: '函数 clore::support::ensure_utf8 接受一个 std::string_view 输入，返回一个 std::string，其内容保证为正确的 UTF‑8 编码。调用方可以依赖返回值在需要 UTF‑8 合规性的场景（如写入 UTF‑8 文本文件或进行 UTF‑8 字符串操作）中安全使用；若输入已为有效 UTF‑8，则实现可能直接生成副本，否则会修正无效序列以达到 UTF‑8 合规。'
+description: '接受一个 std::string_view，返回一个 std::string。该函数保证输出字符串是有效的 UTF-8 编码，无论输入是否已符合该编码。它内部会验证输入序列的合法性，并在必要时进行规范化或修复，确保调用者获得一个可以安全用于任何期望 UTF-8 文本的上下文的字符串。'
 layout: doc
 template: doc
 ---
@@ -21,12 +21,12 @@ Implementation: [`Module support`](../../../../modules/support/index.md)
 auto (std::string_view) -> std::string;
 ```
 
-函数 `clore::support::ensure_utf8` 接受一个 `std::string_view` 输入，返回一个 `std::string`，其内容保证为正确的 UTF‑8 编码。调用方可以依赖返回值在需要 UTF‑8 合规性的场景（如写入 UTF‑8 文本文件或进行 UTF‑8 字符串操作）中安全使用；若输入已为有效 UTF‑8，则实现可能直接生成副本，否则会修正无效序列以达到 UTF‑8 合规。
+接受一个 `std::string_view`，返回一个 `std::string`。该函数保证输出字符串是有效的 UTF-8 编码，无论输入是否已符合该编码。它内部会验证输入序列的合法性，并在必要时进行规范化或修复，确保调用者获得一个可以安全用于任何期望 UTF-8 文本的上下文的字符串。
 
 ## Usage Patterns
 
-- called by `write_utf8_text_file` to ensure valid UTF-8 before writing
-- called by `truncate_utf8` to sanitize input before truncation
+- 在输出或进一步处理前清理字符串
+- 被 `write_utf8_text_file` 和 `truncate_utf8` 调用
 
 ## Calls
 

@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net'
-description: 'The clore::net namespace provides a complete networking layer for interacting with large language model (LLM) providers. Its primary responsibility is to abstract away the details of constructing, sending, and processing asynchronous HTTP requests to LLM endpoints. The namespace defines a rich set of data structures for modeling the entire conversation lifecycle, including message variants (e.g., SystemMessage, UserMessage, AssistantMessage), request types (CompletionRequest, PromptRequest), response types (CompletionResponse, LLMError), and tool integration primitives (ToolCall, ToolOutput, FunctionToolDefinition, ToolChoice). Supporting components like ResponseFormat, ProbedCapabilities, and PromptOutputContract enable fine-grained control over output structure and feature negotiation.'
+description: 'The clore::net namespace provides the networking and protocol layer for interactions with large language model (LLM) providers. It defines core data structures for constructing and parsing LLM requests and responses—including CompletionRequest, CompletionResponse, and PromptRequest—along with a unified message type system (Message) that supports system, user, assistant, tool-call, and tool-result messages. The namespace also includes types for tool support (FunctionToolDefinition, ToolCall, ToolOutput, and several tool-choice variants), output formatting (ResponseFormat, PromptOutputContract), and capability probing (ProbedCapabilities, ProbedCapabilities accessors). Functions such as call_completion_async, call_llm_async, and call_structured_async initiate asynchronous LLM requests over a configurable event loop, while helpers like sanitize_request_for_capabilities and parse_rejected_feature_from_error handle request adaptation and error analysis. Rate-limiting infrastructure (initialize_llm_rate_limit, shutdown_llm_rate_limit) and environment validation (validate_llm_provider_environment) support robust production use. Architecturally, clore::net serves as the central interface between application code and remote LLM endpoints, abstracting provider-specific protocol details and enabling tool-augmented, capability-aware, and structured-output completions.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-The `clore::net` namespace provides a complete networking layer for interacting with large language model (LLM) providers. Its primary responsibility is to abstract away the details of constructing, sending, and processing asynchronous HTTP requests to LLM endpoints. The namespace defines a rich set of data structures for modeling the entire conversation lifecycle, including message variants (e.g., `SystemMessage`, `UserMessage`, `AssistantMessage`), request types (`CompletionRequest`, `PromptRequest`), response types (`CompletionResponse`, `LLMError`), and tool integration primitives (`ToolCall`, `ToolOutput`, `FunctionToolDefinition`, `ToolChoice`). Supporting components like `ResponseFormat`, `ProbedCapabilities`, and `PromptOutputContract` enable fine-grained control over output structure and feature negotiation.
-
-Architecturally, `clore::net` serves as a high-level, protocol-aware abstraction that sanitizes and validates requests against provider capabilities via functions such as `sanitize_request_for_capabilities` and `validate_llm_provider_environment`. It manages asynchronous execution through functions like `call_llm_async`, `call_completion_async`, and `call_structured_async`, which are templated to support different network protocols and integrate with the event loop system. The namespace also includes utility functions for feature rejection parsing, case-insensitive string matching, and rate limiting (`initialize_llm_rate_limit`, `shutdown_llm_rate_limit`). Overall, it acts as the single entry point for all LLM communication within the codebase, enabling tool-augmented, multi-turn conversations while isolating callers from the underlying network and protocol details.
+The `clore::net` namespace provides the networking and protocol layer for interactions with large language model (LLM) providers. It defines core data structures for constructing and parsing LLM requests and responses—including `CompletionRequest`, `CompletionResponse`, and `PromptRequest`—along with a unified message type system (`Message`) that supports system, user, assistant, tool-call, and tool-result messages. The namespace also includes types for tool support (`FunctionToolDefinition`, `ToolCall`, `ToolOutput`, and several tool-choice variants), output formatting (`ResponseFormat`, `PromptOutputContract`), and capability probing (`ProbedCapabilities`, `ProbedCapabilities` accessors). Functions such as `call_completion_async`, `call_llm_async`, and `call_structured_async` initiate asynchronous LLM requests over a configurable event loop, while helpers like `sanitize_request_for_capabilities` and `parse_rejected_feature_from_error` handle request adaptation and error analysis. Rate-limiting infrastructure (`initialize_llm_rate_limit`, `shutdown_llm_rate_limit`) and environment validation (`validate_llm_provider_environment`) support robust production use. Architecturally, `clore::net` serves as the central interface between application code and remote LLM endpoints, abstracting provider-specific protocol details and enabling tool-augmented, capability-aware, and structured-output completions.
 
 ## Diagram
 
@@ -92,15 +90,14 @@ Definition: `network/protocol.cppm:31`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-The `clore::net::AssistantMessage` struct represents a message generated by an AI assistant in a chat or completion protocol. It is one of several message types—such as `clore::net::SystemMessage`, `clore::net::UserMessage`, and `clore::net::ToolResultMessage`—that together form a conversation history, often used as input to a `clore::net::CompletionRequest` or `clore::net::PromptRequest`. The type is a variant in the `clore::net::Message` alias, which serves as a common interface for all message kinds.
+The `clore::net::AssistantMessage` struct represents a message emitted by the AI assistant within a chat conversation. It is one of the several message types that constitute the dialogue history, and it is typically used when constructing a sequence of messages for a completion or prompt request.  
 
-In typical usage, an `AssistantMessage` holds the textual content produced by the model, and optionally includes tool calls when the assistant requests the execution of a tool. Its role is to convey the assistant's response back to the caller, enabling multi-turn interactions or tool-augmented workflows within the `clore` networking layer.
+This type is expected to hold the assistant’s textual reply and is a variant in the `Message` type alias, alongside `UserMessage`, `SystemMessage`, `ToolResultMessage`, and `AssistantToolCallMessage`. By including an `AssistantMessage` in a request, the caller provides the assistant’s prior response as context for the next turn of the conversation.
 
 #### Invariants
 
-- A simple aggregate type with no invariants beyond standard struct initialization
-- The `content` member is freely assignable and modifiable
-- No constraints are implied by the definition
+- `content` holds a textual message from an assistant
+- No explicit invariants are declared or implied by the evidence
 
 #### Key Members
 
@@ -108,8 +105,7 @@ In typical usage, an `AssistantMessage` holds the textual content produced by th
 
 #### Usage Patterns
 
-- Used as a message type in the `clore::net` namespace for network communication
-- Likely serialized or passed as part of a protocol message
+- No usage patterns are documented in the evidence
 
 ### `clore::net::AssistantOutput`
 
@@ -123,7 +119,9 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- No explicit invariants are provided in the evidence; any combination of member values is possible.
+- text is optional and may be nullopt
+- refusal is optional and may be nullopt
+- `tool_calls` may be an empty vector
 
 #### Key Members
 
@@ -133,7 +131,9 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- No specific usage patterns are indicated in the evidence; the struct is expected to be used to capture assistant responses.
+- Used to capture the result of an assistant interaction
+- May be serialized or deserialized in network communication
+- Consumed by code expecting either text, refusal, or a list of tool calls
 
 ### `clore::net::AssistantToolCallMessage`
 
@@ -143,9 +143,24 @@ Definition: `network/protocol.cppm:35`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-The `clore::net::AssistantToolCallMessage` struct represents a message from an assistant that contains one or more tool invocations. It is part of the set of message types (likely a variant in the `clore::net::Message` alias) used to model an AI assistant’s output when it decides to call external functions rather than produce a textual response.
+The `clore::net::AssistantToolCallMessage` struct represents a message generated by an assistant (LLM) that includes one or more tool calls. It is used within the library's networking protocol to capture the assistant's decision to invoke external functions, as part of a multi-turn conversation or tool‑augmented completion flow. This struct distinguishes assistant messages that request tool execution from plain text or other message types, enabling the system to route tool call results back to the conversation.
 
-In the protocol, this message is produced as part of a `clore::net::CompletionResponse` or `clore::net::PromptRequest` flow. It carries the assistant’s tool call requests, which the client should execute and later return results via a `clore::net::ToolResultMessage`. This struct enables clear separation between a plain textual assistant message (`clore::net::AssistantMessage`) and one that triggers tool use.
+#### Invariants
+
+- `content` is optional and may be `std::nullopt`.
+- `tool_calls` is default-constructible to an empty vector.
+- The struct has no user-defined constructors or special member functions, so it is an aggregate.
+
+#### Key Members
+
+- `content`
+- `tool_calls`
+
+#### Usage Patterns
+
+- Used as a message format in the `clore::net` protocol to represent assistant responses with optional text and tool invocations.
+- Aggregate initialization is likely used to construct instances.
+- Consumed by serialization or network functions that process assistant messages.
 
 ### `clore::net::CompletionRequest`
 
@@ -155,14 +170,16 @@ Definition: `network/protocol.cppm:77`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-`clore::net::CompletionRequest` is a struct that represents a request to an LLM completion endpoint. It encapsulates the parameters required to generate a completion, such as the conversation history (a list of `Message` objects), model identifier, tool definitions (`FunctionToolDefinition`), response format (`ResponseFormat`), and other configuration options. This type is typically constructed and then passed to a function that sends it to an LLM API, with the result returned as a `CompletionResponse`. It serves as the primary input structure for initiating a chat or text generation operation within the `clore::net` namespace.
+The struct `clore::net::CompletionRequest` represents a request sent to an LLM inference endpoint, encapsulating the full set of parameters needed to generate a completion. It typically includes the conversation history as a collection of `Message` values, along with optional configuration such as `ResponseFormat`, `FunctionToolDefinition` entries, and a `ToolChoice` that controls how the model may invoke tools.
+
+This struct is used as input to the networking layer when initiating a completion operation. It is the counterpart to `clore::net::CompletionResponse`, which carries the resulting output. By grouping all request parameters—system prompts, user queries, tool definitions, and response format constraints—into a single object, `CompletionRequest` ensures a consistent and complete specification for every LLM call made through the `clore` networking protocol.
 
 #### Invariants
 
-- `model` should typically be non-empty for a valid request
-- `messages` is expected to contain at least one message for a valid request
-- optional fields may be omitted or set to `std::nullopt`
-- `tools` can be empty if no function calling is used
+- All fields have default initializers
+- `model` is an empty `std::string` by default
+- `messages` and `tools` are empty vectors by default
+- Optional fields (`response_format`, `tool_choice`, `parallel_tool_calls`) are `std::nullopt` by default
 
 #### Key Members
 
@@ -175,9 +192,9 @@ Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
 #### Usage Patterns
 
-- Constructed with all necessary fields before sending to an API endpoint
-- Passed to request serialization or network functions
-- Used to configure the behavior of a completion call
+- Constructed with aggregate initialization for each request
+- Likely serialized to JSON for network transmission to a completion endpoint
+- Populated programmatically from user input or higher‑level abstractions before sending
 
 ### `clore::net::CompletionResponse`
 
@@ -187,13 +204,12 @@ Definition: `network/protocol.cppm:107`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-The `clore::net::CompletionResponse` struct represents the result returned by an LLM provider after processing a `clore::net::CompletionRequest`. It encapsulates the model's generated output along with any associated metadata, such as finish reasons, usage statistics, or error information. This type is the primary response object used in the completion flow, allowing callers to extract the assistant's message content, tool calls, or error details produced by the model.
+The struct `clore::net::CompletionResponse` represents the response returned from a language model completion request. It is a core data type in the networking protocol, encapsulating the result of a completion operation—such as the generated assistant message and any associated metadata. This type is typically paired with `clore::net::CompletionRequest` in a request-response flow, where the response is deserialised from the API reply and then processed by the application.
 
 #### Invariants
 
-- All members are default-constructible and copyable.
-- `raw_json` is expected to contain the original server response as a JSON string.
-- `message` is of type `AssistantOutput`, which encapsulates the assistant's reply.
+- Each field is populated after construction as a complete representation of a completion response.
+- `raw_json` holds the original JSON response string.
 
 #### Key Members
 
@@ -204,9 +220,8 @@ The `clore::net::CompletionResponse` struct represents the result returned by an
 
 #### Usage Patterns
 
-- Returned by completion client methods after a successful API call.
-- Consumed by callers to extract the assistant's message or inspect the raw response.
-- Stored or serialized for logging or audit purposes.
+- Used as the return type of completion API calls, allowing callers to access structured response data.
+- Fields are read directly after a request completes.
 
 ### `clore::net::ForcedFunctionToolChoice`
 
@@ -216,13 +231,13 @@ Definition: `network/protocol.cppm:70`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-The `clore::net::ForcedFunctionToolChoice` struct represents a tool selection mode that requires the model to call a specific function tool during a completion or prompt request. Unlike the automatic or required choices, this type forces the model to invoke a particular function identified by its name, allowing the caller to dictate which tool must be used.
+The `clore::net::ForcedFunctionToolChoice` struct represents a specific tool‑choice mode that forces the model to call a particular function. It is one of the alternative tool‑choice types, alongside `clore::net::ToolChoiceAuto`, `clore::net::ToolChoiceNone`, and `clore::net::ToolChoiceRequired`, and is commonly used as a variant in the `clore::net::ToolChoice` type alias.
 
-This struct is a variant in the `clore::net::ToolChoice` type alias, alongside `clore::net::ToolChoiceAuto`, `clore::net::ToolChoiceNone`, and `clore::net::ToolChoiceRequired`. It is typically constructed with a function name and passed in a `clore::net::CompletionRequest` or `clore::net::PromptRequest` to enforce single‑tool execution.
+This struct is intended for scenarios where the application requires the model to invoke a designated function, overriding its ability to choose freely. Instances of `clore::net::ForcedFunctionToolChoice` are typically embedded in a `clore::net::CompletionRequest` to direct the model’s behavior toward a predetermined tool.
 
 #### Invariants
 
-- No invariants imposed by the struct.
+- The struct imposes no constraints on the content of `name` beyond those of `std::string`.
 
 #### Key Members
 
@@ -230,7 +245,7 @@ This struct is a variant in the `clore::net::ToolChoice` type alias, alongside `
 
 #### Usage Patterns
 
-- Used as part of an API where a specific function tool must be forced.
+- Used to represent a forced tool choice by specifying the tool's name.
 
 ### `clore::net::FunctionToolDefinition`
 
@@ -240,26 +255,27 @@ Definition: `network/protocol.cppm:57`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+`clore::net::FunctionToolDefinition` is a struct that represents the definition of a callable function tool within the `clore::net` protocol. It is part of the tool‑enabled messaging system, where the model can request to call external functions by specifying a `FunctionToolDefinition` in a `ToolCall`. You use this type to describe a tool’s name, description, and expected parameters, enabling the model to generate structured function‑call requests.
+
+The struct is typically included in a `CompletionRequest` or `PromptRequest` to advertise available tools, and its instances appear inside `ToolChoice` variants such as `ForcedFunctionToolChoice` or `ToolChoiceRequired`. When the model responds with a `ToolCall`, that call refers back to a `FunctionToolDefinition` by matching the function name, allowing the client to invoke the defined function and return results via `ToolOutput`.
 
 #### Invariants
 
-- `name` and `description` should be non-empty for a valid definition.
-- `strict` defaults to `true` when not explicitly set.
-- `parameters` must be a valid JSON object representing the tool's parameter schema.
+- `strict` defaults to `true`
+- `name` and `description` are `std::string`
+- `parameters` is a `kota::codec::json::Object`
 
 #### Key Members
 
-- `std::string name`
-- `std::string description`
-- `kota::codec::json::Object parameters`
-- `bool strict = true`
+- `name`
+- `description`
+- `strict`
+- `parameters`
 
 #### Usage Patterns
 
-- Populated by client code to describe a tool function.
-- Serialized or transmitted as part of a tool definition in network messages.
-- Read by remote peers to understand available functions and their expected input.
+- Used to specify a function tool definition in network protocol contexts
+- `strict` flag controls enforcement of parameter validation
 
 ### `clore::net::LLMError`
 
@@ -273,21 +289,22 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `message` holds a human-readable error description
-- Default-constructed `LLMError` has an empty `message`
-- Construction from `kota::error` copies the error's message
+- `message` always holds the error description as a `std::string`
+- constructors taking arguments are `explicit` to prevent implicit conversions
+- default-constructed instances have an empty `message`
 
 #### Key Members
 
-- `std::string message`
-- `LLMError()` default constructor
-- `explicit LLMError(std::string msg)`
-- `explicit LLMError(kota::error err)`
+- `message` field of type `std::string`
+- default constructor `LLMError()`
+- `explicit LLMError(std::string msg)` constructor
+- `explicit LLMError(kota::error err)` constructor adapting from `kota::error`
 
 #### Usage Patterns
 
-- Returned or thrown as an error type for LLM-related failures
-- Constructed from a `kota::error` or an explicit message string
+- constructed from a raw message string
+- constructed by adapting a `kota::error` into an LLM-specific error
+- used as an error representation within `clore::net` HTTP/LLM code paths
 
 #### Member Functions
 
@@ -339,7 +356,28 @@ Declaration: `network/protocol.cppm:45`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-The type alias `clore::net::Message` provides a unified representation for the variety of messages exchanged over the network in the Clore library. It acts as a common type that can hold any of the specific message kinds defined in the `clore::net` namespace, such as `SystemMessage`, `UserMessage`, `AssistantMessage`, `ToolCall`, `ToolResultMessage`, and others. This abstraction simplifies handling of different message payloads within the networking layer, allowing functions and components to operate on a single `Message` type while supporting the full range of communication patterns in the protocol.
+The `clore::net::Message` type alias represents any message that can be exchanged in the clore network protocol. It is used as a polymorphic wrapper, typically defined as a variant over the concrete message structures such as `SystemMessage`, `UserMessage`, `AssistantMessage`, `ToolResultMessage`, and others. Code that sends, receives, or processes network messages uses `Message` to handle any possible message type uniformly, typically via visitation or pattern matching.
+
+#### Invariants
+
+- holds exactly one of the listed alternative types
+- alternative set is fixed to the five message classes
+- value-semantic via `std::variant`
+
+#### Key Members
+
+- alternative `SystemMessage`
+- alternative `UserMessage`
+- alternative `AssistantMessage`
+- alternative `AssistantToolCallMessage`
+- alternative `ToolResultMessage`
+- underlying `std::variant`
+
+#### Usage Patterns
+
+- dispatched via `std::visit` or alternative inspection
+- used as a unified message type in protocol handling
+- passed across the `clore::net` networking layer
 
 ### `clore::net::ProbedCapabilities`
 
@@ -353,21 +391,15 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Each capability flag defaults to `true`
-- Flags can only transition from `true` to `false` as probing reveals lack of support
+- All members are `std::atomic<bool>` and safe for concurrent reads and writes.
+- All members start with a value of `true` by default, implying assumed support until explicitly changed.
 
 #### Key Members
 
-- `supports_tools`
-- `supports_tool_choice`
-- `supports_parallel_tool_calls`
-- `supports_json_schema`
-
-#### Usage Patterns
-
-- Initialized with optimistic defaults before probing
-- Updated to `false` after discovering the API does not support a feature
-- Read by request construction code to decide which parameters to include
+- `clore::net::ProbedCapabilities::supports_json_schema`
+- `clore::net::ProbedCapabilities::supports_tool_choice`
+- `clore::net::ProbedCapabilities::supports_parallel_tool_calls`
+- `clore::net::ProbedCapabilities::supports_tools`
 
 ### `clore::net::PromptOutputContract`
 
@@ -378,21 +410,6 @@ Definition: `network/protocol.cppm:86`
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
-
-#### Invariants
-
-- Each enumerator corresponds to a distinct output contract.
-- Values are limited to the three explicitly defined enumerators.
-
-#### Key Members
-
-- `clore::net::PromptOutputContract::Unspecified`
-- `clore::net::PromptOutputContract::Json`
-- `clore::net::PromptOutputContract::Markdown`
-
-#### Usage Patterns
-
-- Used to specify the expected output format when requesting a prompt response.
 
 #### Member Variables
 
@@ -440,13 +457,13 @@ Definition: `network/protocol.cppm:92`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-The `clore::net::PromptRequest` struct is a type that represents a request to prompt a language model for a response. It is part of the `clore::net` network protocol layer, which defines data structures for interacting with LLM endpoints. Alongside other request types such as `clore::net::CompletionRequest`, this struct is used to encapsulate the input data needed to obtain a model‑generated reply, typically including messages, system instructions, and configuration options like `clore::net::ResponseFormat` or `clore::net::ToolChoice`.
+The `clore::net::PromptRequest` struct represents a request to a language model that is centred on a prompt, along with optional configuration parameters. It is typically used in conjunction with related types such as `clore::net::Message`, `clore::net::ResponseFormat`, `clore::net::FunctionToolDefinition`, and `clore::net::ToolChoice` to specify the content, structure, and behaviour of the interaction. The struct serves as an input to a completion endpoint and may include system, user, assistant, and tool‑result messages, as well as control over the output format and function‑calling options. Its design centralises all parameters required for a single model invocation, making it the fundamental unit of interaction in the `clore::net` protocol layer.
 
 #### Invariants
 
-- `prompt` is always initialized, even if empty
-- `output_contract` defaults to `PromptOutputContract::Unspecified`
-- `response_format` and `tool_choice` are optional and can be absent
+- `prompt` may be empty
+- `output_contract` always has a value
+- `response_format` and `tool_choice` are optional and may be absent
 
 #### Key Members
 
@@ -457,8 +474,8 @@ The `clore::net::PromptRequest` struct is a type that represents a request to pr
 
 #### Usage Patterns
 
-- used to pass prompt text along with optional formatting options to a network service
-- constructed and filled before being sent over the network
+- Used as a request payload in network communication for submitting a prompt to a service
+- Default values simplify creation when optional fields are not needed
 
 ### `clore::net::ResponseFormat`
 
@@ -468,13 +485,13 @@ Definition: `network/protocol.cppm:51`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-`clore::net::ResponseFormat` is a public struct that specifies the expected format of a response from the language model. It is typically used within a `clore::net::CompletionRequest` or `clore::net::PromptRequest` to indicate whether the model should produce plain text, a structured object, or another supported format. By setting this format, the caller controls how the model’s output is serialized and parsed, making it a key parameter for integrating structured data generation into the client.
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
 - `strict` defaults to `true`
-- `schema` is optional and may be empty
-- `name` is a non-empty string (implied by typical usage)
+- `schema` is optional and may be `std::nullopt`
+- All fields are public and freely assignable
 
 #### Key Members
 
@@ -484,8 +501,8 @@ Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
 #### Usage Patterns
 
-- Used as a parameter to specify response format in network requests
-- Constructed directly as an aggregate
+- Used to configure response format expectations in network protocol definitions
+- Typically initialized with a name, optional schema, and strictness setting before being passed to request functions
 
 ### `clore::net::SystemMessage`
 
@@ -495,20 +512,21 @@ Definition: `network/protocol.cppm:16`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-`clore::net::SystemMessage` is a struct type that represents a system-level message within the LLM interaction protocol. It is one of several message variants used to construct a conversation history, typically employed to provide high-level instructions, context, or behavioral guidelines to the model before user or assistant exchanges. As part of the `clore::net` message hierarchy, it is designed to be used through the `clore::net::Message` type alias, which unifies `SystemMessage`, `UserMessage`, `AssistantMessage`, and other message types into a single variant-friendly representation for constructing prompts and processing completions.
+`clore::net::SystemMessage` represents a system-level message within a chat or prompt interaction, typically used to set the behavior or context of the assistant. It is one of the message types that can be used via the `clore::net::Message` type alias, alongside user, assistant, and tool messages. System messages are often employed to provide instructions or high-level guidance to the language model.
 
 #### Invariants
 
-- `content` is a valid `std::string` and may be empty.
+- The `content` member always holds a valid `std::string` (default-constructible or assigned).
+- No additional invariants or constraints are enforced by the struct definition.
 
 #### Key Members
 
-- `content` (`std::string`)
+- `content` (`std::string`): the message payload
 
 #### Usage Patterns
 
-- Direct access to the `content` field for reading or setting the system message text.
-- Used as a data carrier in networking protocols for system-level messages.
+- Used to encapsulate a string payload for system-level messages within the networking protocol.
+- Likely instantiated and passed through network send/receive functions or protocol handlers.
 
 ### `clore::net::ToolCall`
 
@@ -518,11 +536,14 @@ Definition: `network/protocol.cppm:24`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-`clore::net::ToolCall` represents a request from the language model to invoke a tool during a conversation. It is embedded within assistant messages when the model decides to call a defined function tool, carrying the necessary information to identify the tool and its arguments. This struct is a key part of the tool‑use protocol, enabling dynamic interaction between the model and external functions. The caller executes the tool and provides the result back through a `ToolOutput` or `ToolResultMessage`.
+The `clore::net::ToolCall` struct represents a request to invoke a tool function during an LLM completion. It is typically included in `clore::net::AssistantToolCallMessage` or `clore::net::CompletionResponse` when the model decides to call a tool. Each `ToolCall` instance carries an identifier and information describing which tool to call, enabling the caller to execute the corresponding tool and send back the result via a `clore::net::ToolOutput` message.
 
 #### Invariants
 
-- No explicit invariants provided in evidence; members are independent strings and a JSON value.
+- `id` is a unique identifier for the tool call
+- `name` identifies the tool to be invoked
+- `arguments_json` is a JSON-encoded string of the arguments
+- `arguments` is a parsed JSON value corresponding to `arguments_json`
 
 #### Key Members
 
@@ -533,7 +554,8 @@ Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
 #### Usage Patterns
 
-- Used in network protocol messages to encode tool call requests with a unique ID, tool name, and arguments in both serialized and deserialized forms.
+- Used in network protocol messages to convey tool invocation requests
+- The `arguments_json` field may be used for serialization, while `arguments` provides structured access
 
 ### `clore::net::ToolChoice`
 
@@ -541,24 +563,25 @@ Declaration: `network/protocol.cppm:74`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-`clore::net::ToolChoice` is a type alias representing the possible modes for tool selection in an LLM request. It is used in the protocol layer to specify how the model should handle tool invocations, such as allowing automatic choice, requiring a tool call, forcing a specific function, or disabling tool use entirely. `ToolChoice` serves as a variant over the distinct option types defined in the same module, enabling straightforward configuration of tool calling behavior in completion and prompt requests.
+The type alias `clore::net::ToolChoice` represents the different modes a language model can use when selecting a tool (function) to invoke during a completion request. It is typically a variant or union of the options defined by the structs `ToolChoiceAuto`, `ToolChoiceNone`, `ToolChoiceRequired`, and `ForcedFunctionToolChoice`, allowing callers to specify whether the model should automatically decide, call a specific function, call any function, or avoid calling any tool.
 
 #### Invariants
 
-- The variant always holds exactly one of the four defined alternatives.
-- The alternatives are mutually exclusive tool choice modes.
+- holds exactly one of the four alternative types
+- alternatives limited to `ToolChoiceAuto`, `ToolChoiceRequired`, `ToolChoiceNone`, `ForcedFunctionToolChoice`
 
 #### Key Members
 
-- `ToolChoiceAuto`
-- `ToolChoiceRequired`
-- `ToolChoiceNone`
-- `ForcedFunctionToolChoice`
+- alternative `ToolChoiceAuto`
+- alternative `ToolChoiceRequired`
+- alternative `ToolChoiceNone`
+- alternative `ForcedFunctionToolChoice`
+- underlying `std::variant`
 
 #### Usage Patterns
 
-- Used as a parameter type in function signatures to specify tool selection behavior.
-- Consumed by visitor patterns or `std::visit` to dispatch based on tool choice mode.
+- used to express a tool selection mode in protocol messages
+- inspected via `std::variant` visitation or alternative access
 
 ### `clore::net::ToolChoiceAuto`
 
@@ -568,18 +591,15 @@ Definition: `network/protocol.cppm:64`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-The struct `clore::net::ToolChoiceAuto` represents a tool selection policy where the language model autonomously decides whether to call a tool and which tool to invoke, based on the current conversation context. It serves as one of the possible values for the `ToolChoice` type alias, which is used in request types such as `CompletionRequest` to control the model’s tool usage behavior. When set to `ToolChoiceAuto`, the model may choose to generate a response without any tool calls, or select an appropriate function from the available tool definitions.
+The `clore::net::ToolChoiceAuto` struct represents the default or automatic tool selection behavior when invoking a language model. Using this choice allows the model to decide on its own whether to call one or more defined tools, based on the input and context. It is typically the starting option in a `clore::net::ToolChoice` variant, providing a no‑intervention mode for tool invocation.
 
 #### Invariants
 
-- The struct is always empty and trivially constructible.
-- No state or data members exist.
+- The struct has no invariants because it contains no data.
 
 #### Usage Patterns
 
-- Used as an argument type for function overloading.
-- Likely employed as a tag in template metaprogramming or policy-based design.
-- May appear in variant or optional type parameters.
+- No usage patterns are evident from the provided source snippets.
 
 ### `clore::net::ToolChoiceNone`
 
@@ -589,11 +609,23 @@ Definition: `network/protocol.cppm:68`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-The `clore::net::ToolChoiceNone` struct represents the tool‑choice option that explicitly forbids the model from using any function tools. It is one of the possible variants for the `ToolChoice` type alias, alongside `ToolChoiceAuto`, `ToolChoiceRequired`, and `ForcedFunctionToolChoice`. When a `CompletionRequest` or similar message carries a tool choice value of `ToolChoiceNone`, the model will not call any tools and will produce only a plain text or structured output without tool invocations.
+The `clore::net::ToolChoiceNone` struct represents the explicit choice to disallow any tool invocations within a completion request. It is one of the possible tool‑selection options and is commonly used as a discriminator in a variant along with `clore::net::ToolChoiceAuto`, `clore::net::ToolChoiceRequired`, and `clore::net::ForcedFunctionToolChoice`. When a `clore::net::ToolChoice` alias (typically a `std::variant` of these types) is set to `ToolChoiceNone`, the model is instructed to respond without calling any tools, making it the appropriate value for scenarios where only a direct text or structured output is desired.
+
+#### Invariants
+
+- Empty struct with no state.
+- Trivially default constructible and destructible.
+- No runtime overhead.
+
+#### Key Members
+
+- None (no members or nested types).
 
 #### Usage Patterns
 
-- Used as a type tag in template or variant contexts to represent the absence of a tool choice.
+- Used as a tag or discriminator in variants or type‑dispatching.
+- Likely passed as a template argument to indicate a disabled or absent tool choice.
+- Comparison or default construction of `clore::net::ToolChoiceNone` is used to represent the 'none' case.
 
 ### `clore::net::ToolChoiceRequired`
 
@@ -603,18 +635,19 @@ Definition: `network/protocol.cppm:66`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-The struct `clore::net::ToolChoiceRequired` represents a tool-choice configuration that forces the model to always use at least one tool during a completion or prompt request. It is one of the variant types used in the `clore::net::ToolChoice` type alias, alongside `clore::net::ToolChoiceAuto`, `clore::net::ToolChoiceNone`, and `clore::net::ForcedFunctionToolChoice`. When a `ToolChoiceRequired` is specified, the model is required to produce a tool call in its response, regardless of whether a function is necessary for the user’s query. This is useful for workflows that depend on tool execution for every interaction.
+The `clore::net::ToolChoiceRequired` struct represents a tool choice policy that mandates the model to always invoke a tool during generation. When used as a variant of the `clore::net::ToolChoice` type alias, it instructs the API to require a tool call without specifying a particular function, allowing the model to select an appropriate tool from the available definitions. This contrasts with `clore::net::ToolChoiceAuto`, which lets the model decide whether to call a tool, and `clore::net::ToolChoiceNone`, which prohibits tool calls.
 
 #### Invariants
 
-- Trivially default constructible
-- Trivially destructible
-- No members or base classes
+- Empty struct, no state
+- Trivially copyable
+- Default-constructible
 
 #### Usage Patterns
 
-- Used as a type tag for function overloading or template specialization
-- May serve as a sentinel or enum alternative in network protocol handling
+- Used as a tag type for overloading or template specialization
+- Passed as a parameter to indicate a required tool choice
+- May appear as a default template argument or function parameter type
 
 ### `clore::net::ToolOutput`
 
@@ -624,7 +657,23 @@ Definition: `network/protocol.cppm:114`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-The `clore::net::ToolOutput` struct models the result produced by a tool function invoked during a chat completion or prompt interaction. It captures the outcome of a tool execution, typically including an identifier matching the originating `clore::net::ToolCall` and the tool’s response payload. This type is consumed by the system when constructing a `clore::net::ToolResultMessage` to feed back into the conversation context, enabling multi-turn tool-using workflows.
+The `ToolOutput` struct represents the result produced by executing a tool call. It is typically paired with a corresponding `ToolCall` identifier and contains the output data (for example, a string) that the tool generated. `ToolOutput` instances are embedded in `ToolResultMessage` objects and sent back to the language model to satisfy a pending tool invocation, enabling the model to continue the completion with the tool’s result.
+
+#### Invariants
+
+- aggregate of two `std::string` members
+- resides in the `clore::net` namespace
+- both members are publicly accessible
+
+#### Key Members
+
+- `tool_call_id` identifying the originating tool call
+- `output` holding the tool's textual result
+
+#### Usage Patterns
+
+- used as a payload in network protocol communication
+- constructed and passed by value as a simple data record
 
 ### `clore::net::ToolResultMessage`
 
@@ -634,21 +683,21 @@ Definition: `network/protocol.cppm:40`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-`clore::net::ToolResultMessage` represents a message carrying the result of a previously invoked tool call within a multi‑turn conversation. It is typically produced after a tool has been executed by the application, returning the tool’s output back to the model. This message type is part of the message‑exchange protocol used alongside `clore::net::AssistantToolCallMessage` and other message variants to model complete tool‑use cycles between the client and the language model.
+`clore::net::ToolResultMessage` is a struct that represents the result of a tool or function execution within a conversational or LLM interaction. It typically carries the identifier of the tool call and the output produced by that tool, enabling the model to receive feedback from external operations. This message type is used alongside other message variants such as `clore::net::SystemMessage`, `clore::net::UserMessage`, `clore::net::AssistantMessage`, and `clore::net::AssistantToolCallMessage` as part of a unified `clore::net::Message` type, allowing the system to model multi-turn tool‑use workflows. The `clore::net::ToolResultMessage` is essential when the assistant has issued a tool call and the runtime must supply the corresponding result to continue the conversation.
 
 #### Invariants
 
-- No invariants beyond the default string state.
+- No documented invariants beyond the standard behavior of `std::string`.
+- Members are independent; no constraints between `tool_call_id` and `content` are specified.
 
 #### Key Members
 
-- `tool_call_id`: identifier of the tool call.
-- `content`: result content.
+- `tool_call_id`
+- content
 
 #### Usage Patterns
 
-- Used to pass tool execution results through the network layer.
-- Constructed with `{tool_call_id, content}` syntax.
+- No usage patterns are documented in the provided evidence; the struct is defined but its specific usage in the codebase is not shown.
 
 ### `clore::net::UserMessage`
 
@@ -658,7 +707,22 @@ Definition: `network/protocol.cppm:20`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-The `clore::net::UserMessage` struct represents a message originating from a user within a conversation or interaction with a large language model. It is one of several typed message structures—alongside `clore::net::SystemMessage`, `clore::net::AssistantMessage`, and `clore::net::ToolResultMessage`—that are commonly grouped via the `clore::net::Message` type alias. This struct is typically used when constructing a `clore::net::CompletionRequest` or a `clore::net::PromptRequest` to supply the user’s input to the model.
+The `clore::net::UserMessage` struct represents a user-provided input message within a conversational LLM protocol. It is one of several distinct message types (including `SystemMessage`, `AssistantMessage`, and `ToolResultMessage`) that are typically combined under the `clore::net::Message` type alias to form a conversation history. This struct is used when constructing a `CompletionRequest` or `PromptRequest` to supply the user’s utterance to the model.
+
+#### Invariants
+
+- `content` is a valid `std::string`
+- No implicit constraints on length or content
+
+#### Key Members
+
+- `std::string content`
+
+#### Usage Patterns
+
+- Instances are constructed with a string to represent a user message
+- Likely serialized or transmitted over the network
+- May be parsed from incoming network data
 
 ## Functions
 
@@ -670,13 +734,13 @@ Definition: `network/client.cppm:57`
 
 Implementation: [`Module client`](../../../modules/client/index.md)
 
-The function `clore::net::call_completion_async` schedules an asynchronous completion call for a specified operation. It accepts an integer identifier for the operation to complete and an optional `kota::event_loop *` (or `kota::event_loop &`) under which the asynchronous work will execute. The function returns an integer status indicating whether the scheduling succeeded. The caller must ensure that the provided event loop (if any) remains valid for the duration of the asynchronous operation; when a pointer is passed, a `nullptr` value causes the default event loop to be used. The template parameter `Protocol` allows the caller to specify the protocol type for the underlying network call.
+The template function `clore::net::call_completion_async` initiates an asynchronous completion call using the protocol specified by the template argument `Protocol`. It accepts an integer handle (e.g., a file descriptor or connection identifier) and a pointer to a `kota::event_loop`. If the event loop pointer is null, a default event loop is selected internally. The function returns an `int` indicating the result of scheduling the operation. The caller is responsible for providing a valid handle and ensuring the event loop remains active for the duration of the asynchronous operation.
 
 #### Usage Patterns
 
-- retry loop with capability probing
-- used by higher-level completion functions
-- handles feature rejection errors
+- called to perform async LLM completion with automatic capability probing
+- used in coroutine contexts where `kota::task` is awaited
+- parameterized with different protocol types to support multiple LLM providers
 
 ### `clore::net::call_completion_async`
 
@@ -686,14 +750,13 @@ Definition: `network/network.cppm:150`
 
 Implementation: [`Module network`](../../../modules/network/index.md)
 
-The function `clore::net::call_completion_async` initiates an asynchronous completion operation. The caller provides an integer identifier for the request and a reference to a `kota::event_loop` that will handle the operation’s completion events. The function returns an integer — typically a status code or a handle that can be used to track or cancel the pending asynchronous call.
-
-The caller is responsible for ensuring that the provided `kota::event_loop` remains active for the duration of the asynchronous operation. The exact semantics of the returned integer and the completion mechanism are defined by the library contract; the function does not block and the result is delivered through the event loop.
+The function `clore::net::call_completion_async` initiates an asynchronous completion operation. It accepts an `int` argument and a `kota::event_loop` reference (or pointer) that drives the asynchronous callback. The caller is responsible for providing a valid event loop; the function returns an `int` result that typically indicates success or failure of the submission, not the outcome of the operation itself. The completion logic is executed within the given event loop, and any results or errors are communicated through that loop’s asynchronous mechanism.
 
 #### Usage Patterns
 
-- Used to start an async LLM completion request.
-- Called within a coroutine context where `co_await` is available.
+- Called to asynchronously perform an LLM completion
+- Used in coroutine contexts with `co_await`
+- Typically invoked when a user issues a completion request
 
 ### `clore::net::call_llm_async`
 
@@ -703,182 +766,201 @@ Definition: `network/network.cppm:126`
 
 Implementation: [`Module network`](../../../modules/network/index.md)
 
-The `clore::net::call_llm_async` function initiates an asynchronous large language model (LLM) request. It takes two `std::string_view` parameters (likely representing the model identifier and the prompt or configuration), an `int` parameter (possibly a request identifier or timeout), and a reference to a `kota::event_loop` on which the asynchronous operations will be scheduled. The function returns an `int` that represents a handle or status code for the request. The caller is responsible for ensuring the event loop is active and that the LLM networking environment has been properly configured before invoking this function. The function does not block; the result is delivered through the event loop.
+The `call_llm_async` function initiates an asynchronous language model (LLM) request. The caller provides input text(s) and an integer parameter (typically a request identifier or configuration value), along with a reference to a `kota::event_loop` that will handle completion callbacks. The function returns an `int` representing the pending operation, which can be used to track or cancel the request. Overloaded variants accept additional arguments such as a structured output schema for specialized LLM interactions.
 
 #### Usage Patterns
 
-- Used for async text completion requests to LLM providers
-- Called within event loop coroutines
+- initiate an asynchronous LLM completion from a coroutine context
+- call with a `PromptRequest`, model name, system prompt, and an event loop
+- use as part of a higher-level async pipeline that consumes `kota::task<std::string, LLMError>`
 
 ### `clore::net::call_llm_async`
 
 Declaration: `network/client.cppm:20`
 
-Definition: `network/client.cppm:137`
+Definition: `network/client.cppm:138`
 
 Implementation: [`Module client`](../../../modules/client/index.md)
 
-The template function `clore::net::call_llm_async` initiates an asynchronous large language model request. It accepts a model identifier and a prompt as `std::string_view` arguments, an opaque `int` parameter (typically a request identifier), and an optional pointer to a `kota::event_loop`. If the pointer is non‑null, the request is scheduled on the provided loop; otherwise, the function selects a default loop via `clore::net::detail::select_event_loop`. The return value is an `int` that represents either a handle to the pending operation or an error code. The caller must ensure that the target event loop is running and that the model and prompt strings remain valid until the request completes.
+The template function `clore::net::call_llm_async` initiates an asynchronous request to a large language model (LLM) using the communication protocol specified by the template parameter `Protocol`. It accepts a model identifier (`model`), a prompt string (`prompt`), an integer argument (likely a connection or session identifier), and a pointer to a `kota::event_loop` to schedule the asynchronous operation. The caller must provide a valid event loop pointer; passing `nullptr` results in undefined behavior or a fallback to a default loop (per the internal helper `detail::select_event_loop`). The function returns an `int` representing a unique request handle that can be used to track or cancel the operation. The caller is responsible for ensuring the event loop remains active until the asynchronous operation completes.
 
 #### Usage Patterns
 
-- called to initiate an asynchronous LLM request with cancellation support
-- used with an explicit event loop pointer or nullptr for default loop
-- invoked as part of a coroutine chain for LLM completion
+- Called from coroutine context to obtain an LLM text response asynchronously
+- Passed an explicit event loop when a specific loop is required
+- Used by higher-level LLM interaction layers that build or wrap completion requests
 
 ### `clore::net::call_llm_async`
 
 Declaration: `network/client.cppm:27`
 
-Definition: `network/client.cppm:156`
+Definition: `network/client.cppm:157`
 
 Implementation: [`Module client`](../../../modules/client/index.md)
 
-Call `clore::net::call_llm_async` to initiate an asynchronous Large Language Model (LLM) request. The function is templated on a `Protocol` type and accepts the model identifier, endpoint URI, request body, and an optional pointer to a `kota::event_loop`. It returns an `int` representing a handle or identifier for the pending operation. The caller is responsible for ensuring the provided event loop remains alive until the operation completes; if a `nullptr` is passed, a default event loop is selected internally.
+`call_llm_async` is a public template function that initiates an asynchronous request to a language model. The template parameter `Protocol` selects the underlying transport protocol for the call. The function accepts three `std::string_view` arguments: the provider identifier, the model name, and the prompt text. It also takes an optional pointer to a `kota::event_loop`; if a null pointer is passed, the implementation selects a default event loop. The return value is an `int` — a positive identifier for the in‑flight request or a negative error code on failure. The caller must ensure that the provider and model names are valid for the configured environment; no other pre‑conditions apply. The request is dispatched asynchronously; completion is delivered through the provided event loop.
 
 #### Usage Patterns
 
-- Called by `clore::net::call_structured_async`
-- Used in high-level async LLM request flows for text generation
-- Invoked with template parameter `Protocol` to select the LLM protocol (e.g., `OpenAI`, Anthropic)
+- Used to perform asynchronous LLM completions with a generic protocol
+- Invoked by higher-level functions like `call_structed_async`
+- Supports different model and prompt configurations
 
 ### `clore::net::call_structured_async`
 
 Declaration: `network/client.cppm:34`
 
-Definition: `network/client.cppm:177`
+Definition: `network/client.cppm:178`
 
 Implementation: [`Module client`](../../../modules/client/index.md)
 
-The function `clore::net::call_structured_async` initiates an asynchronous request to a language model and expects a structured response conforming to the template parameters `Protocol` and `T`. It accepts three `std::string_view` arguments (typically representing the provider, model, and a prompt or configuration string) and a pointer to a `kota::event_loop` that will dispatch the asynchronous callback. The return value is an `int` that signals the immediate success or failure of the call's launch. The caller must guarantee that the provided `kota::event_loop *` remains valid for the entire lifetime of the asynchronous operation.
+`call_structured_async` is a public template function that initiates an asynchronous structured API call. It accepts three `std::string_view` parameters (likely specifying provider, endpoint, and payload), along with a non‑null `kota::event_loop *` for scheduling the asynchronous operation. The function returns an `int`, typically a request identifier or a status code indicating submission success. The caller is responsible for ensuring the string arguments are valid and that the event loop pointer remains valid for the duration of the asynchronous call.
 
 #### Usage Patterns
 
-- invoked to obtain a structured typed response from an LLM
-- used in coroutine contexts requiring a `kota::task` for T
-- relies on schema registration for type T
+- Send a structured LLM completion request with system and user prompts and expect a typed response
+- Typically invoked with a specific `Protocol` and response type `T`
+- Used in async contexts where response format validation is required
 
 ### `clore::net::get_probed_capabilities`
 
 Declaration: `network/protocol.cppm:126`
 
-Definition: `network/protocol.cppm:725`
+Definition: `network/protocol.cppm:729`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-Returns a reference to the `ProbedCapabilities` associated with the given provider identifier. The `std::string_view` argument names the provider or endpoint whose capabilities are to be retrieved. The returned `ProbedCapabilities &` is valid for the lifetime of the program and may be inspected or modified to adjust request processing, such as sanitization performed by `sanitize_request_for_capabilities`.
+The function `clore::net::get_probed_capabilities` accepts a `std::string_view` key and returns a reference to a `ProbedCapabilities` object. It is the primary access point for retrieving or creating the probed capability record associated with that key, typically representing an LLM provider or model identifier. The returned reference can be used to inspect or update the set of capabilities that have been discovered through probing. The caller must ensure that the key is consistent with the one used during capability probing. The returned reference is valid until the underlying capability cache is destroyed.
 
 #### Usage Patterns
 
-- called to obtain a cached `ProbedCapabilities` reference for a given provider
-- used to initialize or retrieve probed capabilities without repeating probes
+- Retrieving or initializing probed capabilities for a given key
+- Caching probe results to avoid redundant probing
 
 ### `clore::net::icontains`
 
-Declaration: `network/protocol.cppm:758`
+Declaration: `network/protocol.cppm:768`
 
-Definition: `network/protocol.cppm:758`
+Definition: `network/protocol.cppm:768`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
 Declaration: [Declaration](functions/icontains.md)
 
-`clore::net::icontains` is a free function that performs a case‑insensitive substring search. It accepts a `std::string_view` `haystack` and a `std::string_view` `needle`, and returns `true` if `needle` is found within `haystack` when case is ignored. The caller can rely on this function to decide whether a given substring appears anywhere in the larger text, without any restriction on position or surrounding characters. The function is intended for text‑matching tasks where upper/lowercase differences should not affect the result.
+The function `clore::net::icontains` determines whether the first `std::string_view` argument contains the second `std::string_view` argument as a substring, performing a case‑insensitive comparison. It returns `true` if the second string is found within the first, and `false` otherwise. Callers can rely on this function for matching patterns in text without regard to letter case.
 
 #### Usage Patterns
 
-- Used by `is_feature_rejection_error` to check for substring patterns in error messages.
+- invoked by `clore::net::is_feature_rejection_error` to detect feature-rejection keywords inside error message text
+- general case-insensitive substring matching within the `clore::net` module
 
 ### `clore::net::initialize_llm_rate_limit`
 
 Declaration: `network/http.cppm:19`
 
-Definition: `network/http.cppm:78`
+Definition: `network/http.cppm:79`
 
 Implementation: [`Module http`](../../../modules/http/index.md)
 
-Callers must invoke `clore::net::initialize_llm_rate_limit` before making any rate‑limited LLM requests. The function accepts a single `std::uint32_t` argument that specifies the maximum request rate (the precise unit is implementation‑defined but typically requests per second). After this function is called, subsequent calls to the LLM API will be throttled according to the supplied limit. The caller must ensure that `clore::net::shutdown_llm_rate_limit` is called later to release internal resources; failure to do so may cause resource leaks.
+The function `clore::net::initialize_llm_rate_limit` prepares the internal rate‑limiting infrastructure for LLM network calls. It accepts a single `std::uint32_t` parameter that represents the maximum allowed request rate or token capacity. The caller must invoke this function before any rate‑limited LLM operations and must pair it with a subsequent `clore::net::shutdown_llm_rate_limit` call to properly release the rate limiter’s resources. The exact unit of the parameter (e.g., requests per second, tokens per minute) is part of the module’s contract and should be documented elsewhere. After this function returns successfully, the rate limiter is active and will enforce limits on all subsequent blocking or asynchronous LLM requests (`call_llm_async`, `call_completion_async`, etc.). Failure to call `shutdown_llm_rate_limit` may result in leaked resources or undefined behavior at program exit.
 
 #### Usage Patterns
 
-- Called during initialization to set the LLM rate limit.
-- Can be called with zero to disable rate limiting.
+- called during startup to set LLM rate limit
+- called with 0 to disable rate limiting
 
 ### `clore::net::is_feature_rejection_error`
 
-Declaration: `network/protocol.cppm:131`
+Declaration: `network/protocol.cppm:135`
 
-Definition: `network/protocol.cppm:778`
+Definition: `network/protocol.cppm:788`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-This function determines whether a given error string, typically received from an LLM provider, represents a feature rejection error. It returns `true` if the error indicates that a requested feature was rejected (for example, because the provider does not support it), and `false` otherwise. The caller can use this result to decide whether to interpret the error as a feature unavailability rather than a transient or generic failure.
-
-The function accepts a `std::string_view` containing the error message and performs a case‑insensitive check (via `clore::net::icontains`) to detect characteristic rejection patterns. It does not parse or extract the rejected feature name; use `clore::net::parse_rejected_feature_from_error` for that purpose.
+The function `clore::net::is_feature_rejection_error` checks whether a given error message string indicates a feature rejection from an LLM provider. It accepts a `std::string_view` containing the error text and returns `true` if the error is recognizable as a feature rejection (for example, a model rejecting an unsupported capability). This is a pure predicate that callers can use to decide whether to treat an error as a feature-rejection scenario, typically before attempting to parse the rejected feature name with `clore::net::parse_rejected_feature_from_error`.
 
 #### Usage Patterns
 
-- Called to classify LLM provider errors as feature rejections during capability probing
-- Used in error handling logic to decide whether to retry without certain features
+- Checking if an LLM error response indicates rejection due to unsupported features
+- Filtering error messages for capability probing
+
+### `clore::net::make_capability_probe_key`
+
+Declaration: `network/protocol.cppm:128`
+
+Definition: `network/protocol.cppm:743`
+
+Implementation: [`Module protocol`](../../../modules/protocol/index.md)
+
+The function `clore::net::make_capability_probe_key` composes a unique string key from three caller-supplied string views. This key is intended to identify a specific capability probe configuration, typically representing components such as a provider, model, and endpoint. The returned key can be used to store or retrieve cached capability probe results, ensuring that probes for the same combination are not repeated unnecessarily. The caller is responsible for providing the three components in the expected order and ensuring they are non-empty to produce a meaningful key.
+
+#### Usage Patterns
+
+- Used to generate a unique lookup key for capability probes based on provider, API base, and model.
 
 ### `clore::net::make_markdown_fragment_request`
 
 Declaration: `network/protocol.cppm:99`
 
-Definition: `network/protocol.cppm:140`
+Definition: `network/protocol.cppm:144`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-The function `clore::net::make_markdown_fragment_request` accepts a `std::string` and returns a `PromptRequest`. It is the caller’s responsibility to provide the content that constitutes the markdown fragment; the function encapsulates that content into a `PromptRequest` object suitable for submission to downstream `APIs`, such as LLM completion calls. The returned `PromptRequest` carries the supplied data in a form that may be further processed or sent over the network.
+Constructs a `PromptRequest` from the provided markdown fragment. This is the primary caller-facing entry point for creating a request that encapsulates a markdown-formatted text block. The caller supplies a `std::string` containing the markdown content; the returned `PromptRequest` can be used directly in subsequent API functions that expect a request object. The function does not parse or validate the markdown syntax—it simply packages the provided string into the request structure, leaving interpretation to downstream processing.
 
 #### Usage Patterns
 
-- constructing a request for markdown fragment responses from an LLM
+- used to create a markdown-fragment request from a plain prompt string
+- callers rely on it to avoid manually setting `response_format` and `output_contract`
 
 ### `clore::net::parse_rejected_feature_from_error`
 
-Declaration: `network/protocol.cppm:133`
+Declaration: `network/protocol.cppm:137`
 
-Definition: `network/protocol.cppm:797`
+Definition: `network/protocol.cppm:807`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-The function `clore::net::parse_rejected_feature_from_error` accepts a `std::string_view` representing an error message and returns a `std::optional<std::string>`. Its caller-facing responsibility is to extract the name of a feature that was rejected by a remote service, if such a feature can be identified from the error text. The function returns `std::nullopt` when the error does not contain a recognized rejected feature indication, and returns the feature name as a `std::string` otherwise. Callers should call this function on error strings that are suspected to originate from a feature rejection (for example, after a positive result from `clore::net::is_feature_rejection_error`) to obtain the specific feature identifier for further handling or reporting.
+The function `clore::net::parse_rejected_feature_from_error` accepts a `std::string_view` representing an error string — typically from an LLM provider — and returns `std::optional<std::string>`. If the error indicates that a specific feature (such as a particular capability or request parameter) was rejected, the returned optional contains the name of that feature; otherwise, the optional is empty. This allows callers to programmatically determine which feature caused a rejection and react accordingly, for example by falling back to a different request configuration or disabling the feature for future calls.
 
 #### Usage Patterns
 
-- parsing LLM error responses to detect rejected feature
-- extracting canonical feature name from error message
+- Called during error parsing to determine which LLM feature was rejected based on the error message returned by the provider.
+- Used in conjunction with `clore::net::is_feature_rejection_error` to categorize errors.
 
 ### `clore::net::sanitize_request_for_capabilities`
 
-Declaration: `network/protocol.cppm:128`
+Declaration: `network/protocol.cppm:132`
 
-Definition: `network/protocol.cppm:739`
+Definition: `network/protocol.cppm:749`
 
 Implementation: [`Module protocol`](../../../modules/protocol/index.md)
 
-The function `clore::net::sanitize_request_for_capabilities` accepts a `CompletionRequest` and a reference to `ProbedCapabilities` and returns a new `CompletionRequest` that is tailored to the probed capabilities. This ensures that the request does not include features or parameters that the underlying service does not support, allowing callers to forward the sanitized request without risk of rejection due to unsupported options.
+The function `clore::net::sanitize_request_for_capabilities` accepts an original `CompletionRequest` and a reference to a `ProbedCapabilities` object, and returns a new `CompletionRequest` that has been adjusted to comply with the features the target endpoint has been found to support. It is the caller’s responsibility to provide a valid `ProbedCapabilities` obtained from an earlier capability probe; the returned request is safe to send to the endpoint without causing a capability‑related rejection.
 
-Callers are responsible for providing a valid `ProbedCapabilities` object—typically obtained from `clore::net::get_probed_capabilities`—that accurately reflects the target LLM provider’s support. The returned `CompletionRequest` is safe to submit in a subsequent completion call, as it strips or adjusts any elements incompatible with the given capabilities.
+The caller should treat the returned `CompletionRequest` as the authoritative request to use for the network call. The original request is not modified; the function produces a separate sanitized copy. Any deficiency in the provided capabilities, or a mismatch between the probed capabilities and the actual endpoint, is outside the contract of this function.
 
 #### Usage Patterns
 
-- called before making a completion request to ensure requested features match provider capabilities
+- preprocess completion request before API call based on probed capabilities
+- apply capability constraints to request to avoid rejected features
 
 ### `clore::net::shutdown_llm_rate_limit`
 
 Declaration: `network/http.cppm:21`
 
-Definition: `network/http.cppm:223`
+Definition: `network/http.cppm:263`
 
 Implementation: [`Module http`](../../../modules/http/index.md)
 
-The function `clore::net::shutdown_llm_rate_limit` is a noexcept function that terminates the LLM rate-limiting subsystem initialized by `clore::net::initialize_llm_rate_limit`. After calling this function, the rate limiter is deactivated and any associated resources are released. Callers should invoke this function during the shutdown phase of the application, after all asynchronous LLM calls have completed, to ensure proper cleanup. No further rate-limited operations should be initiated after calling this function.
+The function `clore::net::shutdown_llm_rate_limit()` performs a graceful shutdown of the LLM rate-limiting subsystem that was previously initialized via `clore::net::initialize_llm_rate_limit`. It releases any resources held by the rate limiter and ensures no further rate-limited requests are accepted.
+
+Callers must ensure that the rate limiter has been initialized before calling this function. The function is `noexcept`, guaranteeing it will not throw exceptions. After `shutdown_llm_rate_limit` returns, any subsequent calls to rate-limited LLM operations may behave as if the rate limiter is inactive; the function itself does not cancel in-flight requests.
 
 #### Usage Patterns
 
-- Called during shutdown or reinitialization of LLM rate limiting
+- Called to disable or reinitialize the LLM rate limiter during shutdown
+- Complement to `initialize_llm_rate_limit` for lifecycle management
 
 ### `clore::net::validate_llm_provider_environment`
 
@@ -888,11 +970,12 @@ Definition: `network/network.cppm:118`
 
 Implementation: [`Module network`](../../../modules/network/index.md)
 
-The function `clore::net::validate_llm_provider_environment` returns an `int`. It verifies that the runtime environment for the configured LLM provider is correctly initialized and available for use. The caller must invoke this function before any LLM API calls; a return value of zero indicates success, while a non-zero value signals a configuration error or missing prerequisite.
+The function `clore::net::validate_llm_provider_environment` checks that the runtime environment has the necessary configuration (such as API credentials, network connectivity, or resource availability) required to interact with an LLM provider. It returns an `int` where a value of `0` indicates a valid and ready environment, while any non-zero value signals a specific configuration or connectivity issue that the caller should resolve before attempting any LLM network operations. Ideally, this function is invoked early in the program lifecycle, and its return value should be inspected to ensure subsequent provider-dependent calls do not fail due to missing or misconfigured environment settings.
 
 #### Usage Patterns
 
-- Called to check whether the LLM provider environment is properly configured before making API calls
+- early validation before LLM operations
+- ensuring provider configuration exists
 
 ## Related Pages
 

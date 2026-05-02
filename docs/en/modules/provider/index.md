@@ -1,6 +1,6 @@
 ---
 title: 'Module provider'
-description: 'The provider module encapsulates the network-layer logic specific to interacting with a single LLM provider, such as OpenAI. It owns the responsibility for reading provider-specific credentials (API keys and base URLs) from the environment, constructing well-formed request paths, and parsing JSON responses with contextual error reporting. The module also handles serialization of tool call arguments and validation of completion requests, ensuring that outgoing requests conform to the expected schema and structure before they reach the HTTP layer.'
+description: 'The provider module is responsible for orchestrating provider‑specific networking operations that bridge the generic HTTP layer with the protocol and schema modules. It owns the logic for reading authentication credentials from environment variables, constructing and normalizing URL paths, parsing JSON objects, serializing tool arguments into request payloads, and validating completion requests against expected constraints. These operations are exposed as public functions within the clore::net::detail namespace, enabling downstream code to build and validate requests tailored to a particular LLM provider.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-The `provider` module encapsulates the network-layer logic specific to interacting with a single LLM provider, such as `OpenAI`. It owns the responsibility for reading provider-specific credentials (API keys and base `URLs`) from the environment, constructing well-formed request paths, and parsing JSON responses with contextual error reporting. The module also handles serialization of tool call arguments and validation of completion requests, ensuring that outgoing requests conform to the expected schema and structure before they reach the HTTP layer.
+The `provider` module is responsible for orchestrating provider‑specific networking operations that bridge the generic HTTP layer with the protocol and schema modules. It owns the logic for reading authentication credentials from environment variables, constructing and normalizing URL paths, parsing JSON objects, serializing tool arguments into request payloads, and validating completion requests against expected constraints. These operations are exposed as public functions within the `clore::net::detail` namespace, enabling downstream code to build and validate requests tailored to a particular LLM provider.
 
-Public-facing entities exposed by this module include `read_credentials`, `append_url_path`, `parse_json_object`, `serialize_tool_arguments`, and `validate_completion_request`. These functions serve as the primary interface for configuring authentication, building provider-specific endpoint `URLs`, and validating the shape of completion requests and tool-related payloads. The module builds on the lower-level `http`, `protocol`, and `schema` modules to coordinate the credential discovery, request construction, and structural validation needed before dispatching an HTTP request to the provider's API.
+The module also manages internal state variables—such as base `URLs`, environment configuration, and request/response schemas—that are used across its utility functions. By consolidating provider‑specific handling in one place, the module abstracts away the details of credential resolution, request formatting, and validation, allowing higher‑level components to interact with providers through a consistent and reusable interface.
 
 ## Imports
 
@@ -48,22 +48,20 @@ Definition: `network/provider.cppm:14`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The struct `clore::net::detail::CredentialEnv` is a lightweight aggregate that bundles two environment variable names as `std::string_view` members: `base_url_env` and `api_key_env`. It serves solely as a compile‑time or runtime container for the symbolic names of the environment variables that will be read to obtain provider connection parameters. The struct imposes no invariants beyond those inherent to `std::string_view` (i.e., the pointed‑to character sequences must outlive the view and remain valid). There are no user‑defined constructors, assignment `operator`s, or member functions; the type is a plain aggregate whose fields are intended to be accessed directly. This design keeps the credential environment specification trivially copyable and usable in `constexpr` or `static const` contexts where the underlying environment variable names are known at compile time.
+The struct `clore::net::detail::CredentialEnv` is implemented as a trivial aggregate data holder. It contains two `std::string_view` members, `base_url_env` and `api_key_env`, which store the names of environment variables expected to provide the base URL and API key, respectively. The key invariant is that both fields must refer to memory with a lifetime extending at least as long as the `CredentialEnv` instance itself, since `std::string_view` does not own the underlying character data. No custom constructors, destructors, or assignment `operator`s are defined; initialization relies entirely on aggregate initialization, allowing direct brace‑enclosed assignment of the two names.
 
 #### Invariants
 
-- Members are set to valid `std::string_view` objects.
-- No other invariants implied by the evidence.
+- Members are valid `std::string_view` objects; no further guarantees are provided
 
 #### Key Members
 
-- `base_url_env`
-- `api_key_env`
+- `base_url_env`: environment variable name for the base URL
+- `api_key_env`: environment variable name for the API key
 
 #### Usage Patterns
 
-- Likely passed as a parameter to functions that read environment variables.
-- Used in the implementation of credential retrieval or connection setup.
+- No usage patterns are explicitly documented in the evidence
 
 ## Functions
 
@@ -75,7 +73,9 @@ Definition: `network/provider.cppm:43`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The implementation of `clore::net::detail::append_url_path` follows a straightforward three‑step algorithm. First, it copies the input `base_url` into a local `std::string` and strips any trailing `'/'` characters using a `while` loop. Second, it copies the input `path` into a local `suffix` and removes any leading `'/'` characters via another `while` loop. Finally, if the trimmed `suffix` is not empty, it appends a single `'/'` and the `suffix` to the trimmed base URL. The function returns the resulting concatenated string. No external dependencies are required beyond the standard library’s string manipulation operations; the control flow consists solely of simple loops and a conditional guard.
+The function `clore::net::detail::append_url_path` constructs a single URL string from a `base_url` and a `path` by performing two trimming operations and a conditional join. It first copies `base_url` into a `std::string` named `url` and strips any trailing forward slashes using a while loop that repeatedly calls `pop_back()`. Similarly, it copies `path` into a second `std::string` called `suffix` and removes all leading forward slashes by erasing from the beginning. If `suffix` is non‑empty after trimming, the algorithm appends a single `/` followed by the cleaned suffix to the cleaned base URL. The resulting string is returned, guaranteeing that the junction between the two parts never contains more than one slash.  
+
+The implementation depends only on the C++ standard library types `std::string` and `std::string_view`; no external helpers, encryption, or networking primitives are used. The control flow is purely sequential with two trivial loops and one conditional, making the function self‑contained and suitable for inline use in URL construction tasks within the `clore::net::detail` namespace.
 
 #### Side Effects
 
@@ -83,18 +83,17 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `base_url` parameter
-- `path` parameter
+- the parameter `base_url`
+- the parameter `path`
 
 #### Writes To
 
-- local `std::string url`
-- local `std::string suffix`
-- returned `std::string`
+- the returned `std::string` object
 
 #### Usage Patterns
 
-- URL path normalization before HTTP requests
+- constructing a full URL by combining a base URL and a relative path
+- ensuring a single slash separator between URL components
 
 ### `clore::net::detail::parse_json_object`
 
@@ -104,9 +103,7 @@ Definition: `network/provider.cppm:148`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The function attempts to parse the raw JSON string `raw` into a `json::Object` using `json::parse<json::Object>`. If parsing fails (the result has no value), it returns a `std::unexpected` containing an `LLMError` constructed with the context string and the parser’s error description. Otherwise, it returns the successfully parsed object by dereferencing the expected value.
-
-The control flow is a single conditional branch after the parse attempt. Its only dependencies are the `json::parse` template (specialized for `json::Object`) and the `LLMError` type, which is used to wrap error information. The `context` parameter is used solely to prefix the error message, aiding in identification of the source of the parsing failure.
+The function first attempts to parse the input `raw` string into a `json::Object` by invoking `json::parse<json::Object>`. If the parse result does not hold a value, the function constructs a descriptive error: it formats the `context` string together with the error message from the failed parse (obtained via `parsed.error().to_string()`) into an `LLMError`, which is then returned inside a `std::unexpected`. On success, the parsed `json::Object` is moved out and returned directly. The entire logic depends on the JSON parser’s return type (`std::expected<json::Object, ParseError>`), the `LLMError` type, and `std::format` for error message construction.
 
 #### Side Effects
 
@@ -114,14 +111,20 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `raw` parameter (`std::string_view`)
-- `context` parameter (`std::string_view`)
-- global string literals for formatting (implied)
+- `raw` parameter
+- `context` parameter
+- `json::parse<json::Object>(raw)` return value
+
+#### Writes To
+
+- local variable `parsed`
+- return value (`std::expected`)
 
 #### Usage Patterns
 
-- parsing a JSON object from a raw response string
-- wrapping parse errors with contextual information
+- parsing JSON objects from raw string input
+- deserializing with error context for diagnostics
+- used as a utility in higher-level parsing or validation functions
 
 ### `clore::net::detail::read_credentials`
 
@@ -131,26 +134,21 @@ Definition: `network/provider.cppm:39`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The function `clore::net::detail::read_credentials` is a thin delegation wrapper that extracts the two fields from its `CredentialEnv` parameter — `base_url_env` and `api_key_env` — and forwards them to `clore::net::detail::read_environment`.  The underlying function is responsible for reading the actual environment variables identified by those names, parsing the values, and constructing the resulting `EnvironmentConfig` or returning an error.  Consequently, the algorithm of `read_credentials` is purely structural: it unpacks the configuration struct, passes the two environment variable names (as `std::string_view` instances) to the core routine, and relays the outcome.  Dependencies are limited to the `CredentialEnv` type and the `read_environment` function, along with the error type `LLMError`.
+The function `clore::net::detail::read_credentials` serves as a thin wrapper around a helper function `read_environment`. It extracts the `base_url_env` and `api_key_env` fields from the provided `CredentialEnv` object and forwards them directly to `read_environment`, which performs the actual environment variable lookup and returns an `std::expected<EnvironmentConfig, LLMError>`. The implementation involves no branching, error recovery, or intermediate transformation; its entire control flow consists of a single delegation call. Dependencies are limited to the `CredentialEnv` struct and the `read_environment` function (not shown in the snippet), meaning that any change to the credential‑reading logic must be made in `read_environment`, while `read_credentials` remains a stable, type‑safe interface for the caller.
 
 #### Side Effects
 
-- Reads environment variables (I/O)
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- env`.base_url_env`
-- env`.api_key_env`
-- Environment variables named by these strings
-
-#### Writes To
-
-- Return value (`std::expected<EnvironmentConfig, LLMError>`)
+- the `base_url_env` field of the `CredentialEnv` parameter `env`
+- the `api_key_env` field of the `CredentialEnv` parameter `env`
 
 #### Usage Patterns
 
-- Used to load credentials from environment variables
-- Called during initialization of network connections
+- Obtaining configuration from environment variables for network requests
+- Retrieving base URL and API key to build a complete environment configuration
 
 ### `clore::net::detail::serialize_tool_arguments`
 
@@ -160,9 +158,7 @@ Definition: `network/provider.cppm:158`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The implementation of `clore::net::detail::serialize_tool_arguments` performs a round‑trip validation of the provided `json::Value` arguments. It first attempts to serialize `arguments` into a JSON string using `json::to_string`. If serialization fails, the function immediately returns an error constructed via `unexpected_json_error` using the supplied `context` and the error from `json::to_string`. On success, it re‑parses the resulting string back into a `json::Value` with `json::parse`. If parsing fails, it returns `std::unexpected` wrapping a `LLMError` that includes `context` and the parsing error. Otherwise, the function returns a `std::pair` containing both the serialized string form and the re‑parsed value, guaranteeing that the output JSON representation is valid and consistent.
-
-The algorithm thus relies on the symmetry of serialization and parsing to detect malformed or unserializable JSON values early. Key dependencies include `json::to_string`, `json::parse`, and the error‑handling utilities `unexpected_json_error` and `LLMError`. The `context` parameter is used solely for enriching error messages, with no effect on the core control flow.
+The function first serializes the provided `arguments` JSON value into a string using `json::to_string`. If this serialization fails, it returns an `unexpected_json_error` with the given `context`. On success, it re-parses that serialized string back into a `json::Value` via `json::parse`. If parsing fails, it returns an `LLMError` containing the `context` and the parser error string. On success, it returns a `std::pair` containing the serialized string and the re-parsed JSON value. This round-trip both verifies that the arguments constitute valid JSON and normalizes the representation (e.g., key ordering, formatting), ensuring that the string form and the parsed form are consistent before further processing by downstream validation steps.
 
 #### Side Effects
 
@@ -170,13 +166,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `json::Value arguments`
-- `std::string_view context`
+- arguments
+- context
 
 #### Usage Patterns
 
-- Used to re-serialize and validate tool arguments
-- Called when tool arguments need to be normalized or error-checked
+- normalizing tool arguments JSON representation
+- validating tool arguments by round-trip encoding/decoding
 
 ### `clore::net::detail::validate_completion_request`
 
@@ -186,9 +182,7 @@ Definition: `network/provider.cppm:61`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The function performs a series of preflight checks on the provided `CompletionRequest` before it is submitted to an upstream API. It first verifies that `request.model` and `request.messages` are non‑empty, returning `std::unexpected(LLMError(...))` if either condition fails. When `validate_response_format_schema` is `true` and `request.response_format` is present, the schema is validated via `validate_response_format`; similarly, when `validate_tool_schemas` is `true`, each element of `request.tools` is validated using `validate_tool_definition`. Additional cross‑field constraints are enforced: if `request.tool_choice` or `request.parallel_tool_calls` are set, at least one tool must be defined, and a `ForcedFunctionToolChoice` requires that its `name` exists among the provided tools.
-
-The message payload is then inspected by iterating over `request.messages` and applying a `std::visit`‑based validator. For `AssistantToolCallMessage` entries, either `content` or at least one `tool_calls` must be present; each tool call must have non‑empty `id` and `name`, and all `id` values must be unique (enforced with a `std::unordered_set`). For `ToolResultMessage` entries, the `tool_call_id` must be non‑empty. Any validation failure causes an immediate `std::unexpected` return with a descriptive `LLMError`. The function returns an empty `std::expected<void, LLMError>` on success.
+The function `clore::net::detail::validate_completion_request` performs a sequence of invariant checks on a `CompletionRequest`, returning `std::expected<void, LLMError>`. It first rejects empty `request.model` or `request.messages`. If `validate_response_format_schema` is true and `request.response_format` is present, it delegates to `validate_response_format`; similarly, if `validate_tool_schemas` is true, it validates each tool definition in `request.tools` via `validate_tool_definition`. It then enforces that `request.tool_choice` or `request.parallel_tool_calls` are set only when `request.tools` is non‑empty, and if `request.tool_choice` holds a `ForcedFunctionToolChoice`, requires that the forced tool name exists among `request.tools`. Finally, it uses `std::visit` over each message in `request.messages` to validate per‑type rules: `AssistantToolCallMessage` must have non‑empty `content` or `tool_calls`, and every tool call ID must be unique and non‑empty; `ToolResultMessage` must have a non‑empty `tool_call_id`. Any violation returns `std::unexpected` with a descriptive `LLMError`, otherwise the function succeeds with an empty expected. The implementation depends on `validate_response_format` and `validate_tool_definition` (presumably detail helpers), the type‑erased message dispatch via `std::visit`, and the `std::format` utility for error messages.
 
 #### Side Effects
 
@@ -196,19 +190,23 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `CompletionRequest` fields: `model`, `messages`, `response_format`, `tools`, `tool_choice`, `parallel_tool_calls`
-- message fields: `content`, `tool_calls`, `tool_call_id`, `id`, `name`
+- `request.model`
+- `request.messages`
+- `request.response_format`
+- `request.tools`
+- `request.tool_choice`
+- `request.parallel_tool_calls`
+- parameters `validate_response_format_schema` and `validate_tool_schemas`
+- individual message variant types via `std::visit`
 
 #### Usage Patterns
 
-- called before initiating a completion request to validate the request structure
-- part of request validation pipeline
+- Called before processing a completion request to ensure validity
+- Used with optional schema validation flags to conditionally validate response format and tool schemas
 
 ## Internal Structure
 
-The `provider` module is the network‑layer component responsible for orchestrating communication with a specific LLM provider. It decomposes provider‑specific concerns into a set of `detail`‑scoped utilities: `read_credentials` probes environment variables defined by `CredentialEnv` (which carries `base_url_env` and `api_key_env` names) to obtain authentication and endpoint configuration; `append_url_path` constructs clean URL paths from base and segment strings; `parse_json_object` attempts JSON‑object parsing with context‑aware error reporting; `serialize_tool_arguments` converts tool‑call argument JSON into a serialized form; and `validate_completion_request` performs structural validation of a completion request against boolean flags.
-
-Imports reflect a three‑layer dependency: `std` for core language support, `http` for actual request dispatch and rate‑limiting, `protocol` for the request/response types (e.g., `CompletionRequest`, `ToolCall`), and `schema` for generating `OpenAI`‑compatible JSON schemas used in tool definitions and response format validation. Internally, `provider` uses variable‑scoped schemas (`validate_tool_schemas`, `validate_response_format_schema`) that are likely loaded once and reused across validation calls. The module does not own HTTP transport or protocol types; instead it composes them into a cohesive provider client that translates high‑level tool call and completion requests into properly authenticated, validated, and serialized network operations.
+The `provider` module implements the networking layer for LLM API providers, building on the foundation of the `http`, `protocol`, and `schema` modules. It imports these to leverage raw HTTP communication, structured request/response types, and JSON Schema generation. The module is decomposed into internal detail functions that handle credential reading via a `CredentialEnv` struct (which maps to environment variable names for base URL and API key), URL path construction, JSON object parsing, tool argument serialization, and completion request validation. This internal layering separates low-level concerns—such as environment variable lookup and string manipulation—from higher-level orchestration. The implementation structure relies on these utilities to assemble and validate completion requests before passing them to the underlying HTTP layer, ensuring that provider-specific boilerplate is isolated within this module.
 
 ## Related Pages
 

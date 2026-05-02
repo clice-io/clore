@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::detail::selecteventloop'
-description: 'The function clore::net::detail::select_event_loop accepts a pointer to a kota::event_loop and returns a reference to a kota::event_loop. If the provided pointer is non-null, the function dereferences it and returns that same loop. If the pointer is null, the function selects an internal default event loop and returns a reference to it. The caller must ensure that any non-null pointer passed to the function points to a valid, running kota::event_loop that remains alive for the duration of the operation. The return value is guaranteed to be a valid reference.'
+description: 'The function clore::net::detail::select_event_loop accepts a pointer to a kota::event_loop and returns a reference to a kota::event_loop. Its responsibility is to resolve an event loop for use in asynchronous operations: if the provided pointer is non‑null, the function returns a reference to that same loop; if the pointer is null, it selects and returns a default or fallback event loop. The caller can rely on the returned reference being valid for the duration of the asynchronous operation. No other pre‑conditions are imposed beyond providing a pointer that, when not null, points to a valid kota::event_loop.'
 layout: doc
 template: doc
 ---
@@ -21,11 +21,12 @@ Implementation: [`Module client`](../../../../../modules/client/index.md)
 auto (kota::event_loop *) -> kota::event_loop &;
 ```
 
-The function `clore::net::detail::select_event_loop` accepts a pointer to a `kota::event_loop` and returns a reference to a `kota::event_loop`. If the provided pointer is non-null, the function dereferences it and returns that same loop. If the pointer is null, the function selects an internal default event loop and returns a reference to it. The caller must ensure that any non-null pointer passed to the function points to a valid, running `kota::event_loop` that remains alive for the duration of the operation. The return value is guaranteed to be a valid reference.
+The function `clore::net::detail::select_event_loop` accepts a pointer to a `kota::event_loop` and returns a reference to a `kota::event_loop`. Its responsibility is to resolve an event loop for use in asynchronous operations: if the provided pointer is non‑null, the function returns a reference to that same loop; if the pointer is null, it selects and returns a default or fallback event loop. The caller can rely on the returned reference being valid for the duration of the asynchronous operation. No other pre‑conditions are imposed beyond providing a pointer that, when not null, points to a valid `kota::event_loop`.
 
 ## Usage Patterns
 
-- Used by async functions like `call_completion_async` and `call_llm_async` to resolve an optional event loop pointer to a valid reference before passing it to internal logic.
+- Resolves an optional event loop pointer into a guaranteed-valid reference for downstream async operations
+- Allows callers to pass `nullptr` to request the current thread's event loop
 
 ## Called By
 

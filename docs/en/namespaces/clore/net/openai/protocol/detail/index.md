@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::openai::protocol::detail'
-description: 'The clore::net::openai::protocol::detail namespace contains internal implementation helpers that handle low-level serialization, parsing, and validation of OpenAI protocol elements. Notable declarations include functions for parsing tool calls and content parts, as well as serializing response formats, messages, tool choices, tool definitions, and validating requests. All functions operate on JSON objects and arrays, returning integer status codes to indicate success or specific error conditions.'
+description: 'The clore::net::openai::protocol::detail namespace contains the internal, low‑level helpers for serializing and parsing OpenAI‑protocol data structures. Functions such as serialize_tool_definition, serialize_tool_choice, serialize_message, and serialize_response_format write protocol elements into caller‑supplied JSON objects or arrays, returning an integral status code to indicate success or failure. Corresponding parsing functions—parse_tool_calls, parse_content_parts, and validate_request—convert JSON input into internal representations and check request validity. These functions are not part of the public API; they form the foundation on which higher‑level protocol abstractions are built, enforcing consistent error‑reporting conventions and insulating external code from implementation details.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-The `clore::net::openai::protocol::detail` namespace contains internal implementation helpers that handle low-level serialization, parsing, and validation of `OpenAI` protocol elements. Notable declarations include functions for parsing tool calls and content parts, as well as serializing response formats, messages, tool choices, tool definitions, and validating requests. All functions operate on JSON objects and arrays, returning integer status codes to indicate success or specific error conditions.
-
-Architecturally, this namespace serves as a private implementation layer within the `OpenAI` protocol module. It encapsulates the JSON‑focused logic required to translate between the protocol’s abstract identifiers and the concrete JSON structures used in API communication. By isolating these details, the namespace prevents external code from depending directly on serialization internals and allows the higher‑level protocol interface to remain clean and focused on business logic.
+The `clore::net::openai::protocol::detail` namespace contains the internal, low‑level helpers for serializing and parsing `OpenAI`‑protocol data structures. Functions such as `serialize_tool_definition`, `serialize_tool_choice`, `serialize_message`, and `serialize_response_format` write protocol elements into caller‑supplied JSON objects or arrays, returning an integral status code to indicate success or failure. Corresponding parsing functions—`parse_tool_calls`, `parse_content_parts`, and `validate_request`—convert JSON input into internal representations and check request validity. These functions are not part of the public API; they form the foundation on which higher‑level protocol abstractions are built, enforcing consistent error‑reporting conventions and insulating external code from implementation details.
 
 ## Functions
 
@@ -23,12 +21,13 @@ Definition: `network/openai.cppm:288`
 
 Implementation: [`Module openai`](../../../../../../modules/openai/index.md)
 
-The function `clore::net::openai::protocol::detail::parse_content_parts` accepts a reference to a `const json::Array` and returns an `int`. It expects the caller to provide a JSON array containing content parts as defined by the `OpenAI` response schema. Successful parsing of the array is indicated by a non‑negative return value; a negative value signals an error or an unrecognized structure. This function is intended for internal use within the `OpenAI` protocol implementation and should not be called directly by external code. The caller is responsible for ensuring the input array is well‑formed according to the expected format.
+The function `clore::net::openai::protocol::detail::parse_content_parts` accepts a constant reference to a `json::Array` and returns an `int` status code. It is responsible for parsing the content parts embedded in a message within the `OpenAI` protocol, converting the JSON array into the internal representation used by the library. The caller must supply a valid JSON array that conforms to the expected schema; the return value indicates whether parsing completed successfully, with a non‑zero value signalling an error. This function is part of the internal protocol‑handling layer and is not intended for direct use by application code.
 
 #### Usage Patterns
 
-- Called to parse the `content` array of an assistant message in the `OpenAI` protocol
-- Used within message deserialization to convert raw JSON into domain types
+- Called to deserialize the content field from an `OpenAI` chat completion response
+- Used in protocol layer to convert JSON content array into structured `AssistantOutput`
+- Part of the `clore::net::openai::protocol::detail` parsing pipeline
 
 ### `clore::net::openai::protocol::detail::parse_tool_calls`
 
@@ -38,12 +37,13 @@ Definition: `network/openai.cppm:369`
 
 Implementation: [`Module openai`](../../../../../../modules/openai/index.md)
 
-The function `clore::net::openai::protocol::detail::parse_tool_calls` accepts a constant reference to a `json::Array` and returns an `int`. It is responsible for parsing tool call representations from the provided JSON array according to the `OpenAI` protocol. The return value indicates the outcome of the parsing operation—typically the number of successfully parsed tool calls or an error code on failure. The caller must ensure the array is well-formed and that all required tool call fields are present; otherwise the behavior is unspecified.
+The function `clore::net::openai::protocol::detail::parse_tool_calls` accepts a constant reference to a `json::Array` that is expected to represent a sequence of tool call objects as defined by the `OpenAI` protocol. It parses this array and returns an `int` that communicates the result of the operation—typically a count of successfully parsed calls or a status code indicating success or failure. The caller is responsible for providing a valid JSON array conforming to the expected schema; the function does not throw exceptions and reports any issues solely through its return value.
 
 #### Usage Patterns
 
-- parse tool calls from `OpenAI` API response
-- deserialize tool call array in protocol layer
+- parse tool calls from a chat completion response
+- extract and validate tool call objects from a raw JSON array
+- convert JSON tool call representation to structured `ToolCall` instances
 
 ### `clore::net::openai::protocol::detail::serialize_message`
 
@@ -53,12 +53,12 @@ Definition: `network/openai.cppm:27`
 
 Implementation: [`Module openai`](../../../../../../modules/openai/index.md)
 
-Serializes an `OpenAI`‑protocol message into the provided JSON array. The caller passes a mutable `json::Array &` to receive the serialized representation and a `const int &` argument that identifies the message to be serialized. On success the function returns an integer indicating the outcome; a non‑zero value typically signals an error. The exact meaning of the return value is defined by the protocol layer and must be checked by the caller.
+The function `clore::net::openai::protocol::detail::serialize_message` serializes a message identified by the given integer reference into the provided `json::Array`. The caller supplies a mutable `json::Array` that will be appended with the serialized message representation, and a `const int &` that identifies which message to serialize. The function returns an integral value indicating success (typically zero) or a non‑zero error code. This function is an internal protocol helper; it assumes that the referenced message data is valid and accessible.
 
 #### Usage Patterns
 
-- called during request serialization to convert a `Message` variant to JSON
-- used in constructing the messages array for `OpenAI` chat completions API
+- Used to convert a single message into JSON for inclusion in an `OpenAI` API request payload
+- Called during serialization of a conversation history to a JSON array of messages
 
 ### `clore::net::openai::protocol::detail::serialize_response_format`
 
@@ -68,12 +68,12 @@ Definition: `network/openai.cppm:209`
 
 Implementation: [`Module openai`](../../../../../../modules/openai/index.md)
 
-The function `clore::net::openai::protocol::detail::serialize_response_format` populates a given `json::Object` with the serialized representation of a response format identified by the provided integer. It is part of a family of detail‑level serialization helpers that prepare JSON request bodies for the `OpenAI` API. The caller is responsible for supplying a valid, mutable `json::Object` reference and a response format identifier that corresponds to one of the protocol‑defined formats. The function returns an integer whose value indicates success or an error condition; a non‑zero result typically signals that serialization could not be completed.
+The function `clore::net::openai::protocol::detail::serialize_response_format` writes the response format configuration into a caller‑supplied `json::Object`. The caller provides an integer parameter that selects the desired response format type; the function populates the object accordingly. The return value indicates whether serialization succeeded—zero typically denotes success, while a non‑zero value signals an invalid format identifier or an internal error. The caller must ensure that the integer argument corresponds to one of the recognized response format types defined by the protocol.
 
 #### Usage Patterns
 
-- Used in request serialization for `OpenAI` API calls.
-- Called alongside `serialize_message`, `serialize_tool_choice`, etc. to build a full request body.
+- called during construction of an `OpenAI` chat completion request containing a response format
+- invoked within the protocol serialization pipeline for request building
 
 ### `clore::net::openai::protocol::detail::serialize_tool_choice`
 
@@ -83,12 +83,12 @@ Definition: `network/openai.cppm:167`
 
 Implementation: [`Module openai`](../../../../../../modules/openai/index.md)
 
-The function `clore::net::openai::protocol::detail::serialize_tool_choice` serializes a tool choice option into a JSON object. It accepts a reference to a `json::Object` representing a request payload and a `const int &` that identifies the tool choice selection (typically an enum or index). The caller must ensure that the provided integer corresponds to a valid tool choice and that the output object is mutable. The function returns an `int` indicating success or error status, enabling the caller to detect serialization failures.
+`clore::net::openai::protocol::detail::serialize_tool_choice` accepts a mutable `json::Object` reference and a `const int` reference representing the tool‑choice configuration. It serialises the given tool choice into the supplied JSON object, preparing the object for inclusion in an `OpenAI` protocol request. The function returns an `int` to indicate the outcome of the serialisation; a caller should treat a non‑zero result as an error. This function is intended for use within the protocol‑detail layer and is not part of the public API.
 
 #### Usage Patterns
 
-- Called during `OpenAI` API request serialization to set the `tool_choice` field.
-- Part of the `clore::net::openai::protocol::detail` namespace for protocol implementation.
+- Used during serialization of `OpenAI` chat completion requests to encode the `tool_choice` field.
+- Called by higher-level serialization functions that build the JSON payload.
 
 ### `clore::net::openai::protocol::detail::serialize_tool_definition`
 
@@ -98,12 +98,12 @@ Definition: `network/openai.cppm:248`
 
 Implementation: [`Module openai`](../../../../../../modules/openai/index.md)
 
-The function `clore::net::openai::protocol::detail::serialize_tool_definition` serializes a tool definition, identified by a caller-supplied integer, into a JSON array. It expects a mutable `json::Array &` as the target container and a `const int &` that uniquely specifies which tool definition to encode. The return value of `int` indicates whether the serialization succeeded or failed, typically zero for success and a non‑zero error code otherwise. The caller is responsible for ensuring that the provided integer corresponds to a valid, previously registered tool definition and that the output array is ready to receive the serialized representation. This function is an internal detail of the `OpenAI` protocol layer and should not be invoked directly outside of the serialization pipeline.
+The caller‑facing function `clore::net::openai::protocol::detail::serialize_tool_definition` serializes a single tool definition into the supplied `json::Array`. The `const int &` parameter identifies the specific tool definition to serialize—likely an index or a resource handle. The function appends the serialized representation (typically a JSON object) to the given array. It returns an `int` that indicates success (zero) or a non‑zero error code on failure, consistent with the error‑reporting convention used by other serialization helpers in the same module. The caller must ensure the `json::Array` reference is valid and that the integer argument corresponds to an existing, well‑formed tool definition.
 
 #### Usage Patterns
 
-- Serializes a single tool definition for inclusion in an `OpenAI` API request
-- Called by higher-level serialization functions that build the tools array
+- called during serialization of a list of tool definitions in an `OpenAI` API request
+- used by functions that construct the request body before sending to the API
 
 ### `clore::net::openai::protocol::detail::validate_request`
 
@@ -113,11 +113,11 @@ Definition: `network/openai.cppm:23`
 
 Implementation: [`Module openai`](../../../../../../modules/openai/index.md)
 
-The function `clore::net::openai::protocol::detail::validate_request` validates a request object represented by its `const int &` parameter. It returns an `int` indicating the success or failure of the validation: a value of zero signifies a valid request, while a non-zero result encodes a specific validation error. The caller is responsible for providing a reference to an existing request; the function does not modify the input. The contract guarantees that the returned status code follows the error conventions defined by the protocol.
+The function `clore::net::openai::protocol::detail::validate_request` verifies that a request object provided as a `const int &` conforms to the expected protocol constraints. It returns an `int` status code: a value of zero signals a valid request, while non-zero values indicate specific validation failures that the caller must handle. Callers are responsible for constructing the request correctly before calling this function, and for relying on the returned status to decide whether the request can proceed through the pipeline.
 
 #### Usage Patterns
 
-- Used to validate a `CompletionRequest` before processing
+- Called to validate a completion request before using it in a protocol operation
 
 ## Related Pages
 

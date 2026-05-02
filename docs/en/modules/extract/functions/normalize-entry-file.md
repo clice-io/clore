@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::normalizeentryfile'
-description: 'The function clore::extract::normalize_entry_file takes a CompileEntry and returns a normalized file path as a std::string. It begins by constructing a std::filesystem::path from entry.file. If the path is relative, it is prefixed with entry.directory. After converting to an absolute path using fs::absolute (with error checking), the path is normalized via lexically_normal(). A subsequent call to fs::weakly_canonical attempts to resolve any symbolic links and produce a canonical path; if this fails (e.g., the file does not exist), the function falls back to the lexically-normalized path. The result is always returned as a generic string (forward slashes).'
+description: 'The function clore::extract::normalize_entry_file resolves a compile entry’s file path to a stable, normalized string. It first converts entry.file into a std::filesystem::path. If the path is relative, it is prefixed with entry.directory to form an absolute path; an explicit fs::absolute call is then attempted (falling back to the prefixed path on error). The path is then run through lexically_normal() to eliminate redundant separators and dot segments. To materialize symlinks and produce a fully resolved absolute path, fs::weakly_canonical is applied; if it fails (e.g., the file does not exist), the lexically normalized path is used as the final fallback. The result is returned as a generic string via generic_string(). The algorithm relies solely on std::filesystem operations and the fields of CompileEntry (file and directory).'
 layout: doc
 template: doc
 ---
@@ -38,9 +38,7 @@ auto normalize_entry_file(const CompileEntry& entry) -> std::string {
 }
 ```
 
-The function `clore::extract::normalize_entry_file` takes a `CompileEntry` and returns a normalized file path as a `std::string`. It begins by constructing a `std::filesystem::path` from `entry.file`. If the path is relative, it is prefixed with `entry.directory`. After converting to an absolute path using `fs::absolute` (with error checking), the path is normalized via `lexically_normal()`. A subsequent call to `fs::weakly_canonical` attempts to resolve any symbolic links and produce a canonical path; if this fails (e.g., the file does not exist), the function falls back to the lexically-normalized path. The result is always returned as a generic string (forward slashes).
-
-Internally, the function relies solely on the `std::filesystem` library and the `CompileEntry` fields `file` and `directory`. Error codes from `weakly_canonical` are captured but not propagated—the function degrades gracefully to the non-canonical form. This ensures robust behavior when the input file does not exist on disk or when filesystem resolution fails. The algorithm prioritizes accuracy (canonical form when possible) over strict failure reporting.
+The function `clore::extract::normalize_entry_file` resolves a compile entry’s file path to a stable, normalized string. It first converts `entry.file` into a `std::filesystem::path`. If the path is relative, it is prefixed with `entry.directory` to form an absolute path; an explicit `fs::absolute` call is then attempted (falling back to the prefixed path on error). The path is then run through `lexically_normal()` to eliminate redundant separators and dot segments. To materialize symlinks and produce a fully resolved absolute path, `fs::weakly_canonical` is applied; if it fails (e.g., the file does not exist), the lexically normalized path is used as the final fallback. The result is returned as a generic string via `generic_string()`. The algorithm relies solely on `std::filesystem` operations and the fields of `CompileEntry` (`file` and `directory`).
 
 ## Side Effects
 
@@ -53,8 +51,8 @@ No observable side effects are evident from the extracted code.
 
 ## Usage Patterns
 
-- Called by `build_compile_signature` to derive a unique signature for a compile entry.
-- Called by `ensure_cache_key_impl` to produce a normalized file path for cache key computation.
+- Used by `build_compile_signature` to normalize the entry file path before hashing
+- Used by `ensure_cache_key_impl` to produce a consistent file path representation
 
 ## Called By
 

@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::normalizeentryfile'
-description: '函数 clore::extract::normalize_entry_file 通过组合 std::filesystem 操作将 entry.file 规范化为绝对路径并解析链接依赖。首先检查路径是否为相对路径，若是则与 entry.directory 拼接；接着调用 std::filesystem::absolute 生成绝对形式，然后通过 lexically_normal 做词法上的规范化。为处理符号链接，进一步尝试 weakly_canonical：若失败（如路径不存在或权限不足）则回退到词法规范化结果，最终以 Unix 风格返回 generic_string。'
+description: '该函数解析 entry.file 路径并尝试将其转换为绝对形式，随后进行词法规范化和弱规范化。具体流程为：从 std::filesystem::path 构造开始，若路径是相对路径则将其与 entry.directory 拼接；接着调用 fs::absolute 将其转为绝对路径（若转换失败则保留原路径）；然后调用 lexically_normal() 消除冗余的 .. 和 . 组件。最后尝试 fs::weakly_canonical 以解析符号链接并将结果转换为通用字符串格式返回；若弱规范化失败则直接返回词法规范化后的通用字符串。整个函数完全依赖 <filesystem> 标准库，未涉及其他内部函数或复杂错误处理。'
 layout: doc
 template: doc
 ---
@@ -38,9 +38,7 @@ auto normalize_entry_file(const CompileEntry& entry) -> std::string {
 }
 ```
 
-函数 `clore::extract::normalize_entry_file` 通过组合 `std::filesystem` 操作将 `entry.file` 规范化为绝对路径并解析链接依赖。首先检查路径是否为相对路径，若是则与 `entry.directory` 拼接；接着调用 `std::filesystem::absolute` 生成绝对形式，然后通过 `lexically_normal` 做词法上的规范化。为处理符号链接，进一步尝试 `weakly_canonical`：若失败（如路径不存在或权限不足）则回退到词法规范化结果，最终以 Unix 风格返回 `generic_string`。
-
-该函数主要依赖 `std::filesystem::path` 及其错误处理（通过 `std::error_code`），不涉及外部文件系统缓存或其他模块。控制流简洁：仅处理相对路径分支和回退分支，确保在无法解析真实路径时仍返回格式一致的结果。
+该函数解析 `entry.file` 路径并尝试将其转换为绝对形式，随后进行词法规范化和弱规范化。具体流程为：从 `std::filesystem::path` 构造开始，若路径是相对路径则将其与 `entry.directory` 拼接；接着调用 `fs::absolute` 将其转为绝对路径（若转换失败则保留原路径）；然后调用 `lexically_normal()` 消除冗余的 `..` 和 `.` 组件。最后尝试 `fs::weakly_canonical` 以解析符号链接并将结果转换为通用字符串格式返回；若弱规范化失败则直接返回词法规范化后的通用字符串。整个函数完全依赖 `<filesystem>` 标准库，未涉及其他内部函数或复杂错误处理。
 
 ## Side Effects
 
@@ -50,11 +48,12 @@ No observable side effects are evident from the extracted code.
 
 - `entry.file`
 - `entry.directory`
+- filesystem state for path resolution and canonicalization
 
 ## Usage Patterns
 
-- Used by `build_compile_signature` to create a stable file key
-- Used by `ensure_cache_key_impl` to normalize the file path before caching
+- used in `clore::extract::build_compile_signature` to generate a hash key
+- used in `clore::extract::ensure_cache_key_impl` to normalize the entry file before caching
 
 ## Called By
 

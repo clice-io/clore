@@ -71,8 +71,8 @@ endif()
 
 FetchContent_Declare(
     kotatsu
-    GIT_REPOSITORY https://github.com/fogsong233/eventide.git
-    GIT_TAG        add-curl
+    GIT_REPOSITORY https://github.com/clice-io/kotatsu.git
+    GIT_TAG        main
 )
 FetchContent_MakeAvailable(kotatsu)
 

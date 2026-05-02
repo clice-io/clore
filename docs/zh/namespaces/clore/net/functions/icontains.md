@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::icontains'
-description: '函数 clore::net::icontains 判断第一个字符串是否不区分大小写地包含第二个字符串。它接受两个 std::string_view 参数，并返回 bool 值：当且仅当 input 中（忽略大小写后）包含 substring 时返回 true。该函数是纯查询操作，不修改参数内容，其用途包括错误消息中的模式匹配，例如在 clore::net::is_feature_rejection_error 中用于检测特征拒绝模式。'
+description: '检查第一个 std::string_view 参数是否包含第二个，比较时忽略字母大小写。该函数返回 true 当且仅当在 haystack 中找到 needle 的匹配（不区分大小写），否则返回 false。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Namespace clore::net](../index.md)
 
-Declaration: `network/protocol.cppm:758`
+Declaration: `network/protocol.cppm:768`
 
-Definition: `network/protocol.cppm:758`
+Definition: `network/protocol.cppm:768`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -21,11 +21,13 @@ Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 auto (std::string_view, std::string_view) -> bool;
 ```
 
-函数 `clore::net::icontains` 判断第一个字符串是否不区分大小写地包含第二个字符串。它接受两个 `std::string_view` 参数，并返回 `bool` 值：当且仅当 `input` 中（忽略大小写后）包含 `substring` 时返回 `true`。该函数是纯查询操作，不修改参数内容，其用途包括错误消息中的模式匹配，例如在 `clore::net::is_feature_rejection_error` 中用于检测特征拒绝模式。
+检查第一个 `std::string_view` 参数是否包含第二个，比较时忽略字母大小写。该函数返回 `true` 当且仅当在 `haystack` 中找到 `needle` 的匹配（不区分大小写），否则返回 `false`。
+
+此函数主要供内部字符串匹配场景使用，例如 `clore::net::is_feature_rejection_error` 会用它来判断错误消息是否与已知的拒绝模式相匹配。调用方应确保两个字符串均有效，且比较行为对 ASCII 大小写不敏感。
 
 ## Usage Patterns
 
-- Used by `is_feature_rejection_error` to check if an error message contains a substring case-insensitively
+- Used by `clore::net::is_feature_rejection_error` to perform case-insensitive matching on error messages.
 
 ## Called By
 

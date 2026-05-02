@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::anthropic::protocol::buildmessagesurl'
-description: 'The function first normalizes the input api_base by removing any trailing forward slash characters. It then checks whether the resulting string already ends with the path segment /v1. If it does, the function delegates to clore::net::detail::append_url_path to directly append "messages" to the base URL. Otherwise, it appends the full path "v1/messages" using the same utility, ensuring the final URL correctly points to the Anthropic Messages API endpoint. The algorithm relies on clore::net::detail::append_url_path to handle path concatenation, which manages proper slash insertion between path components.'
+description: 'clore::net::anthropic::protocol::build_messages_url normalises the provided api_base string by stripping trailing forward slashes, then determines the correct path to append for the Anthropic messages endpoint. If the cleaned base already ends with "/v1", it appends the literal "messages" via clore::net::detail::append_url_path; otherwise it appends "v1/messages". This logic ensures the resulting URL always points to the standard Anthropic messages API path regardless of whether the caller supplies a base URL that includes the version segment. The function depends solely on clore::net::detail::append_url_path (a generic path‑appending utility) and performs no network or I/O operations itself.'
 layout: doc
 template: doc
 ---
@@ -30,7 +30,7 @@ auto build_messages_url(std::string_view api_base) -> std::string {
 }
 ```
 
-The function first normalizes the input `api_base` by removing any trailing forward slash characters. It then checks whether the resulting string already ends with the path segment `/v1`. If it does, the function delegates to `clore::net::detail::append_url_path` to directly append `"messages"` to the base URL. Otherwise, it appends the full path `"v1/messages"` using the same utility, ensuring the final URL correctly points to the Anthropic Messages API endpoint. The algorithm relies on `clore::net::detail::append_url_path` to handle path concatenation, which manages proper slash insertion between path components.
+`clore::net::anthropic::protocol::build_messages_url` normalises the provided `api_base` string by stripping trailing forward slashes, then determines the correct path to append for the Anthropic messages endpoint. If the cleaned base already ends with `"/v1"`, it appends the literal `"messages"` via `clore::net::detail::append_url_path`; otherwise it appends `"v1/messages"`. This logic ensures the resulting URL always points to the standard Anthropic `messages` API path regardless of whether the caller supplies a base URL that includes the version segment. The function depends solely on `clore::net::detail::append_url_path` (a generic path‑appending utility) and performs no network or I/O operations itself.
 
 ## Side Effects
 
@@ -38,15 +38,11 @@ No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- `api_base` parameter
-
-## Writes To
-
-- returned `std::string`
+- parameter `api_base`
 
 ## Usage Patterns
 
-- Called by `clore::net::anthropic::detail::Protocol::build_url`
+- called by `clore::net::anthropic::detail::Protocol::build_url` to produce the messages endpoint URL
 
 ## Called By
 

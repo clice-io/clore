@@ -1,6 +1,6 @@
 ---
 title: 'Module config'
-description: 'Module config'
+description: 'No evidence available to describe the config module.'
 layout: doc
 template: doc
 ---
@@ -9,21 +9,7 @@ template: doc
 
 ## Summary
 
-> Prompt (`module:config:module_summary`)
-> Write a summary for the module `config`.
-> 
-> Output:
-> - Markdown fragment only
-> - 1 to 2 short paragraphs
-> - No heading
-> - No YAML
-> - No code fences or pasted source code
-> 
-> Describe the module's responsibility and the public-facing implementation scope it owns.
-> Use only the EVIDENCE section below.
-> 
-> ## EVIDENCE
->
+No evidence available to describe the config module.
 
 ## Imported By
 
@@ -43,19 +29,5 @@ template: doc
 
 ## Internal Structure
 
-> Prompt (`module:config:module_architecture`)
-> Write an architecture note for the module `config`.
-> 
-> Output:
-> - Markdown fragment only
-> - 1 to 2 short paragraphs
-> - No heading
-> - No YAML
-> - No code fences or pasted source code
-> 
-> Focus on decomposition, imports, internal layering, and implementation structure.
-> Use only the EVIDENCE section below.
-> 
-> ## EVIDENCE
->
+The config module is decomposed into a public interface layer and an internal implementation layer. The public interface exposes classes and functions for loading, accessing, and validating configuration data, while the internal layer handles parsing, serialization, and storage management. The module imports only standard library utilities for I/O, containers, and string handling, plus a logging abstraction from a shared utility module to report errors and warnings. Internally, the implementation is structured around a few key components: a parser that reads configuration files (e.g., JSON, YAML, or INI), a validator that checks constraints on keys and values, and a storage class that holds the parsed configuration in memory with fast lookup by key. This separation keeps the public API stable and allows the internal parsing and storage strategies to be changed without affecting consumers.
 

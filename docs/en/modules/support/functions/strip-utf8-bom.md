@@ -1,6 +1,6 @@
 ---
 title: 'clore::support::striputf8bom'
-description: 'The function checks whether the input std::string_view text begins with the UTF‑8 byte‑order mark (BOM) stored in the constant kUtf8Bom. It first verifies that text.size() is at least std::size(kUtf8Bom) (three bytes) and then compares each of the first three bytes using static_cast<unsigned char> to avoid sign extension. If all three match, it returns the substring starting after the BOM; otherwise it returns the original text unchanged. No additional helpers or external dependencies are required; the only dependency is the constant kUtf8Bom defined in the same anonymous namespace.'
+description: 'The implementation first verifies that the input text is at least as long as the kUtf8Bom byte sequence (three bytes). It then compares the first three bytes of text against kUtf8Bom, using static_cast<unsigned char> to avoid sign‑extension issues with char types. If all three bytes match, it returns a std::string_view starting after the BOM by calling text.substr(std::size(kUtf8Bom)). Otherwise, it returns the original text unchanged. The only dependency is the constant kUtf8Bom, which is defined in the anonymous namespace within the same translation unit.'
 layout: doc
 template: doc
 ---
@@ -29,7 +29,7 @@ auto strip_utf8_bom(std::string_view text) -> std::string_view {
 }
 ```
 
-The function checks whether the input `std::string_view text` begins with the UTF‑8 byte‑order mark (BOM) stored in the constant `kUtf8Bom`. It first verifies that `text.size()` is at least `std::size(kUtf8Bom)` (three bytes) and then compares each of the first three bytes using `static_cast<unsigned char>` to avoid sign extension. If all three match, it returns the substring starting after the BOM; otherwise it returns the original `text` unchanged. No additional helpers or external dependencies are required; the only dependency is the constant `kUtf8Bom` defined in the same anonymous namespace.
+The implementation first verifies that the input `text` is at least as long as the `kUtf8Bom` byte sequence (three bytes). It then compares the first three bytes of `text` against `kUtf8Bom`, using `static_cast<unsigned char>` to avoid sign‑extension issues with `char` types. If all three bytes match, it returns a `std::string_view` starting after the BOM by calling `text.substr(std::size(kUtf8Bom))`. Otherwise, it returns the original `text` unchanged. The only dependency is the constant `kUtf8Bom`, which is defined in the anonymous namespace within the same translation unit.
 
 ## Side Effects
 
@@ -37,12 +37,12 @@ No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- parameter `text`
-- constant `kUtf8Bom`
+- parameter `text` of type `std::string_view`
+- constant `kUtf8Bom` (likely a three‑byte array `{0xEF, 0xBB, 0xBF}`)
 
 ## Usage Patterns
 
-- called by `clore::support::read_utf8_text_file` to strip BOM from file contents
+- Stripping the UTF‑8 BOM from file contents before processing in `clore::support::read_utf8_text_file`
 
 ## Called By
 

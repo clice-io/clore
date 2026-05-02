@@ -1,6 +1,6 @@
 ---
 title: 'Module generate'
-description: 'generate 模块负责文档生成的完整流程，包括生成前验证、同步与异步页面构建以及结果输出。它对外提供四个核心函数：generate_dry_run 用于在无副作用的前提下模拟生成过程并返回状态或预估统计；generate_pages 是同步阻塞的入口，接收分析数据、输出路径、并发数及格式标识，在成功时保证输出目录中包含完整且引用一致的文档集；write_pages 将已生成的页面集合写入指定目录；generate_pages_async 则在给定的 kota::event_loop 上执行异步页面生成，调用者必须显式调度返回的任务以触发实际工作。模块内部管理配置、模型、速率限制、页面集合及输出根路径等状态，并依赖 config 模块提供配置数据、依赖 extract 模块提供预处理的符号与分析结果。'
+description: '模块 clore::generate 负责组织和执行文档页面的生成任务，包含干运行、同步生成、异步生成以及页面写入四种公开操作。它对外暴露 generate_dry_run、generate_pages、generate_pages_async 和 write_pages 四个函数，分别对应模拟验证、完整生成、基于事件循环的异步生成和结果持久化。模块内部管理生成所需的配置参数（如模型选择、速率限制、输出根路径），依赖 config 与 extract 模块提供的基础设施，是文档生成子系统的控制核心。'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-`generate` 模块负责文档生成的完整流程，包括生成前验证、同步与异步页面构建以及结果输出。它对外提供四个核心函数：`generate_dry_run` 用于在无副作用的前提下模拟生成过程并返回状态或预估统计；`generate_pages` 是同步阻塞的入口，接收分析数据、输出路径、并发数及格式标识，在成功时保证输出目录中包含完整且引用一致的文档集；`write_pages` 将已生成的页面集合写入指定目录；`generate_pages_async` 则在给定的 `kota::event_loop` 上执行异步页面生成，调用者必须显式调度返回的任务以触发实际工作。模块内部管理配置、模型、速率限制、页面集合及输出根路径等状态，并依赖 `config` 模块提供配置数据、依赖 `extract` 模块提供预处理的符号与分析结果。
+模块 `clore::generate` 负责组织和执行文档页面的生成任务，包含干运行、同步生成、异步生成以及页面写入四种公开操作。它对外暴露 `generate_dry_run`、`generate_pages`、`generate_pages_async` 和 `write_pages` 四个函数，分别对应模拟验证、完整生成、基于事件循环的异步生成和结果持久化。模块内部管理生成所需的配置参数（如模型选择、速率限制、输出根路径），依赖 `config` 与 `extract` 模块提供的基础设施，是文档生成子系统的控制核心。
 
 ## Imports
 
@@ -28,35 +28,27 @@ template: doc
 
 Declaration: `generate/generate.cppm:25`
 
-Definition: `generate/scheduler.cppm:1888`
+Definition: `generate/scheduler.cppm:1932`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::generate_dry_run` 首先通过 `prepare_generation_context` 和 `prepare_symbol_analyses_for_dry_run` 构建完整的 `PreparedGenerationContext` 与 `PreparedSymbolAnalyses`。随后创建一个 `PageGenerationScheduler` 实例，其构造函数将 `dry_run` 参数设为 `true`，并基于给定配置、模型、上下文、LLM 模型、速率限制、输出根路径及事件循环进行初始化。调度器执行 `run` 方法，遍历所有计划页面：内部会依次调用 `run_symbol_analysis_task` 与 `run_page_prompt_task` 来处理依赖分析与提示请求，但干运行模式下 `PageRenderer` 不会实际执行 `emit_pages` 或 `update_summaries` 等含输出写入的操作。`DependencyTracker` 全程追踪各 `PageState` 的 `unsatisfied_deps` 与 `completed_prompts`，同时 `scheduler.expected_llm_requests_`、`page_prompt_cache_hits_` 等计数被累计以反映预期 LLM 调用次数与缓存命中情况。函数最终返回 `scheduler.dry_run_pages()` 的结果，该值表示干运行中预计生成的页面数量。
+该函数是生成管线的干运行入口，用于在生产模式下绕过文件写入而仅模拟全流程。内部首先通过 `prepare_generation_context` 构造 `PreparedGenerationContext`，再以 `dry_run = true` 初始化 `PageGenerationScheduler`。调度器实例化 `PageRenderer` 时将该标志存入其 `dry_run_` 字段，从而控制后续所有输出操作仅更新内存中的 `dry_run_pages_` 计数，而非实际落盘。算法沿袭常规生成的依赖驱动调度：`DependencyTracker` 管理页面状态与符号分析依赖，`WorkQueue` 协调并发任务，`PageGenerationScheduler` 的 `run` 方法驱动循环，依次执行符号分析、页面提示词请求及结果处理。最终函数返回 `PageRenderer::dry_run_pages()` 的值，即干运行期间模拟生成的页面数。
 
 #### Side Effects
 
 No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- the two const int& parameters
-
-#### Usage Patterns
-
-- called to simulate generation without side effects
 
 ### `clore::generate::generate_pages`
 
 Declaration: `generate/generate.cppm:28`
 
-Definition: `generate/scheduler.cppm:1947`
+Definition: `generate/scheduler.cppm:1991`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::generate_pages` 是页面生成管线的顶层协调函数。它首先调用 `prepare_generation_context` 从配置与模型参数构建一个 `PreparedGenerationContext`，其中包含计划集合、提示请求、符号分析目标及链接映射。随后实例化一个 `PageGenerationScheduler`，传入该上下文、LLM 模型标识、速率限制、输出根目录和事件循环。调度器的 `run` 方法驱动一个 `WorkQueue`，该队列区分两类工作项：`SymbolAnalysisWork`（执行深层符号分析）和 `PagePromptWork`（根据提示生成页面内容）。一个 `DependencyTracker` 维护页面间的依赖关系，确保所有必需的符号分析完成后才提交页面的提示请求。提示响应可能从持久缓存（`cache_index_` 与 `prompt_cache_identity_for_page_request`）中直接获取，或通过 `request_llm_async` 发起新的 LLM 调用获取。
+The function orchestrates a multi‑stage generation pipeline that transforms a prepared generation context into fully rendered documentation pages. Internally, it constructs a `PageGenerationScheduler` backed by a `DependencyTracker` and a `WorkQueue`. The scheduler first submits symbol‑analysis tasks for every documentable symbol; as each analysis finishes, it releases dependent page‑prompt tasks, which are themselves fed into the work queue. The `DependencyTracker` maintains a directed graph of unsatisfied dependencies per `PageState` and exposes ready candidates via `pop_ready_candidate`. All LLM‑bound work is dispatched through `request_llm_async`, and both prompt outputs and rendered pages are cached using a `cache_index_` to avoid redundant computation.
 
-当所有工作项处理完毕，调度器调用 `render_generated_pages` 将生成的页面写入输出目录，并调用 `build_directory_index_pages` 生成目录索引页面。整个过程依赖 `PageRenderer` 执行最终的文件写出与摘要收集，同时通过 `record_consecutive_failure` 和 `fail_page_work` 实现错误重试限制，确保在 LLM 调用失败或缓存缺失时不会无限重复。
+Worker threads (`WorkerActivity`) repeatedly dequeue `ScheduledWork` items — either `SymbolAnalysisWork` or `PagePromptWork` — execute the corresponding task, record successes or failures via `PageGenerationScheduler::finish_symbol_prompt` / `finish_page_prompt_work`, and then call `try_submit_ready_pages` to push newly unblocked work. Once all prompts for a page are complete, a `RenderPageWork` item triggers `PageRenderer::emit_pages`. The function also handles concurrency limits (`rate_limit`), retry logic (`consecutive_failures_` / `retry_limit_exceeded_`), dry‑run mode, and deferred re‑evaluation of symbol analysis through `WorkQueue::enqueue_deferred` / `flush_deferred`. The entire flow terminates when the scheduler’s run loop ends, after which directory index pages are built and the function returns the final result code.
 
 #### Side Effects
 
@@ -64,74 +56,71 @@ No observable side effects are evident from the extracted code.
 
 #### Usage Patterns
 
-- Called as the main generation entry point
+- no explicit usage patterns evident from the evidence
 
 ### `clore::generate::generate_pages_async`
 
 Declaration: `generate/generate.cppm:37`
 
-Definition: `generate/scheduler.cppm:1925`
+Definition: `generate/scheduler.cppm:1969`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数的核心实现围绕 `PageGenerationScheduler` 展开。首先，它使用传入的配置、模型、输出根目录和事件循环构造一个调度器实例，并在内部通过 `prepare_generation_context` 解析计划与符号分析目标，初始化 `DependencyTracker` 以追踪页面状态与依赖关系。随后，调度器启动一个多阶段异步流水线：通过 `WorkQueue` 管理并发工作量，利用 `worker_task` 循环从队列中取出 `ScheduledWork` 并执行——工作类型包括符号分析任务（调用 `run_symbol_analysis_task`）和页面提示任务（调用 `run_page_prompt_task`）。每个任务完成后会更新依赖状态，并通过 `try_submit_ready_pages` 将依赖就绪的页面提交为新的提示工作。该过程受 `rate_limit` 和 `consecutive_failures_` 控制，确保在 LLM 请求频率和失败重试方面具有可配置的鲁棒性。
+该函数负责协调整个异步页面生成流程。它在提供的 `kota::event_loop` 上调度一个协程任务，该任务首先通过 `prepare_generation_context` 和 `collect_documentable_symbols` 准备上下文，然后构造一个 `PageGenerationScheduler` 实例。调度器内部持有 `DependencyTracker`、`WorkQueue`、`PageRenderer` 以及 LLM 请求相关的配置（`config_`、`model_`、`rate_limit`）。算法首先按计划组织所有页面状态，初始化依赖关系，然后启动多个 worker 任务（`worker_task`）并发处理符号分析与页面提示生成。
 
-当所有页面提示工作完成后，调度器通过 `maybe_stop_workers` 终止工作线程，并转入渲染阶段：`render_ready_page` 收集页面输出并调用 `PageRenderer::emit_pages_async` 将生成的内容写入文件系统。整个过程完全异步运行在给定的 `kota::event_loop` 上，调用者需要将返回的任务调度到该循环中并启动执行；函数内部通过 `WorkQueue` 的信号量（`available_`）与事件循环协同调度，确保流水线不会阻塞外部循环。
+控制流围绕 `WorkQueue` 的任务调度与 `DependencyTracker` 的就绪候选机制展开。每个 worker 从队列中取出 `ScheduledWork`，根据工作类型分别执行 `run_symbol_analysis_task` 或 `run_page_prompt_task`。符号分析结果通过 `finish_*_symbol_prompt` 释放下游依赖，触发页面提示的生成；页面提示生成结果则通过 `finish_page_prompt_work` 积累输出。当所有依赖满足后，通过 `render_ready_page` 调用 `PageRenderer` 将页面渲染为文件。整个过程利用 `WorkQueue::flush_deferred`、`DependencyTracker::release_dependents` 等方法确保因果序，同时借助 `persistent_cache_key` 和 `prompt_cache_identity_for_page_request` 实现 LLM 请求的缓存。失败处理通过 `mark_page_failed` 记录错误并可能触发重试，最终在 `PageGenerationScheduler::run` 返回前等待所有工作完成或超出重试限制。
 
 #### Side Effects
 
-- schedules work on the provided event loop
-- potentially writes generated pages to the output location
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- first integer parameter
-- second integer parameter
-- output path string view
-- 32-bit integer parameter
-- second string view parameter
-- event loop reference (for state reading)
-
-#### Writes To
-
-- event loop (by scheduling work)
-- generated pages (implied by 'page generation')
+- `const int &`
+- `const int &`
+- `std::string_view`
+- `std::uint32_t`
+- `std::string_view`
+- `kota::event_loop &`
 
 #### Usage Patterns
 
-- callers schedule the returned task on the event loop
-- run the scheduled task on the loop
+- Callers must schedule the returned task on the loop and run it.
+- Used for asynchronous page generation.
 
 ### `clore::generate::write_pages`
 
 Declaration: `generate/generate.cppm:44`
 
-Definition: `generate/scheduler.cppm:1966`
+Definition: `generate/scheduler.cppm:2010`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::write_pages` orchestrates the end-to-end generation of documentation pages. It first prepares the generation context by calling `prepare_generation_context`, which builds the collection of documentable symbols and prompt requests. A `PageGenerationScheduler` is then instantiated with the configuration, LLM model, `PreparedGenerationContext`, output root, event loop, and optional dry-run flag. The scheduler’s `run` method drives the core workflow: it initializes `DependencyTracker`, submits symbol analysis tasks and page prompt requests via `submit_after_symbol_analysis` and `schedule_symbol_analysis`, and processes the asynchronous work queue (`WorkQueue`) through worker tasks. Each worker invocation of `worker_task` polls the queue, runs `run_symbol_analysis_task` or `run_page_prompt_task`, and updates state through the tracker. After LLM requests complete, the scheduler calls `render_ready_page` to generate final output via `PageRenderer::emit_pages_async` and `render_generated_pages`. The function returns a status code indicating success or failure, with metrics gathered from the scheduler’s counters (`llm_requests_issued_`, `written_output_count_`, etc.).
+函数 `clore::generate::write_pages` 协调整个页面生成管线。它首先调用 `prepare_generation_context` 构造 `PreparedGenerationContext`，其中包含 `plan_set`、`prompt_requests_by_plan`、`symbol_analysis_targets` 等结构。随后创建一个 `PageRenderer` 实例（持有 `output_root_` 与 `dry_run_` 标志），并构建 `PageGenerationScheduler`，传入配置、模型、上下文、LLM 模型、速率限制以及事件循环。调度器的 `run` 方法启动多个 `worker_task`，通过 `WorkQueue` 分发 `ScheduledWork`（如 `PagePromptWork` 和 `SymbolAnalysisWork`）。内部使用 `DependencyTracker` 管理页面依赖：通过 `initialize_ready_candidates` 确定无依赖的初始候选页，当符号分析完成后调用 `release_dependents` 或 `mark_symbol_ready` 以解锁等待的页面，并通过 `pop_ready_candidate` 获取可提交的页面。每个页面依次执行符号分析（`run_symbol_analysis_task`）和页面提示（`run_page_prompt_task`），期间利用 `PagePromptWork::cache_identity` 和 `prompt_cache_identity_for_page_request` 进行缓存判断，并通过 `perform_prompt_request` 发起 LLM 请求。所有任务通过 `WorkQueue::enqueue_deferred` 和 `flush_deferred` 实现异步调度，并受 `WorkQueue::stopped_` 和 `retry_limit_exceeded_` 控制。最终，`render_ready_page` 调用 `PageRenderer::emit_pages` 或 `emit_pages_async` 将生成的 `PagePromptWork::output_key` 写入磁盘，同时 `update_page_summary_cache` 汇集摘要，并在所有页面完成后触发 `build_directory_index_pages` 生成目录索引页。
 
 #### Side Effects
 
-- Writes documentation pages to the filesystem
+- Writes generated documentation pages to the output location specified by the string view parameter.
 
 #### Reads From
 
-- The integer parameter (likely a page plan set identifier)
-- The string view parameter (likely an output path)
+- The integer reference parameter (likely representing a page plan or set of pages)
+- The string view parameter (likely representing an output directory path)
 
 #### Writes To
 
-- Files on disk
+- Files on the filesystem corresponding to generated pages
 
 #### Usage Patterns
 
-- Called during documentation generation to write all pages
+- Called during the documentation generation process to persist all generated pages
+- Likely invoked by higher-level generation functions such as `clore::generate::generate_pages`
 
 ## Internal Structure
 
-`generate`模块按照功能关注点进行了清晰的分解：提供干运行验证、同步生成、独立写出以及异步生成四项公开入口，分别对应 `generate_dry_run`、`generate_pages`、`write_pages` 和 `generate_pages_async`。这些函数共享同一声明单元（`generate.cppm`）内的一组内部变量，包括配置对象、LLM 模型句柄、速率限制参数以及页面容器，从而在避免重复声明的同时保持状态一致性。模块显式导入 `config`（读取外部设置）、`extract`（利用已提取的符号数据）以及标准库，未引入其他业务模块，体现了向下的依赖方向。内部层次上，同步流程（`generate_pages` → 隐式构建页面计划 → 可选调用 `write_pages` 落盘）与异步流程（`generate_pages_async` 接受 `kota::event_loop` 引用，将生成任务调度到循环之上）并行存在，前者阻塞直至完成，后者将生命周期交给调用者控制。干运行函数则独立模拟完整流程但不产生输出，方便调用者评估生成范围与成本。这种结构使调用方可根据场景选择同步或异步路径，同时通过公开的写出函数将页面渲染与序列化解耦。
+`generate` 模块对外提供四个公共入口点：同步的 `generate_dry_run`、`generate_pages`、`write_pages`，以及异步的 `generate_pages_async`。模块内部将页面生成流程拆解为配置解析、模型加载、速率限制和输出路径管理四个独立环节，这些环节共享模块级别的变量 `config`、`model`、`rate_limit`、`output_root` 和 `llm_model`，实现了状态与逻辑的分离。`generate_pages` 和 `generate_dry_run` 分别代表执行写入与不写入的实际生成与干运行模式，而 `write_pages` 专门负责将生成的页面计划序列化到文件系统。
+
+模块依赖关系清晰：通过 `import config` 获取全局生成配置，`import extract` 获得从源代码提取的结构化信息作为生成输入，同时依赖标准库 `std` 提供基础设施。在实现结构上，模块采用分层设计：底层依赖配置与提取模块提供原始数据，中层通过限速与模型管理控制生成流程，上层则通过同步或异步接口暴露给调用者。异步版本 `generate_pages_async` 将生成任务包装为可调度对象，需由调用者挂载在 `kota::event_loop` 上显式运行，从而将事件循环生命周期管理完全交给调用方，降低了模块与异步引擎的耦合度。
 
 ## Related Pages
 

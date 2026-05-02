@@ -1,6 +1,6 @@
 ---
 title: 'Module extract:compiler'
-description: 'extract:compiler 模块负责加载、解析和归一化编译数据库（如 compile_commands.json），并提供对单个编译条目进行标准化处理的核心流程。它公开定义了 CompileEntry、CompilationDatabase 和 CompDbError 等数据结构，用于表示编译命令、数据库及错误信息。模块的公开函数涵盖从文件路径加载数据库（load_compdb）、在数据库中按源文件查找条目（lookup）、标准化条目中的文件路径与参数（normalize_entry_file、normalize_argument_path、sanitize_driver_arguments、sanitize_tool_arguments）、生成唯一编译签名与缓存键（build_compile_signature、ensure_cache_key）、缓存工具链查询结果（query_toolchain_cached）以及最终基于归一化后的条目创建编译器实例（create_compiler_instance）等关键操作，为后续代码提取与分析提供稳定可重复的编译上下文。'
+description: 'extract:compiler 模块负责将编译数据库中的条目解析、规范化并预处理，为后续的代码提取提供可靠的编译器配置和源文件信息。它公开了 CompileEntry、CompilationDatabase 和 CompDbError 等数据结构，分别描述单个编译操作、整个编译数据库以及加载错误。公有接口包括加载编译数据库的 load_compdb、在数据库中查找条目的 lookup、路径与参数的规范化函数（normalize_argument_path、sanitize_driver_arguments、sanitize_tool_arguments、normalize_entry_file），以及生成唯一编译签名的 build_compile_signature、管理缓存键的 ensure_cache_key 和 query_toolchain_cached，最后还有创建编译器实例的 create_compiler_instance。这些函数共同构成了从原始编译数据库到可被提取管线消费的标准化输入之间的桥梁。'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-`extract:compiler` 模块负责加载、解析和归一化编译数据库（如 `compile_commands``.json`），并提供对单个编译条目进行标准化处理的核心流程。它公开定义了 `CompileEntry`、`CompilationDatabase` 和 `CompDbError` 等数据结构，用于表示编译命令、数据库及错误信息。模块的公开函数涵盖从文件路径加载数据库（`load_compdb`）、在数据库中按源文件查找条目（`lookup`）、标准化条目中的文件路径与参数（`normalize_entry_file`、`normalize_argument_path`、`sanitize_driver_arguments`、`sanitize_tool_arguments`）、生成唯一编译签名与缓存键（`build_compile_signature`、`ensure_cache_key`）、缓存工具链查询结果（`query_toolchain_cached`）以及最终基于归一化后的条目创建编译器实例（`create_compiler_instance`）等关键操作，为后续代码提取与分析提供稳定可重复的编译上下文。
+`extract:compiler` 模块负责将编译数据库中的条目解析、规范化并预处理，为后续的代码提取提供可靠的编译器配置和源文件信息。它公开了 `CompileEntry`、`CompilationDatabase` 和 `CompDbError` 等数据结构，分别描述单个编译操作、整个编译数据库以及加载错误。公有接口包括加载编译数据库的 `load_compdb`、在数据库中查找条目的 `lookup`、路径与参数的规范化函数（`normalize_argument_path`、`sanitize_driver_arguments`、`sanitize_tool_arguments`、`normalize_entry_file`），以及生成唯一编译签名的 `build_compile_signature`、管理缓存键的 `ensure_cache_key` 和 `query_toolchain_cached`，最后还有创建编译器实例的 `create_compiler_instance`。这些函数共同构成了从原始编译数据库到可被提取管线消费的标准化输入之间的桥梁。
 
 ## Imports
 
@@ -32,19 +32,21 @@ Definition: `extract/compiler.cppm:38`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-`clore::extract::CompDbError` 是一个简单的错误类型，内部仅包含一个 `std::string` 类型的 `message` 成员。该结构体没有自定义构造函数、析构函数或赋值运算符，完全依赖编译器生成的默认版本，因此它作为平凡可复制且可移动的类型。其唯一的不变性是 `message` 在逻辑上应表示一条无歧义的错误信息，但该结构体自身不对此施加任何校验或约束，所有错误文本的构建与解释均由上层调用代码负责。`message` 成员使用标准字符串存储，使得该类型能够自然地参与异常抛出或值返回的错误处理流程。
+结构体 `clore::extract::CompDbError` 是作为单个 `std::string` 成员 `message` 的简单包装器实现的。内部布局仅包含该字符串，没有其他数据成员或用户声明的特殊成员函数，因此其构造、析构和赋值操作完全由编译器隐式生成。该设计不添加任何不变量或资源管理逻辑，整个类型的职责完全委托给底层字符串的既定语义。
 
 #### Invariants
 
-- The `message` member is always default-constructible and movable.
+- Contains only a `std::string` member for the error message
+- No enforced invariants beyond the string being present
 
 #### Key Members
 
-- `message`
+- `message` member
 
 #### Usage Patterns
 
-- Caught or checked by callers of `clore::extract` functions that may fail.
+- Used as a return type or exception type to report errors in extraction logic
+- The `message` string is expected to be consumed by logging or error handling code
 
 ### `clore::extract::CompilationDatabase`
 
@@ -54,9 +56,7 @@ Definition: `extract/compiler.cppm:31`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-内部结构由两个主要数据容器构成：`entries` 是一个 `std::vector<CompileEntry>`，用于存储编译数据库中的所有编译条目；`toolchain_cache` 是一个 `std::unordered_map<std::string, std::vector<std::string>>`，作为缓存层，将工具链标识符（字符串）映射到其对应的编译标志序列，从而避免重复解析相同的工具链配置。两个容器之间没有显式的约束，但缓存的设计预期与 `entries` 中的工具链引用保持一致。
-
-`has_cached_toolchain` 方法的实现直接检查 `toolchain_cache` 是否非空，返回 `true` 表示缓存中至少包含一组解析后的工具链数据，否则返回 `false`。由于该方法不带参数且为 const 限定，它仅反映缓存整体的填充状态，而不针对特定工具链标识符进行查询。该实现作为轻量级门卫函数，允许调用方在需要填充或重用缓存前快速判断是否已有缓存数据。
+该结构体通过 `entries` 维护编译数据库中所有原始编译条目的向量，并借助 `toolchain_cache` 字典缓存从工具链标识符到解析后参数的映射，以避免重复解析相同工具链定义。`has_cached_toolchain()` 成员函数提供一种高效检查缓存是否已填充的方法，便于调用者在执行工具链查找前判断是否可用缓存，从而减少冗余计算。内部设计强调对编译条目与工具链缓存的分离管理：`entries` 存储数据来源，`toolchain_cache` 则保存从这些条目中提取并归一化的工具链信息，二者在逻辑上关联但无强制同步约束。
 
 #### Member Functions
 
@@ -84,13 +84,9 @@ Definition: `extract/compiler.cppm:21`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-结构体 `clore::extract::CompileEntry` 直接容纳从编译数据库记录中解析出的四个原始字段：`file`、`directory`、`arguments` 和可选的 `source_hash`。其中 `file` 存储源文件相对路径，`directory` 记录编译命令的工作目录，`arguments` 保留完整的命令行参数列表。`normalized_file` 与 `compile_signature` 是两个派生字段，分别代表规范化后的文件路径和根据规范化文件与参数计算出的 64 位编译签名，用于唯一标识该编译条目。`cache_key` 则是一个字符串，通常由 `compile_signature` 和 `source_hash` 联合构成，为后续缓存查找提供快速索引。
+该结构体将一次编译调用所需的所有元数据聚合为一个单元。内部包含原始文件路径 `file`、工作目录 `directory`、编译器参数列表 `arguments`、规范化后的文件路径 `normalized_file`、基于输入计算出的编译签名 `compile_signature`、可选的源文件内容哈希 `source_hash` 以及用于缓存查找的字符串 `cache_key`。  
 
-所有成员均在默认构造函数中初始化为空字符串或零值。在加载条目时，`normalized_file`、`compile_signature` 和 `cache_key` 会依次计算并赋值，确保它们在后续使用前已正确填充。`source_hash` 仅当源文件内容被访问时才记录哈希值，因此其类型为 `std::optional`，允许未赋值状态。这些字段共同构成了一个紧凑的编译单元描述，供提取流程下游步骤（如去重、缓存或分析）直接使用。
-
-#### Invariants
-
-- 字段的默认值为空字符串、空向量、零或 `std::nullopt`，表示使用前应被填充。
+这些字段在构造时同时填充，并维持若干隐式不变量：`normalized_file` 始终是 `file` 的规范化形式，`compile_signature` 由 `arguments` 和 `normalized_file` 共同计算得出，而 `cache_key` 通常融合了 `directory`、`normalized_file` 和 `compile_signature` 以保证唯一性。`source_hash` 仅当实际读取源文件后才被设置，用于判断源文件是否发生变动。
 
 #### Key Members
 
@@ -104,8 +100,7 @@ Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.m
 
 #### Usage Patterns
 
-- 用于表示从编译数据库或构建系统中提取的单个编译条目。
-- 可能用于编译缓存或重新执行的输入。
+- Used to store and pass compilation command details generated during extraction.
 
 ## Functions
 
@@ -117,9 +112,7 @@ Definition: `extract/compiler.cppm:110`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-`clore::extract::build_compile_signature` 首先检查 `entry` 的 `normalized_file` 是否非空且 `compile_signature` 字段非零：若成立则直接返回缓存的签名，避免重复计算。否则，它会确保 `normalized_file` 可用——若 `entry.normalized_file` 为空则调用 `normalize_entry_file` 生成它，否则直接复用已有值——然后委托给命名空间内的 `build_compile_signature_impl` 执行实际签名计算。
-
-该函数的核心设计是通过预检查缓存短路后续开销，并统一规范化文件路径。其依赖关系局限于 `normalize_entry_file`（用于解析 `CompileEntry` 的文件路径）以及 `build_compile_signature_impl`（内部实现签名算法），后者负责解析编译参数、加载编译数据库、实例化编译器调用等更复杂的流程。
+该函数首先检查传入的 `entry` 是否已经缓存了计算过的签名：若 `entry.normalized_file` 非空且 `entry.compile_signature` 非零，则直接返回该缓存值。否则，通过 `normalize_entry_file` 获取统一的文件路径（若 `entry.normalized_file` 已存在则直接使用），然后将 `entry` 与归一化路径一起交给 `build_compile_signature_impl` 执行实际的签名计算。整体流程是一个快速的缓存层，避免重复调用底层的实现函数。
 
 #### Side Effects
 
@@ -127,14 +120,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `entry.normalized_file`
-- `entry.compile_signature`
-- `clore::extract::normalize_entry_file` (reads `entry`)
+- entry`.normalized_file`
+- entry`.compile_signature`
 
 #### Usage Patterns
 
-- Used to obtain a stable identifier for a compile entry.
-- Likely used for caching or detecting changes in compile configurations.
+- Cache-aware computation of compile signatures
+- Called before further extraction steps that depend on unique compile identity
 
 ### `clore::extract::create_compiler_instance`
 
@@ -144,22 +136,24 @@ Definition: `extract/compiler.cppm:297`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-`create_compiler_instance` 首先调用 `sanitize_driver_arguments` 清理传入的 `CompileEntry` 以生成有效的 `driver_args`。若 `driver_args` 为空则直接返回 `nullptr`。接着创建一个物理文件系统 `vfs`，并基于 `DiagnosticOptions` 和 `IgnoringDiagConsumer` 初始化一个 `DiagnosticsEngine`。随后调用 `parse_compiler_invocation` 解析 `driver_args`、`entry.file`、`vfs` 和 `diagnostics`，尝试构造 `CompilerInvocation`；若解析失败或 `FrontendOptions::Inputs` 为空，均返回 `nullptr`。成功获得 `invocation` 后，会设置其 `DisableFree` 为 `false` 并将 `WorkingDir` 设为 `entry.directory`。最终使用该 `invocation` 构造 `CompilerInstance`，依次设置 `vfs`、创建诊断器与文件管理器，并通过 `createTarget` 检查目标是否可用；任意步骤失败则返回 `nullptr`，否则返回构建好的实例。
+函数 `clore::extract::create_compiler_instance` 接受一个 `const CompileEntry & entry`，返回一个 `std::unique_ptr<clang::CompilerInstance>`。它首先调用 `clore::extract::sanitize_driver_arguments` 对 `entry` 进行参数清理，得到 `driver_args`；若结果为空则立即返回 `nullptr`。接着创建一个物理文件系统 `vfs`，并使用 `clang::CompilerInstance::createDiagnostics` 构造一个忽略所有诊断消息的 `diagnostics` 引擎。然后调用 `clore::extract::(anonymous namespace)::parse_compiler_invocation` 将 `driver_args`、`entry.file`、`vfs` 和 `diagnostics` 解析为 `invocation`；若解析失败也返回 `nullptr`。成功解析后，设置 `invocation` 的 `FrontendOpts.DisableFree` 为 `false`，`FileSystemOpts.WorkingDir` 为 `entry.directory`，并检查 `FrontendOpts.Inputs` 是否为空，空则返回 `nullptr`。
 
-该函数依赖 `sanitize_driver_arguments`、`parse_compiler_invocation` 以及 `clang` 与 `llvm::vfs` 的基础设施，通过组装一个完整的编译器实例为后续的提取工作提供执行环境。
+随后，该函数构造一个 `clang::CompilerInstance` 实例，依次为其设置虚拟文件系统、诊断消费者（仍为忽略型）和文件管理器。最后调用 `createTarget()` 进行目标初始化，若失败则返回 `nullptr`；否则返回构建好的编译器实例。整个过程依赖 `clore::extract::sanitize_driver_arguments` 进行参数预处理，依赖解析函数从命令行恢复编译调用，并利用 Clang 和 LLVM 基础架构完成诊断、文件系统和目标的建立。
 
 #### Side Effects
 
-- Allocates memory for a `clang::CompilerInstance` and associated objects
-- Accesses the file system via physical VFS creation and target creation
+- allocates heap memory for `CompilerInstance`, diagnostics, and file manager objects
+- creates physical file system reference
+- creates diagnostic consumer instance
 
 #### Reads From
 
-- entry (const `CompileEntry`&): reads entry`.file` and entry`.directory`
+- `entry` parameter: `entry.file` and `entry.directory` fields
 
 #### Usage Patterns
 
-- Typically called by extraction pipeline to obtain a compiler instance for parsing source files
+- used as a helper to instantiate a clang-based compiler for a compile entry
+- called during project extraction to prepare a compiler instance
 
 ### `clore::extract::ensure_cache_key`
 
@@ -171,23 +165,23 @@ Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.m
 
 Implementation: [Implementation](functions/ensure-cache-key.md)
 
-函数 `clore::extract::ensure_cache_key` 完全委托给内部的 `ensure_cache_key_impl`，后者负责为给定的 `CompileEntry` 计算并设置 `cache_key` 字段。实现流程首先调用 `normalize_entry_file` 获取规范化路径，然后通过 `sanitize_driver_arguments` 清理参数列表，并尝试用 `parse_compiler_invocation` 解析出 `CompilerInvocation`，从中提取 `frontend_inputs` 并调用 `try_hash_source_file` 计算 `source_hash`。接着利用 `build_compile_signature`（内部委托给 `build_compile_signature_impl`）生成最终的签名值，此过程还会查询 `toolchain_cache`（通过 `query_toolchain_cached`）并可能加载编译数据库（`load_compdb`）以补充缺失上下文，最终将签名写入 `entry.cache_key` 以确保每个条目拥有唯一的缓存标识。
+函数 `clore::extract::ensure_cache_key` 直接将控制权委托给 `clore::extract::ensure_cache_key_impl`，将给定的 `CompileEntry` 引用 `entry` 原样转发。作为 `ensure_cache_key` 唯一的实现，它充当一个薄包装器：所有实际的缓存键生成逻辑、错误处理和副作用都发生在 `ensure_cache_key_impl` 内部。这种分离允许将来在缓存键计算流程周围统一添加日志记录、断言或性能监控，而无需修改核心算法的调用点。
 
 #### Side Effects
 
-- Modifies the `CompileEntry` by setting its cache key.
+- Modifies the `CompileEntry` object passed by reference, as delegated to `clore::extract::ensure_cache_key_impl`.
 
 #### Reads From
 
-- Parameter `entry` (reference to `CompileEntry`).
+- The `CompileEntry` reference `entry`.
 
 #### Writes To
 
-- Parameter `entry` (the `CompileEntry` object is mutated).
+- The `CompileEntry` reference `entry`.
 
 #### Usage Patterns
 
-- Called by `query_toolchain_cached` before attempting to use cached toolchain information to ensure the entry has a valid cache key.
+- Called before `clore::extract::query_toolchain_cached` to ensure a cache key is present.
 
 ### `clore::extract::ensure_cache_key_impl`
 
@@ -199,19 +193,19 @@ Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.m
 
 Implementation: [Implementation](functions/ensure-cache-key-impl.md)
 
-`ensure_cache_key_impl` 通过依次填充 `CompileEntry` 的四个关键字段来构造缓存键。它首先调用 `normalize_entry_file` 将条目的源文件路径规范化，结果写入 `entry.normalized_file`。然后调用 `build_compile_signature_impl` 基于该规范化路径生成编译签名，存入 `entry.compile_signature`。接着用 `try_hash_source_file` 尝试哈希源文件，结果存入 `entry.source_hash`；该调用可能返回空，但函数在此处不检查其结果——缓存键的最终构建依赖 `clore::support::build_cache_key`，它仅使用规范化路径和编译签名组成 `entry.cache_key`。
+该实现通过依次调用三个内部函数来填充 `CompileEntry` 的缓存相关字段。首先调用 `normalize_entry_file` 将 `entry` 的原始文件路径转换为规范的绝对形式，结果存入 `entry.normalized_file`。接着使用 `build_compile_signature_impl` 并传入规范文件路径，生成反映编译选项和输入特征的 `uint64_t` 签名，存入 `entry.compile_signature`。随后尝试用 `try_hash_source_file` 对规范文件计算源文件哈希，若成功则记入 `entry.source_hash`（可能基于文件内容或元数据），否则该字段保持空。最后调用 `clore::support::build_cache_key`，以规范文件路径和编译签名为输入，生成全局唯一的缓存键 `entry.cache_key`，用于后续的编译结果复用或去重。
 
-整个流程是线性的，无分支或错误处理；它假定所有被调用的辅助函数均能成功完成，并将结果直接赋值给传入的 `CompileEntry`。该函数是 `ensure_cache_key` 的内部实现，将缓存键的构造分解为独立的子步骤，便于测试和复用。
+内部控制流为线性顺序，无分支；所有依赖函数均位于相同或匿名命名空间内，且均直接操作 `entry` 的字段。性能上，文件规范化与签名计算可能涉及文件系统 I/O，`try_hash_source_file` 仅在需要内容哈希时产生额外开销。此函数不检查外部数据库或缓存状态，仅完成本地字段的初始化。
 
 #### Side Effects
 
-- Modifies the fields of the passed `CompileEntry&`
-- Reads the source file for hashing via `try_hash_source_file`
+- Reads source file content to compute hash via `try_hash_source_file`
+- Mutates fields of the `CompileEntry` argument
 
 #### Reads From
 
-- The `CompileEntry` parameter `entry`
-- The file system via `normalize_entry_file` and `try_hash_source_file`
+- The `CompileEntry` argument's existing data
+- Source file identified by the entry's original file
 
 #### Writes To
 
@@ -222,7 +216,7 @@ Implementation: [Implementation](functions/ensure-cache-key-impl.md)
 
 #### Usage Patterns
 
-- Called by `clore::extract::ensure_cache_key`
+- Called by `clore::extract::ensure_cache_key` to populate cache metadata for a single compile entry
 
 ### `clore::extract::load_compdb`
 
@@ -232,31 +226,34 @@ Definition: `extract/compiler.cppm:127`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该函数首先检查输入路径对应的文件是否存在，若不存在则返回一个 `CompDbError`。接着调用 `clang::tooling::JSONCompilationDatabase::loadFromFile` 解析 JSON 数据库，解析失败同样返回错误。成功时遍历所有编译命令，为每个命令构造一个 `CompileEntry`，依次填充其 `file`、`directory` 和 `arguments` 字段，并对每个 entry 调用 `ensure_cache_key` 生成缓存键，最后将 entry 移入 `CompilationDatabase` 的 `entries` 向量。此过程依赖 `clang::tooling` 的 JSON 解析能力，以及内部辅助函数 `ensure_cache_key` 对每个条目进行键值计算，最终以日志记录加载的条目数量并返回数据库对象。
+该函数首先通过 `std::filesystem::path` 构造编译数据库路径，检查文件是否存在；若不存在则返回包含错误信息的 `CompDbError`。随后调用 `clang::tooling::JSONCompilationDatabase::loadFromFile` 解析 JSON，并自动检测命令行语法（`clang::tooling::JSONCommandLineSyntax::AutoDetect`）；若解析失败也返回错误。成功解析后，遍历 `json_db->getAllCompileCommands()` 返回的所有编译命令，为每个命令初始化一个 `CompileEntry`，将命令中的 `Filename`、`Directory` 和 `CommandLine` 分别填充到 `entry.file`、`entry.directory` 和 `entry.arguments`。随后对每个条目调用 `ensure_cache_key` 以生成并缓存键值，最后将条目移入 `db.entries`。函数依赖 `std::filesystem` 进行文件存在性检查，依赖 Clang 的 `JSONCompilationDatabase` 解析 JSON 格式，并调用内部辅助函数 `ensure_cache_key` 为每个条目计算缓存键，后续可用于工具链缓存查询。整个流程将外部编译数据库转换为库内定义的 `CompilationDatabase` 结构体。
 
 #### Side Effects
 
-- Reads file system to check existence and read `compile_commands.json`
-- Allocates memory for the returned `CompilationDatabase` and its entries
-- Calls `ensure_cache_key` which may modify each `CompileEntry`
-- Outputs a log message via `logging::info`
+- reads the file system to check if `path` exists
+- reads the contents of the file at `path` via `clang::tooling::JSONCompilationDatabase::loadFromFile`
+- allocates memory for `CompilationDatabase` entries and their argument vectors
+- logs an info message about the number of loaded commands
+- calls `ensure_cache_key` on each entry, which may have its own side effects (not detailed here)
 
 #### Reads From
 
-- `path` parameter (`std::string_view`)
-- File system: `compile_commands.json` at the given `path`
-- `entry.file`, `entry.directory`, `entry.arguments` from each parsed compile command
+- the parameter `path`
+- the file system (existence check of `path`)
+- the contents of `compile_commands.json`
+- the `cmd.Filename`, `cmd.Directory`, and `cmd.CommandLine` fields from each parsed compile command
 
 #### Writes To
 
-- Returned `std::expected<CompilationDatabase, CompDbError>` (includes `CompilationDatabase` on success)
-- Each `CompileEntry` passed to `ensure_cache_key` (cache key field)
-- Log output via `logging::info`
+- the local variables `compdb_path`, `error_message`, `json_db`, and `db`
+- the `db.entries` vector (populated with `CompileEntry` objects)
+- the log output (via `logging::info`)
 
 #### Usage Patterns
 
-- Typically invoked at the start of the extraction pipeline to obtain the compilation database
-- Used in conjunction with other extraction functions like `query_toolchain_cached` or `extract_project_async`
+- called by code that needs to load a compilation database for a project
+- typically used before extracting symbols or building dependency graphs
+- the returned `CompilationDatabase` is passed to other extraction functions like `query_toolchain_cached` or `extract_project_async`
 
 ### `clore::extract::lookup`
 
@@ -266,9 +263,9 @@ Definition: `extract/compiler.cppm:164`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-函数 `clore::extract::lookup` 遍历 `CompilationDatabase` 的 `entries` 容器，对每个 `CompileEntry` 执行两步路径标准化：首先通过 `normalize_argument_path` 将查询的文件路径 `file` 与当前条目的 `directory` 合并得到候选路径 `candidate`；然后利用 `normalize_entry_file` 将条目的 `file` 字段转换为绝对路径（若 `normalized_file` 已缓存则直接使用）。最后使用 `std::filesystem::path` 的相等比较判断 `candidate` 与 `normalized_entry` 是否匹配，将所有匹配的条目指针收集到 `std::vector<const CompileEntry*>` 中并返回。
+该函数遍历 `db.entries` 中的每个 `CompileEntry`，为输入 `file` 和每个条目的 `directory` 调用 `normalize_argument_path` 生成候选规范化路径。接着检查条目的 `normalized_file`：若为空则通过 `normalize_entry_file` 计算，否则直接使用。当 `candidate` 与条目的规范化文件路径相同时，将条目的指针加入 `results`，最终返回所有匹配条目的集合。
 
-该函数依赖于 `normalize_argument_path` 和 `normalize_entry_file` 两个辅助函数，后者会调用 `std::filesystem::weakly_canonical` 完成路径解析。内部控制流为简单的线性扫描，未涉及缓存或提前退出，时间复杂度为 O(n)。
+核心控制流依赖于 `normalize_argument_path` 和 `normalize_entry_file` 这两个路径标准化函数，二者均基于 `std::filesystem` 实现跨平台路径等价比较。查找结果基于文件名精确匹配，不依赖编译签名或工具链缓存。
 
 #### Side Effects
 
@@ -279,10 +276,13 @@ No observable side effects are evident from the extracted code.
 - `db.entries`
 - `entry.directory`
 - `entry.normalized_file`
+- `normalize_argument_path(file, entry.directory)`
+- `normalize_entry_file(entry)`
 
 #### Usage Patterns
 
-- Lookup compile entries for a specific source file
+- Used to map a source file to its corresponding compile command entries in a compilation database.
+- Supports extraction pipelines that require entry lookup by file path.
 
 ### `clore::extract::normalize_argument_path`
 
@@ -292,22 +292,22 @@ Definition: `extract/compiler.cppm:188`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该函数将传入的 `path` 与 `directory` 组合并解析为绝对、规范的文件系统路径。算法首先判断 `path` 是否为相对路径：若是，则将其与 `directory` 拼接；接着通过 `std::filesystem::absolute` 转换为绝对路径（忽略错误），再调用 `lexically_normal` 进行词法规范化。最后尝试使用 `weakly_canonical` 获取强规范形式——此步骤依赖底层文件系统判断是否存在符号链接或目录问题，若失败则直接返回词法规范化后的结果。整个流程依赖 `std::filesystem` 提供的路径操作与错误处理机制。
+该函数将输入路径 `path` 与参考目录 `directory` 结合，生成一个尽可能规范的绝对路径。首先构造 `std::filesystem::path` 对象，若路径为相对路径则将其与 `directory` 拼接；随后调用 `std::filesystem::absolute` 尝试转为绝对路径（忽略错误），并对其调用 `lexically_normal()` 进行词法规范化。最终尝试 `weakly_canonical` 以解析符号链接并消除冗余元素，若成功则返回该规范路径，否则返回词法规范化后的结果。整个过程依赖 `std::filesystem` 库，并通过 `std::error_code` 捕获可能发生的文件系统错误。
 
 #### Side Effects
 
-- Accesses the filesystem via `std::filesystem::weakly_canonical` to resolve symlinks and verify path existence.
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `std::string_view path` parameter
-- `std::string_view directory` parameter
-- Filesystem state (for symlink resolution and existence checks)
+- Parameter `path`
+- Parameter `directory`
+- File system state for canonical resolution (via `std::filesystem::absolute` and `std::filesystem::weakly_canonical`)
 
 #### Usage Patterns
 
-- Normalizes file paths from compilation database entries
-- Standardizes paths before comparison or indexing in extraction pipeline
+- Normalize file paths from compile entries
+- Resolve relative paths against a base directory
 
 ### `clore::extract::normalize_entry_file`
 
@@ -319,9 +319,7 @@ Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.m
 
 Implementation: [Implementation](functions/normalize-entry-file.md)
 
-函数 `clore::extract::normalize_entry_file` 通过组合 `std::filesystem` 操作将 `entry.file` 规范化为绝对路径并解析链接依赖。首先检查路径是否为相对路径，若是则与 `entry.directory` 拼接；接着调用 `std::filesystem::absolute` 生成绝对形式，然后通过 `lexically_normal` 做词法上的规范化。为处理符号链接，进一步尝试 `weakly_canonical`：若失败（如路径不存在或权限不足）则回退到词法规范化结果，最终以 Unix 风格返回 `generic_string`。
-
-该函数主要依赖 `std::filesystem::path` 及其错误处理（通过 `std::error_code`），不涉及外部文件系统缓存或其他模块。控制流简洁：仅处理相对路径分支和回退分支，确保在无法解析真实路径时仍返回格式一致的结果。
+该函数解析 `entry.file` 路径并尝试将其转换为绝对形式，随后进行词法规范化和弱规范化。具体流程为：从 `std::filesystem::path` 构造开始，若路径是相对路径则将其与 `entry.directory` 拼接；接着调用 `fs::absolute` 将其转为绝对路径（若转换失败则保留原路径）；然后调用 `lexically_normal()` 消除冗余的 `..` 和 `.` 组件。最后尝试 `fs::weakly_canonical` 以解析符号链接并将结果转换为通用字符串格式返回；若弱规范化失败则直接返回词法规范化后的通用字符串。整个函数完全依赖 `<filesystem>` 标准库，未涉及其他内部函数或复杂错误处理。
 
 #### Side Effects
 
@@ -331,11 +329,12 @@ No observable side effects are evident from the extracted code.
 
 - `entry.file`
 - `entry.directory`
+- filesystem state for path resolution and canonicalization
 
 #### Usage Patterns
 
-- Used by `build_compile_signature` to create a stable file key
-- Used by `ensure_cache_key_impl` to normalize the file path before caching
+- used in `clore::extract::build_compile_signature` to generate a hash key
+- used in `clore::extract::ensure_cache_key_impl` to normalize the entry file before caching
 
 ### `clore::extract::query_toolchain_cached`
 
@@ -345,28 +344,30 @@ Definition: `extract/compiler.cppm:233`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-函数 `clore::extract::query_toolchain_cached` 通过缓存机制返回与给定 `CompileEntry` 关联的工具链参数。它首先检查 `entry.arguments` 是否为空，若为空则直接返回空向量。否则，使用 `entry.cache_key` 作为查找键；若该键为空，则复制 `entry` 并调用 `ensure_cache_key` 生成缓存键。随后在 `db.toolchain_cache` 中查找该键，若命中则返回对应的已缓存 `std::vector<std::string>`。
+函数 `clore::extract::query_toolchain_cached` 在检查 `entry.arguments` 非空后，首先处理缓存键：若 `entry.cache_key` 为空，则通过复制 `entry` 并调用 `ensure_cache_key` 生成键值，再用移动后的副本键赋值给局部变量 `key`。随后，它在 `db.toolchain_cache` 中按 `key` 查找：若命中则直接返回缓存结果；否则调用 `sanitize_tool_arguments` 对原始 `entry` 进行参数清理，将清理结果与 `key` 配对插入缓存，并返回该结果。
 
-若缓存未命中，函数调用 `sanitize_tool_arguments` 对原始 `entry` 进行清理，将结果存入 `db.toolchain_cache`（键为步骤中确定的 `key`），并返回该结果。该实现依赖于 `ensure_cache_key`（用于保证缓存键的一致性）和 `sanitize_tool_arguments`（负责实际的参数规范化与提取）。
+该实现的核心依赖是 `ensure_cache_key`（用于保证缓存键存在）和 `sanitize_tool_arguments`（用于计算实际工具链参数），两者均以 `CompileEntry` 为输入。缓存查找与更新均直接在 `db.toolchain_cache`（一个从 `cache_key` 到字符串向量的映射）上操作，避免了重复计算开销。
 
 #### Side Effects
 
-- Modifies the toolchain cache of the `CompilationDatabase` object
+- writes to `db.toolchain_cache` (inserts or updates the cache entry)
+- calls `ensure_cache_key` on a local copy of `entry` (no effect outside function)
 
 #### Reads From
 
-- entry`.arguments`
-- entry`.cache_key`
-- db`.toolchain_cache`
+- `entry.arguments`
+- `entry.cache_key`
+- `db.toolchain_cache` (for cache lookup)
+- `sanitize_tool_arguments(entry)` reads from `entry`
 
 #### Writes To
 
-- db`.toolchain_cache`
+- `db.toolchain_cache` (via `insert_or_assign`)
 
 #### Usage Patterns
 
-- Caching sanitized tool arguments for compile entries
-- Avoiding repeated sanitization of tool arguments
+- callers retrieve cached sanitized tool arguments for a compile entry
+- used to avoid repeated calls to `sanitize_tool_arguments` for the same entry
 
 ### `clore::extract::sanitize_driver_arguments`
 
@@ -376,7 +377,7 @@ Definition: `extract/compiler.cppm:207`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该函数首先通过 `normalize_argument_path` 规范化 `entry.file` 与 `entry.directory` 得到 `source_path`，然后对 `entry.arguments` 执行 `std::erase_if`，移除那些非空、不以 `-` 开头且经相同规范化后与 `source_path` 相等的参数。这一过滤逻辑用于剔除与输入文件自身路径重复的参数（如显式传递的源文件名），保留编译选项和标志。核心依赖是 `normalize_argument_path`，它负责将相对路径或混合路径转换为统一的绝对形式以进行精确比较；内部不涉及复杂的状态或异常处理，仅依赖标准库容器算法和路径规范化工具。
+该函数首先复制 `entry.arguments` 的副本 `adjusted`，并利用 `normalize_argument_path` 将 `entry.file` 与 `entry.directory` 组合后规范化得到 `source_path`。随后通过 `std::erase_if` 对 `adjusted` 执行过滤：仅移除那些不为空、不以 `'-'` 开头、且经 `normalize_argument_path` 规范化后路径与 `source_path` 相同的参数。其余参数（包括空串、以 `'-'` 开头的选项以及其他无关路径）被保留，最终返回过滤后的 `adjusted`。整个过滤过程完全依赖于 `normalize_argument_path` 提供的路径规范化能力，无需额外分支或外部状态。
 
 #### Side Effects
 
@@ -384,14 +385,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `entry.arguments`
-- `entry.file`
-- `entry.directory`
+- entry`.arguments`
+- entry`.file`
+- entry`.directory`
+- `normalize_argument_path`
 
 #### Usage Patterns
 
-- used to clean up compiler argument lists before invoking the driver
-- called to avoid duplicate source file arguments
+- preparing command-line arguments for compiler invocation
+- removing the source file from argument lists
+- obtaining compiler flags for analysis
 
 ### `clore::extract::sanitize_tool_arguments`
 
@@ -401,7 +404,7 @@ Definition: `extract/compiler.cppm:221`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-`clore::extract::sanitize_tool_arguments` 的实现完全依赖于委托：它将接收到的 `CompileEntry` 引用传递给 `sanitize_driver_arguments`，再将结果直接传入 `strip_compiler_path`。内部控制流是线性的，没有分支、循环或错误处理；唯一的数据流是参数向量经过两次转换后的返回值。这两个被调用的函数分别承担了清理编译器特定参数和剥离可执行路径的核心工作，共同构成了整个函数的计算逻辑。
+该函数通过一个简单的两步流水线实现参数清理。首先调用 `clore::extract::sanitize_driver_arguments(entry)`，该步骤负责处理驱动级别的参数，包括路径规范化、去除与编译无关的选项等；然后对返回的参数列表调用 `clore::extract::strip_compiler_path`，移除其中的编译器路径元素（通常是第一个参数）。整个函数不涉及复杂的控制流或外部依赖，其核心逻辑完全委托给这两个内部函数，自身仅作为组合包装器。
 
 #### Side Effects
 
@@ -409,11 +412,11 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- const `CompileEntry` &entry
+- `entry` parameter of type `const CompileEntry &`
 
 #### Usage Patterns
 
-- Used in the extraction pipeline to normalize compile commands before parsing or analysis
+- Used to obtain cleaned argument list for a compile entry before further processing
 
 ### `clore::extract::strip_compiler_path`
 
@@ -423,7 +426,7 @@ Definition: `extract/compiler.cppm:181`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该函数接收一个代表编译器调用的参数向量，并返回移除了第一个元素（即编译器可执行路径）后的剩余参数。若输入参数不足两个元素（即没有后续参数），则返回一个空向量。控制流仅包含一个长度检查与一次向量切片操作，不依赖外部函数或数据结构，算法复杂度为线性复制。
+函数 `clore::extract::strip_compiler_path` 的实现基于简单的前缀截断。它接受一个代表编译器调用参数的 `std::vector<std::string>`。若输入向量大小不超过 1，直接返回空向量；否则，通过向量构造函数从 `args.begin() + 1` 到 `args.end()` 复制剩余元素，构造并返回一个新的向量。该过程不依赖任何外部组件，仅使用标准库容器操作，其控制流为一个分支判断和一次区间复制。
 
 #### Side Effects
 
@@ -431,15 +434,20 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `args` parameter
+- `args` parameter (vector of strings)
+
+#### Writes To
+
+- Returns a new vector of strings; does not modify any external state
 
 #### Usage Patterns
 
-- Used to extract compiler flags from a compilation command, e.g., when processing `CompileEntry` arguments.
+- Used to extract compiler arguments from a full command line
+- Often called before sanitizing or normalizing arguments
 
 ## Internal Structure
 
-模块 `extract:compiler` 围绕编译数据库的加载、条目规范化及编译器调用实例化进行分解。核心公开类型包括 `CompileEntry`（存储源文件、编译目录、参数列表及缓存字段）和 `CompilationDatabase`（维护条目列表与工具链缓存）。公开函数从 `load_compdb` 开始，逐层处理：先通过 `normalize_entry_file` 与 `sanitize_driver_arguments` 完成路径和参数的标准化，再通过 `ensure_cache_key` 建立唯一缓存标识，最后由 `query_toolchain_cached` 和 `create_compiler_instance` 将清理后的输入转化为可复用的编译器实例。内部处于匿名命名空间的辅助函数（如 `parse_compiler_invocation`、`try_hash_source_file`、`build_compile_signature_impl`）负责底层的路径哈希、参数解析与签名计算，确保公开接口的职责清晰且可测试。该模块仅导入 `std` 与 `support` 模块，依赖后者提供的文件 I/O、路径归一化及缓存键构造能力，自身则专注于编译器调用相关的解析、去重与实例化逻辑，形成从原始编译数据库到可用编译器实例的完整转换流水线。
+`extract:compiler` 是提取管线的核心模块，负责将编译数据库中的原始条目转换并规范化为可被下游直接消费的 `CompileEntry`。它仅导入 `std` 和 `support`，通过 `CompilationDatabase` 管理整个编译数据库的生命周期（`load_compdb` 解析 JSON 文件），并通过 `CompileEntry` 承载单个翻译单元的目录、文件、参数、规范化路径和缓存签名。模块内部按职责分为多个层次：最底层是路径处理与参数清理（`normalize_argument_path`、`sanitize_driver_arguments`、`sanitize_tool_arguments`），保证输入的一致性；中层负责按条目建立缓存键（`ensure_cache_key`、`build_compile_signature`），为后续的工具链缓存（`query_toolchain_cached`）和编译器实例创建（`create_compiler_instance`）提供可重复的索引。`lookup`、`strip_compiler_path` 等工具函数则被各层内部调用，保持模块的单一职责与低耦合。匿名命名空间中封装了 `parse_compiler_invocation` 和 `try_hash_source_file` 等实现细节，避免对外暴露不必要的符号。整体设计遵循“装载‑规范化‑签名‑缓存‑实例化”的管线顺序，依赖支撑模块处理文本与文件系统操作。
 
 ## Related Pages
 

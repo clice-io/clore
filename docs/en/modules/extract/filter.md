@@ -1,6 +1,6 @@
 ---
 title: 'Module extract:filter'
-description: 'The extract:filter module provides path resolution and filtering utilities used during the extraction process. It defines public functions such as resolve_path_under_directory, canonical_graph_path, and project_relative_path that normalize and compute relative paths from project roots. Filtering capabilities are exposed through matches_filter and path_prefix_matches, which check inclusion criteria and directory ancestry. The PathResolveError struct reports failures when a path cannot be resolved to a filesystem location. Together, these components manage scope restrictions and path transformations essential for extracting relevant source artifacts.'
+description: 'The extract:filter module is responsible for providing path resolution, normalization, and filtering utilities used throughout the extraction pipeline. It abstracts filesystem operations to ensure that paths are safely resolved under designated root directories, canonicalized for consistent comparison, and tested against inclusion or exclusion patterns. The module handles error conditions such as unresolvable or out‐of‑range paths through a dedicated PathResolveError struct.'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,9 @@ template: doc
 
 ## Summary
 
-The `extract:filter` module provides path resolution and filtering utilities used during the extraction process. It defines public functions such as `resolve_path_under_directory`, `canonical_graph_path`, and `project_relative_path` that normalize and compute relative paths from project roots. Filtering capabilities are exposed through `matches_filter` and `path_prefix_matches`, which check inclusion criteria and directory ancestry. The `PathResolveError` struct reports failures when a path cannot be resolved to a filesystem location. Together, these components manage scope restrictions and path transformations essential for extracting relevant source artifacts.
+The `extract:filter` module is responsible for providing path resolution, normalization, and filtering utilities used throughout the extraction pipeline. It abstracts filesystem operations to ensure that paths are safely resolved under designated root directories, canonicalized for consistent comparison, and tested against inclusion or exclusion patterns. The module handles error conditions such as unresolvable or out‐of‑range paths through a dedicated `PathResolveError` struct.
+
+The public interface consists of functions that operate on integer path handles (rather than raw strings) to enforce a controlled, pipeline‑safe environment. `resolve_path_under_directory` validates that a target path lies strictly under a given root and returns the canonical absolute path. `canonical_graph_path` produces a stable, normalized identifier for a path for use in graph operations. `matches_filter` determines whether a path satisfies a two‑parameter filter criterion. `filter_root_path` transforms or normalizes a root path for pipeline consumption. `path_prefix_matches` checks whether a path starts with a given prefix, and `project_relative_path` computes a relative path from a project root to a source path. Together, these functions form the core path manipulation layer for the extraction framework.
 
 ## Imports
 
@@ -30,20 +32,20 @@ Definition: `extract/filter.cppm:8`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The struct `clore::extract::PathResolveError` consists of a single public member, `std::string message`, which stores a human-readable description of the resolution failure. No additional invariants are enforced beyond those inherent to `std::string`; the member is intended to be populated at construction or assignment time. All special member functions (default constructor, copy/move constructors, copy/move assignment, destructor) are implicitly defined by the compiler, meaning the struct is trivially copyable and movable via the corresponding operations of `std::string`. This lightweight design allows the error type to be passed and stored efficiently without custom resource management.
+The struct `clore::extract::PathResolveError` is implemented as a trivial aggregate containing a single `std::string message` field. This field is intended to hold a human-readable description of the error that occurred during path resolution. Its design places no additional invariants beyond those already enforced by `std::string`; however, callers are expected to populate `message` with a meaningful value for diagnostic purposes. As an aggregate, the struct supports brace-initialization and is implicitly default-constructible, copyable, and movable, with no special member implementations required.
 
 #### Invariants
 
-- The `message` member is always initialized (default-constructed or assigned).
+- The struct is an aggregate with one data member.
+- The `message` member may be empty or contain a human-readable error description.
 
 #### Key Members
 
-- `std::string message`
+- `message` - the error description string
 
 #### Usage Patterns
 
-- Constructed with a descriptive error message when path resolution fails.
-- Likely returned as an error from functions or stored in `std::expected` or similar error-handling mechanisms.
+- No specific usage patterns are provided in the evidence; it is assumed to be used for error reporting.
 
 ## Functions
 
@@ -55,21 +57,27 @@ Definition: `extract/filter.cppm:103`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function `clore::extract::canonical_graph_path` normalises a given `std::filesystem::path` into a uniform, platform-independent string suitable for graph contexts. It first attempts to compute an absolute path via `fs::absolute`; if successful, it applies `fs::weakly_canonical` on the lexically-normalised absolute form. Should that second step fail, it falls back to the absolute normalised path’s `generic_string`. If the initial absolute resolution itself fails (e.g., due to a non-existent component), the function computes a lexically-normalised version of the original path and tries `fs::weakly_canonical` on that; as a final fallback, it returns the normalised string directly. Throughout, `std::error_code` captures filesystem errors, ensuring that no exceptions propagate from the standard library calls, and the returned string always uses forward slashes via `generic_string`.
+The function `clore::extract::canonical_graph_path` implements a multi‑stage normalization strategy using `std::filesystem`. It first attempts to resolve the input `path` to an absolute form via `fs::absolute`. If that succeeds, it applies `fs::weakly_canonical` to the normalized absolute path; if the canonicalization also succeeds, the result is returned as a generic string. When canonicalization fails but absolute resolution succeeded, it falls back to the normalized absolute path’s generic string. If the initial `absolute` call fails, the function performs a purely lexical normalization of the original `path` and then tries `fs::weakly_canonical` on that normalized string; if that attempt fails as well, it returns the normalized generic string directly. The entire control flow is guarded by `std::error_code` to avoid exceptions, ensuring a usable string is always returned regardless of filesystem errors or missing entries.
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- Performs filesystem I/O to resolve absolute and canonical paths
 
 #### Reads From
 
+- filesystem state
+- current working directory
 - the input `path` parameter
-- filesystem state (to resolve absolute and canonical paths)
+
+#### Writes To
+
+- return value of type `std::string`
 
 #### Usage Patterns
 
-- normalizing paths for dependency graph nodes
-- computing a unique key for a filesystem path
+- Used to obtain a stable, canonical path key for graph nodes
+- Called when constructing or looking up dependency graph entries
+- Relies on filesystem to normalize path representations
 
 ### `clore::extract::filter_root_path`
 
@@ -79,7 +87,7 @@ Definition: `extract/filter.cppm:161`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function evaluates two candidate root paths from the provided `config` object. It first checks whether `config.workspace_root` is non‑empty; if so, it returns that path normalized via `lexically_normal()`. Otherwise, it falls back to normalizing `config.project_root`. This simple conditional ensures that when a workspace root is configured, it takes precedence as the filter root, while a project root serves as the default. No further transformation or validation is performed on the selected path.
+The function first checks whether `config.workspace_root` is non‑empty. If so, it returns `config.workspace_root` normalized via `lexically_normal()`; otherwise it falls back to normalizing `config.project_root`. This conditional choice means the filter root is always derived from a single configuration field, preferring the workspace root over the project root when present. The only dependency is `config::TaskConfig` and the `std::filesystem` path normalization utility.
 
 #### Side Effects
 
@@ -87,12 +95,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- config`.workspace_root`
-- config`.project_root`
+- `config::TaskConfig::workspace_root`
+- `config::TaskConfig::project_root`
 
 #### Usage Patterns
 
-- Obtain the normalized root path for filtering operations.
+- computing canonical root path for filtering operations
+- providing a normalized base directory for path comparisons
 
 ### `clore::extract::matches_filter`
 
@@ -102,9 +111,7 @@ Definition: `extract/filter.cppm:124`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function `clore::extract::matches_filter` determines whether a given `file` should be processed based on a `config::FilterRule` with include and exclude patterns, relative to a `filter_root` directory. It begins by normalising both the `file` path and the `filter_root` via `canonical_graph_path`, then computes a relative path from the root to the file using `project_relative_path`. If the relative path cannot be obtained (e.g. the file lies outside the root), the function immediately returns `false`.
-
-Internally, the algorithm proceeds in two phases. If the `filter.include` list is non-empty, it iterates over each pattern and tests `path_prefix_matches` against the relative path string; if no pattern matches, the function returns `false`. Regardless of include filtering, it then iterates over the `filter.exclude` list; if any exclusion pattern matches, the function returns `false`. Only if the relative path satisfies both the include (or absence of include rules) and the exclude rule set does it return `true`. The core dependencies are `canonical_graph_path` for path normalisation, `project_relative_path` for relative path computation, and `path_prefix_matches` for pattern matching against the generic string representation of the relative path.
+The implementation normalises both the target `file` and the `filter_root` by calling `clore::extract::canonical_graph_path` on each, producing `file_path` and `root_path`. It then computes a project‑relative path using `clore::extract::project_relative_path`; if no relative path exists, the function immediately returns `false`. After converting the relative path to a generic string (`relative_str`), control proceeds through two pattern‑matching stages driven by the `filter.include` and `filter.exclude` vectors. For includes, the function iterates over each `pattern` using `clore::extract::path_prefix_matches`; if none match, it returns `false`. For excludes, any matching pattern also causes an immediate `false` return. If both stages pass, the function returns `true`. All path comparisons rely on `path_prefix_matches` rather than full equality, and relative‑path resolution is a precondition for any further matching.
 
 #### Side Effects
 
@@ -112,14 +119,18 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `file` (const `std::string`&)
-- parameter `filter` (const `config::FilterRule`&)
-- parameter `filter_root` (const `std::filesystem::path`&)
+- parameter `file`
+- parameter `filter`
+- parameter `filter_root`
+- internal calls to `clore::extract::canonical_graph_path`
+- internal calls to `clore::extract::project_relative_path`
+- internal calls to `clore::extract::path_prefix_matches`
+- fields `filter.include` and `filter.exclude`
 
 #### Usage Patterns
 
-- filtering source files during symbol extraction
-- applying user-defined include/exclude rules
+- used in extraction pipeline to filter source files based on include/exclude rules
+- called after obtaining a normalized file path and before further processing
 
 ### `clore::extract::path_prefix_matches`
 
@@ -129,7 +140,7 @@ Definition: `extract/filter.cppm:33`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function `clore::extract::path_prefix_matches` determines whether a given `relative` path string starts with a `pattern` such that the match occurs at a directory boundary. It first strips any trailing slashes from `pattern`; if the result is empty it immediately returns `false`. When the pattern contains a slash, it performs a prefix check using `relative.starts_with(pattern)` and then validates that the remainder of `relative` is either empty or begins with another slash, ensuring the match respects path component boundaries. For patterns without a slash (i.e., a single name component), the function checks whether `relative` exactly equals `pattern`, or, if `relative` is longer, whether it starts with `pattern` followed by a slash. The implementation relies solely on `std::string_view` operations such as `empty()`, `back()`, `remove_suffix()`, `find()`, `starts_with()`, `size()`, and indexing, with no external dependencies or side effects.
+The function `clore::extract::path_prefix_matches` determines whether a `relative` path matches a given `pattern` as a directory‑aware prefix. It first strips any trailing slashes from `pattern`, returning `false` if the resulting pattern is empty. If the trimmed pattern contains a slash, the function requires an exact prefix match via `relative.starts_with(pattern)` and then verifies that either the strings are equal or the next character in `relative` is a slash—this enforces whole‑segment matching for multi‑component prefixes. When the pattern has no slash (i.e., it is a single name), the function first checks for an exact equality; if that fails, it ensures `relative` is at least one character longer than `pattern`, confirms the prefix match, and then checks that the character immediately following the prefix is a slash. This logic ensures that a single‑name pattern only matches an actual path component, not a partial file name. The function relies solely on `std::string_view` operations and has no external dependencies beyond the C++ standard library; it is used internally by `clore::extract::matches_filter` to evaluate inclusion/exclusion rules during file extraction.
 
 #### Side Effects
 
@@ -137,13 +148,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `relative`
-- `pattern`
+- `relative` (`std::string_view`)
+- `pattern` (`std::string_view`)
 
 #### Usage Patterns
 
-- Used to filter compilation entries by file path prefixes
-- Applied when checking if a source file belongs to a given directory pattern
+- used by path-filtering logic
+- called by `matches_filter` in the extract module
 
 ### `clore::extract::project_relative_path`
 
@@ -153,7 +164,7 @@ Definition: `extract/filter.cppm:64`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The implementation computes a relative path from `root_path` to `file` by calling `std::filesystem::path::lexically_relative` on `file` with `root_path`. This operation produces a path whose first component would place the starting location inside `root_path`; the result is stored in `rel`. If `rel` is empty—meaning the two paths are identical or `lexically_relative` could not produce a meaningful relative form—the function immediately returns `std::nullopt`. Otherwise, it iterates over each component of `rel`; if any component equals `".."`, the path escapes `root_path`, and the function again returns `std::nullopt`. Only when all components are within `root_path` does it return `rel` wrapped in `std::optional`. The entire control flow relies solely on standard library path operations and involves no external project‑specific dependencies.
+The function `clore::extract::project_relative_path` computes a relative path from `root_path` to `file` using `std::filesystem::path::lexically_relative` and stores the result in `rel`. It then validates the computed relative path: if `rel` is empty (meaning `file` is not under `root_path`) or if any component equals `".."` (indicating an escape above `root_path`), the function returns `std::nullopt`. Otherwise, it returns `rel` as the project-relative path. The algorithm is purely linear with a single loop over the components of the relative path, relying only on the standard library facilities `std::filesystem::path` and `std::optional`.
 
 #### Side Effects
 
@@ -161,13 +172,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `file` (const ref)
-- `root_path` (const ref)
+- parameter `file`
+- parameter `root_path`
 
 #### Usage Patterns
 
-- path validation before extraction
-- ensuring file is within project root
+- Used to derive a project-local path for source files during extraction.
+- Likely employed when normalizing file paths relative to a project root for indexing or analysis.
 
 ### `clore::extract::resolve_path_under_directory`
 
@@ -177,7 +188,7 @@ Definition: `extract/filter.cppm:79`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function `clore::extract::resolve_path_under_directory` resolves a file path from a compilation database entry against an associated directory. It first checks if the input `path` is empty, returning a `PathResolveError` with an appropriate message if so. For a relative `path`, it verifies that the provided `directory` is non‑empty; if empty, it returns an error indicating that a directory is required. Otherwise, it forms an absolute path by combining `directory` and `path` using the `/` `operator` on `std::filesystem::path`. Finally, the result is normalized via `lexically_normal()` and returned as a valid `std::expected`. The function relies solely on the `std::filesystem` library and the custom `PathResolveError` struct; no other project utilities are invoked.
+The implementation first checks whether the input `path` is empty, and if so, returns an error of type `clore::extract::PathResolveError` with an appropriate message. Otherwise, it constructs a `std::filesystem::path` object from `path`. If that path is relative, the function validates that the `directory` argument is non‑empty; if `directory` is empty, it returns another `PathResolveError`. Provided that check passes, the relative path is resolved by prepending `directory` via the `operator/` of `std::filesystem::path`. Finally, the function calls `lexically_normal()` on the resulting path to produce a canonical representation. No further resolution against the actual file system is performed — the logic relies solely on lexical normalization and the caller‑provided directory for disambiguation.
 
 #### Side Effects
 
@@ -185,17 +196,18 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- const `std::string`& path
-- const `std::string`& directory
+- `path` parameter
+- `directory` parameter
 
 #### Usage Patterns
 
-- Resolve compilation database entry file path
-- Normalize relative source paths
+- Resolves file paths from `compile_commands``.json` entries
+- Combines relative paths with the compilation directory
+- Used as a helper for normalizing entry file paths
 
 ## Internal Structure
 
-The `extract:filter` module is decomposed into two conceptual layers: path resolution utilities and filtering predicates. The resolution layer—comprising `resolve_path_under_directory`, `canonical_graph_path`, `project_relative_path`, and `path_prefix_matches—handles` normalization, prefix checking, and derivation of relative paths using opaque integer path handles, relying on `std` for underlying filesystem operations. The filtering layer (`matches_filter`, `filter_root_path`) applies inclusion or root-scoping rules, drawing configuration from the `config` module and using the resolution utilities to validate filtered paths. Error conditions from resolution are explicitly represented by the public `PathResolveError` struct, which carries an error message. Implementation structure separates public interface in the primary module (filter`.cppm`) from internal details, with all public symbols declared at module scope and no further internal submodules indicated.
+The `extract:filter` module is decomposed into a layered set of path handling utilities, filtering predicates, and error types. It imports only the `config` module and the standard library, keeping its dependencies minimal. At the lowest internal layer, core operations such as `path_prefix_matches`, `canonical_graph_path`, `resolve_path_under_directory`, and `project_relative_path` work on integer path handles, providing normalized, directory‑constrained, or relative representations. Above that, `matches_filter` and `filter_root_path` combine these primitives to implement configurable filtering logic, returning boolean or transformed handles. The module also defines a `PathResolveError` struct for error reporting during resolution. Internally, all public functions and variables are declared in a single partition (`filter.cppm`), with local variables for intermediate state (e.g., `relative`, `canonical`, `ec`) kept private to the implementation. This structure separates pure path manipulation from higher‑level filtering, enabling reuse and clear responsibility boundaries.
 
 ## Related Pages
 

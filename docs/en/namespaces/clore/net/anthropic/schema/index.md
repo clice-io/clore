@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::anthropic::schema'
-description: 'The clore::net::anthropic::schema namespace encapsulates the data structures and functions that define the schema for interacting with the Anthropic API. It provides variables such as name and description, which likely serve as field identifiers or constants used in schema construction. The primary functional elements are the template functions function_tool and response_format. function_tool accepts two string arguments—intended as a tool’s name and its description—and returns an integer representing the outcome of registering or validating the tool, with the template parameter T enabling type‑safe input parameters. response_format returns an integer that designates the expected response format, relying on the template type argument T to determine the format identifier. Architecturally, this namespace forms a type‑safe schema layer for building Anthropic API tool definitions and response format specifications, isolating schema‑related logic from other networking and client code within the clore::net::anthropic hierarchy.'
+description: 'The clore::net::anthropic::schema namespace provides type‑safe, C++ abstractions for constructing and representing schema objects required by the Anthropic API. It exposes the function template function_tool, which accepts a tool’s name and description (both std::string) and returns an int status code, embodying the logic to produce a conformant function‑tool schema. The related function response_format returns an integer format identifier for a given type T, used to select the response structure expected by the API. Declarations such as name and description serve as placeholder variables or schematic constants within this namespace.'
 layout: doc
 template: doc
 ---
@@ -9,38 +9,40 @@ template: doc
 
 ## Summary
 
-The `clore::net::anthropic::schema` namespace encapsulates the data structures and functions that define the schema for interacting with the Anthropic API. It provides variables such as `name` and `description`, which likely serve as field identifiers or constants used in schema construction. The primary functional elements are the template functions `function_tool` and `response_format`. `function_tool` accepts two string arguments—intended as a tool’s name and its description—and returns an integer representing the outcome of registering or validating the tool, with the template parameter `T` enabling type‑safe input parameters. `response_format` returns an integer that designates the expected response format, relying on the template type argument `T` to determine the format identifier. Architecturally, this namespace forms a type‑safe schema layer for building Anthropic API tool definitions and response format specifications, isolating schema‑related logic from other networking and client code within the `clore::net::anthropic` hierarchy.
+The `clore::net::anthropic::schema` namespace provides type‑safe, C++ abstractions for constructing and representing schema objects required by the Anthropic API. It exposes the function template `function_tool`, which accepts a tool’s name and description (both `std::string`) and returns an `int` status code, embodying the logic to produce a conformant function‑tool schema. The related function `response_format` returns an integer format identifier for a given type `T`, used to select the response structure expected by the API. Declarations such as `name` and `description` serve as placeholder variables or schematic constants within this namespace.
+
+Architecturally, this namespace centralises schema construction and validation, insulating the rest of the codebase from direct API‑schema serialisation. It enforces invariants (e.g., non‑empty, unique tool names) and relies on template parameters to support varied tool‑parameter shapes and response formats, thereby maintaining extensibility while keeping the schema‑building logic cohesive and testable.
 
 ## Functions
 
 ### `clore::net::anthropic::schema::function_tool`
 
-Declaration: `network/anthropic.cppm:755`
+Declaration: `network/anthropic.cppm:762`
 
-Definition: `network/anthropic.cppm:755`
+Definition: `network/anthropic.cppm:762`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-The function template `clore::net::anthropic::schema::function_tool` defines a callable tool within the Anthropic API schema. It expects two string arguments—typically the tool’s name and a description of its purpose—and returns an integer that represents the result of registering or validating the tool. The template parameter `T` allows the caller to specify the type of the tool’s input parameters schema, enabling type‑safe construction of the tool definition. Callers must supply both string values and a suitable `T` according to the schema contract; the returned integer indicates success or failure of the tool definition.
+The function template `clore::net::anthropic::schema::function_tool` accepts two `std::string` arguments that specify the tool’s name and description, and returns an `int` status code. Its caller-facing responsibility is to construct a function tool schema object that conforms to the Anthropic API specification, allowing the model to invoke the tool. The caller must guarantee that the name is non‑empty and unique among the tools in the request, and that the description provides clear context for when the tool should be used. The template parameter `T` designates the type of the tool’s parameter schema; callers are responsible for providing a concrete type that matches the expected structure of the tool’s inputs.
 
 #### Usage Patterns
 
-- Used to construct a `FunctionToolDefinition` for a specific type `T`
-- Called with name and description strings to create a tool definition for the Anthropic API
+- Creating a function tool definition for Anthropic schema
+- Delegating to generic function tool creator
 
 ### `clore::net::anthropic::schema::response_format`
 
-Declaration: `network/anthropic.cppm:750`
+Declaration: `network/anthropic.cppm:757`
 
-Definition: `network/anthropic.cppm:750`
+Definition: `network/anthropic.cppm:757`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-The `clore::net::anthropic::schema::response_format` template function returns an integer value that designates the expected format of an Anthropic API response. Callers rely on this function to obtain an opaque format identifier when constructing or validating schema objects; the precise meaning of the returned integer is determined by the template type argument `T` and the associated schema definitions. This function provides no arguments and requires no precondition beyond the availability of a valid template type.
+The function `clore::net::anthropic::schema::response_format` returns an integer identifying the response format for the specified type `T`. This format code is used by the Anthropic API to determine how responses are structured. The caller may invoke it without arguments; the template parameter `T` selects the format variant.
 
 #### Usage Patterns
 
-- Obtain a response format for the specified type T in the Anthropic context
+- Callers use this function to obtain the response format configuration for the template type `T` when interacting with the Anthropic API.
 
 ## Related Pages
 

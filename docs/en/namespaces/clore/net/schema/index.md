@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::schema'
-description: 'The clore::net::schema namespace provides the core definitions and functions for specifying network‑level schemas and tool registrations. It declares fundamental variables such as name, description, and schema, which are used to describe individual schema elements. Two key function templates are exposed: response_format<T>(), which returns an integer identifier that selects the response encoding for a caller‑provided type T; and function_tool<T>(std::string, std::string), which registers or retrieves a callable tool within the schema, returning an integer success indicator or handle. Together, these declarations enable type‑safe integration of callable functions and response formatting into the network layer, forming the schema foundation for structured communication.'
+description: 'The clore::net::schema namespace encapsulates the core schema definitions and operations for the networking layer. It declares metadata fields such as name, description, and schema, which are used to describe entities and their expected structures. Key template functions include response_format, which returns an integer identifier representing the expected response format for a given type (driving schema-level interpretation), and function_tool, which accepts two string arguments and returns an integer status or outcome, enabling tool-based interactions within the schema framework. Architecturally, this namespace provides a typed, declarative layer that defines how network messages are formatted, interpreted, and acted upon, serving as the contract between the networking infrastructure and higher-level application logic.'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-The `clore::net::schema` namespace provides the core definitions and functions for specifying network‑level schemas and tool registrations. It declares fundamental variables such as `name`, `description`, and `schema`, which are used to describe individual schema elements. Two key function templates are exposed: `response_format<T>()`, which returns an integer identifier that selects the response encoding for a caller‑provided type `T`; and `function_tool<T>(std::string, std::string)`, which registers or retrieves a callable tool within the schema, returning an integer success indicator or handle. Together, these declarations enable type‑safe integration of callable functions and response formatting into the network layer, forming the schema foundation for structured communication.
+The `clore::net::schema` namespace encapsulates the core schema definitions and operations for the networking layer. It declares metadata fields such as `name`, `description`, and `schema`, which are used to describe entities and their expected structures. Key template functions include `response_format`, which returns an integer identifier representing the expected response format for a given type (driving schema-level interpretation), and `function_tool`, which accepts two string arguments and returns an integer status or outcome, enabling tool-based interactions within the schema framework. Architecturally, this namespace provides a typed, declarative layer that defines how network messages are formatted, interpreted, and acted upon, serving as the contract between the networking infrastructure and higher-level application logic.
 
 ## Functions
 
@@ -21,12 +21,13 @@ Definition: `network/schema.cppm:584`
 
 Implementation: [`Module schema`](../../../../modules/schema/index.md)
 
-The function template `clore::net::schema::function_tool` accepts two `std::string` arguments, typically representing the name and description of the tool, and returns an `int` that serves as a success indicator or a handle for subsequent operations. The caller is responsible for providing valid strings; the function registers or retrieves a function tool within the schema, making it available for use in network calls or tool-calling protocols. The template parameter `T` specifies the callable type or signature that the tool wraps, enabling type‑safe integration with the schema system.
+The function `clore::net::schema::function_tool` is a public template that accepts two `std::string` arguments and returns an `int`. It provides a tool mechanism within the network schema layer, allowing callers to pass string inputs and receive an integer result that typically represents a status code, identifier, or other numeric outcome.
+
+Callers supply the two string parameters according to the schema’s contract; the function expects valid, non‑empty strings unless otherwise documented. The return value indicates success or failure and may be used in conjunction with related schema functions such as `clore::net::schema::response_format`.
 
 #### Usage Patterns
 
-- used to create function tool definitions for LLM calls with automatic schema generation
-- typically called with a reflectable type as the template argument
+- Instantiated with a reflectable type to generate a tool definition for an LLM function call
 
 ### `clore::net::schema::response_format`
 
@@ -36,11 +37,12 @@ Definition: `network/schema.cppm:561`
 
 Implementation: [`Module schema`](../../../../modules/schema/index.md)
 
-The template function `clore::net::schema::response_format<T>()` returns an integer identifier that represents the response format for the type `T`. It is the caller’s responsibility to provide a type `T` that is recognized within the schema system; the returned value is used to select the corresponding network-level response encoding.
+The template function `clore::net::schema::response_format` returns an integer identifier that describes the expected response format for a given type `T`. Callers supply the type as an explicit template argument and receive a value that can be used to drive schema-level decisions about how responses of that type are interpreted or handled. The function itself takes no runtime parameters and has no side effects.
 
 #### Usage Patterns
 
-- used to obtain a structured output schema for LLM API calls requiring a `ResponseFormat`
+- used to configure structured output for LLM calls
+- obtains a `ResponseFormat` for a reflectable type
 
 ## Related Pages
 

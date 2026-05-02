@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:symbol'
-description: 'The generate:symbol module is responsible for planning and rendering documentation pages for individual code symbols. It owns the core data structures SymbolDocPlan and PageDocLayout, which capture the documentation decisions and structural arrangement for a symbol’s page. The module provides public entry points for building page layouts (build_page_doc_layout), iterating over symbol documentation groups (for_each_symbol_doc_group), appending symbol doc pages to the generation pipeline (append_symbol_doc_pages), and querying page capabilities (page_supports_symbol_subpages). It also exposes utilities for title normalization (normalize_frontmatter_title), index path resolution (find_doc_index_path), and inserting cross-reference links and type‑member sections (add_symbol_doc_links, append_type_member_sections). These functions and types form the public API that drives the symbol‑specific page generation process.'
+description: 'The generate:symbol module is responsible for producing rendered documentation pages for individual symbols (e.g., types, functions, variables) extracted from the codebase. It owns the planning and layout logic that determines how each symbol’s documentation is structured, including its frontmatter, code snippets (declaration, implementation, resolved), member sections, relation links, and fallback content. Public interface elements include the data structures SymbolDocPlan and PageDocLayout, which capture per-symbol documentation plans and overall page layout groupings, respectively. Key public functions such as build_page_doc_layout, normalize_frontmatter_title, for_each_symbol_doc_group, add_symbol_doc_links, and append_symbol_doc_pages expose the module’s ability to construct, query, and render symbol documentation pages and their sub‑pages.'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,9 @@ template: doc
 
 ## Summary
 
-The `generate:symbol` module is responsible for planning and rendering documentation pages for individual code symbols. It owns the core data structures `SymbolDocPlan` and `PageDocLayout`, which capture the documentation decisions and structural arrangement for a symbol’s page. The module provides public entry points for building page layouts (`build_page_doc_layout`), iterating over symbol documentation groups (`for_each_symbol_doc_group`), appending symbol doc pages to the generation pipeline (`append_symbol_doc_pages`), and querying page capabilities (`page_supports_symbol_subpages`). It also exposes utilities for title normalization (`normalize_frontmatter_title`), index path resolution (`find_doc_index_path`), and inserting cross-reference links and type‑member sections (`add_symbol_doc_links`, `append_type_member_sections`). These functions and types form the public API that drives the symbol‑specific page generation process.
+The `generate:symbol` module is responsible for producing rendered documentation pages for individual symbols (e.g., types, functions, variables) extracted from the codebase. It owns the planning and layout logic that determines how each symbol’s documentation is structured, including its frontmatter, code snippets (declaration, implementation, resolved), member sections, relation links, and fallback content. Public interface elements include the data structures `SymbolDocPlan` and `PageDocLayout`, which capture per-symbol documentation plans and overall page layout groupings, respectively. Key public functions such as `build_page_doc_layout`, `normalize_frontmatter_title`, `for_each_symbol_doc_group`, `add_symbol_doc_links`, and `append_symbol_doc_pages` expose the module’s ability to construct, query, and render symbol documentation pages and their sub‑pages.
+
+The module collaborates closely with `generate:model` for core data types, `generate:markdown` for Markdown node construction, and `generate:diagram` for visual diagram generation. Its internal implementation handles tasks like collecting documentable children, building documentation plans, rendering symbol pages with context links and snippet sections, and sanitizing slugs and titles. The module also provides predicates like `page_supports_symbol_subpages` to control hierarchical documentation generation and utilities such as `find_doc_index_path` for navigating within the layout.
 
 ## Imports
 
@@ -36,25 +38,26 @@ Definition: `generate/render/symbol.cppm:19`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::PageDocLayout` serves as an internal container that partitions all documentation plans for a single rendered page by symbol category. It holds three separate vectors of `SymbolDocPlan` — `type_docs`, `variable_docs`, and `function_docs` — each storing the plans for its respective kind of symbol. This separation simplifies the rendering logic by allowing different layout or ordering rules per category while keeping the plans for all symbols of the page collected together. Additionally, the `index_paths` unordered map associates string keys (typically fully qualified symbol names or link labels) with file-system paths, enabling efficient generation of cross-reference links or an index of pages that contain those symbols. The struct imposes no invariants beyond those implied by the container types: each vector is a simple sequence of plans, and the map must contain no duplicate keys.
+The internal structure of `clore::generate::PageDocLayout` consists of four member fields that collectively partition the documentation content for a single rendered page. Three `std::vector<SymbolDocPlan>` members — `type_docs`, `variable_docs`, and `function_docs` — store symbol documentation plans grouped by kind. The fourth member, `index_paths`, is a `std::unordered_map<std::string, std::string>` that likely maps logical names or identifiers to file paths for cross‑referencing or link generation. An important invariant is that the categorization of plans into the three vectors is the responsibility of the caller; the struct itself performs no validation or enforcement of category correctness. Additionally, consistency between the entries in these vectors and the keys in `index_paths` is not guaranteed by the struct’s own methods. The design thus treats `PageDocLayout` as a passive data aggregate, relying on external orchestration (e.g., the generation pipeline) to maintain coherence among the four collections.
 
 #### Invariants
 
-- `index_paths` keys are unique as per `std::unordered_map`
-- Each vector may be empty
-- Elements in each vector are `SymbolDocPlan` instances
+- `type_docs`, `variable_docs`, and `function_docs` each contain only `SymbolDocPlan` objects relevant to their category
+- All keys in `index_paths` are unique
+- The struct is intended to be fully populated before use
 
 #### Key Members
 
+- `index_paths`
 - `type_docs`
 - `variable_docs`
 - `function_docs`
-- `index_paths`
 
 #### Usage Patterns
 
-- Populated by documentation generation logic
-- Consumed by page rendering code to produce final output
+- Populated by a layout builder during documentation generation
+- Consumed by a renderer to produce the final page output
+- Used to categorize symbol documentation by type, variable, and function
 
 ### `clore::generate::SymbolDocPlan`
 
@@ -64,24 +67,26 @@ Definition: `generate/render/symbol.cppm:13`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::SymbolDocPlan` implements a recursive node in a documentation plan tree. It holds three fields: an owning pointer `symbol` (to a `extract::SymbolInfo`, typically pointing into a symbol collection, may be null for the root), a `std::string index_path` for generating output file paths, and a `std::vector<SymbolDocPlan> children` that recursively establishes the tree hierarchy. The key invariant is that the tree formed by `children` mirrors the semantic nesting of the symbols being documented (e.g., namespace → class → member). The `symbol` pointer is non‑owning; the referenced object must outlive the plan. The `index_path` is used during rendering to determine file locations, and the recursive structure enables depth‑first traversal without maintaining explicit parent links.
+The struct `clore::generate::SymbolDocPlan` implements a tree node for organizing documentation generation plans. Its fields include `symbol`, a pointer to a `extract::SymbolInfo` object defaulting to `nullptr`, `index_path`, a `std::string` that stores the hierarchical path used for indexing, and `children`, a `std::vector<SymbolDocPlan>` representing child nodes. The `symbol` pointer being `nullptr` signifies an intermediate or root node without a direct symbol association. The `children` vector enables recursive nesting, with each child plan potentially having its own subtree. Invariants include that the tree structure mirrors the symbol hierarchy extracted from source code. The `index_path` field typically corresponds to the full dotted or qualified name of the symbol (or path for intermediate nodes) and is expected to be unique within the plan for correct output generation.
 
 #### Invariants
 
-- `symbol` may be null if no symbol info is associated
-- `children` can be empty if the symbol has no sub-symbols
-- Each `SymbolDocPlan` represents a node in a hierarchical documentation plan
+- No explicit invariants beyond default initialization
+- `symbol` may be null if not set
+- `index_path` may be empty
+- `children` vector may be empty
 
 #### Key Members
 
-- `symbol`
-- `index_path`
-- `children`
+- `symbol` member
+- `index_path` member
+- `children` member
 
 #### Usage Patterns
 
-- Used to construct a tree of documentation plans for symbols and their nested children
-- Likely processed by a renderer to generate documentation output
+- Used by documentation generation infrastructure to represent a hierarchical plan for symbol documentation
+- Other code likely populates instances of `SymbolDocPlan` by assigning the `symbol`, `index_path`, and `children` fields
+- The recursive `children` vector allows building a tree structure of nested symbol documentation plans
 
 ## Variables
 
@@ -91,7 +96,7 @@ Declaration: `generate/render/symbol.cppm:43`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-This variable is consumed by `clore::generate::(anonymous namespace)::render_symbol_page` to add documentation links to rendered symbol pages. It likely holds a callable or function reference that performs the link insertion.
+The variable `clore::generate::add_symbol_doc_links` is a callable object (likely a function or lambda) that participates in generating symbol documentation pages. It is referenced inside `render_symbol_page` to insert hyperlinks to related symbols or documentation sections, contributing to the page's link paragraphs.
 
 #### Mutation
 
@@ -99,7 +104,7 @@ No mutation is evident from the extracted code.
 
 #### Usage Patterns
 
-- called by `render_symbol_page`
+- called or referenced inside `render_symbol_page` to add symbol documentation links
 
 ### `clore::generate::append_symbol_doc_pages`
 
@@ -107,7 +112,7 @@ Declaration: `generate/render/symbol.cppm:60`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-Based on its name, `append_symbol_doc_pages` is likely used to append documentation pages for symbols during generation. No evidence of its specific role or consumption is provided.
+No evidence of mutation or reassignment after initialization is present. The variable is presumed to be consumed as part of the documentation page assembly pipeline, either as a function object or a function pointer, given its appearance among other rendering-related variables.
 
 #### Mutation
 
@@ -119,7 +124,7 @@ Declaration: `generate/render/symbol.cppm:49`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The variable's role is not explicitly shown in the evidence; it appears only in a declaration snippet. It is probably a callable (e.g., a function pointer or lambda) that participates in rendering type member documentation sections, but no further usage or mutation is observable from the provided context.
+Based solely on the provided evidence, no assignment, mutation, or consumption of this variable is shown. The variable name suggests involvement in appending type member sections during documentation generation, but this is speculative. The evidence includes only its declaration and a partial source snippet.
 
 #### Mutation
 
@@ -135,35 +140,32 @@ Definition: `generate/render/symbol.cppm:897`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function first performs early‑exit checks: if `page_supports_symbol_subpages` returns false, or the base directory derived via `page_directory_of` is empty, it returns an empty `PageDocLayout`. Otherwise it collects all relevant symbols for the page—using `collect_namespace_symbols` for namespace pages and `collect_implementation_symbols` otherwise—and classifies them into three vectors based on kind predicates (`is_type_kind`, `is_variable_kind`, `is_function_kind`). Each category is then processed by `build_symbol_doc_plans` to populate the corresponding field of the layout: `type_docs`, `variable_docs`, and `function_docs`. Finally `for_each_symbol_doc_group` iterates over every group of plans and calls `register_symbol_doc_plan` to integrate them into the layout, which is then returned.
+The function begins by checking `page_supports_symbol_subpages`; if the plan does not permit subpages, it returns a default‑constructed `PageDocLayout`. It then derives a base directory via `page_directory_of` and, if empty, returns the empty layout. Symbols are collected according to the page type: for namespace pages, `collect_namespace_symbols` is used; otherwise `collect_implementation_symbols` is called with an unconditional predicate. The resulting set of `extract::SymbolInfo` pointers is partitioned into three vectors (`type_symbols`, `variable_symbols`, `function_symbols`) based on their kind. For each category, `build_symbol_doc_plans` is invoked with the `model`, `plan`, the relevant symbol list, and the computed `base_dir`, producing `SymbolDocPlan` sequences that are stored respectively in `layout.type_docs`, `layout.variable_docs`, and `layout.function_docs`. Finally, `for_each_symbol_doc_group` iterates over all groups in the layout and registers each plan into the layout via `register_symbol_doc_plan`, which populates the index‑path and other cross‑reference structures of the `PageDocLayout`.
 
 #### Side Effects
 
-- Modifies the returned `PageDocLayout` object by populating its `type_docs`, `variable_docs`, `function_docs` members and registering symbol doc plans via `register_symbol_doc_plan`
+- Allocates memory for symbol doc plans via `build_symbol_doc_plans`
+- Populates the `type_docs`, `variable_docs`, and `function_docs` vectors of the `PageDocLayout`
+- Registers each `SymbolDocPlan` into the `PageDocLayout` via `register_symbol_doc_plan`
 
 #### Reads From
 
-- plan (`PagePlan`)
-- model (`ProjectModel`)
-- `page_supports_symbol_subpages`
-- `page_directory_of`
-- `collect_namespace_symbols`
-- `collect_implementation_symbols`
-- `is_type_kind`
-- `is_variable_kind`
-- `is_function_kind`
-- `build_symbol_doc_plans`
-- `for_each_symbol_doc_group`
-- `register_symbol_doc_plan`
+- `plan` (const `PagePlan&`) — reads `plan.relative_path`, `plan.page_type`, `plan.owner_keys`
+- `model` (const `extract::ProjectModel&`) — provides symbol info
+- Collected `SymbolInfo` objects via `collect_namespace_symbols` or `collect_implementation_symbols`
+- `page_directory_of` — computes base directory from path
+- `page_supports_symbol_subpages` — queries page capability
 
 #### Writes To
 
-- Returned `PageDocLayout` object (fields: `type_docs`, `variable_docs`, `function_docs`)
-- (via `register_symbol_doc_plan`) internal mapping within layout
+- The returned `PageDocLayout` object (local variable `layout`)
+- `layout.type_docs`, `layout.variable_docs`, `layout.function_docs` — populated by `build_symbol_doc_plans`
+- Internal registration state of `layout` via `register_symbol_doc_plan`
 
 #### Usage Patterns
 
-- Called during page documentation generation to construct a layout of symbol documentation plans categorized by kind
+- Called during page documentation generation to create subpage layouts for types, variables, and functions
+- Used as part of building the overall page structure for module, namespace, or implementation pages
 
 ### `clore::generate::find_doc_index_path`
 
@@ -173,7 +175,9 @@ Definition: `generate/render/symbol.cppm:804`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function performs a direct map lookup on `layout.index_paths`, constructing a temporary `std::string` from the `qualified_name` view to serve as the key. If the entry exists, it returns a pointer to the associated value without copying; otherwise it returns `nullptr`. This avoids unnecessary string duplication and provides a simple existence-check mechanism for the precomputed index paths. The implementation has no external dependencies beyond the `PageDocLayout` data structure and the standard library.
+The function accepts a reference to `PageDocLayout` and a `std::string_view` qualified name, then searches the `index_paths` map for an entry with that name. It constructs a temporary `std::string` from the view to perform the lookup, which may incur a small allocation but simplifies the comparison against the map’s key type. The function returns a pointer to the associated path string if found, or `nullptr` if no match exists.
+
+Internally, the control flow is a single map lookup via `layout.index_paths.find(...)`. The result is compared against `layout.index_paths.end()`, and based on the check either a pointer to the found element’s second member (the path) is returned, or a null pointer. The key dependency is the `PageDocLayout` type, which must provide an `index_paths` member that is a map from `std::string` to some string type. The function avoids copying the path by returning a raw pointer to the existing storage.
 
 #### Side Effects
 
@@ -181,13 +185,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- layout`.index_paths`
-- `qualified_name`
+- `layout` (specifically `layout.index_paths` member)
+- `qualified_name` parameter
 
 #### Usage Patterns
 
-- lookup index path by qualified name
-- used during page generation to resolve symbol paths
+- Lookup of index page paths during documentation generation
+- Retrieving a path for a symbol after constructing a `PageDocLayout`
 
 ### `clore::generate::for_each_symbol_doc_group`
 
@@ -197,7 +201,7 @@ Definition: `generate/render/symbol.cppm:27`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::for_each_symbol_doc_group` implements a simple dispatch loop over the three documentation group containers stored in a `PageDocLayout`. It sequentially invokes the `Visitor` functor on `layout.type_docs`, `layout.variable_docs`, and `layout.function_docs`, in that fixed order. There is no branching or conditional logic; the control flow is strictly linear. The design relies on `PageDocLayout` exposing these three public fields as the canonical partitions of symbol documentation. The visitor is forwarded via a forwarding reference, allowing both lvalue and rvalue callables. No internal state is modified, and no return value is extracted beyond the void return type. The function serves as a central iterator for downstream processing of all symbol documentation groups within a layout.
+The function `clore::generate::for_each_symbol_doc_group` is a simple dispatch that, given a `PageDocLayout` and a `Visitor` callable, applies the visitor to each of the three categorized symbol documentation collections stored in the layout. It sequentially invokes `visitor(layout.type_docs)`, `visitor(layout.variable_docs)`, and `visitor(layout.function_docs)`. This provides a uniform way to iterate over all top-level symbol-document groups—type docs, variable docs, and function docs—in a predetermined order. The function depends solely on the `PageDocLayout` structure exposing these three fields and on the visitor being callable with the type of each field. No conditional branching, mutation of layout state, or additional control flow is performed.
 
 #### Side Effects
 
@@ -205,14 +209,15 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
+- the `PageDocLayout` parameter `layout`
 - `layout.type_docs`
 - `layout.variable_docs`
 - `layout.function_docs`
+- the `Visitor` functor parameter `visitor`
 
 #### Usage Patterns
 
-- Iterating over all symbol doc groups in a page layout
-- Applying a visitor to each group for rendering or analysis
+- used to apply a visitor to each of the three symbol documentation groups (type, variable, function) from a `PageDocLayout`
 
 ### `clore::generate::normalize_frontmatter_title`
 
@@ -222,9 +227,7 @@ Definition: `generate/render/symbol.cppm:885`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function first strips inline Markdown formatting from the input `page_title` via `strip_inline_markdown`. If the resulting plain text is non‑empty, it is returned directly. Otherwise, the function falls back to `trim_ascii` applied to the original `page_title`, which removes leading and trailing ASCII whitespace. This fallback ensures that a title consisting entirely of Markdown markup still yields a non‑empty result.
-
-The implementation depends on two internal helper functions: `strip_inline_markdown` for removing lightweight formatting (e.g., bold, italic, inline code) from the title string, and `trim_ascii` for whitespace trimming. Both are presumed to be defined in the same translation unit or namespace. No external dependencies or complex control flow are involved; the logic is a straightforward conditional return based on the intermediate plain‑text result.
+The function first strips inline Markdown formatting from the input `page_title` via `strip_inline_markdown`. If the resulting plain text is non‑empty, it is returned directly as the normalized title. Otherwise, the function falls back to trimming ASCII whitespace from the original `page_title` using `trim_ascii` and returns that. The control flow is a simple conditional: the Markdown‑free variant is preferred; the trimmed original serves as a safe default when stripping yields an empty string.
 
 #### Side Effects
 
@@ -232,12 +235,12 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `page_title` parameter
+- `page_title` (the input `std::string_view`)
 
 #### Usage Patterns
 
-- Used to normalize frontmatter titles before page rendering
-- Called during documentation generation to clean titles
+- used to normalize titles for frontmatter in documentation page generation
+- ensures a clean, non-empty title for metadata rendering
 
 ### `clore::generate::page_supports_symbol_subpages`
 
@@ -247,7 +250,7 @@ Definition: `generate/render/symbol.cppm:893`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function evaluates a single condition: it accesses the `page_type` field of the provided `PagePlan` object and returns `true` if that value equals either `PageType::Namespace` or `PageType::Module`; otherwise it returns `false`. The control flow is a direct equality check with no branching or external calls. The implementation depends only on the `PagePlan` type and the `PageType` enumeration; no other analysis or state is consulted.
+The function `clore::generate::page_supports_symbol_subpages` determines whether a given page type supports subpages for symbols. It accepts a constant reference to a `PagePlan` object and returns a boolean. Internally, it performs a single comparison against the `plan.page_type` member: if the value equals `PageType::Namespace` or `PageType::Module`, the result is `true`; otherwise `false`. This produces a straightforward, branch-free check with no additional control flow. The function depends only on the `PagePlan` type and the `PageType` enumeration, making it a lightweight predicate that is likely called when evaluating page layout or navigation generation. There are no side effects or external dependencies beyond the input parameter.
 
 #### Side Effects
 
@@ -255,15 +258,19 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
+- `plan` (the `PagePlan` parameter)
 - `plan.page_type`
 
 #### Usage Patterns
 
-- Used in page generation to decide if subpages should be created for a given page plan.
+- Called in page generation logic to decide whether to generate symbol subpages for a given page plan.
+- Used by functions such as `clore::generate::build_page_root` and `clore::generate::build_namespace_page_root` to conditionally include subpage structures.
 
 ## Internal Structure
 
-The `generate:symbol` module is responsible for planning and rendering individual symbol documentation pages. It imports support from `generate:common` (linking and Markdown utilities), `generate:markdown` (document AST construction), `generate:model` (page plans and symbol analyses), `config`, `extract`, `generate:diagram`, and the standard library. Internally, the module is decomposed into a public interface—comprising `SymbolDocPlan`, `PageDocLayout`, and functions such as `build_page_doc_layout`, `for_each_symbol_doc_group`, and `append_symbol_doc_pages`—and an anonymous-namespace implementation layer that handles plan construction (`build_symbol_doc_plans`, `collect_documentable_children`, `collect_member_symbols`), Markdown rendering (`render_symbol_page`, `render_document_page`, `declaration_snippet`, `implementation_snippet`), and structural helpers (`sanitize_doc_slug`, `join_relative_paths`, `normalize_frontmatter_title`). This layering separates the stable export contract from the internal rendering and planning logic, enabling the pipeline to evolve without affecting external callers.
+The `generate:symbol` module is responsible for rendering documentation pages for individual code symbols. It decomposes the task into two layers: a planning layer that builds `SymbolDocPlan` and `PageDocLayout` structures to define which symbols are documented and how pages are organized, and a rendering layer that transforms those plans into Markdown content. The module imports extraction results, configuration, and shared generation utilities (`generate:common`, `generate:model`, `generate:markdown`, `generate:diagram`), placing it at the top of the generation pipeline where symbol metadata is consumed and user‑facing pages are produced.
+
+Internally, the module is implemented as a single module unit using an anonymous namespace for nearly all helper functions. These helpers handle specific rendering concerns such as building symbol frontmatter, creating declaration or implementation snippets, collecting related symbols, and appending member or relation sections. Public entry points like `build_page_doc_layout`, `for_each_symbol_doc_group`, and `append_symbol_doc_pages` expose a controlled interface for other parts of the generator to request symbol page plans, iterate over groups, or trigger full page output. This structure keeps the rendering logic cohesive while providing clean boundaries for integration with broader documentation workflows.
 
 ## Related Pages
 

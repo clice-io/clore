@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::anthropic::protocol::buildmessagesurl'
-description: 'Constructs the complete URL for the Anthropic Messages API endpoint. Given a string view that identifies the target resource (for example, an API key or version token), clore::net::anthropic::protocol::build_messages_url returns the fully qualified URL as a std::string. The caller must supply a valid string view; no validation is performed within the function.'
+description: 'The function clore::net::anthropic::protocol::build_messages_url accepts a std::string_view (presumably a resource identifier or API key component) and returns a std::string representing the fully constructed URL for the Anthropic Messages API endpoint. Callers provide the necessary input to parameterize the URL; the function encapsulates the endpoint path and any required base URL logic. The returned string is suitable for use in HTTP requests to the Anthropic service.'
 layout: doc
 template: doc
 ---
@@ -21,11 +21,11 @@ Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.m
 auto (std::string_view) -> std::string;
 ```
 
-Constructs the complete URL for the Anthropic Messages API endpoint. Given a string view that identifies the target resource (for example, an API key or version token), `clore::net::anthropic::protocol::build_messages_url` returns the fully qualified URL as a `std::string`. The caller must supply a valid string view; no validation is performed within the function.
+The function `clore::net::anthropic::protocol::build_messages_url` accepts a `std::string_view` (presumably a resource identifier or API key component) and returns a `std::string` representing the fully constructed URL for the Anthropic Messages API endpoint. Callers provide the necessary input to parameterize the URL; the function encapsulates the endpoint path and any required base URL logic. The returned string is suitable for use in HTTP requests to the Anthropic service.
 
 ## Usage Patterns
 
-- Called by `clore::net::anthropic::detail::Protocol::build_url`
+- called by `clore::net::anthropic::detail::Protocol::build_url` to produce the messages endpoint URL
 
 ## Called By
 

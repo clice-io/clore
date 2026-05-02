@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::support'
-description: 'The clore::support namespace provides a collection of utility functions and types that serve as a foundational layer for the Clore project. Its responsibilities include UTF‑8 text file I/O (read_utf8_text_file, write_utf8_text_file), text normalization and validation (strip_utf8_bom, ensure_utf8, truncate_utf8, normalize_line_endings, normalize_path_string), caching infrastructure (build_cache_key, split_cache_key, build_compile_signature), and console configuration (enable_utf8_console). Notable declarations also include string‑comparison utilities (TransparentStringEqual, TransparentStringHash) for heterogeneous associative containers, a CacheKeyParts structure, and helper functions such as extract_first_plain_paragraph, canonical_log_level_name, and topological_order. Architecturally, this namespace abstracts platform‑specific and string‑handling details, ensuring that other modules in the codebase can work consistently with UTF‑8 text, file paths, and cache keys without reimplementing low‑level logic.'
+description: 'The clore::support namespace provides a collection of foundational utility functions and types used throughout the clore codebase. Its responsibilities include UTF‑8 text file I/O (reading, writing, console enablement), string normalization (line endings, path casing, BOM stripping, encoding validation), transparent hash and equality functors for heterogeneous lookup in unordered containers, and cache key construction and decomposition. The namespace also contains helpers for topological ordering, log level canonicalization, compile signature generation, and first‑paragraph extraction, making it a general‑purpose support layer that other clore modules depend on for consistent text and file handling.'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-The `clore::support` namespace provides a collection of utility functions and types that serve as a foundational layer for the Clore project. Its responsibilities include UTF‑8 text file I/O (`read_utf8_text_file`, `write_utf8_text_file`), text normalization and validation (`strip_utf8_bom`, `ensure_utf8`, `truncate_utf8`, `normalize_line_endings`, `normalize_path_string`), caching infrastructure (`build_cache_key`, `split_cache_key`, `build_compile_signature`), and console configuration (`enable_utf8_console`). Notable declarations also include string‑comparison utilities (`TransparentStringEqual`, `TransparentStringHash`) for heterogeneous associative containers, a `CacheKeyParts` structure, and helper functions such as `extract_first_plain_paragraph`, `canonical_log_level_name`, and `topological_order`. Architecturally, this namespace abstracts platform‑specific and string‑handling details, ensuring that other modules in the codebase can work consistently with UTF‑8 text, file paths, and cache keys without reimplementing low‑level logic.
+The `clore::support` namespace provides a collection of foundational utility functions and types used throughout the `clore` codebase. Its responsibilities include UTF‑8 text file I/O (reading, writing, console enablement), string normalization (line endings, path casing, BOM stripping, encoding validation), transparent hash and equality functors for heterogeneous lookup in unordered containers, and cache key construction and decomposition. The namespace also contains helpers for topological ordering, log level canonicalization, compile signature generation, and first‑paragraph extraction, making it a general‑purpose support layer that other `clore` modules depend on for consistent text and file handling.
 
 ## Diagram
 
@@ -38,22 +38,22 @@ Definition: `support/logging.cppm:57`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+`clore::support::CacheKeyParts` is a struct that represents the decomposed components of a cache key, typically used in conjunction with `clore::support::TransparentStringHash` and `clore::support::TransparentStringEqual`. It is designed to enable heterogeneous lookup in associative containers, allowing keys to be constructed and compared without requiring the exact stored type. The struct serves as the logical unit for caching purposes, likely within the logging subsystem, where key parts can be hashed and compared transparently with `std::string` equivalents.
 
 #### Invariants
 
-- `compile_signature` is default-initialized to 0 if not explicitly provided.
-- The struct is trivially copyable and movable via default compiler-generated operations.
+- `compile_signature` defaults to `0` if not explicitly set.
+- `path` is a `std::string` with no additional constraints implied by the evidence.
 
 #### Key Members
 
-- `path` – the file path component of the cache key
-- `compile_signature` – an integer hash or signature representing compilation inputs
+- `path`
+- `compile_signature`
 
 #### Usage Patterns
 
-- Constructed and passed to cache lookup or storage functions within `clore::support`.
-- Likely compared or hashed to uniquely identify compiled module signatures.
+- Defined as a fundamental part of cache key representation within the logging module.
+- Expected to be aggregated into a larger cache key or used directly to identify compiled artifacts.
 
 ### `clore::support::TransparentStringEqual`
 
@@ -63,27 +63,23 @@ Definition: `support/logging.cppm:33`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-The type `clore::support::TransparentStringEqual` is a function object that provides transparent equality comparison for string-like types. It is designed for use with heterogeneous associative containers, such as `std::unordered_set`, to enable lookup without constructing temporary `std::string` objects from string literals or other compatible types. The presence of the nested type alias `is_transparent` indicates that the comparison supports transparent lookup, allowing the container to match keys of different but comparable types efficiently.
+`clore::support::TransparentStringEqual` is a function object type that provides equality comparison for strings with transparent lookup support. It is intended for use as the key equality comparator in unordered associative containers, enabling heterogeneous lookup when combined with a transparent hash such as `clore::support::TransparentStringHash`. The presence of the `is_transparent` member type marks this comparator as transparent, allowing containers to perform lookups using string-like types such as `std::string_view` without constructing temporary `std::string` objects.
 
 #### Invariants
 
-- All overloads are `noexcept` and return `bool`.
-- Comparison is consistent with `operator==` for `std::string` and `std::string_view`.
-- No mutable state is stored; the functor is stateless.
-- Equal strings are guaranteed to compare equal regardless of argument types.
+- Provides equality comparison for strings
+- Supports heterogeneous lookup via `is_transparent`
+- All `operator()` overloads are `noexcept`
 
 #### Key Members
 
-- `using is_transparent = void`
-- `operator()(std::string_view, std::string_view) const noexcept`
-- `operator()(const std::string&, std::string_view) const noexcept`
-- `operator()(std::string_view, const std::string&) const noexcept`
-- `operator()(const std::string&, const std::string&) const noexcept`
+- `is_transparent` type alias
+- Four `operator()` overloads (each combination of `std::string_view` and `const std::string&`)
 
 #### Usage Patterns
 
-- Passed as the comparison key to `std::set`, `std::map`, `std::unordered_set`, or `std::unordered_map` to enable lookup with `std::string_view` without constructing `std::string` temporaries.
-- Used in heterogeneous lookup scenarios where keys are stored as `std::string` but lookup is performed with `std::string_view`.
+- Used as a comparator in associative containers to enable transparent lookup
+- Allows efficient searching with `std::string_view` without constructing temporary `std::string` objects
 
 #### Member Types
 
@@ -165,25 +161,26 @@ Definition: `support/logging.cppm:17`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-The `clore::support::TransparentStringHash` struct is a hash functor designed for use with unordered associative containers (such as `std::unordered_map` or `std::unordered_set`) that require heterogeneous lookup. It provides an `is_transparent` type alias, which enables the container's `find`, `count`, and similar member functions to accept arguments of types other than the container's key type (e.g., `std::string_view` or `const char*`) without requiring an explicit conversion to `std::string`. This improves efficiency by avoiding temporary key construction. It is intended to be paired with `clore::support::TransparentStringEqual` for transparent equality comparison.
+The struct `clore::support::TransparentStringHash` is a hash functor designed to support heterogeneous lookup in unordered associative containers. It exposes the `is_transparent` type alias, which enables transparent comparison and lookup by keys of different but compatible types, such as `std::string_view`, without requiring conversion to `std::string`. This struct is intended to be used alongside `clore::support::TransparentStringEqual` to form a complete set of transparent hash and equality functors for string-based keys.
 
 #### Invariants
 
-- All `operator()` overloads are noexcept
-- Equal string inputs produce equal hash values
-- Delegates exclusively to `std::hash<std::string_view>`
+- Hash values are identical to `std::hash<std::string_view>` for equivalent string content
+- All three `operator()` overloads produce the same hash for equal string content
+- The `is_transparent` type alias enables heterogeneous lookup in unordered containers
 
 #### Key Members
 
 - `is_transparent`
-- `operator()(``std::string_view`)
-- `operator()(`const `std::string`&)
-- `operator()(`const char*)
+- `operator()(std::string_view)`
+- `operator()(const std::string&)`
+- `operator()(const char*)`
 
 #### Usage Patterns
 
-- Used as the Hash template parameter in `std::unordered_set` or `std::unordered_map` for string keys
-- Enables lookups with `std::string_view`, `std::string`, or const char* without constructing a key type
+- Used as the hash functor in `std::unordered_set` or `std::unordered_map` with transparent key equality
+- Enables lookup with `std::string_view` or `const char*` without constructing a `std::string`
+- Serves as a building block for string-based associative containers that require heterogeneous access
 
 #### Member Types
 
@@ -253,14 +250,12 @@ Definition: `support/logging.cppm:368`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-The function `clore::support::build_cache_key` constructs a cache key from a string identifier and a numeric value. It accepts a `std::string_view` representing a key prefix or name and a `std::uint64_t` typically used as a hash or signature, and returns a `std::string` that can be used to uniquely identify cached artifacts.
-
-The returned key is deterministic for the same inputs and is designed for use in caching subsystems that require a string-based lookup. The caller is responsible for providing a consistent identifier and a matching numeric value; no side effects are introduced.
+The function `clore::support::build_cache_key` constructs a deterministic cache key string from a textual identifier and a numeric signature. The caller provides a `std::string_view` representing the key’s base name or context and a `std::uint64_t` that typically encodes a version, content hash, or compile signature. The returned `std::string` is intended for use as a unique, consistent lookup key in caching systems; its format can later be decomposed by the companion function `split_cache_key`.
 
 #### Usage Patterns
 
-- Used to form keys for caching compiled results
-- Called when building a cache entry identifier
+- building cache keys for compile results
+- combining a file path with a signature
 
 ### `clore::support::build_compile_signature`
 
@@ -270,12 +265,11 @@ Definition: `support/logging.cppm:352`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-The function `clore::support::build_compile_signature` constructs a 64‑bit signature for a compilation unit from its source path, a secondary identifier, and a compile‑related flag. It is typically used to associate a build artifact with specific inputs, enabling cache lookups or incremental builds. The caller provides a `std::string_view` representing the source file path, another `std::string_view` for a distinguishing key (such as a hash or version), and a `const int &` that conveys an additional compile parameter (e.g., optimization level or a flags index). The returned `std::uint64_t` is a deterministic hash of the normalized inputs; the function internally normalizes the file path to ensure consistent signatures across different path representations. The contract guarantees that identical inputs produce identical output signatures, and that the normalization uses the platform‑appropriate path separator.
+The function `clore::support::build_compile_signature` accepts two `std::string_view` arguments and a `const int &` argument, and returns a `std::uint64_t`. It constructs a deterministic, compact signature that uniquely identifies a compilation instance based on the provided inputs. The first two string views typically represent the source file path and compiler configuration or command line; the integer reference might encode an additional version or index. The returned 64‑bit value is designed for use as a key in caching or deduplication logic, enabling efficient comparison and storage of compilation variants. Internally, the function relies on `clore::support::normalize_path_string` to ensure consistent representation of file paths before generating the signature.
 
 #### Usage Patterns
 
-- generating a hash-based signature for compile options
-- used in caching or deduplication of compilation results
+- computing a hash key for compile caching from directory, file, and arguments
 
 ### `clore::support::canonical_log_level_name`
 
@@ -285,13 +279,13 @@ Definition: `support/logging.cppm:424`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-The function `clore::support::canonical_log_level_name` accepts a `std::string_view` representing a log level name and returns a `std::optional<std::string>`. If the input matches a recognized log level, it returns the canonical form of that level; otherwise it returns `std::nullopt`. The caller is responsible for providing a non‑empty, case‑sensitive (or case‑insensitive, depending on implementation) name; the function’s contract guarantees no exceptions and a determinate canonical mapping for known levels. The returned string is a stable, normalized representation that can be used for comparisons or storage.
+The function `clore::support::canonical_log_level_name` accepts a log level name as a `std::string_view` and returns a `std::optional<std::string>`. If the input corresponds to a recognized log level, the result is the canonical form of that level (for example, a fixed uppercase string such as `"ERROR"`). If the input is not a recognized log level, the function returns `std::nullopt`. This provides callers with a simple, consistent way to validate and normalize log level identifiers without exposing the internal mapping.
 
 #### Usage Patterns
 
-- validate log level name
-- normalize log level to lowercase
-- used before setting log level
+- Canonicalizing user-provided log level strings before use
+- Validating log level configuration entries
+- Mapping raw input to a consistent lowercase representation
 
 ### `clore::support::enable_utf8_console`
 
@@ -301,11 +295,11 @@ Definition: `support/logging.cppm:534`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-`clore::support::enable_utf8_console` configures the console environment to support UTF‑8 input and output. It should be called early in program startup, typically before any console I/O operations that involve non‑ASCII text. The function has no parameters and returns nothing; its effect is system‑wide and persists for the lifetime of the process. Under the hood it may adjust the console code page, set locale facets, or perform similar platform‑specific initialization to ensure that `std::cout`, `std::cin`, and related streams handle UTF‑8 correctly. The caller must ensure that this function is invoked at most once; repeated calls are harmless but unnecessary. On unsupported platforms the function may silently degrade gracefully, but the exact behavior depends on the underlying implementation.
+Call `clore::support::enable_utf8_console` to configure the process console for correct UTF‑8 text output. This function performs any necessary platform‑specific setup (such as changing the active console code page on Windows) so that subsequent writes to the standard output streams are interpreted as UTF‑8 by the console. It must be called once, before any output is emitted, and is safe to call even if the console already supports UTF‑8. The function is a void‑returning nullary operation; it does not perform I/O or throw exceptions.
 
 #### Usage Patterns
 
-- Called during program initialization to enable UTF-8 console support on Windows
+- Called during program initialization on Windows to enable UTF-8 console support
 
 ### `clore::support::ensure_utf8`
 
@@ -317,12 +311,12 @@ Implementation: [`Module support`](../../../modules/support/index.md)
 
 Declaration: [Declaration](functions/ensure-utf8.md)
 
-The function `clore::support::ensure_utf8` accepts a `std::string_view` and returns a `std::string` that is guaranteed to be a valid UTF-8 representation of the input. Callers can rely on the result being well-formed UTF-8, suitable for downstream operations that require UTF-8 encoding, such as writing to a file or performing truncation. The caller is responsible for providing the input text; the function handles any necessary normalization or conversion to ensure UTF-8 validity.
+The function `clore::support::ensure_utf8` accepts a `std::string_view` and returns a `std::string`. It is responsible for ensuring that the returned string is a valid UTF-8 encoding of the input. The caller can rely on the result being a correctly encoded UTF-8 string, suitable for further processing or output. This function is used by other utilities such as `clore::support::write_utf8_text_file` and `clore::support::truncate_utf8` to guarantee UTF-8 validity before performing operations that require correct encoding.
 
 #### Usage Patterns
 
-- called by `write_utf8_text_file` to ensure output is valid UTF-8
-- called by `truncate_utf8` to sanitize input before truncation
+- Used by `write_utf8_text_file` to sanitize input before writing
+- Used by `truncate_utf8` to ensure truncated result is valid UTF-8
 
 ### `clore::support::extract_first_plain_paragraph`
 
@@ -332,12 +326,11 @@ Definition: `support/logging.cppm:303`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-`clore::support::extract_first_plain_paragraph` accepts a `std::string_view` containing text that may include inline markdown formatting and returns a `std::string` holding the first paragraph of that text as plain text, with any markdown syntax removed. The caller is responsible for providing well‑formed input; the function does not modify the original string and returns only the first logical paragraph.
+This function extracts the first paragraph from the provided `std::string_view` input and returns it as a plain, non‑formatted `std::string`. It is designed for use cases where only the first logical paragraph of a message or document is needed, and any inline formatting (such as that used in Markdown) is automatically removed from the result. The caller passes a string view and receives ownership of a new `std::string` containing the first plain paragraph.
 
 #### Usage Patterns
 
-- extracting the first paragraph from Markdown documentation
-- obtaining a plain text summary from Markdown strings
+- Extracting plain text from Markdown documentation or log messages
 
 ### `clore::support::normalize_line_endings`
 
@@ -347,12 +340,12 @@ Definition: `support/logging.cppm:442`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-The function `clore::support::normalize_line_endings` accepts a `std::string_view` and returns a `std::string`. It transforms the line-ending sequences in the input into a canonical form, ensuring consistent line termination throughout the returned string. The caller can rely on the returned string having all line endings normalized, regardless of the original mix of carriage‑return and newline characters present in the input.
+`clore::support::normalize_line_endings` accepts a `std::string_view` and returns a `std::string` with line endings converted to a canonical form. This function ensures that any mixture of carriage-return (`\r`), line-feed (`\n`), or carriage-return–line-feed (`\r\n`) sequences present in the input are replaced by a single standard line-ending character. The caller provides the source text and receives a newly allocated string with consistent line breaks, suitable for further text processing or cross-platform interchange.
 
 #### Usage Patterns
 
-- normalize line endings for text processing
-- prepare strings for hash or comparison ignoring line ending variations
+- normalizing line endings in input text to Unix LF format
+- preprocessing text for consistent newline representation before further processing
 
 ### `clore::support::normalize_path_string`
 
@@ -362,13 +355,11 @@ Definition: `support/logging.cppm:348`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-`clore::support::normalize_path_string` accepts a `std::string_view` representing a filesystem path and returns a `std::string` containing a normalized version of that path. The normalization ensures that paths are represented in a consistent, canonical form, making them suitable for reliable string comparison, hashing, or use as keys in maps and cache signatures.
-
-The caller is responsible for providing a valid path string; the function does not verify that the path exists or is absolute. The returned string is intended to be platform-independent and free of redundant separators, relative components, or trailing separators. This function is primarily used by `clore::support::build_compile_signature` to produce stable identifiers for compilation inputs.
+The function `clore::support::normalize_path_string` accepts a `std::string_view` representing a file path and returns a `std::string` with a normalized, canonical form of that path. It is responsible for transforming path strings into a consistent representation, typically used to ensure that logically identical paths produce identical strings for hashing or comparison purposes. The caller can expect that the returned string is suitable for use as a key in operations like building compile signatures, where path normalization is required to avoid duplicate entries due to variations in separators, redundant segments, or other platform‑dependent differences.
 
 #### Usage Patterns
 
-- used by `clore::support::build_compile_signature` to normalize path arguments before hashing
+- used by `clore::support::build_compile_signature` to normalize path strings before constructing a hash
 
 ### `clore::support::read_utf8_text_file`
 
@@ -378,13 +369,13 @@ Definition: `support/logging.cppm:480`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-`clore::support::read_utf8_text_file` reads the entire contents of a UTF‑8 text file identified by the given file descriptor (`const int &`). The function strips any leading UTF‑8 byte order mark (BOM) from the read data, using `clore::support::strip_utf8_bom` to produce clean text. It returns an `int` indicating the outcome—typically zero for success or a non‑zero error code on failure. This function is the counterpart of `clore::support::write_utf8_text_file`.
+`clore::support::read_utf8_text_file` reads the contents of a UTF‑8 text file from an open file descriptor. The caller passes a `const int &` representing the descriptor, and the function returns an `int` that signals the outcome of the read (for example, a success code or an error indicator). The function is expected to validate the file’s encoding as UTF‑8 and to strip any leading byte‑order mark (BOM) before returning. The caller must provide a valid, readable file descriptor and should interpret the return value to determine whether the operation completed successfully.
 
 #### Usage Patterns
 
-- used to load text files for processing
-- used where UTF-8 BOM stripping is required
-- error handling via `std::expected`
+- load UTF-8 text files for logging configuration
+- read source files for processing or analysis
+- implement file-based data loading in support utilities
 
 ### `clore::support::split_cache_key`
 
@@ -394,12 +385,12 @@ Definition: `support/logging.cppm:378`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-The function `clore::support::split_cache_key` accepts a single `std::string_view` representing a cache key and returns an `int`. It provides a caller-facing interface to decompose a composite cache key into a numeric component, which may be used for comparison, ordering, or lookup purposes. The caller is responsible for passing a properly formatted key string; the exact interpretation of the return value is determined by the cache key encoding scheme.
+The function `clore::support::split_cache_key` accepts a cache key as a `std::string_view` and returns an `int`. Its caller-facing responsibility is to decompose or parse the provided key, with the returned integer typically representing either the number of resulting components, a status code, or a derived value. The caller must supply a valid cache key string; the exact interpretation of the returned `int` is defined by the implementation of `split_cache_key`.
 
 #### Usage Patterns
 
-- parsing a combined cache key into its path and signature components
-- validating cache key format before further processing
+- Used to split a combined cache key into its path and compile signature components for validation or further processing.
+- Complementary to `build_cache_key`.
 
 ### `clore::support::strip_utf8_bom`
 
@@ -411,13 +402,11 @@ Implementation: [`Module support`](../../../modules/support/index.md)
 
 Declaration: [Declaration](functions/strip-utf8-bom.md)
 
-`clore::support::strip_utf8_bom` accepts a `std::string_view` and returns a `std::string_view` that points to the same character data, except that a leading UTF‑8 byte order mark (BOM), if present, is skipped. The result is a non‑owning view that does not modify the original input; the caller retains ownership of the underlying storage.
-
-The function is intended to normalize UTF‑8 text before further processing, such as reading a file with `read_utf8_text_file`. The returned view is equivalent to the input when no BOM is found, or advances past the three‑byte sequence `0xEF BB BF` when it is detected. No validity checks are performed beyond the BOM pattern itself.
+The function `clore::support::strip_utf8_bom` examines the beginning of a `std::string_view` input for the UTF-8 Byte Order Mark (BOM) sequence (`U+FEFF` encoded as `EF BB BF` in UTF-8). If the BOM is present, it returns a new `std::string_view` that points to the input data with the BOM skipped; otherwise, it returns the original view unchanged. The caller can rely on the result being a valid view into the same storage, and no heap allocation or data copying occurs. This function is typically used by file-reading utilities to cleanly expose UTF-8 content without the BOM prefix.
 
 #### Usage Patterns
 
-- called by `clore::support::read_utf8_text_file` to strip BOM from file contents
+- Stripping the UTF‑8 BOM from file contents before processing in `clore::support::read_utf8_text_file`
 
 ### `clore::support::topological_order`
 
@@ -427,13 +416,12 @@ Definition: `support/logging.cppm:547`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-`clore::support::topological_order` computes the topological ordering relation between two elements. The caller provides two integer references as the elements to compare and a third `int` parameter that influences the ordering context (for example, the size of the graph or a domain identifier). The function returns an `int` that indicates the relative order: a negative value, zero, or a positive value to represent that the first element should appear before, at the same position as, or after the second element in the topological order.
+The function `clore::support::topological_order` computes a topological ordering of elements based on the provided relationships. It accepts two `const int &` parameters representing node identifiers or constraints, and an `int` parameter that likely indicates a count or additional control value, and returns an `int` that represents the computed order position or a result code. The caller is responsible for supplying valid node references and ensuring the input conforms to a directed acyclic graph; the function returns a deterministic ordering under these preconditions.
 
 #### Usage Patterns
 
-- Topological ordering of dependencies
-- Cycle detection in directed graphs
-- Build system task scheduling
+- Used for dependency resolution and ordering tasks, such as scheduling build steps or validating `DAGs`.
+- Returns the topological order or indicates a cycle via `std::nullopt`.
 
 ### `clore::support::truncate_utf8`
 
@@ -443,12 +431,13 @@ Definition: `support/logging.cppm:460`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-The function `clore::support::truncate_utf8` returns a UTF-8–safe substring of the input `std::string_view`. It truncates the string to at most the specified number of code units (bytes), ensuring the result does not split a multi-byte UTF-8 character. The caller provides the source view and a maximum byte length; the returned `std::string` is guaranteed to be valid UTF-8 and no longer than the given length. If the input is already short enough, the result may be a copy; otherwise, trailing incomplete sequences are removed.
+The function `clore::support::truncate_utf8` accepts a `std::string_view` containing a UTF‑8 encoded string and a `std::size_t` maximum byte length. It returns a `std::string` holding a prefix of the input that is valid UTF‑8 and whose byte count does not exceed the given limit; the truncation is performed at a UTF‑8 character boundary, guaranteeing that the result is well‑formed. If the input is already within the limit, the entire string is returned unchanged. The caller must supply a valid UTF‑8 input; the function does not itself validate the encoding beyond ensuring safe truncation.
 
 #### Usage Patterns
 
-- truncating UTF-8 text to a byte limit without breaking multi-byte characters
-- normalizing and truncating input lengths for logging or display
+- Truncating log messages to fit a byte limit
+- Limiting user-provided strings to a maximum UTF-8 byte length
+- Ensuring strings do not exceed storage constraints while maintaining encoding validity
 
 ### `clore::support::write_utf8_text_file`
 
@@ -458,12 +447,12 @@ Definition: `support/logging.cppm:515`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-The function `clore::support::write_utf8_text_file` writes the content provided as a `std::string_view` to a file identified by an open file descriptor (passed as `const int &`). It returns an `int` indicating success (zero) or a system error code on failure. The caller is responsible for providing a valid, writable file descriptor. The function ensures that the written byte stream is valid UTF-8; if necessary, it transforms the input using `clore::support::ensure_utf8` before writing. This contract guarantees that the output text file is well-formed UTF-8.
+The function `clore::support::write_utf8_text_file` writes a UTF‑8 encoded text file to an open file descriptor. It accepts a file handle (an `int` reference) and a `std::string_view` containing the text content. The function returns an `int` to indicate success or failure; a return value of `0` typically represents success, while a non‑zero value signals an error. Callers are responsible for providing a valid file handle and may rely on the function to ensure that the output is properly encoded in UTF‑8.
 
 #### Usage Patterns
 
-- Used to write UTF-8 text files after content normalization
-- Provides error handling for file write failures
+- callers provide a filesystem path and string content to write a UTF-8 encoded file
+- used when a function needs to persist text data to disk with error handling
 
 ## Related Pages
 

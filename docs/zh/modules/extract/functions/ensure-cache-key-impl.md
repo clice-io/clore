@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::ensurecachekeyimpl'
-description: 'ensure_cache_key_impl 通过依次填充 CompileEntry 的四个关键字段来构造缓存键。它首先调用 normalize_entry_file 将条目的源文件路径规范化，结果写入 entry.normalized_file。然后调用 build_compile_signature_impl 基于该规范化路径生成编译签名，存入 entry.compile_signature。接着用 try_hash_source_file 尝试哈希源文件，结果存入 entry.source_hash；该调用可能返回空，但函数在此处不检查其结果——缓存键的最终构建依赖 clore::support::build_cache_key，它仅使用规范化路径和编译签名组成 entry.cache_key。'
+description: '该实现通过依次调用三个内部函数来填充 CompileEntry 的缓存相关字段。首先调用 normalize_entry_file 将 entry 的原始文件路径转换为规范的绝对形式，结果存入 entry.normalized_file。接着使用 build_compile_signature_impl 并传入规范文件路径，生成反映编译选项和输入特征的 uint64_t 签名，存入 entry.compile_signature。随后尝试用 try_hash_source_file 对规范文件计算源文件哈希，若成功则记入 entry.source_hash（可能基于文件内容或元数据），否则该字段保持空。最后调用 clore::support::build_cache_key，以规范文件路径和编译签名为输入，生成全局唯一的缓存键 entry.cache_key，用于后续的编译结果复用或去重。'
 layout: doc
 template: doc
 ---
@@ -27,19 +27,19 @@ auto ensure_cache_key_impl(CompileEntry& entry) -> void {
 }
 ```
 
-`ensure_cache_key_impl` 通过依次填充 `CompileEntry` 的四个关键字段来构造缓存键。它首先调用 `normalize_entry_file` 将条目的源文件路径规范化，结果写入 `entry.normalized_file`。然后调用 `build_compile_signature_impl` 基于该规范化路径生成编译签名，存入 `entry.compile_signature`。接着用 `try_hash_source_file` 尝试哈希源文件，结果存入 `entry.source_hash`；该调用可能返回空，但函数在此处不检查其结果——缓存键的最终构建依赖 `clore::support::build_cache_key`，它仅使用规范化路径和编译签名组成 `entry.cache_key`。
+该实现通过依次调用三个内部函数来填充 `CompileEntry` 的缓存相关字段。首先调用 `normalize_entry_file` 将 `entry` 的原始文件路径转换为规范的绝对形式，结果存入 `entry.normalized_file`。接着使用 `build_compile_signature_impl` 并传入规范文件路径，生成反映编译选项和输入特征的 `uint64_t` 签名，存入 `entry.compile_signature`。随后尝试用 `try_hash_source_file` 对规范文件计算源文件哈希，若成功则记入 `entry.source_hash`（可能基于文件内容或元数据），否则该字段保持空。最后调用 `clore::support::build_cache_key`，以规范文件路径和编译签名为输入，生成全局唯一的缓存键 `entry.cache_key`，用于后续的编译结果复用或去重。
 
-整个流程是线性的，无分支或错误处理；它假定所有被调用的辅助函数均能成功完成，并将结果直接赋值给传入的 `CompileEntry`。该函数是 `ensure_cache_key` 的内部实现，将缓存键的构造分解为独立的子步骤，便于测试和复用。
+内部控制流为线性顺序，无分支；所有依赖函数均位于相同或匿名命名空间内，且均直接操作 `entry` 的字段。性能上，文件规范化与签名计算可能涉及文件系统 I/O，`try_hash_source_file` 仅在需要内容哈希时产生额外开销。此函数不检查外部数据库或缓存状态，仅完成本地字段的初始化。
 
 ## Side Effects
 
-- Modifies the fields of the passed `CompileEntry&`
-- Reads the source file for hashing via `try_hash_source_file`
+- Reads source file content to compute hash via `try_hash_source_file`
+- Mutates fields of the `CompileEntry` argument
 
 ## Reads From
 
-- The `CompileEntry` parameter `entry`
-- The file system via `normalize_entry_file` and `try_hash_source_file`
+- The `CompileEntry` argument's existing data
+- Source file identified by the entry's original file
 
 ## Writes To
 
@@ -50,7 +50,7 @@ auto ensure_cache_key_impl(CompileEntry& entry) -> void {
 
 ## Usage Patterns
 
-- Called by `clore::extract::ensure_cache_key`
+- Called by `clore::extract::ensure_cache_key` to populate cache metadata for a single compile entry
 
 ## Calls
 

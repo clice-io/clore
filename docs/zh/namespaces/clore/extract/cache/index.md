@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::extract::cache'
-description: '命名空间 clore::extract::cache 封装了编译缓存系统的核心逻辑，负责为提取（extract）阶段和 Clice 缓存提供持久化、键值管理及依赖追踪能力。其关键声明包括面向不同缓存类型的保存/加载函数（如 save_extract_cache、load_extract_cache、save_clice_cache、load_clice_cache），以及用于构建缓存键和签名的工具（build_cache_key、build_compile_signature、hash_file）。此外，还提供了依赖快照的捕获与变更检测函数（capture_dependency_snapshot、dependencies_changed）和缓存键解析函数（split_cache_key），配合 CacheRecord、CliceCacheData、CacheError 等数据结构和错误类型，形成一套完整的缓存操作接口。'
+description: '该命名空间为 clore 提取流程提供完整的缓存基础设施，主要职责是序列化、反序列化及失效检测。其核心声明包括：CacheRecord、CliceCacheData、DependencySnapshot 等数据载体，以及 build_cache_key、split_cache_key、hash_file 等键与指纹生成函数；save_clice_cache、load_clice_cache 管理持久化存储，capture_dependency_snapshot 与 dependencies_changed 实现依赖变更检测，CacheError 统一错误处理。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-命名空间 `clore::extract::cache` 封装了编译缓存系统的核心逻辑，负责为提取（extract）阶段和 Clice 缓存提供持久化、键值管理及依赖追踪能力。其关键声明包括面向不同缓存类型的保存/加载函数（如 `save_extract_cache`、`load_extract_cache`、`save_clice_cache`、`load_clice_cache`），以及用于构建缓存键和签名的工具（`build_cache_key`、`build_compile_signature`、`hash_file`）。此外，还提供了依赖快照的捕获与变更检测函数（`capture_dependency_snapshot`、`dependencies_changed`）和缓存键解析函数（`split_cache_key`），配合 `CacheRecord`、`CliceCacheData`、`CacheError` 等数据结构和错误类型，形成一套完整的缓存操作接口。
+该命名空间为 `clore` 提取流程提供完整的缓存基础设施，主要职责是序列化、反序列化及失效检测。其核心声明包括：`CacheRecord`、`CliceCacheData`、`DependencySnapshot` 等数据载体，以及 `build_cache_key`、`split_cache_key`、`hash_file` 等键与指纹生成函数；`save_clice_cache`、`load_clice_cache` 管理持久化存储，`capture_dependency_snapshot` 与 `dependencies_changed` 实现依赖变更检测，`CacheError` 统一错误处理。
 
-在架构上，该命名空间位于 `clore::extract` 下层，作为独立的缓存抽象层，剥离了具体的编译流程细节，专注于高效的缓存键构造、数据读写和依赖一致性校验。通过提供统一的 `build_cache_key` 与哈希函数，确保了缓存键的唯一性与可复原性；依赖快照机制支持在增量编译场景下快速判断缓存是否失效。这些设计使得上层编译模块能够以声明式的方式使用缓存，而不必关心底层存储格式或并发控制细节。
+从架构上看，该命名空间位于提取层与文件系统之间，通过编译签名（`build_compile_signature`）和文件哈希（`hash_file`）构建唯一缓存键，以支持增量重构建。内部使用 `std::expected` 的返回模式分离成功与错误路径，不暴露文件 I/O 细节，为上层提供确定性缓存命中/失效接口。
 
 ## Diagram
 
@@ -52,15 +52,18 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- The `message` member must be set to a descriptive error string when an error occurs.
+- The `message` member may be empty or contain any string
+- No additional constraints beyond standard `std::string` behavior
 
 #### Key Members
 
-- `message`: a `std::string` that stores the error description.
+- `message`
 
 #### Usage Patterns
 
-- Can be thrown as an exception or returned as an error result in cache-related functions.
+- Returned or caught as an error result from cache operations
+- Constructed with a descriptive string to indicate failure cause
+- Likely used with `std::expected` or `std::variant` error handling patterns
 
 ### `clore::extract::cache::CacheKeyParts`
 
@@ -74,16 +77,18 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- No explicit invariants documented; likely expects `path` to be a valid file path and `compile_signature` to be non-zero? Not confirmed.
+- `path` 应该是一个有效的文件系统路径
+- `compile_signature` 应当唯一标识一个编译单元的特定版本
 
 #### Key Members
 
-- `std::string path`
-- `std::uint64_t compile_signature`
+- `path`：文件路径
+- `compile_signature`：编译签名
 
 #### Usage Patterns
 
-- Used to uniquely identify cache entries based on a file and its compile-time signature.
+- 用作缓存键的一部分，与完整的缓存键组合或比较
+- 可能通过其成员来生成哈希或进行相等性判断
 
 ### `clore::extract::cache::CacheRecord`
 
@@ -97,23 +102,23 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Fields are default-initialized to zero or default-constructed.
-- `source_hash` and `compile_signature` are expected to be non-zero after a successful extraction.
-- `ast_deps`, scan, and ast hold consistent results from the same extraction.
+- `compile_signature` 与 `source_hash` 的组合唯一标识一个编译单元
+- 缓存记录中的 `ast_deps`、`scan`、`ast` 应与对应的 `source_hash` 和 `compile_signature` 保持一致
+- 当源文件或编译配置变化时，相关字段应失效或更新
 
 #### Key Members
 
 - `compile_signature`
 - `source_hash`
 - `ast_deps`
-- scan
-- ast
+- `scan`
+- `ast`
 
 #### Usage Patterns
 
-- Populated by the extraction pipeline after a successful extraction.
-- Retrieved by the cache module to return cached results.
-- Stored in a cache container keyed by source hash and compile signature.
+- 在缓存查找时通过 `source_hash` 和 `compile_signature` 匹配记录
+- 提取过程中生成新的 `CacheRecord` 实例并存储到缓存中
+- 其他代码通过读取成员（如 `scan`、`ast`）获取缓存的分析结果
 
 ### `clore::extract::cache::CliceCacheData`
 
@@ -127,8 +132,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `paths`、`pch`、`pcm` 中的各个字段是相互独立的向量
-- 无显式的不变式约束
+- All three member vectors may be empty; no non‑empty guarantee is implied.
+- The struct provides no validation or ordering invariants beyond what `std::vector` offers.
 
 #### Key Members
 
@@ -138,8 +143,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- 作为缓存系统的一部分，存储提取的文件路径和对应的编译产物数据
-- 可能由缓存填充逻辑写入，由读取逻辑遍历并使用
+- Used to aggregate and transfer cache data in the extraction pipeline.
+- Likely populated by serialization or extraction routines and consumed by cache lookup or storage logic.
 
 ### `clore::extract::cache::CliceCacheDepEntry`
 
@@ -153,8 +158,9 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Fields are default-initialized to zero.
-- The struct layout is compatible with an external `CacheData` schema.
+- `path` 和 `hash` 的类型固定为 `std::uint32_t` 和 `std::uint64_t`
+- 所有成员初始化为零，表示空或未设置状态
+- 结构的字段布局与外部 `CacheData` 保持兼容
 
 #### Key Members
 
@@ -163,8 +169,9 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Used in clice workspace cache structures for dependency tracking.
-- Serialized or interpreted in a schema-compatible manner with `CacheData`.
+- 作为缓存数据结构中的元素，用于存储依赖项的路径和哈希值
+- 通过比较 `path` 和 `hash` 判断依赖是否发生变化
+- 是 `CliceCacheEntry` 或其他缓存容器的一部分（未在证据中明确）
 
 ### `clore::extract::cache::CliceCachePCHEntry`
 
@@ -176,6 +183,28 @@ Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
+#### Invariants
+
+- `hash` uniquely identifies the PCH content
+- `deps` holds all dependency entries for the PCH
+- `build_at` is a timestamp (likely Unix epoch in seconds or milliseconds)
+- `bound` represents a binding count or reference counter
+
+#### Key Members
+
+- `filename`
+- `source_file`
+- `hash`
+- `bound`
+- `build_at`
+- `deps`
+
+#### Usage Patterns
+
+- Used as element in a cache container (e.g., map or vector)
+- Fields accessed directly for read/write by cache serialization and comparison logic
+- Dependency information stored in `deps` for validity checks
+
 ### `clore::extract::cache::CliceCachePCMEntry`
 
 Declaration: `extract/cache.cppm:60`
@@ -185,6 +214,25 @@ Definition: `extract/cache.cppm:60`
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
+
+#### Invariants
+
+- `source_file` and `build_at` default to zero when not explicitly initialized
+- `deps` is a vector that may be empty
+
+#### Key Members
+
+- `filename`
+- `module_name`
+- `source_file`
+- `build_at`
+- `deps`
+
+#### Usage Patterns
+
+- Stored in a cache collection managed by `clore::extract::cache`
+- Populated during PCM extraction and used for build system dependency tracking
+- Likely serialized or persisted to disk for incremental builds
 
 ### `clore::extract::cache::DependencySnapshot`
 
@@ -196,6 +244,21 @@ Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
+#### Invariants
+
+- No documented invariants; the vectors are not explicitly constrained to have the same length.
+
+#### Key Members
+
+- `files`
+- `hashes`
+- `mtimes`
+- `build_at`
+
+#### Usage Patterns
+
+- Used to bundle file paths, hashes, modification times, and build timestamp for caching purposes.
+
 ## Functions
 
 ### `clore::extract::cache::build_cache_key`
@@ -206,11 +269,11 @@ Definition: `extract/cache.cppm:228`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-函数 `clore::extract::cache::build_cache_key` 根据调用者提供的文件标识符（第一个参数 `std::string_view`）和编译签名哈希（第二个参数 `std::uint64_t`）构造并返回一个用于缓存查找或存储的标准化键字符串。调用者负责提供与缓存条目对应的源文件路径或逻辑标识符，以及由 `clore::extract::cache::build_compile_signature` 等函数生成的64位编译签名值；该函数仅执行键的组装，不访问文件系统或执行I/O操作。返回的 `std::string` 可直接用于其他缓存接口（如 `clore::extract::cache::load_extract_cache` 或 `clore::extract::cache::save_extract_cache`）作为缓存键参数。
+调用者使用 `clore::extract::cache::build_cache_key` 生成一个唯一字符串键，用于缓存存储或检索。该函数接受一个 `std::string_view` 标识符（通常代表源文件路径或提取目标）和一个 `std::uint64_t` 签名（例如由 `build_compile_signature` 提供的编译指纹），并返回一个格式化的 `std::string` 键。调用者必须确保提供的签名与特定内容强关联，以维持缓存键的正确性与唯一性。返回的键设计为可与 `load_extract_cache` 或 `save_extract_cache` 等接口配套使用。
 
 #### Usage Patterns
 
-- Used to build a key for caching extraction results based on a file path and a compile signature.
+- 被缓存相关函数用于构建唯一缓存键
 
 ### `clore::extract::cache::build_compile_signature`
 
@@ -220,14 +283,11 @@ Definition: `extract/cache.cppm:224`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-该函数负责为给定的编译输入生成一个唯一的64位签名，供缓存系统用于键值构建和一致性校验。调用方需提供一个 `const int &` 类型的引用，该引用通常代表文件描述符、进程句柄或编译单元标识符；返回值 `std::uint64_t` 是根据输入的内容计算出的哈希值，可用于与后续同一输入的签名进行比较，以判断编译环境是否发生变化。
-
-`build_compile_signature` 是缓存键生成流程的一部分：其输出通常作为参数传递给 `clore::extract::cache::build_cache_key`，与缓存键字符串共同组成最终的键值。调用方不应假定签名的具体算法，但可以依赖其确定性：相同的输入始终产生相同的签名。该函数可以独立于缓存的其他操作使用，例如在 `clore::extract::cache::dependencies_changed` 之前检测到的差异。
+函数 `clore::extract::cache::build_compile_signature` 接受一个 `const int &` 类型的引用参数，返回一个 `std::uint64_t` 类型的编译签名。调用者需要提供一个表示编译输入源（例如文件描述符或内部标识符）的有效引用，该签名用于唯一标识当前编译输入的快照状态。返回的签名可以与其他签名进行比较，以判断编译输入是否发生变化，从而支持缓存命中与失效的判断。调用者必须确保传入的引用在其生命周期内保持有效且指向预期的输入；函数本身不对引用的有效性做校验。
 
 #### Usage Patterns
 
-- Used to generate a unique compile signature for cache key computation.
-- Called in caching logic to identify compile configurations.
+- Used to obtain a compile signature for cache key operations by delegating to the core signature builder.
 
 ### `clore::extract::cache::capture_dependency_snapshot`
 
@@ -237,12 +297,15 @@ Definition: `extract/cache.cppm:282`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-函数 `clore::extract::cache::capture_dependency_snapshot` 接受一个 `const int &` 参数（通常代表一个文件标识或内部索引），并返回一个 `std::expected<DependencySnapshot, CacheError>`。调用者应提供正确的标识符，函数会基于当前状态生成对应的依赖关系快照；成功时返回 `DependencySnapshot` 实例，失败时返回 `CacheError` 指示具体错误原因。此快照可用于后续的变更检测（例如与 `dependencies_changed` 配合使用），调用者必须处理 `std::expected` 中的错误情况以确保缓存逻辑正确性。
+函数 `clore::extract::cache::capture_dependency_snapshot` 接受一个 `const int &` 参数（表示编译单元或文件标识符），返回一个 `std::expected<DependencySnapshot, CacheError>`。调用者通过该函数获取当前依赖关系的不可变快照，该快照可用于后续的依赖变更检测（如与 `dependencies_changed` 配合使用）。
+
+成功时，调用者得到一个完整的 `DependencySnapshot` 对象；失败时，`CacheError` 提供具体的错误信息（如文件不可读或哈希失败）。调用者应确保传入的标识符有效，且函数不会修改任何持久状态：捕获过程是只读的，契约保证快照反映了调用时刻的依赖文件系统状态。
 
 #### Usage Patterns
 
-- called to capture dependency information for cache invalidation checks
-- used before comparing with a previous snapshot via `dependencies_changed`
+- Capturing dependency state for incremental compilation cache
+- Feeding snapshot to `dependencies_changed` for change detection
+- Storing snapshot in cache via `save_clice_cache`
 
 ### `clore::extract::cache::dependencies_changed`
 
@@ -252,12 +315,14 @@ Definition: `extract/cache.cppm:401`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-检查给定 `DependencySnapshot` 中记录的依赖项相对于缓存状态是否已发生变化。当且仅当至少有一个依赖项发生更改时，函数返回 `true`；否则返回 `false`。该函数通常用于判断缓存是否需要失效，调用者应在使用缓存数据前调用它，并基于返回值决定是否重新提取。
+确定给定依赖快照所载的文件依赖集合是否已发生变更。此函数接受一个 `DependencySnapshot` 对象，并将其内部记录的依赖状态与当前文件系统的实际状态进行比较，返回一个 `bool` 值。
+
+调用者需确保传入的快照是之前通过 `capture_dependency_snapshot` 捕获的有效实例。返回 `true` 表示至少有一个依赖项的内容或存在性已改变；返回 `false` 则表示所有依赖项均未变化。该函数不修改快照本身，且不依赖任何外部持久化状态。
 
 #### Usage Patterns
 
-- called before loading extract cache to determine freshness
-- used to decide whether to re-extract dependencies
+- Called before deciding whether to reuse a cached extraction result
+- Used in conjunction with `capture_dependency_snapshot` and cache loading/saving functions
 
 ### `clore::extract::cache::hash_file`
 
@@ -267,15 +332,14 @@ Definition: `extract/cache.cppm:270`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-计算指定文件的哈希值，该哈希值通常用于缓存键的构建或依赖关系的追踪。接受一个 `std::string_view` 类型的文件路径，返回一个 `std::expected<std::uint64_t, CacheError>`，成功时携带文件内容的哈希结果，失败时则携带 `CacheError` 错误信息。
+函数 `clore::extract::cache::hash_file` 接受一个 `std::string_view` 类型的文件路径，并返回一个 `std::expected<std::uint64_t, CacheError>`。成功时，该函数以 `uint64_t` 形式提供文件的哈希值；失败时，则提供 `CacheError` 中的错误信息。该函数是缓存子系统的一部分，用于生成可唯一标识文件内容（或文件状态）的数值指纹，常被其他缓存函数（如 `build_cache_key`）使用。
 
-调用者应确保提供的路径可访问且指向一个有效文件。该函数不处理路径解析或文件打开之外的前置条件；任何文件系统层面的失败（如文件不存在、读取权限不足）均会以 `CacheError` 的形式呈现给调用者。
+调用者应确保传入的文件路径是有效的、可访问的，并且不对临时或已移除的文件调用此函数。处理返回的 `expected` 对象时，必须检查其是否持有有效值，或通过错误分支处理 `CacheError`，从而保证缓存逻辑的健壮性。此函数的设计明确将错误与成功路径分离，调用者无需自行处理异常。
 
 #### Usage Patterns
 
-- used by cache-key building functions to hash source files
-- called by `build_compile_signature` or `capture_dependency_snapshot` to incorporate file content into cache keys
-- part of the cache layer's file integrity verification
+- 用于计算文件内容的哈希值，通常作为缓存键的一部分
+- 被 `build_cache_key` 或类似缓存管理函数调用
 
 ### `clore::extract::cache::load_clice_cache`
 
@@ -285,13 +349,12 @@ Definition: `extract/cache.cppm:670`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-函数 `clore::extract::cache::load_clice_cache` 负责从缓存中加载与给定标识符关联的 `CliceCacheData`。调用者传入一个 `std::string_view` 作为缓存键，函数返回 `std::expected<CliceCacheData, CacheError>`；成功时包含对应的缓存数据，失败时返回 `CacheError` 以指示错误原因（例如缓存缺失或读取失败）。该函数假设缓存已被正确初始化和维护，由调用者保证键格式符合缓存系统的预期。
+调用 `clore::extract::cache::load_clice_cache` 尝试加载与给定缓存键关联的 CLICE 缓存数据。该函数接收一个 `std::string_view` 类型的缓存键，并返回 `std::expected<CliceCacheData, CacheError>`。成功时返回先前通过 `save_clice_cache` 保存的 `CliceCacheData`；失败时返回 `CacheError`，表示缓存不存在、格式错误或其他读取故障。调用者应确保缓存键对应一条有效记录，否则将得到错误返回值。
 
 #### Usage Patterns
 
-- load cached clice data before extraction
-- check if a valid clice cache exists
-- used in pair with `save_clice_cache`
+- called to load previously cached clice data from disk
+- used before processing to check for stale cache
 
 ### `clore::extract::cache::load_extract_cache`
 
@@ -301,12 +364,13 @@ Definition: `extract/cache.cppm:457`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-`clore::extract::cache::load_extract_cache` 尝试从提取缓存中加载与给定 `std::string_view` 键关联的整数数据，并返回该整数值。调用者应确保提供的键对应一个有效的缓存条目——若键不存在或加载失败，函数行为未定义。返回的 `int` 先前应通过 `clore::extract::cache::save_extract_cache` 写入，因此其含义由该写入逻辑决定。
+`clore::extract::cache::load_extract_cache` 尝试使用指定的缓存键从提取缓存中恢复之前保存的数据。调用者提供一个 `std::string_view` 类型的键；函数返回一个 `int` 表示操作结果：非负值指示成功加载，负值表示缓存缺失或发生错误。调用者必须检查返回值以判断缓存是否命中，并据此决定是否重新执行提取或使用返回的数据。
 
 #### Usage Patterns
 
-- called before extraction to check if a cached result exists
-- used in conjunction with `save_extract_cache` for read-write caching
+- load cached extraction results before performing extraction
+- check cache validity and optionally fall back to empty cache
+- used in conjunction with `save_extract_cache` for cache round-trip
 
 ### `clore::extract::cache::save_clice_cache`
 
@@ -316,12 +380,13 @@ Definition: `extract/cache.cppm:710`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-函数 `clore::extract::cache::save_clice_cache` 将给定的 `CliceCacheData` 持久化存储到与指定键相关联的缓存条目中。调用者必须提供一个有效的缓存键（`std::string_view`）和完整的 `CliceCacheData` 对象。如果保存操作成功，函数返回 `std::expected<void, CacheError>` 的空值；否则返回一个 `CacheError`，描述失败原因。该函数假定调用者已确保缓存键的唯一性或更新语义，且返回的错误应被调用者妥善处理，以避免缓存状态不一致。
+函数 `clore::extract::cache::save_clice_cache` 尝试将给定的 `CliceCacheData` 持久化到缓存系统中，使用一个字符串键进行标识。若保存成功，函数返回一个空的 `std::expected<void, CacheError>`；否则返回一个 `CacheError`，指示写入失败或序列化错误。调用者应确保提供的键是有效的，并且缓存数据的状态是完整的（例如，由先前调用的 `clore::extract::cache::load_clice_cache` 或其他构建路径填充）。此函数不负责检查依赖项是否更改或生成签名；它仅负责将数据写入缓存存储。
 
 #### Usage Patterns
 
-- Persist clice extract cache
-- Called after extraction to update cache data
+- Called to save/update clice cache data after extraction.
+- Used similarly to `save_extract_cache` but for a different data type.
+- Expected to be paired with `load_clice_cache` for persistence.
 
 ### `clore::extract::cache::save_extract_cache`
 
@@ -331,12 +396,12 @@ Definition: `extract/cache.cppm:533`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-函数 `clore::extract::cache::save_extract_cache` 将给定的 `int` 值与指定的缓存键关联并持久化。调用者应提供一个有效的缓存键（通常通过 `clore::extract::cache::build_cache_key` 或其他键构造函数获得）以及要缓存的数据。操作成功时返回空的 `std::expected`，失败时返回 `clore::extract::cache::CacheError`。此函数不保证立即刷新到存储；调用者若需要确保写入完成，应依赖后续的同步机制。
+`clore::extract::cache::save_extract_cache` 持久化存储一个提取操作的缓存条目。它接受一个缓存键（`std::string_view`）以及一个表示提取结果的整数值（`const int &`），将该键值对存入缓存系统中，以便后续通过 `load_extract_cache` 检索。若操作成功，返回 `std::expected<void, CacheError>`；若出现缓存写入失败或键格式无效等情况，则返回对应的 `CacheError`。调用方应确保提供的缓存键与 `split_cache_key` 的预期格式一致。
 
 #### Usage Patterns
 
-- Called to persist extract cache after a successful extraction pass
-- Used to store incremental build cache for later reuse
+- called during extract caching to persist processed `CacheRecord` data to disk
+- used after building a collection of cache records for the workspace
 
 ### `clore::extract::cache::split_cache_key`
 
@@ -346,12 +411,13 @@ Definition: `extract/cache.cppm:238`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-`clore::extract::cache::split_cache_key` 接受一个代表完整缓存键的 `std::string_view`，并将其解析为 `CacheKeyParts` 结构，该结构将键的各个组成部分（例如源标识符和签名）进行分离。如果输入字符串不符合预期的键格式，函数返回一个 `CacheError` 来指示失败原因。调用方应使用此函数来解构由 `build_cache_key` 生成的缓存键，以便独立地检查或操作键的各个部分。
+函数 `clore::extract::cache::split_cache_key` 接受一个表示缓存键的 `std::string_view`，并尝试将其分解为结构化的 `CacheKeyParts`。调用者应确保传入的缓存键格式符合预期（例如由 `clore::extract::cache::build_cache_key` 生成）；解析成功时返回 `CacheKeyParts`，失败时返回 `CacheError` 指示错误原因（如键格式不合法或数据损坏）。该函数的职责是将完整的缓存键字符串还原为原始组成部分，便于后续按部件进行匹配或检查。
 
 #### Usage Patterns
 
-- Parsing cache keys previously built by `build_cache_key`
-- Extracting path and signature before cache lookup operations
+- 解析由 `build_cache_key` 生成的缓存键
+- 从组合缓存键中提取文件路径和签名
+- 在使用缓存键组件前验证其格式
 
 ## Related Pages
 

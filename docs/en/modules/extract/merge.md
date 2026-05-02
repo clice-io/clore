@@ -1,6 +1,6 @@
 ---
 title: 'Module extract:merge'
-description: 'The extract:merge module is responsible for consolidating extracted symbol information into the project model, handling deduplication, namespace hierarchy resolution, and index reconstruction. It provides the public entry points merge_symbol_info (with both const‑reference and rvalue‑reference overloads) to merge symbol data from an incoming source into a target, along with rebuild_model_indexes and rebuild_lookup_maps to regenerate lookup structures after model modifications. Additionally, it exposes utility templates append_unique and deduplicate for efficient collection management, and an internal LocalIndexData structure to support parallel processing of merge operations.'
+description: 'The extract:merge module is responsible for combining symbol information gathered from multiple extraction passes or sources into a single, coherent model. It provides the core merging logic through functions such as merge_symbol_info, which updates a target symbol record with data from a source, and utility templates like append_unique and deduplicate to handle duplicate entries during assembly. The module also owns the post‑merge index rebuilding phase, exposed via rebuild_lookup_maps and rebuild_model_indexes, ensuring that name‑based and identifier‑based lookups reflect the fully merged state. By leveraging the extract:model data structures and relying on filtering and support utilities, the module maintains consistency across the extraction pipeline while allowing parallel or incremental updates to the model.'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-The `extract:merge` module is responsible for consolidating extracted symbol information into the project model, handling deduplication, namespace hierarchy resolution, and index reconstruction. It provides the public entry points `merge_symbol_info` (with both const‑reference and rvalue‑reference overloads) to merge symbol data from an incoming source into a target, along with `rebuild_model_indexes` and `rebuild_lookup_maps` to regenerate lookup structures after model modifications. Additionally, it exposes utility templates `append_unique` and `deduplicate` for efficient collection management, and an internal `LocalIndexData` structure to support parallel processing of merge operations.
+The `extract:merge` module is responsible for combining symbol information gathered from multiple extraction passes or sources into a single, coherent model. It provides the core merging logic through functions such as `merge_symbol_info`, which updates a target symbol record with data from a source, and utility templates like `append_unique` and `deduplicate` to handle duplicate entries during assembly. The module also owns the post‑merge index rebuilding phase, exposed via `rebuild_lookup_maps` and `rebuild_model_indexes`, ensuring that name‑based and identifier‑based lookups reflect the fully merged state. By leveraging the `extract:model` data structures and relying on filtering and support utilities, the module maintains consistency across the extraction pipeline while allowing parallel or incremental updates to the model.
 
 ## Imports
 
@@ -27,7 +27,7 @@ Declaration: `extract/merge.cppm:12`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-Based on its name and signature, `append_unique` serves as a utility to add an element to a container while avoiding duplicates. The exact container type and comparison logic depend on template instantiation, but the purpose is to ensure uniqueness in the target collection.
+The evidence does not provide any usage or mutation of `append_unique`. While a snippet shows `void append_unique`, suggesting a function template, the target is classified as a variable. Its role in the surrounding logic cannot be determined from the given context.
 
 #### Mutation
 
@@ -39,7 +39,7 @@ Declaration: `extract/merge.cppm:19`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The variable's role and how it participates in surrounding logic are not described in the provided evidence. No reads or mutations are observable from the snippets.
+No evidence describes how `clore::extract::append_unique_range` is read, assigned, or participates in surrounding logic. Its initialization and any mutations are unknown from the provided context.
 
 #### Mutation
 
@@ -51,7 +51,7 @@ Declaration: `extract/merge.cppm:49`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-It appears to be a function template, but the evidence does not provide enough context to determine its role.
+No additional details can be inferred from the evidence. The variable does not appear in the local context list or any usage patterns beyond its declaration.
 
 #### Mutation
 
@@ -67,25 +67,25 @@ Definition: `extract/merge.cppm:215`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The implementation of `merge_symbol_info` is a thin public entry point that immediately delegates to the internal helper `merge_symbol_info_impl`. This helper drives the entire merging algorithm, which processes the incoming symbol data into the existing model. Control flow begins by dividing work across hardware threads via `run_parallel_chunks`; each thread operates on its own per-thread data structure (`per_thread`) to store merged results. Within each chunk, the algorithm uses `ensure_namespace_hierarchy` and `find_enclosing_namespace` to maintain the namespace tree, and calls `append_unique` or `append_unique_range` to insert symbols while avoiding duplicates. Configuration flags such as `prefer_incoming_snippet` and `prefer_incoming_definition` guide attribute conflict resolution. After all chunks complete, the per-thread results are consolidated and `deduplicate` is applied on the final output. Finally, the function `rebuild_model_indexes` and `rebuild_lookup_maps` are invoked to reconstruct the model’s internal index structures, ensuring consistency for subsequent queries.
+The implementation of `clore::extract::merge_symbol_info` delegates directly to the internal template `merge_symbol_info_impl`, which accepts the current model and an incoming `SymbolInfo`. The merge algorithm iterates over the incoming symbol's scopes and names, using utility functions such as `append_unique` and `append_unique_range` to add missing entries and `deduplicate` to remove duplicates after assembly. Conflicts between the current model and the incoming data are resolved according to configuration flags `prefer_incoming_snippet` and `prefer_incoming_definition`. The namespace hierarchy is rebuilt with `ensure_namespace_hierarchy` and `find_enclosing_namespace` to maintain parent-child relationships. Finally, indexes are updated via `rebuild_model_indexes` and `rebuild_lookup_maps` to reflect the merged state.
 
 #### Side Effects
 
-- Modifies `current` `SymbolInfo` instance
+- modifies the `current` `SymbolInfo` object through the call to `merge_symbol_info_impl`
 
 #### Reads From
 
-- `current` parameter (in/out)
-- `incoming` parameter (read-only)
+- `current` (parameter, read prior to modification)
+- `incoming` (parameter, const reference)
 
 #### Writes To
 
-- `current` parameter (mutated)
+- `current` (parameter, modified via `merge_symbol_info_impl`)
 
 #### Usage Patterns
 
-- Called by code that needs to combine symbol data from multiple sources
-- Used during symbol extraction or update phases
+- called during symbol extraction to merge symbol information from multiple sources
+- used when multiple compile entries contribute data to the same symbol
 
 ### `clore::extract::merge_symbol_info`
 
@@ -95,29 +95,24 @@ Definition: `extract/merge.cppm:211`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The public overload `clore::extract::merge_symbol_info(SymbolInfo& current, SymbolInfo&& incoming)` is a thin wrapper that moves `incoming` into the internal helper `merge_symbol_info_impl`. The implementation of `merge_symbol_info_impl` begins by inspecting `incoming` to determine the number of hardware threads (`hardware_threads`) and reserving per‑thread work partitions via `run_parallel_chunks`. For each partition, a worker block reads the symbol range, identifies the `incoming` model and its `config` (which includes flags like `prefer_incoming_snippet` and `prefer_incoming_definition`), and then runs the core merge for that chunk.
+The function `clore::extract::merge_symbol_info` is a public entry point that delegates to the anonymous-namespace helper `merge_symbol_info_impl`. For the rvalue-reference overload it moves the incoming `SymbolInfo` into the implementation, while the const-lvalue overload creates a copy before moving. The core merging algorithm processes symbol entries in parallel using `run_parallel_chunks`, distributing work across `num_threads` hardware threads. Each thread operates on a `per_thread` local state holding `LocalIndexData` and a local copy of the model segment. The merging logic handles namespace hierarchy reconciliation through `ensure_namespace_hierarchy` and `find_enclosing_namespace`, ensuring symbols are placed under the correct owning namespace. Duplicate symbols are resolved using `append_unique` and `append_unique_range`, with preference controlled by `prefer_incoming_snippet` and `prefer_incoming_definition` from the `config` object.
 
-Inside each worker, the algorithm calls `ensure_namespace_hierarchy` to guarantee that the namespace `ns` from `incoming` exists in `model`’s namespace tree (creating missing ancestors), then locates the enclosing namespace via `find_enclosing_namespace` using the `owner_path`. For each symbol in the chunk, `sym` is compared with existing symbols in `model` at the same `parent_id`; if no match is found, `append_unique` adds it together with its `explicit_namespaces` and any derived `current_name`. Overlapping symbol ranges are handled by `append_unique_range` and later `deduplicate` cleans up duplication. After all chunks complete, `rebuild_model_indexes` re‑establishes internal indexes (e.g., `known_namespace_names`) and `rebuild_lookup_maps` updates the global lookup structures, ensuring the merged `model` is fully consistent.
+After parallel chunk processing completes, the results are combined and the model is finalized. The function calls `rebuild_model_indexes` to reconstruct internal indexing structures and `rebuild_lookup_maps` to update symbol lookup tables. It also invokes `deduplicate` to remove any remaining duplicates introduced during merging. The entire process depends on `run_parallel_chunks` for thread synchronization and work distribution, and uses `ensure_namespace_hierarchy` to create missing parent namespace entries while `find_enclosing_namespace` determines the appropriate container for each symbol.
 
 #### Side Effects
 
-- modifies the `current` `SymbolInfo` by merging data from `incoming`
-- moves resources from `incoming`, leaving it in a valid but unspecified state
+- Modifies `current` by merging data from `incoming`
+- Invalidates `incoming` as its resources are moved
 
 #### Reads From
 
-- `current` (existing `SymbolInfo` data)
-- `incoming` (data to be merged)
+- `current`
+- `incoming`
 
 #### Writes To
 
-- `current` (modified `SymbolInfo`)
+- `current`
 - `incoming` (moved-from state)
-
-#### Usage Patterns
-
-- called during symbol extraction to combine partial symbol information
-- used to merge newly discovered symbol attributes into an existing record
 
 ### `clore::extract::rebuild_lookup_maps`
 
@@ -127,40 +122,31 @@ Definition: `extract/merge.cppm:428`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The implementation of `clore::extract::rebuild_lookup_maps` regenerates two internal lookup structures of a `ProjectModel` instance. It first clears `model.symbol_ids_by_qualified_name` and `model.module_name_to_sources`, then iterates over all entries in `model.symbols`. For each symbol that has a non‑empty `qualified_name`, the function appends its `symbol_id` to the corresponding vector in the lookup map. After populating, each vector is sorted using a custom comparator that orders by `signature`, then `declaration_location.file`, then `declaration_location.line`, and finally by `symbol_id` as a tiebreaker. The sorted vectors are deduplicated via `std::unique`; if a qualified name maps to more than one symbol ID, an informational log message records the count of overload candidates.
+The function `clore::extract::rebuild_lookup_maps` first clears two lookup maps in the `ProjectModel`: `model.symbol_ids_by_qualified_name` and `model.module_name_to_sources`. It then repopulates the symbol lookup by iterating over every entry in `model.symbols`. For each symbol whose `sym.qualified_name` is non‑empty, it appends the `SymbolID` to the list keyed by that qualified name. After populating, it processes each `qualified_name` entry: it sorts the vector of `symbol_ids` using a comparator that orders by `lhs_sym.signature`, then by `lhs_sym.declaration_location.file` and `lhs_sym.declaration_location.line`, and finally by the `SymbolID` itself. Duplicates are removed via `std::unique` followed by `symbol_ids.erase`, and if more than one candidate remains, `logging::info` reports the qualified name and overload count.
 
-The module side follows a similar pattern. The function clears `model.module_name_to_sources` and rebuilds it by iterating over `model.modules`; for each module unit with a non‑empty `name`, it adds the source file to the corresponding vector. Each source list is then sorted and deduplicated. Finally, the function counts how many interface units exist per module name. If more than one interface is found, a warning is logged listing the first two conflicting source files. No external dependencies beyond the model’s maps and the logging utilities are required.
+The second part rebuilds the module source lookup. It iterates over every file‑to‑module mapping in `model.modules`; for any `mod_unit` with a non‑empty `mod_unit.name`, the source file is appended to the list for that module name in `model.module_name_to_sources`. Each list of `sources` is then sorted and deduplicated with `std::unique`. The function then counts how many of those sources correspond to interface units (`mod_unit.is_interface`). If more than one interface source exists, it logs a warning via `logging::warn` identifying the duplicate interfaces by their file paths.
 
 #### Side Effects
 
-- Clears `model.symbol_ids_by_qualified_name` and `model.module_name_to_sources`
-- Populates `model.symbol_ids_by_qualified_name` with sorted, deduplicated symbol `IDs`
-- Populates `model.module_name_to_sources` with sorted, deduplicated source file paths
-- Logs info messages about overload candidate counts
-- Logs warning messages about duplicate module interfaces
+- Clears and repopulates `model.symbol_ids_by_qualified_name`
+- Clears and repopulates `model.module_name_to_sources`
+- Logs info message for each qualified name with multiple symbols
+- Logs warning message for each module name with duplicate interfaces
 
 #### Reads From
 
 - `model.symbols`
 - `model.modules`
-- `SymbolInfo::qualified_name`
-- `SymbolInfo::signature`
-- `SymbolInfo::declaration_location.file`
-- `SymbolInfo::declaration_location.line`
-- `ModuleUnit::name`
-- `ModuleUnit::is_interface`
-- `SymbolID`
 
 #### Writes To
 
 - `model.symbol_ids_by_qualified_name`
 - `model.module_name_to_sources`
-- log output
 
 #### Usage Patterns
 
-- Called after merging symbol info into a `ProjectModel`
-- Invoked to refresh lookup caches when symbol or module data changes
+- Called after initial population of the `ProjectModel` to synchronize lookup indices
+- May be invoked again after modifying symbols or modules to refresh cached maps
 
 ### `clore::extract::rebuild_model_indexes`
 
@@ -170,42 +156,46 @@ Definition: `extract/merge.cppm:219`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function first resets the existing model indexes by clearing per-file symbols, deduplicating includes, clearing all namespaces, and cleaning per-symbol relation lists such as `calls`, `references`, `children`, `derived`, `called_by`, and `referenced_by`. It then captures all symbol `IDs` and builds a set of known namespace qualified names for strict validation. The core indexing is performed in parallel via `run_parallel_chunks`: each thread processes a range of symbol `IDs`, checking each symbol’s declaration location against the filter via `matches_filter`, inferring its enclosing namespace through `find_enclosing_namespace`, and recording explicit namespace names and parent–child pairs. Results are accumulated into thread‑local `LocalIndexData` structures and later merged into global maps (`file_symbols`, `namespace_symbols`, `parent_children`, `explicit_namespaces`).
+The function first clears all per-file symbol lists, resets the namespace map, and deduplicates relation vectors (calls, references, etc.) on every symbol. It then collects all symbol `IDs` into a flat vector and builds a set of known namespace qualified names for strict validation during namespace inference. A parallel-chunking lambda (`run_parallel_chunks`) dispatches work across hardware threads: each thread builds a `LocalIndexData` structure containing file‑to‑symbol mappings (filtered via `matches_filter` and `filter_root_path`), namespace‑to‑symbol mappings (obtained by calling `find_enclosing_namespace` on non‑namespace symbols), and parent–child edges. After all threads join, the local vectors are merged into global `std::unordered_map` collections (`file_symbols`, `namespace_symbols`) and a single `parent_children` vector. The explicit namespace names from the local data are also aggregated.
 
-After merging, the function populates `model.files` entries with the owner‑path mappings, ensures the namespace hierarchy using `ensure_namespace_hierarchy` for both explicit and inferred namespace names, and injects symbol `IDs` into namespace info objects. Parent–child relationships are applied by appending child `IDs` to the parent symbol’s `children` list. Finally, three parallel passes deduplicate lists within file info objects, namespace info objects (both `symbols` and `children`), and symbol info objects (`children` and `derived`), ensuring index consistency after the rebuild.
+The merged `file_symbols` are written into `model.files`, creating or updating `FileInfo` entries. For namespaces, `ensure_namespace_hierarchy` is first called for each explicit namespace name, then for each implicit namespace name from the aggregated map, ensuring the full hierarchy exists in `model.namespaces` before appending symbol `IDs`. The parent–child edges are applied by pushing child `IDs` into the `children` field of the parent symbol. Finally, three parallel‑chunk passes deduplicate the `symbols` field of every `FileInfo`, the `symbols` and `children` fields of every `NamespaceInfo`, and the `children` and `derived` fields of every `SymbolInfo`.
 
 #### Side Effects
 
-- clears `model.files[].symbols` and `model.files[].includes`
-- clears `model.namespaces`
-- clears `model.symbols[].children`
-- deduplicates `model.symbols[].calls`, `model.symbols[].references`, `model.symbols[].derived`, `model.symbols[].called_by`, `model.symbols[].referenced_by`
-- rebuilds `model.files` with updated path and symbol lists
-- rebuilds `model.namespaces` with namespace info and symbol lists
-- adds parent-child relationships to `model.symbols`
+- clears `file_info.symbols` for every file in `model.files`
+- deduplicates `file_info.includes` for every file
+- clears `model.namespaces` map
+- deduplicates `sym.calls`, `sym.references`, `sym.derived`, `sym.called_by`, `sym.referenced_by` for every symbol
+- clears `sym.children` for every symbol
+- repopulates `model.files` entries with new `.path` and `.symbols`
+- inserts or updates namespace entries in `model.namespaces` with `.name` and `.symbols`
+- appends child symbol `IDs` to parent symbol's `.children` vector
+- final deduplication of file symbols, namespace symbols, and symbol `.children`/`.derived`
 
 #### Reads From
 
-- reads `config.filter` and `config.root_path` via `filter_root_path(config)`
-- reads `model.symbols` keys and values (including `declaration_location.file`, `kind`, `qualified_name`, `parent`)
-- reads `model.files` keys
-- reads `model.namespaces` for known namespace names
+- `config` parameter
+- `model` parameter (all fields: `model.files`, `model.symbols`, `model.namespaces`)
+- per‑symbol `sym.declaration_location.file`, `sym.kind`, `sym.qualified_name`, `sym.parent`
+- `filter_root_path(config)` result
+- `known_namespace_names` set built from symbol qualified names
 
 #### Writes To
 
-- writes to `model.files[].symbols` and `model.files[].path`
-- writes to `model.namespaces` entries and `model.namespaces[].symbols`, `model.namespaces[].name`, `model.namespaces[].children`
-- writes to `model.symbols[].children`
+- `model.files` (file entries' `.path` and `.symbols`)
+- `model.namespaces` (namespace entries' `.name` and `.symbols`)
+- `model.symbols` (symbols' `.children`, `.derived`, `.calls`, `.references`, `.called_by`, `.referenced_by`)
+- local `file_symbols`, `namespace_symbols`, `parent_children`, `explicit_namespaces` (merged into model)
 
 #### Usage Patterns
 
-- called after extraction or merging to refresh indexes
-- part of the model finalization pipeline
-- ensures consistency of file, namespace, and parent-child associations
+- called after merging symbol information to rebuild efficient lookup structures
+- used to prepare a `ProjectModel` for queries or display
+- invokes heavy parallelization to improve performance on large models
 
 ## Internal Structure
 
-The `extract:merge` module is the component responsible for combining extracted symbol data into a consistent project model. It imports the `extract:model` for core data structures, `extract:filter` for path resolution, the `config` module for settings, and the `support` module for utility types. The module is decomposed into a set of internal helper functions and public entry points. The helper layer includes template utilities for deduplication (`append_unique`, `append_unique_range`, `deduplicate`) and namespace hierarchy management (`ensure_namespace_hierarchy`, `find_enclosing_namespace`). A private `LocalIndexData` struct supports per-thread state during parallel index rebuilding. On top of this, the public API provides `merge_symbol_info` (with overloads for const and rvalue references) to merge individual symbol records, `rebuild_model_indexes` to reconstruct internal indices after modifications, and `rebuild_lookup_maps` to repopulate name‑ and location‑based lookup tables. The implementation structure separates these concerns: low‑level merging of symbol fields, namespace resolution, and index maintenance are each handled by dedicated functions, promoting clarity and reuse.
+The `extract:merge` module is responsible for combining symbol information from multiple extraction passes into a single coherent project model. It exposes three core public functions: `merge_symbol_info` (two overloads) which merges a source symbol info into a target, `rebuild_lookup_maps` which refreshes name‑ and identifier‑based lookups, and `rebuild_model_indexes` which reconstructs internal index structures for a given model. Internally, the module decomposes work into a set of anonymous‑namespace helpers—`ensure_namespace_hierarchy` and `find_enclosing_namespace`—that resolve namespace nesting, and template utilities `append_unique`, `append_unique_range`, and `deduplicate` for efficient data deduplication. The implementation uses a parallel chunk‑processing strategy driven by `hardware_threads` and per‑thread `LocalIndexData` to partition merging tasks, with explicit control over which source (incoming or current) is preferred for snippets and definitions. The module imports `extract:model` for its data types, `extract:filter` for path resolution, `support` for logging and UTF‑8 utilities, and `config` for project‑level settings, forming a clear layering where merge logic sits atop the model and filtering infrastructure.
 
 ## Related Pages
 

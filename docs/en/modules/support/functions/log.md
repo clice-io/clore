@@ -1,6 +1,6 @@
 ---
 title: 'clore::logging::log'
-description: 'The implementation of clore::logging::log applies a two-step dispatch: it first checks the global filter clore::logging::g_log_level, and only proceeds to the underlying logger if the requested severity meets the threshold. When g_log_level has a value and the incoming lvl is strictly less than that stored level, the function returns immediately, performing no I/O or formatting. Otherwise, it forwards the call directly to spdlog::default_logger_raw()->log, passing lvl and formatting the msg argument as the sole format string parameter ("{}"). This avoids the overhead of constructing a formatted output when the message would be suppressed.'
+description: 'The function clore::logging::log implements a level‑gated dispatch to the spdlog library. Its control flow begins by checking whether the module‑level global g_log_level has been set (via its std::optional state). If a threshold exists and the incoming lvl is strictly less than that threshold, the function returns immediately without performing any logging work. This early‑exit optimization avoids unnecessary formatting and I/O when the message would be filtered out by the current log level configuration. When the level passes the gate, the call is forwarded to spdlog::default_logger_raw()->log(lvl, "{}", msg), which writes the formatted message through the default spdlog logger. No additional buffering or transformation is applied; the raw spdlog::level::level_enum and the std::string_view message are passed directly. The function therefore depends on g_log_level (a std::optional<spdlog::level::level_enum> defined in the same clore::logging namespace) and on the spdlog runtime API for the actual output. Its behaviour is fully synchronous and non‑allocating for the threshold check; allocation may occur inside spdlog depending on the sink configuration.'
 layout: doc
 template: doc
 ---
@@ -26,28 +26,27 @@ inline void log(spdlog::level::level_enum lvl, std::string_view msg) {
 }
 ```
 
-The implementation of `clore::logging::log` applies a two-step dispatch: it first checks the global filter `clore::logging::g_log_level`, and only proceeds to the underlying logger if the requested severity meets the threshold. When `g_log_level` has a value and the incoming `lvl` is strictly less than that stored level, the function returns immediately, performing no I/O or formatting. Otherwise, it forwards the call directly to `spdlog::default_logger_raw()->log`, passing `lvl` and formatting the `msg` argument as the sole format string parameter (`"{}"`). This avoids the overhead of constructing a formatted output when the message would be suppressed.
-
-The only external dependency is the `spdlog` library for the logger instance and level type. The filtering state is held in the file‑scoped variable `clore::logging::g_log_level`, which is a `std::optional<spdlog::level::level_enum>`. No additional string processing, caching, or level‑name resolution is performed inside `log`; those responsibilities are delegated to callers (e.g., `LogProxy::operator()`) or to other functions in the `clore::logging` namespace.
+The function `clore::logging::log` implements a level‑gated dispatch to the spdlog library. Its control flow begins by checking whether the module‑level global `g_log_level` has been set (via its `std::optional` state). If a threshold exists and the incoming `lvl` is strictly less than that threshold, the function returns immediately without performing any logging work. This early‑exit optimization avoids unnecessary formatting and I/O when the message would be filtered out by the current log level configuration. When the level passes the gate, the call is forwarded to `spdlog::default_logger_raw()->log(lvl, "{}", msg)`, which writes the formatted message through the default spdlog logger. No additional buffering or transformation is applied; the raw `spdlog::level::level_enum` and the `std::string_view` message are passed directly. The function therefore depends on `g_log_level` (a `std::optional<spdlog::level::level_enum>` defined in the same `clore::logging` namespace) and on the spdlog runtime API for the actual output. Its behaviour is fully synchronous and non‑allocating for the threshold check; allocation may occur inside spdlog depending on the sink configuration.
 
 ## Side Effects
 
-- Logs a message to the spdlog default logger output.
+- Writes a log record through `spdlog::default_logger_raw()` at the specified severity level
 
 ## Reads From
 
-- `g_log_level` global
-- `lvl` parameter
-- `msg` parameter
+- parameter `lvl`
+- parameter `msg`
+- global optional `g_log_level`
+- the `spdlog` default logger via `spdlog::default_logger_raw()`
 
 ## Writes To
 
-- spdlog default logger output
+- the `spdlog` default logger's output sinks
 
 ## Usage Patterns
 
-- called by `LogProxy::operator()(std::string_view)`
-- used directly for logging with an explicit level
+- Invoked by `clore::logging::LogProxy::operator()(std::string_view)` to route formatted messages to `spdlog`
+- Used as the underlying logging primitive that respects the `g_log_level` threshold
 
 ## Called By
 

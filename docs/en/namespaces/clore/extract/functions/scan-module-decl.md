@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::scanmoduledecl'
-description: 'The caller provides a source text (as std::string_view) and a mutable reference to a ScanResult object. The function performs a fast scan of the source to extract the module declaration, using Clang''s dependency directives scanner. It populates the module_name, is_interface_unit, and module_imports fields of the ScanResult without running the full preprocessor. This is a lightweight alternative to a full parse and is intended to be used during the initial scanning phase.'
+description: 'The function clore::extract::scan_module_decl performs a fast scan of a C++ module declaration using Clang’s dependency directives scanner. It avoids running the full preprocessor and instead directly populates the module_name, is_interface_unit, and module_imports fields of a provided ScanResult object. The caller supplies a std::string_view containing the source text of the translation unit and a mutable reference to a ScanResult that will receive the extracted module information. The function returns void and relies on the caller to ensure the source text is valid and the ScanResult is properly initialized.'
 layout: doc
 template: doc
 ---
@@ -21,14 +21,12 @@ Implementation: [`Module extract:scan`](../../../../modules/extract/scan.md)
 auto (std::string_view, ScanResult &) -> void;
 ```
 
-The caller provides a source text (as `std::string_view`) and a mutable reference to a `ScanResult` object. The function performs a fast scan of the source to extract the module declaration, using Clang's dependency directives scanner. It populates the `module_name`, `is_interface_unit`, and `module_imports` fields of the `ScanResult` without running the full preprocessor. This is a lightweight alternative to a full parse and is intended to be used during the initial scanning phase.
-
-The caller must ensure the `std::string_view` remains valid for the duration of the call, and the `ScanResult` is in a default‑initialized state (or at least that its relevant fields are overwritten). After the call, the caller can inspect the populated fields to determine module‑related properties of the source. The function does not throw exceptions; any failure to extract the declaration is reflected by the state of the `ScanResult` after the call, typically as an empty or invalid `module_name`.
+The function `clore::extract::scan_module_decl` performs a fast scan of a C++ module declaration using Clang’s dependency directives scanner. It avoids running the full preprocessor and instead directly populates the `module_name`, `is_interface_unit`, and `module_imports` fields of a provided `ScanResult` object. The caller supplies a `std::string_view` containing the source text of the translation unit and a mutable reference to a `ScanResult` that will receive the extracted module information. The function returns `void` and relies on the caller to ensure the source text is valid and the `ScanResult` is properly initialized.
 
 ## Usage Patterns
 
-- called by `clore::extract::scan_file` to extract module information from source content
-- used as a fast alternative to full preprocessing for module detection
+- called by `scan_file` to fill `ScanResult` fields without full preprocessing
+- used as a fast module detection step before heavy parsing
 
 ## Called By
 

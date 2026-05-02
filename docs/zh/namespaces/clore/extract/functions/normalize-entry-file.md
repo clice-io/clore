@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::normalizeentryfile'
-description: '返回与指定 clore::extract::CompileEntry 关联的规范化源文件路径。该路径是条目的主要输入文件经过标准化后的表现形式，可用于唯一标识编译单元，并作为构建签名或缓存键的组成部分。调用方应依赖该函数提供的稳定标识符，而非原始的文件名或路径。'
+description: 'clore::extract::normalize_entry_file 接受一个 CompileEntry 引用，并返回一个 std::string，表示该条目对应源文件的规范化路径。调用者可以依赖返回的字符串在文件系统的不同表示形式（如符号链接解析、路径分隔符统一、相对路径转换为绝对路径等）之间保持稳定且可重复，从而用于缓存键的生成或等价性检查。该函数不修改传入的 CompileEntry，其结果是纯函数式的。'
 layout: doc
 template: doc
 ---
@@ -21,12 +21,12 @@ Implementation: [`Module extract:compiler`](../../../../modules/extract/compiler
 auto (const CompileEntry &) -> std::string;
 ```
 
-返回与指定 `clore::extract::CompileEntry` 关联的规范化源文件路径。该路径是条目的主要输入文件经过标准化后的表现形式，可用于唯一标识编译单元，并作为构建签名或缓存键的组成部分。调用方应依赖该函数提供的稳定标识符，而非原始的文件名或路径。
+`clore::extract::normalize_entry_file` 接受一个 `CompileEntry` 引用，并返回一个 `std::string`，表示该条目对应源文件的规范化路径。调用者可以依赖返回的字符串在文件系统的不同表示形式（如符号链接解析、路径分隔符统一、相对路径转换为绝对路径等）之间保持稳定且可重复，从而用于缓存键的生成或等价性检查。该函数不修改传入的 `CompileEntry`，其结果是纯函数式的。
 
 ## Usage Patterns
 
-- Used by `build_compile_signature` to create a stable file key
-- Used by `ensure_cache_key_impl` to normalize the file path before caching
+- used in `clore::extract::build_compile_signature` to generate a hash key
+- used in `clore::extract::ensure_cache_key_impl` to normalize the entry file before caching
 
 ## Called By
 

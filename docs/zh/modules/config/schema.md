@@ -1,6 +1,6 @@
 ---
 title: 'Module config:schema'
-description: '模块 config:schema 负责声明 Clore 工具链中核心配置数据结构的公共类型定义，包括 TaskConfig、LLMConfig 和 FilterRule。这些类型通过公开字段暴露了任务执行所需的所有配置项：路径配置（项目根目录、工作区根目录、输出根目录、编译命令数据库路径）、LLM 行为配置（系统提示、重试次数）以及文件过滤规则（包含/排除模式）。作为配置模块的数据合同，它独立于序列化或解析逻辑，仅定义结构体及其成员的可访问性，供配置加载、验证和消费方统一引用。'
+description: '模块 config:schema 负责定义 CLORE 工具的配置数据结构，为整个项目的配置系统提供类型骨架。其公开实现范围涵盖三个核心结构体：FilterRule（包含文件包含/排除规则）、LLMConfig（语言模型调用参数，如系统提示和重试限制）以及 TaskConfig（任务级配置，汇总项目路径、编译数据库路径、输出根目录、过滤规则与 LLM 设置）。这些类型共同构成了配置文件的静态模式，供解析、验证与序列化组件使用。'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-模块 `config:schema` 负责声明 Clore 工具链中核心配置数据结构的公共类型定义，包括 `TaskConfig`、`LLMConfig` 和 `FilterRule`。这些类型通过公开字段暴露了任务执行所需的所有配置项：路径配置（项目根目录、工作区根目录、输出根目录、编译命令数据库路径）、LLM 行为配置（系统提示、重试次数）以及文件过滤规则（包含/排除模式）。作为配置模块的数据合同，它独立于序列化或解析逻辑，仅定义结构体及其成员的可访问性，供配置加载、验证和消费方统一引用。
+模块 `config:schema` 负责定义 CLORE 工具的配置数据结构，为整个项目的配置系统提供类型骨架。其公开实现范围涵盖三个核心结构体：`FilterRule`（包含文件包含/排除规则）、`LLMConfig`（语言模型调用参数，如系统提示和重试限制）以及 `TaskConfig`（任务级配置，汇总项目路径、编译数据库路径、输出根目录、过滤规则与 LLM 设置）。这些类型共同构成了配置文件的静态模式，供解析、验证与序列化组件使用。
 
 ## Imports
 
@@ -31,12 +31,12 @@ Definition: `config/schema.cppm:7`
 
 Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
-`clore::config::FilterRule` 的内部结构由两个公开的 `std::vector<std::string>` 成员 `include` 和 `exclude` 组成，分别代表允许匹配和拒绝匹配的模式集合。该结构本身未定义任何构造函数、赋值运算符或其他成员函数，因此其生命周期完全由默认的隐式构造和析构管理。核心的不变性假设是 `include` 与 `exclude` 列表在逻辑上互斥——即同一个模式不应同时出现在两个列表中——但结构体自身不强制执行这一约束，依赖外部调用方或解析逻辑来保证语义一致性。`include` 和 `exclude` 向量的添加、删除、遍历等操作均委托给 `std::vector` 的标准接口，无额外封装或检查。
+`clore::config::FilterRule` 的实现内部仅包含两个 `std::vector<std::string>` 数据成员：`include` 和 `exclude`。这两个无序模式列表共同构成过滤规则的核心载体，没有额外的辅助成员或状态标志。由于未定义用户提供的构造函数、析构函数或赋值运算符，该类型的对象完全依赖编译器合成的特殊成员函数进行构造、拷贝和移动，其语义相当于一个简单的聚合体。外部代码通过直接读取或修改这两个向量来设置过滤条件，过滤逻辑本身并不集成在结构体内，而是由使用方遍历 `include` 与 `exclude` 的条目并执行模式匹配。此结构不维护内部不变量或附加约束（例如模式字符串的格式验证或去重），所有输入有效性由调用者保证。
 
 #### Invariants
 
-- Each member is independently mutable
-- No constraints between include and exclude lists
+- Both `include` and `exclude` vectors can be empty
+- No implied ordering or mutual exclusivity between the two lists
 
 #### Key Members
 
@@ -45,8 +45,8 @@ Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
 #### Usage Patterns
 
-- Used to represent filter configurations
-- Lists can be populated by callers to define filtering behavior
+- Used as a building block in configuration systems to filter items based on inclusion and exclusion criteria
+- Likely checked by other code to decide whether to allow or deny a given element
 
 ### `clore::config::LLMConfig`
 
@@ -56,11 +56,12 @@ Definition: `config/schema.cppm:12`
 
 Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
-`clore::config::LLMConfig` 是一个聚合类型，内部通过两个公有成员保存 LLM 调用的基本配置。`system_prompt` 字段为 `std::string` 类型，用于存储系统级提示词；`retry_limit` 字段为 `std::uint32_t` 类型，默认初始化为 `0`，表示不进行重试。作为实现层的数据载体，该结构体不提供自定义构造函数或校验逻辑，所有成员均为直接访问，使用者需在构造后自行保证 `retry_limit` 的非负性（已由无符号类型保证）以及 `system_prompt` 的有效性。
+`clore::config::LLMConfig` 是一个聚合类型，包含两个公有数据成员：`system_prompt` 为 `std::string` 类型，`retry_limit` 为 `std::uint32_t` 类型。成员 `retry_limit` 的默认值为 0，这意味着在默认构造的实例中，重试行为被禁用。由于结构体采用聚合初始化，其成员可以通过花括号初始化列表直接赋值，且编译器隐式生成了默认构造函数、析构函数、复制及移动语义。该结构体没有显式设定的类不变量，因此所有合法值均可被接受，但 `retry_limit` 为 0 的约定赋予了默认配置特定的语义含义。
 
 #### Invariants
 
-- `retry_limit` 初始化为0
+- `retry_limit` 为无符号整数，值域为 `[0, UINT32_MAX]`
+- `system_prompt` 可以是任意字符串，无长度或内容约束
 
 #### Key Members
 
@@ -69,8 +70,9 @@ Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
 #### Usage Patterns
 
-- 作为配置对象传递给LLM接口
-- 从配置文件中解析
+- 直接作为配置参数传递给 LLM 相关的函数或类
+- 通过聚合初始化或成员赋值创建实例
+- 可能被序列化为 JSON 或 YAML 等格式以持久化配置
 
 ### `clore::config::TaskConfig`
 
@@ -80,13 +82,12 @@ Definition: `config/schema.cppm:17`
 
 Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
-结构体 `clore::config::TaskConfig` 将所有任务级配置参数聚合为一个纯聚合类型，不定义自定义构造函数或成员函数。其成员包括四个 `std::string` 路径字段（`compile_commands_path`、`project_root`、`output_root` 和 `workspace_root`），分别指定编译命令数据库位置、项目根、输出根和工作区根；以及一个 `FilterRule` 实例 `filter` 和一个 `LLMConfig` 实例 `llm`，分别控制过滤规则与语言模型配置。该结构无显式不变量约束，所有成员均为公开，调用方负责在赋值后维护路径间的语义一致性（例如 `workspace_root` 应为 `project_root` 的子目录）。
+`clore::config::TaskConfig` 以扁平字段形式直接存储核心路径配置，包括 `compile_commands_path`、`project_root`、`output_root` 和 `workspace_root`（均为 `std::string`），并包含两个聚合子对象 `filter`（`FilterRule`）和 `llm`（`LLMConfig`）。结构体不提供任何方法或构造函数，所有成员均为公有，因此不变量由调用方维护；设计上期望这些字符串代表有效的文件系统路径，且子对象在其各自类型中保持合法状态。字段的声明顺序（路径串在前，子对象在后）决定了默认的内存布局，但未引入额外的运行时约束或初始化逻辑。
 
 #### Invariants
 
-- Paths are stored as `std::string`.
-- `filter` is of type `FilterRule`.
-- `llm` is of type `LLMConfig`.
+- All path fields should refer to valid filesystem locations when the struct is used
+- `filter` and `llm` sub-configurations must be fully initialized before task execution
 
 #### Key Members
 
@@ -99,10 +100,11 @@ Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
 #### Usage Patterns
 
-- Used as a configuration container passed to task execution functions.
-- Aggregates directory paths and sub-configurations for filtering and LLM interaction.
+- Instantiated and populated from a configuration file or command-line arguments
+- Passed to task infrastructure components to control LLM interaction and file filtering
+- Used as a data transfer object for task setup
 
 ## Internal Structure
 
-`config:schema` 模块定义了配置层核心的数据类型，包括 `FilterRule`、`LLMConfig` 和 `TaskConfig`，所有字段均为公有访问，设计为纯值对象。该模块仅依赖标准库，内部层次平坦，没有进一步拆分或隐藏的实现细节；它作为 `config` 模块的一个分区，集中存放配置模式的实体定义，供其他分区或使用者直接引用。
+`config:schema` 模块定义了核心配置数据结构，实现了关注点分离：纯数据定义与解析逻辑解耦。它仅导入标准库，保持轻量独立。内部层次清晰——`TaskConfig` 复合了 `LLMConfig` 和 `FilterRule`，分别管理 AI 模型参数与路径筛选规则。`FilterRule` 的 `include`/`exclude` 字段体现了最小化、正交的设计，`LLMConfig` 包含 `system_prompt` 和 `retry_limit`，聚焦于运行时可调参数。整个模块位于单个接口文件 `schema.cppm` 中，形成自包含的类型定义层，为上层配置解析及业务逻辑提供类型安全的基础。
 

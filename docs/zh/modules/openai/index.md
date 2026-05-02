@@ -1,6 +1,6 @@
 ---
 title: 'Module openai'
-description: '模块 openai 实现了与 OpenAI 兼容的 LLM API 交互的完整协议，涵盖请求构建、响应解析、工具调用序列化、结构化输出支持及环境配置管理等核心能力。其公开接口包括三个顶层异步调用函数 call_completion_async、call_llm_async 和 call_structured_async，以及协议层的 protocol::build_request_json 和 protocol::parse_response 等函数。内部通过 detail::Protocol 结构体封装 API 密钥读取、URL 拼接和请求头生成，并由 protocol::detail 子命名空间提供 serialize_message、serialize_tool_choice、serialize_tool_definition、parse_content_parts 和 parse_tool_calls 等具体的序列化与解析工具，以及 validate_request 进行请求合规性检查。该模块还声明了 clore::net::protocol 命名空间下的若干独立函数，作为协议层的基础设施。'
+description: '模块 openai 封装了与 OpenAI API 进行交互的完整协议实现和异步调用接口。它公开了高层异步函数 call_llm_async、call_completion_async 和模板函数 call_structured_async，用于触发非阻塞的语言模型请求，同时提供了 detail::Protocol 类及其下的环境读取、请求构建、URL 拼接和响应解析等内部细节。在协议层，模块通过 protocol 子命名空间及 protocol::detail 子命名空间暴露了消息序列化（serialize_message、serialize_response_format、serialize_tool_choice 等）、请求验证（validate_request）以及响应解析（parse_response、parse_tool_calls、parse_content_parts）等底层工具，这些工具共同构成了与 OpenAI API 交换 JSON 数据的核心契约。'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,9 @@ template: doc
 
 ## Summary
 
-模块 `openai` 实现了与 `OpenAI` 兼容的 LLM API 交互的完整协议，涵盖请求构建、响应解析、工具调用序列化、结构化输出支持及环境配置管理等核心能力。其公开接口包括三个顶层异步调用函数 `call_completion_async`、`call_llm_async` 和 `call_structured_async`，以及协议层的 `protocol::build_request_json` 和 `protocol::parse_response` 等函数。内部通过 `detail::Protocol` 结构体封装 API 密钥读取、URL 拼接和请求头生成，并由 `protocol::detail` 子命名空间提供 `serialize_message`、`serialize_tool_choice`、`serialize_tool_definition`、`parse_content_parts` 和 `parse_tool_calls` 等具体的序列化与解析工具，以及 `validate_request` 进行请求合规性检查。该模块还声明了 `clore::net::protocol` 命名空间下的若干独立函数，作为协议层的基础设施。
+模块 `openai` 封装了与 `OpenAI` API 进行交互的完整协议实现和异步调用接口。它公开了高层异步函数 `call_llm_async`、`call_completion_async` 和模板函数 `call_structured_async`，用于触发非阻塞的语言模型请求，同时提供了 `detail::Protocol` 类及其下的环境读取、请求构建、URL 拼接和响应解析等内部细节。在协议层，模块通过 `protocol` 子命名空间及 `protocol::detail` 子命名空间暴露了消息序列化（`serialize_message`、`serialize_response_format`、`serialize_tool_choice` 等）、请求验证（`validate_request`）以及响应解析（`parse_response`、`parse_tool_calls`、`parse_content_parts`）等底层工具，这些工具共同构成了与 `OpenAI` API 交换 JSON 数据的核心契约。
+
+该模块依赖于 `client`、`http`、`protocol`、`provider`、`schema` 和 `support` 等模块，共同构建了从凭据管理、请求构造、网络传送到结构化输出解析的完整链路。它的公开实现范围涵盖了从顶层异步调用到底层 JSON 序列化/反序列化的所有环节，旨在为调用者提供统一、可靠的 `OpenAI` 集成能力。
 
 ## Imports
 
@@ -50,29 +52,33 @@ Definition: `network/openai.cppm:692`
 
 Declaration: [`Namespace clore::net::openai::detail`](../../namespaces/clore/net/openai/detail/index.md)
 
-该结构体作为 `OpenAI` API 的协议策略实现，通过一系列静态方法封装了与 `https://api.openai.com` 交互的特定细节。`read_environment` 使用硬编码的环境变量名 `OPENAI_BASE_URL` 和 `OPENAI_API_KEY` 读取凭证，返回 `clore::net::detail::EnvironmentConfig`。`build_url` 在 API 基址后附加路径 `chat/completions`；`build_headers` 构造包含 `Content-Type: application/json` 和 `Bearer {api_key}` 的请求头。`build_request_json` 和 `parse_response` 分别委托给 `clore::net::protocol` 命名空间中的通用实现，其中 `parse_response` 额外检查响应体是否为空以及 HTTP 状态码是否大于等于 400，并构造对应的 `LLMError`。`provider_name` 返回固定字符串 `"LLM"`。由于所有成员均为静态且无状态，该结构体不维护任何运行时不变量，纯粹作为逻辑分组使用。
+`clore::net::openai::detail::Protocol` 是一个纯静态方法的集合，内部无任何数据成员，充当 `OpenAI` 协议的具体策略实现。其每个静态方法均负责协议生命周期中的一个独立阶段，组合起来构成从环境配置读取到响应解析的完整流水线。由于所有方法均为静态，该结构体本身不持有状态，调用方只需传入必要的上下文参数（如 `EnvironmentConfig` 或 `CompletionRequest`）即可驱动协议逻辑，这使其易于测试和替换。
+
+关键实现中，`parse_response` 首先对空响应和 HTTP 状态码进行防御性检查，仅在通过后才将解析工作委托给通用的 `clore::net::protocol::parse_response`；`build_headers` 直接构造 `Content-Type` 与 `Authorization` 头，其中 API 密钥来自传入的 `environment`；`read_environment` 封装了环境变量名 `OPENAI_BASE_URL` 和 `OPENAI_API_KEY`，调用通用凭据读取函数；`build_url` 通过追加固定路径 `chat/completions` 生成终端地址；`capability_probe_key` 则组合供应商名、API 基址和模型名生成唯一探针键，其中供应商名固定为 `"LLM"`。
 
 #### Invariants
 
-- No mutable state
-- All methods are static
-- Configuration is read from environment variables
-- Return types use `std::expected` for error handling
+- All members are static; no instance state exists.
+- Environment variables `OPENAI_BASE_URL` and `OPENAI_API_KEY` are required for credential configuration.
+- `build_url` always appends `/chat/completions` path.
+- `build_headers` always includes `Content-Type: application/json; charset=utf-8` and `Authorization: Bearer <key>`.
+- `parse_response` expects a JSON response body compatible with the completion response schema.
 
 #### Key Members
 
-- static `read_environment`
-- static `build_url`
-- static `build_headers`
-- static `build_request_json`
-- static `parse_response`
-- static `provider_name`
+- `read_environment`
+- `build_url`
+- `build_headers`
+- `build_request_json`
+- `parse_response`
+- `provider_name`
+- `capability_probe_key`
 
 #### Usage Patterns
 
-- Called by higher-level `OpenAI` API functions to prepare requests and handle responses
-- Used to encapsulate API-specific details like endpoint path and header format
-- Provides a common interface for different LLM providers
+- Used as a template argument to generic HTTP client code that calls the static methods sequentially.
+- Other `Protocol` specializations (e.g., for other providers) follow the same static interface pattern.
+- Callers obtain credentials via `read_environment`, build the request with `build_*` methods, then parse the response with `parse_response`.
 
 #### Member Functions
 
@@ -132,6 +138,25 @@ Declaration: [`Namespace clore::net::openai::detail`](../../namespaces/clore/net
 ```cpp
 static auto build_url(const clore::net::detail::EnvironmentConfig& environment) -> std::string {
         return clore::net::detail::append_url_path(environment.api_base, "chat/completions");
+    }
+```
+
+##### `clore::net::openai::detail::Protocol::capability_probe_key`
+
+Declaration: `network/openai.cppm:743`
+
+Definition: `network/openai.cppm:743`
+
+Declaration: [`Namespace clore::net::openai::detail`](../../namespaces/clore/net/openai/detail/index.md)
+
+###### Implementation
+
+```cpp
+static auto capability_probe_key(const clore::net::detail::EnvironmentConfig& environment,
+                                     const CompletionRequest& request) -> std::string {
+        return clore::net::make_capability_probe_key(provider_name(),
+                                                     environment.api_base,
+                                                     request.model);
     }
 ```
 
@@ -202,125 +227,131 @@ static auto read_environment()
 
 ### `clore::net::openai::call_completion_async`
 
-Declaration: `network/openai.cppm:748`
-
-Definition: `network/openai.cppm:775`
-
-Declaration: [`Namespace clore::net::openai`](../../namespaces/clore/net/openai/index.md)
-
-`clore::net::openai::call_completion_async` 的实现是一个轻量包装，它将传入的 `CompletionRequest` 和 `kota::event_loop` 直接转发给 `clore::net::call_completion_async<clore::net::openai::detail::Protocol>`。该泛型调用函数负责处理完整的异步工作流，其返回的协程结果通过 `or_fail()` 转换为 `kota::task<CompletionResponse, LLMError>`。
-
-内部的控制流程由泛型函数调度，它依赖 `clore::net::openai::detail::Protocol` 结构体提供 `OpenAI` API 特定的行为。该协议类实现了 `build_url`、`build_request_json`、`build_headers`、`parse_response`、`read_environment` 和 `provider_name` 等挂接方法，分别用于构造请求 URL、序列化请求体的 JSON、设置 HTTP 头部、解析响应、读取环境配置以及返回提供商字符串。底层的 HTTP 调用与 JSON 序列化/反序列化（通过 `clore::net::openai::protocol::detail` 命名空间下的工具函数，如 `serialize_message`、`serialize_tool_choice`、`parse_tool_calls`、`parse_content_parts` 等）共同构成了完整的请求-响应循环。
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- `request` (by move)
-- `loop` reference
-- `detail::Protocol`
-
-#### Usage Patterns
-
-- called to initiate an async completion request to `OpenAI`
-- used with an event loop for lightweight concurrency
-
-### `clore::net::openai::call_llm_async`
-
-Declaration: `network/openai.cppm:752`
+Declaration: `network/openai.cppm:755`
 
 Definition: `network/openai.cppm:782`
 
 Declaration: [`Namespace clore::net::openai`](../../namespaces/clore/net/openai/index.md)
 
-该函数是 `clore::net::openai::call_llm_async` 的协程包装器，接收模型标识符、系统提示、`PromptRequest` 对象以及 `kota::event_loop` 引用。其核心实现直接委托给泛型模板 `clore::net::call_llm_async<clore::net::openai::detail::Protocol>`，并调用 `.or_fail()` 将 `kota::task` 的失败结果转换为异常抛出（或按框架约定处理）。这种设计将 `OpenAI` 特定的协议细节（如 URL 构建、请求序列化、响应解析）封装在 `detail::Protocol` 特质中，使顶层调用逻辑与具体的 LLM 提供商解耦；控制流仅涉及协程挂起与恢复，依赖的底层组件包括 `clore::net::protocol::build_request_json`、`detail::Protocol::parse_response` 以及 `call_completion_async` 等函数，但本函数本身不直接操作这些细节。
+该函数是一个轻量包装器，其核心逻辑完全委托给模板函数 `clore::net::call_completion_async<detail::Protocol>`。具体来说，它接收一个 `CompletionRequest` 和一个指向 `kota::event_loop` 的指针，将其转发给通用实现，然后通过 `.or_fail()` 将底层的 `expected` 结果转换为协程任务返回值。
+
+在内部，所有与 `OpenAI` 特有的交互细节均由 `detail::Protocol` 封装：它通过 `build_url`、`build_headers` 和 `build_request_json` 构造 HTTP 请求，并且依赖 `detail::Protocol::parse_response` 和协议细节命名空间内的序列化/解析函数（如 `serialize_message`、`serialize_tool_definition`、`serialize_tool_choice`、`serialize_response_format`、`parse_tool_calls`、`parse_content_parts` 以及 `validate_request`）来处理请求体组装与响应中工具调用、内容分片等复杂结构的解析。这些模块的协作形成了完整的控制流，而包装器本身仅负责类型擦除和错误转换。
 
 #### Side Effects
 
-- Initiates an asynchronous LLM completion request via the network.
-- Moves the `request` object, transferring ownership.
-- Potentially modifies internal state in the event loop.
+- 发起网络 I/O 请求到 `OpenAI` 服务
+- 异步等待响应并可能触发事件循环调度
+- 通过 `or_fail()` 处理 `LLMError` 错误状态
+
+#### Reads From
+
+- 参数 `request`（`CompletionRequest`）
+- 参数 `loop`（`kota::event_loop&`）
+- 底层协议 `detail::Protocol` 的配置
+
+#### Writes To
+
+- 协程返回值 `CompletionResponse`（通过 `co_return` 写入）
+
+#### Usage Patterns
+
+- 用于异步获取 `OpenAI` 补全结果
+- 与事件循环集成以避免阻塞
+- 通过错误处理机制应对 LLM 请求失败
+
+### `clore::net::openai::call_llm_async`
+
+Declaration: `network/openai.cppm:759`
+
+Definition: `network/openai.cppm:789`
+
+Declaration: [`Namespace clore::net::openai`](../../namespaces/clore/net/openai/index.md)
+
+函数 `clore::net::openai::call_llm_async` 是一个基于协程的轻量级包装器，其核心逻辑完全委托给泛型模板 `clore::net::call_llm_async<detail::Protocol>`。调用时，它直接将接收到的 `model`、`system_prompt`、`request` 以及 `loop` 的指针转发给该模板，并随后调用 `.or_fail()` 将返回的 `kota::task` 转换为 `kota::task<std::string, LLMError>`。由此，算法和内部控制流均由模板通过 `detail::Protocol` 完成，该协议实现了具体的请求构建、HTTP 通信及响应解析，包括调用 `detail::Protocol::build_url`、`build_headers`、`build_request_json` 以及 `parse_response` 等方法。函数本身不包含独立的请求构造或解析逻辑，仅作为接口适配层，将 `OpenAPI` 参数形式映射到通用异步 LLM 调用框架中。
+
+#### Side Effects
+
+- 启动异步网络 I/O 操作（通过委托的 `call_llm_async` 实现）
+- 可能修改 `kota::event_loop` 内部状态以调度协程
+
+#### Reads From
+
+- 参数 `model`（类型 `std::string_view`）
+- 参数 `system_prompt`（类型 `std::string_view`）
+- 参数 `request`（类型 `PromptRequest`）
+- 参数 `loop`（类型 `kota::event_loop&`）
+
+#### Writes To
+
+- 调用方返回的 `kota::task<std::string, LLMError>` 对象（包含最终结果）
+
+#### Usage Patterns
+
+- 在需要异步执行 LLM 生成的地方调用，配合 `co_await`
+- 与其他异步操作组合，如 `call_completion_async` 或 `call_structured_async`
+- 用于事件循环驱动的高层 LLM 客户端
+
+### `clore::net::openai::call_llm_async`
+
+Declaration: `network/openai.cppm:765`
+
+Definition: `network/openai.cppm:800`
+
+Declaration: [`Namespace clore::net::openai`](../../namespaces/clore/net/openai/index.md)
+
+该函数使用协程封装底层异步请求，将调用委托给泛型实现 `clore::net::call_llm_async<detail::Protocol>`，并传入模型标识符、系统提示、用户提示以及事件循环指针。它依赖 `detail::Protocol` 结构体提供的协议方法（如 `build_json`、`build_url`、`build_headers`、`parse_response`）来构造和解析 `OpenAI` API 请求，并通过 `.or_fail()` 将内部错误转换为公开的 `LLMError` 类型。返回值是一个 `kota::task<std::string, LLMError>`，调用方可在事件循环中 `co_await` 获取最终文本结果。
+
+#### Side Effects
+
+- Initiates an asynchronous HTTP request to a remote LLM service
+- Schedules callbacks on the provided `kota::event_loop`
 
 #### Reads From
 
 - `model` parameter
 - `system_prompt` parameter
-- `request` parameter
-- `loop` parameter
-- `detail::Protocol` type
-
-#### Writes To
-
-- Coroutine return value (a `kota::task`)
-- Potentially network buffers and I/O state
+- `prompt` parameter
+- `loop` parameter (event loop reference)
 
 #### Usage Patterns
 
-- Called by higher-level `OpenAI` API functions
-- Used to perform LLM calls asynchronously in an event-driven context
-
-### `clore::net::openai::call_llm_async`
-
-Declaration: `network/openai.cppm:758`
-
-Definition: `network/openai.cppm:793`
-
-Declaration: [`Namespace clore::net::openai`](../../namespaces/clore/net/openai/index.md)
-
-该函数充当 `clore::net::openai` 命名空间的便捷包装器，将调用直接转发给模板化的 `clore::net::call_llm_async`，并明确绑定协议实现为 `clore::net::openai::detail::Protocol`。它接收 `model`、`system_prompt` 和 `prompt` 三个字符串视图，以及一个 `kota::event_loop` 引用，然后通过 `co_await` 等待模板调用返回的 `kota::task<std::string, LLMError>`，并立即调用其 `.or_fail()` 方法，将潜在的 `kota::result` 错误转化为异常或终止流程。
-
-算法上，该函数不直接参与 JSON 构造、HTTP 请求或响应解析；这些细节完全由 `detail::Protocol` 中的 `build_request_json`、`build_url`、`build_headers`、`read_environment`、`parse_response` 等成员方法处理。依赖关系集中于 `clore::net::openai::detail::Protocol` 这一协议层，而本函数仅作为协程入口点，确保调用者获得一个类型安全的字符串结果或失败传播。
-
-#### Side Effects
-
-- 发起网络 I/O 请求
-- 分配协程状态和任务对象
-
-#### Reads From
-
-- `model`
-- `system_prompt`
-- `prompt`
-- `loop`
-
-#### Usage Patterns
-
-- 使用异步协程进行 LLM 调用
-- 与 `kota::event_loop` 集成
+- Primary async interface for LLM calls within the `clore::net::openai` namespace
+- Called by code that requires non-blocking interaction with an LLM backend
+- Wrapped or extended by higher-level functions such as `call_completion_async` and `call_structured_async`
 
 ### `clore::net::openai::call_structured_async`
 
-Declaration: `network/openai.cppm:765`
+Declaration: `network/openai.cppm:772`
 
-Definition: `network/openai.cppm:805`
+Definition: `network/openai.cppm:812`
 
 Declaration: [`Namespace clore::net::openai`](../../namespaces/clore/net/openai/index.md)
 
-该函数是 `clore::net::openai` 命名空间中针对 `OpenAI` 协议的协程入口，它接收 `model`、`system_prompt`、`prompt` 和一个 `kota::event_loop`，并将这些参数直接转发给通用的 `clore::net::call_structured_async<detail::Protocol, T>`。内部实现使用 `co_return co_await` 等待该通用函数的结果，并通过 `.or_fail()` 将错误转换为 `LLMError` 类型。通用函数负责实际的 HTTP 通信流程：它利用 `detail::Protocol` 提供的 `build_url`、`build_headers`、`build_request_json` 方法构造请求，调用 `clore::net::openai::call_llm_async` 发送并接收原始响应，再通过 `detail::Protocol::parse_response` 解析 JSON 响应，提取并验证工具调用与结构化内容（如通过 `parse_tool_calls` 和 `parse_content_parts`），最终反序列化为模板参数 `T`。整个流程在 `kota::event_loop` 的异步上下文中执行，并依赖 `clore::net::protocol::build_request_json` 和 `clore::net::protocol::parse_response` 等底层函数处理 JSON 的序列化与解析。
+函数 `clore::net::openai::call_structured_async` 的核心逻辑是委托给通用 `clore::net::call_structured_async`，特化为 `clore::net::openai::detail::Protocol`。该协议首先通过 `read_environment` 加载配置，随后调用 `build_url`、`build_headers` 和 `build_request_json` 构造 HTTP 请求。`build_request_json` 内部利用 `serialize_message` 构建消息数组，并根据模板类型通过 `serialize_response_format`、`serialize_tool_definition` 和 `serialize_tool_choice` 嵌入结构化输出约束。请求发送后，`parse_response` 解析返回的 JSON，遍历 `choices` 并提取 `message` 中的 `content` 或 `tool_calls`，依赖 `parse_content_parts` 和 `parse_tool_calls` 进行反序列化。整体控制流涉及 `validate_request` 的校验，并依赖于 `clore::net::protocol` 命名空间的通用函数以及 `clore::net::openai::protocol::detail` 中的序列化与解析工具。
 
 #### Side Effects
 
-- 发起网络 I/O 请求
-- 可能修改传入的 `kota::event_loop` 状态
-- 通过协程机制实现异步控制流
+- 发起异步 HTTP 网络请求到 `OpenAI` 服务
+- 等待网络响应并可能解析 JSON 为类型 `T`
+- 通过传递的 `&loop` 向事件循环注册回调或任务
 
 #### Reads From
 
-- `model`
-- `system_prompt`
-- `prompt`
-- `loop`
+- 参数 `model`（字符串视图）
+- 参数 `system_prompt`（字符串视图）
+- 参数 `prompt`（字符串视图）
+- 参数 `loop`（事件循环引用）
+- 底层 `clore::net::call_structured_async` 的执行结果
 
 #### Writes To
 
-- 返回的 `kota::task<T, LLMError>` 对象
+- 通过 `.or_fail()` 可能设置 `kota::task<T, LLMError>` 中的错误状态
+- 事件循环 `loop` 可能包含在异步操作期间修改的内部状态（如待处理回调队列）
 
 #### Usage Patterns
 
-- 用于需要结构化响应的 `OpenAI` LLM 调用
-- 与事件循环配合使用以支持异步等待
+- `co_await clore::net::openai::call_structured_async<MyStruct>("gpt-4", "system", "prompt", loop)`
+- 作为 `clore::net::openai::call_completion_async` 或 `call_llm_async` 的结构化版本，直接返回解析后的类型 `T`
 
 ### `clore::net::openai::protocol::detail::parse_content_parts`
 
@@ -330,7 +361,7 @@ Definition: `network/openai.cppm:288`
 
 Declaration: [`Namespace clore::net::openai::protocol::detail`](../../namespaces/clore/net/openai/protocol/detail/index.md)
 
-该函数遍历 `clore::net::openai::protocol::detail::parse_content_parts` 接收的 `json::Array` 中的每个元素，首先将每个元素通过 `clore::net::detail::expect_object` 解析为一个 JSON 对象。接着从对象中获取 `"type"` 字段（若不存在则默认为 `"text"`）并经由 `clore::net::detail::expect_string` 验证其类型。根据类型值分流：若为 `"refusal"`，则提取对象的 `"refusal"` 字段字符串并累加到本地 `refusal` 变量，设置 `saw_refusal` 标记；若为 `"text"` 或 `"output_text"`，则尝试获取 `"text"` 字段：该字段可能直接是一个字符串（通过 `get_string` 直接获取），也可能是一个包含 `"value"` 子字段的对象，此时需递归使用 `clore::net::detail::expect_object` 和 `expect_string` 提取 `"value"` 字符串，最后将得到的文本累加到本地 `text` 变量并设置 `saw_text` 标记。对于其他类型（如 `"image_url"`）则直接跳过。任何字段缺失或类型不匹配都会导致立即返回 `std::unexpected` 错误。循环结束后，根据 `saw_text` 和 `saw_refusal` 标记决定是否将累积的字符串移动到输出结构 `AssistantOutput` 的对应成员中，最终返回该结构。该函数完全依赖 `clore::net::detail` 命名空间下的类型安全 JSON 提取工具进行错误处理，并假定输入数组是合法的 `OpenAI` 消息内容部分格式。
+该函数遍历 `parts` 数组中的每一个元素，将其解析为 JSON 对象并提取 `type` 字段，以此决定如何处理内容。对于类型为 `"refusal"` 的元素，它从 `refusal` 字段读取字符串并追加到局部变量 `refusal` 中，同时设置 `saw_refusal` 标志。对于类型为 `"text"` 或 `"output_text"` 的元素，它尝试直接从 `text` 字段获取字符串值；若该字段本身是一个对象，则进一步提取其 `value` 子字段。所有有效的文本内容被累积到 `text` 变量中，并设置 `saw_text` 标志。其他类型的元素则被静默跳过。遍历结束后，根据 `saw_text` 和 `saw_refusal` 标志，将累积的 `text` 和 `refusal` 分别填入返回的 `AssistantOutput` 结构体。整个过程中，所有 JSON 字段的提取都依赖 `clore::net::detail::expect_object` 和 `clore::net::detail::expect_string` 进行类型验证，任何验证失败都会立即返回 `LLMError` 错误。
 
 #### Side Effects
 
@@ -338,16 +369,18 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- const `json::Array`& parts
-- JSON value fields: "type", "refusal", "text", "value"
+- parameter `parts` of type `const json::Array&`
+- JSON object fields accessed via `clore::net::detail::expect_object` and `get` methods, specifically `type`, `refusal`, `text`, and `value`
 
 #### Writes To
 
-- returned `AssistantOutput` object
+- local variables `output`, `text`, `refusal`, `saw_text`, `saw_refusal`
+- return value of type `std::expected<AssistantOutput, LLMError>`
 
 #### Usage Patterns
 
-- Called when parsing chat completion response content from `OpenAI` API
+- Used to parse the `content` array of a chat completion response into an `AssistantOutput` object
+- Called during response deserialization in the `OpenAI` protocol layer
 
 ### `clore::net::openai::protocol::detail::parse_tool_calls`
 
@@ -357,7 +390,7 @@ Definition: `network/openai.cppm:369`
 
 Declaration: [`Namespace clore::net::openai::protocol::detail`](../../namespaces/clore/net/openai/protocol/detail/index.md)
 
-该函数遍历 `calls` 数组中的每个 JSON 值，将其解析为 `ToolCall` 对象。对于每个元素，先通过 `clore::net::detail::expect_object` 提取工具调用对象，然后依次提取 `id`、`type`、`function`（包括 `name` 和 `arguments`）字段，每个字段都调用 `clore::net::detail::expect_string` 进行类型检查。`id` 被收集到 `ids` 集合中以检测重复；`type` 必须等于 `"function"`，否则返回 `LLMError`。`arguments` 字段是 JSON 字符串，通过 `json::parse` 解析为 `json::Value` 对象。所有字段验证通过后，将 `id`、`name`、原始 `arguments_json` 及其解析结果 `arguments` 组合为 `ToolCall` 并加入返回向量。任何字段缺失、类型错误、重复 id 或 JSON 解析失败都会立即以 `std::unexpected` 返回错误。最后返回整个 `parsed_calls` 向量。
+该函数遍历输入数组 `calls`，对每个元素通过 `clore::net::detail::expect_object` 提取为对象，并依次提取和验证 `id`、`type`、`function`、`name` 及 `arguments` 字段。`id` 使用 `std::unordered_set` 去重；`type` 必须为 `"function"`；`arguments` 字段被解析为 JSON 值。任何缺失或格式错误的字段都会立即返回 `std::unexpected` 错误。验证通过后，构造 `ToolCall` 实例并添加到结果向量中，最终返回完整的调用列表。核心依赖为 `clore::net::detail::expect_object`、`expect_string` 以及 `json::parse`，分别用于类型检查和 JSON 反序列化。
 
 #### Side Effects
 
@@ -365,17 +398,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `const json::Array& calls`
-- nested JSON objects and string values within each array element
+- const `json::Array`& calls
 
 #### Writes To
 
-- returned `std::vector<ToolCall>` (constructed locally, moved out)
+- local variable `parsed_calls`
 
 #### Usage Patterns
 
-- called to parse `tool_calls` from an `OpenAI` API response
-- used in response deserialization pipeline
+- Used by `OpenAI` protocol message parsing logic
+- Called during response deserialization to extract tool calls
 
 ### `clore::net::openai::protocol::detail::serialize_message`
 
@@ -385,26 +417,32 @@ Definition: `network/openai.cppm:27`
 
 Declaration: [`Namespace clore::net::openai::protocol::detail`](../../namespaces/clore/net/openai/protocol/detail/index.md)
 
-该函数通过 `std::visit` 模式匹配实现了对 `Message` 变体的序列化。它首先调用 `clore::net::detail::make_empty_object` 创建一个初始的 JSON 对象，接着在访问器中根据消息的具体类型填充 `role` 字段，并利用 `clore::net::detail::normalize_utf8` 和 `clore::net::detail::insert_string_field` 处理 `content` 字符串。对于 `AssistantToolCallMessage`，该函数会遍历其中的 `tool_calls` 列表，为每个调用创建嵌套的 JSON 对象，依次插入 `id`、`type`（固定为 `"function"`）以及由 `function` 子对象包含的 `name` 和 `arguments_json`（同样经过规范化处理）。最后将构建完成的 JSON 对象推入传入的 `out` 数组。整个流程依赖 `clore::net::detail` 命名空间下的辅助函数来管理内存分配和错误传播，所有错误路径均通过返回 `std::unexpected` 提前退出。
+函数 `clore::net::openai::protocol::detail::serialize_message` 将一条 `Message` 变体序列化为一个 JSON 对象并追加至输出数组。它使用 `std::visit` 按消息类型分发：`SystemMessage`、`UserMessage` 和 `AssistantMessage` 均设置 `role` 与 `content` 字段，其中 `content` 经 `clore::net::detail::normalize_utf8` 归一化后通过 `clore::net::detail::insert_string_field` 写入。`AssistantToolCallMessage` 除可选 `content` 外，还会遍历 `tool_calls` 列表，为每个调用构建包含 `id`、`type`（固定为 `"function"`）以及嵌套 `function` 对象（含 `name` 与 `arguments`）的子 JSON 对象，最终将所有调用汇聚为一个 `tool_calls` 数组。`ToolResultMessage` 则填充 `role`、`tool_call_id` 和 `content`。每个字段插入失败均会以 `std::unexpected` 终止序列化并传播底层错误；成功后将构造的 JSON 对象推入 `out` 数组。该函数依赖 `clore::net::detail` 命名空间下的 JSON 构建工具函数，并直接接受 `Message` 变体，无需外部上下文。
 
 #### Side Effects
 
-- 修改输出参数 `out` 数组的内容
-- 动态分配 JSON 对象、数组及字符串的内存
-- 调用 `normalize_utf8` 和 `insert_string_field` 等辅助函数可能分配或转换字符串
+- mutates the output `json::Array` by appending a new JSON object
+- allocates memory for temporary JSON objects and strings via helper functions
+- modifies local JSON objects (`object`, `tool_calls`, `call_object`, `function_object`)
 
 #### Reads From
 
-- 参数 `message` 的变体内容（包括 `content`, `tool_call_id`, `tool_calls` 及其子字段）
+- the `out` parameter (reference to `json::Array`)
+- the `message` parameter (const `Message&`)
+- fields of the visited message variants (e.g., `content`, `tool_calls`, `tool_call_id`, `id`, `name`, `arguments_json`)
 
 #### Writes To
 
-- 输出参数 `out` 数组（通过 `push_back` 追加 JSON 对象）
-- 函数返回值中的错误状态（通过 `std::expected`）
+- the `out` array (append)
+- temporary `json::Object` instances created via `clore::net::detail::make_empty_object`
+- temporary `json::Array` for tool calls
+- fields inserted into those objects via `insert` and `clore::net::detail::insert_string_field`
 
 #### Usage Patterns
 
-- 作为 `OpenAI` 协议消息序列化的一部分，用于将消息列表转换为 JSON 请求体
+- called by higher-level request serialization functions
+- used to convert a `Message` variant (e.g., from a chat history) into JSON for the `OpenAI` API
+- part of the protocol detail layer for building request bodies
 
 ### `clore::net::openai::protocol::detail::serialize_response_format`
 
@@ -414,27 +452,30 @@ Definition: `network/openai.cppm:209`
 
 Declaration: [`Namespace clore::net::openai::protocol::detail`](../../namespaces/clore/net/openai/protocol/detail/index.md)
 
-该函数首先调用 `clore::net::detail::make_empty_object` 创建两个临时的 JSON 对象 —— `object` 与 `schema_object`，每一步都会检查返回值，若任一创建失败则立即传播错误。接着根据 `format.schema` 是否为空选择分支：若无 schema，则直接将 `"json_object"` 写入 `object` 的 `type` 字段；若有 schema，则设置 `type` 为 `"json_schema"`，并通过 `clore::net::detail::insert_string_field` 写入 `name`、直接设置 `strict` 布尔值，再调用 `clore::net::detail::clone_object` 复制原始 schema 后嵌套为子对象。最后将组装好的 `object` 作为 `"response_format"` 的值插入到 `root` 中，成功时返回空 `expected`。所有 JSON 操作均使用 `json::Object` 的插入方法，错误处理依赖 `std::expected` 链。
+函数 `clore::net::openai::protocol::detail::serialize_response_format` 将 `ResponseFormat` 结构序列化为 JSON 对象并注入给定 `root` 的 `"response_format"` 字段。内部首先创建两个空 JSON 对象 `object` 和 `schema_object`，若任一创建失败则立即返回 `std::unexpected`。控制流根据 `format.schema` 是否有值分支：若无值，直接向 `object` 插入 `"type"` 为 `"json_object"`；若有值，则先后插入 `"type"` 为 `"json_schema"`，并通过 `clore::net::detail::insert_string_field` 写入 `"name"`，手动插入 `"strict"` 布尔字段，再克隆 `format.schema` 的内容作为 `"schema"` 子对象，最后将 `schema_object` 整体作为 `"json_schema"` 放入 `object`。最终将 `object` 移动至 `root`。该函数依赖于 `clore::net::detail::make_empty_object`、`clore::net::detail::insert_string_field` 和 `clore::net::detail::clone_object` 等内部辅助，并统一使用 `std::expected` 传播错误。
 
 #### Side Effects
 
-- Mutates root JSON object by inserting `response_format` key
-- Allocates temporary JSON objects for response format and schema sub-objects
-- May log errors via helper functions if allocation fails
+- Modifies the provided `root` JSON object by inserting a `response_format` object
+- Allocates memory for intermediate JSON objects through helper functions
 
 #### Reads From
 
-- format parameter: format`.schema` (`has_value`, and clone of its content), format`.name`, format`.strict`
+- `root` parameter (existing JSON object)
+- `format` parameter fields: `format.name`, `format.schema`, `format.strict`
+- Helper functions: `clore::net::detail::make_empty_object`, `clore::net::detail::insert_string_field`, `clore::net::detail::clone_object`
 
 #### Writes To
 
-- root JSON object: inserts `response_format` key with the constructed JSON value
-- Temporary JSON objects for response format and schema that are moved into root
+- `root` JSON object (inserts `"response_format"` key)
+- Temporary `object` and `schema_object` JSON objects that are moved into `root`
+- Error state via `std::expected` when any sub-operation fails
 
 #### Usage Patterns
 
-- Called during serialization of `OpenAI` API request body
-- Used to set the response format for chat completions requests
+- Called during serialization of `OpenAI` API requests
+- Used to convert a `ResponseFormat` into a JSON representation nested within a larger request object
+- Likely invoked from higher-level serialization routines such as `serialize_message` or `validate_request`
 
 ### `clore::net::openai::protocol::detail::serialize_tool_choice`
 
@@ -444,27 +485,26 @@ Definition: `network/openai.cppm:167`
 
 Declaration: [`Namespace clore::net::openai::protocol::detail`](../../namespaces/clore/net/openai/protocol/detail/index.md)
 
-该函数接受一个 `json::Object& root` 和一个 `ToolChoice& choice`，通过 `std::visit` 对 `choice` 中的每个变体类型进行分发。对于 `ToolChoiceAuto`、`ToolChoiceRequired` 和 `ToolChoiceNone`，它分别向 `root` 中插入字符串常量 `"auto"`、`"required"` 或 `"none"`，然后直接返回成功。对于其余情况（强制工具选择），算法首先调用 `clore::net::detail::make_empty_object` 创建两个临时 `json::Object`，分别用于表示工具选择对象和其内部的函数对象；若任一创建失败，立即返回对应的 `LLMError`。接着，设置工具选择对象的 `"type"` 为 `"function"`，并借助 `clore::net::detail::insert_string_field` 将当前工具的名称（`current.name`）插入函数对象的 `"name"` 字段，插入过程同样会处理错误。最后，将组装好的函数对象移入工具选择对象，再将工具选择对象移入 `root` 的 `"tool_choice"` 字段。该分支依赖 `clore::net::detail` 提供的内存分配与字段插入辅助函数，保证了在失败时返回清晰的错误信息。
+该函数通过 `std::visit` 对 `ToolChoice` 变体进行模式匹配，根据具体类型决定序列化方式。对于 `ToolChoiceAuto`、`ToolChoiceRequired` 和 `ToolChoiceNone`，它直接将对应的字符串（`"auto"`、`"required"` 或 `"none"`）插入到输出对象 `root` 的 `"tool_choice"` 键中。对于其余变体（预期为强制选择特定工具的情况），它构建一个嵌套的 JSON 对象：先依赖 `clore::net::detail::make_empty_object` 创建外层对象和函数对象，然后设置 `"type": "function"`，再使用 `clore::net::detail::insert_string_field` 将 `current.name` 写入函数对象的 `"name"` 字段，最后将该函数对象作为 `"function"` 的值插入外层对象，并将整个对象赋值给 `root` 的 `"tool_choice"`。整个处理通过 `std::expected` 传播错误，任何中间失败都会导致立即返回 `std::unexpected`。
 
 #### Side Effects
 
-- Modifies `root` by inserting `"tool_choice"` field
-- Allocates temporary JSON objects via `make_empty_object` and `insert_string_field`
-- Moves ownership of nested objects into `root`
+- 修改 `root` 对象，插入或替换 `"tool_choice"` 键的值
+- 可能通过 `clore::net::detail::make_empty_object` 和 `clore::net::detail::insert_string_field` 进行内存分配
 
 #### Reads From
 
-- `choice` parameter (a `ToolChoice` variant)
-- In fallback case: `current.name` (a string)
+- 参数 `root`（作为写入目标）
+- 参数 `choice`（其变体类型及可能包含的 `name` 字段）
 
 #### Writes To
 
-- `root` parameter (a `json::Object&`)
+- 参数 `root`（修改其内容）
 
 #### Usage Patterns
 
-- Called during serialization of `OpenAI` API request bodies
-- Used to set the `tool_choice` field in a JSON object
+- 用于将 `ToolChoice` 配置序列化为 JSON 对象，作为 `OpenAI` API 请求的一部分
+- 在序列化对话请求时被调用，类似 `serialize_response_format` 或 `serialize_tool_definition`
 
 ### `clore::net::openai::protocol::detail::serialize_tool_definition`
 
@@ -474,24 +514,33 @@ Definition: `network/openai.cppm:248`
 
 Declaration: [`Namespace clore::net::openai::protocol::detail`](../../namespaces/clore/net/openai/protocol/detail/index.md)
 
-该函数的核心流程是构造一个 `OpenAI` 兼容的工具定义 JSON 对象并将其追加到 `tools` 数组中。首先创建两个空的 JSON 对象 `object` 和 `function_object`，均通过 `clore::net::detail::make_empty_object` 完成，若失败则直接返回 `std::unexpected`。接着在 `object` 中设置 `"type": "function"`，然后依次将 `FunctionToolDefinition` 中的 `name`、`description` 字段通过 `clore::net::detail::insert_string_field` 写入 `function_object`，将 `parameters` 字段通过 `clore::net::detail::clone_object` 深拷贝后写入，最后写入 `strict` 布尔字段。组装完成后，将 `function_object` 作为 `"function"` 字段并入 `object`，再将 `object` 压入 `tools` 数组。整个过程中每一步都检查返回值，任何错误都会提前返回 `std::unexpected` 并携带 `LLMError` 错误信息。该函数仅依赖于 `clore::net::detail` 命名空间下的辅助函数和 `std::expected` 错误处理机制。
+该函数首先通过两次调用 `clore::net::detail::make_empty_object` 创建两个独立的空 JSON 对象——一个用于顶层工具条目，另一个用于内嵌的函数定义。接着，它在这两个对象中逐步填充字段：顶层对象插入固定的 `"type"` 值 `"function"`，然后向函数对象依次插入 `"name"`、`"description"`（均通过 `clore::net::detail::insert_string_field` 写入）、`"parameters"`（通过 `clore::net::detail::clone_object` 深拷贝传入的 `tool.parameters` 参数），以及布尔字段 `"strict"`。每一步写入后均检查返回的 `std::expected` 是否包含错误，若某一步失败则立即将错误携带的 `LLMError` 原样向上传播。所有字段成功写入后，将组装好的顶层对象推入输出数组 `tools` 的末尾，并返回一个空的 `std::expected<void>` 表示成功。
+
+该实现完全依赖于 `clore::net::detail` 命名空间下的底层 JSON 工具函数（`make_empty_object`、`insert_string_field`、`clone_object`）来保障字段正确插入并提供统一的错误报告路径，自身不涉及任何额外的 JSON 操作或业务逻辑校验。其控制流清晰为“创建对象 → 顺序填充 → 逐级错误传播”，仅当所有步骤成功时才修改输出数组。
 
 #### Side Effects
 
-- Modifies the `tools` array by appending a new tool definition object.
-- Allocates and constructs JSON objects internally.
+- 修改传入的 `tools` 数组（追加元素）
+- 创建临时 JSON 对象并移动插入
+- 分配 JSON 内存（通过 `make_empty_object` 和 `clone_object`）
 
 #### Reads From
 
-- `tool` parameter fields: `name`, `description`, `parameters`, `strict`
+- `tool.name`
+- `tool.description`
+- `tool.parameters`
+- `tool.strict`
 
 #### Writes To
 
-- `tools` array (appended object)
+- `tools` 数组（通过 `push_back`）
+- 内部临时 `object` 和 `function_object` 对象
 
 #### Usage Patterns
 
-- Called when constructing tool definitions for `OpenAI` API requests during serialization.
+- 用于构造 `OpenAI` 工具定义请求
+- 被更高层序列化函数调用
+- 在构建工具列表时逐个处理工具定义
 
 ### `clore::net::openai::protocol::detail::validate_request`
 
@@ -501,7 +550,7 @@ Definition: `network/openai.cppm:23`
 
 Declaration: [`Namespace clore::net::openai::protocol::detail`](../../namespaces/clore/net/openai/protocol/detail/index.md)
 
-该函数将验证工作直接委托给 `clore::net::detail::validate_completion_request`，传递原始请求对象 `request` 以及两个硬编码的 `true` 值。这两个布尔参数通常分别控制是否检查模型是否存在以及是否检查工具定义的有效性，具体取决于通用验证函数的内部实现。整个控制流是单次转发调用，不包含分支或循环，返回值直接作为函数的返回结果。
+`clore::net::openai::protocol::detail::validate_request` 的实现是一个薄转发层。它立即将调用委托给 `clore::net::detail::validate_completion_request`，并传递两个硬编码的布尔值参数（均为 `true`）。这些布尔值分别控制验证过程中是否检查工具调用的一致性以及是否强制要求系统提示（system prompt）的存在。该函数本身不包含任何独立的校验逻辑或控制流，所有实际验证行为完全依赖于 `clore::net::detail::validate_completion_request` 的实现。依赖链因此集中在 `clore::net::detail` 命名空间下的同一个验证器，而 `validate_request` 仅作为适配点，为 `OpenAI` 协议层提供一个统一且与具体验证策略解耦的调用入口。
 
 #### Side Effects
 
@@ -509,12 +558,12 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `request` parameter
+- request (`CompletionRequest` parameter)
 
 #### Usage Patterns
 
-- Validation of `CompletionRequest` before further processing
-- Called by `OpenAI` protocol layer
+- Called internally before sending a request to the `OpenAI` API to ensure the request is well-formed.
+- Used as a precondition check for other protocol serialization functions.
 
 ### `clore::net::protocol::build_request_json`
 
@@ -524,36 +573,24 @@ Definition: `network/openai.cppm:465`
 
 Declaration: [`Namespace clore::net::protocol`](../../namespaces/clore/net/protocol/index.md)
 
-该函数首先调用 `openai::protocol::detail::validate_request` 对 `request` 进行验证，若验证失败则直接返回 `std::unexpected`。验证通过后依次构造根 JSON 对象 `root` 和消息数组 `messages`，插入 `model` 字段，然后遍历 `request.messages`，对每条消息委托 `openai::protocol::detail::serialize_message` 完成序列化并将结果追加至 `messages`。后续处理可选的 `response_format`、`tools`（通过 `serialize_tool_definition` 逐一序列化）、`tool_choice`（通过 `serialize_tool_choice`）以及 `parallel_tool_calls`。所有子步骤均采用 `std::expected` 返回式错误处理，一旦某步失败即向上传播。最终调用 `kota::codec::json::to_string` 将构建好的 `root` 对象序列化为 JSON 字符串并返回。
-
-依赖方面，函数重度依赖于 `clore::net::detail` 的辅助函数（如 `make_empty_object`、`make_empty_array`）以及 `openai::protocol::detail` 子命名空间下的多个序列化与验证组件，底层序列化由 `kota::codec::json` 模块完成。
+该函数将传入的 `CompletionRequest` 参数转换为 `OpenAI` 兼容的 JSON 请求字符串。首先调用 `openai::protocol::detail::validate_request` 进行校验，若失败则直接返回错误。随后通过 `clore::net::detail::make_empty_object` 创建根 JSON 对象，并依次填充 `model` 字段及由 `openai::protocol::detail::serialize_message` 序列化的 `messages` 数组。若请求包含 `response_format`、`tools`、`tool_choice` 或 `parallel_tool_calls`，则分别调用对应的序列化函数（`serialize_response_format`、`serialize_tool_definition`、`serialize_tool_choice`）或直接插入值。每一步操作若产生错误（如内存分配失败或字段格式无效），均立即返回 `std::unexpected` 错误。最后通过 `kota::codec::json::to_string` 将构建好的 JSON 对象序列化为字符串并返回。依赖关系集中在 `openai::protocol::detail` 命名空间内的校验与序列化组件，以及底层 JSON 构造工具 `clore::net::detail`。
 
 #### Side Effects
 
-- allocates JSON nodes and strings
-- may propagate errors as `LLMError`
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `request.model`
-- `request.messages`
-- `request.response_format`
-- `request.tools`
-- `request.tool_choice`
-- `request.parallel_tool_calls`
-- `openai::protocol::detail::validate_request` reads the request
-- `kota::codec::json::to_string` reads the JSON root
+- 参数 `request` 及其字段：`request.model`、`request.messages`、`request.response_format`、`request.tools`、`request.tool_choice`、`request.parallel_tool_calls`
 
 #### Writes To
 
-- returns a new `std::string` containing JSON
-- creates and populates internal JSON `root` and `messages` objects
-- inserts fields into JSON objects
+- 返回的 `std::expected<std::string, LLMError>` 中的 `std::string`（成功时）或 `LLMError`（失败时）
 
 #### Usage Patterns
 
-- used to generate `OpenAI`-compatible request JSON
-- called before sending HTTP request to LLM API
+- 通过 `build_request_json(request)` 将业务请求对象序列化为 JSON 字符串
+- 用于构造发送给 LLM 的 HTTP 请求体
 
 ### `clore::net::protocol::parse_response`
 
@@ -563,7 +600,9 @@ Definition: `network/openai.cppm:532`
 
 Declaration: [`Namespace clore::net::protocol`](../../namespaces/clore/net/protocol/index.md)
 
-`clore::net::protocol::parse_response` 解析以 `std::string_view` 传入的 LLM 响应 JSON。首先使用 `kota::codec::json::parse` 解析为 `json::Object`，若失败则返回 `LLMError`。接着利用 `clore::net::detail::ObjectView` 访问根对象：若有 `error` 字段则提取 `message` 并返回错误；否则依次提取 `id`、`model`、`choices` 数组，校验存在性与类型，并取出 `choices[0]` 中的 `finish_reason`，对其值（`stop`、`tool_calls`、`length`、`content_filter` 等）进行分支处理，拒绝被截断或被过滤的响应。随后提取 `choices[0].message` 对象，从中解析 `refusal`（如果存在且非 null）、`content`（可能为字符串、数组或 null，数组时调用 `openai::protocol::detail::parse_content_parts` 处理）、以及 `tool_calls`（数组时调用 `clore::net::openai::protocol::detail::parse_tool_calls` 解析）。最后验证 `finish_reason` 与 `tool_calls` 的一致性（若 `finish_reason` 为 `tool_calls` 但无工具调用则报错；反之亦然），并确保消息中至少包含文本、拒绝或工具调用之一，然后构造 `CompletionResponse` 返回。此函数依赖 `kota::codec::json` 解析库和 `clore::net::detail` 中的期望值提取辅助函数。
+函数首先通过 `kota::codec::json::parse` 将输入的 JSON 文本解析为顶层对象 `root`，若解析失败则立即返回包含错误描述的 `LLMError`。接着检查响应中是否存在 `"error"` 字段，若有则提取其 `"message"` 子字段并返回 API 错误。确认无误后，顺序提取并验证必需的顶层字段 `"id"`、`"model"` 和 `"choices"`，要求 `"choices"` 数组非空，并从第一个 choice 中取得 `"finish_reason"` 进行语义校验：仅接受 `"stop"` 或 `"tool_calls"`，其他值（包括 `"length"` 和 `"content_filter"`）直接以错误终止。
+
+从 choice 的 `"message"` 对象中逐步组装 `AssistantOutput`：处理可选的 `"refusal"`、`"content"`（支持纯文本字符串或由 `openai::protocol::detail::parse_content_parts` 解析的部件数组）以及 `"tool_calls"`（通过 `openai::protocol::detail::parse_tool_calls` 解析）。工具调用与 `finish_reason` 之间的一致性经过双重校验，确保内容、拒绝或工具调用至少存在一项。最后将提取的 `id`、`model`、构造的 `output` 以及原始 JSON 文本打包为 `CompletionResponse` 返回。整个流程依赖 `clore::net::detail::ObjectView` 和相关的类型安全取值函数来访问并验证 JSON 结构。
 
 #### Side Effects
 
@@ -571,17 +610,17 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `json_text` parameter
-- parsed JSON object via `kota::codec::json::parse`
+- `json_text` parameter (`std::string_view`)
+- parsed JSON object via `kota::codec::json::parse` and `clore::net::detail::ObjectView`
 
 #### Usage Patterns
 
-- Parse LLM API response JSON
-- Deserialize completion response
+- parse LLM API JSON response into `CompletionResponse`
+- validate and convert raw response text from an AI provider
 
 ## Internal Structure
 
-`openai` 模块实现了与 `OpenAI` 兼容 API 的异步交互，其结构分为三个层次：顶层公开异步调用函数（`call_completion_async`、`call_llm_async`、`call_structured_async`），它们通过模板参数 `Protocol` 接入具体的协议实现；中间层是 `clore::net::openai::detail::Protocol` 结构体，封装了与环境配置（API 密钥、基础 URL）、HTTP 请求构建（`build_url`、`build_headers`、`build_request_json`）以及响应解析相关的内部方法；底层位于 `clore::net::openai::protocol::detail` 命名空间，提供 JSON 序列化与解析工具（如 `serialize_message`、`serialize_tool_choice`、`parse_content_parts`、`parse_tool_calls` 等），并依赖 `client`、`http`、`provider`、`schema`、`support` 等模块完成网络通信、 Schema 生成和基础工具支持。这种分层将协议细节、客户端抽象和业务逻辑解耦，使得上层调用函数仅需关注异步调度与结果获取，而序列化与验证逻辑集中在协议细节层，便于维护和扩展。
+模块 `openai` 采用三层分解：协议层、内部实现层和对外接口层。协议层包含 `protocol` 与 `protocol::detail` 命名空间，前者提供 `validate_request`、`build_request_json`、`parse_response` 等公开的请求验证与序列化/反序列化函数，后者封装了 `serialize_message`、`serialize_tool_definition`、`parse_content_parts` 等仅限内部使用的辅助函数，专注于与 `OpenAI` 消息格式间的转换。内部实现层由 `detail::Protocol` 结构体构成，它通过导入 `http` 和 `support` 模块，封装了环境变量读取、URL 拼接、请求头部构建、请求 JSON 构造以及响应解析等完整的网络交互流程。对外接口层提供 `call_completion_async`、`call_llm_async` 和 `call_structured_async` 等异步入口，这些函数接收模型标识、提示文本和事件循环，通过组合 `Protocol` 中的方法驱动请求并返回句柄。整体上，模块依赖 `client`、`http`、`protocol`、`provider`、`schema` 和 `std` 模块，其中 `schema` 用于生成结构化输出所需的 JSON Schema，`provider` 提供凭据与端点配置，`http` 负责实际的网络请求调度。
 
 ## Related Pages
 

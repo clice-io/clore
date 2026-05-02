@@ -1,6 +1,6 @@
 ---
 title: 'clore::generate::cache::normalizetextforhashing'
-description: '该函数通过两个阶段实现文本规范化。第一阶段从前向后扫描输入并跳过所有前导空白字符（使用 std::isspace 检查每个字符），因此只保留第一个非空白字符之后的文本。第二阶段从第一个非空白字符开始遍历剩余字符：遇到空白字符时，仅设置一个布尔标记 prev_space，不直接向结果追加空白；遇到非空白字符时，若 prev_space 为真且结果非空，则在追加该字符前先插入一个空格，然后重置标记。这一逻辑将任意长度的连续空白序列压缩为一个空格，同时确保结果字符串不会以空格开头（因为前导空白已跳过）且末尾不会有多余空格（只有当非空白字符之后有空白时才可能追加空格，而末尾空白序列永远不会触发追加）。整个过程完全基于标准库函数 std::isspace 和 std::string 的 reserve、push_back，无需其他外部依赖。'
+description: '函数 clore::generate::cache::normalize_text_for_hashing 实现了对输入文本的标准化，旨在为后续哈希计算提供一致、可比较的字符串。算法通过两步完成：首先跳过所有前导空白字符，然后遍历剩余字符，使用一个 prev_space 标志记录是否遇到了空白；每当遇到非空白字符时，如果之前有空白且结果字符串非空，则插入一个空格，再添加该字符，从而将任意连续的空白序列（包括换行、制表等）压缩为单个标准空格，同时自动消除尾部空白。控制流基于单次线性扫描与条件判断，依赖标准库的 std::isspace 检测空白字符，不涉及外部系统或复杂数据结构，保证了轻量且确定性的规范化效果。'
 layout: doc
 template: doc
 ---
@@ -46,25 +46,19 @@ auto normalize_text_for_hashing(std::string_view text) -> std::string {
 }
 ```
 
-该函数通过两个阶段实现文本规范化。第一阶段从前向后扫描输入并跳过所有前导空白字符（使用 `std::isspace` 检查每个字符），因此只保留第一个非空白字符之后的文本。第二阶段从第一个非空白字符开始遍历剩余字符：遇到空白字符时，仅设置一个布尔标记 `prev_space`，不直接向结果追加空白；遇到非空白字符时，若 `prev_space` 为真且结果非空，则在追加该字符前先插入一个空格，然后重置标记。这一逻辑将任意长度的连续空白序列压缩为一个空格，同时确保结果字符串不会以空格开头（因为前导空白已跳过）且末尾不会有多余空格（只有当非空白字符之后有空白时才可能追加空格，而末尾空白序列永远不会触发追加）。整个过程完全基于标准库函数 `std::isspace` 和 `std::string` 的 `reserve`、`push_back`，无需其他外部依赖。
+函数 `clore::generate::cache::normalize_text_for_hashing` 实现了对输入文本的标准化，旨在为后续哈希计算提供一致、可比较的字符串。算法通过两步完成：首先跳过所有前导空白字符，然后遍历剩余字符，使用一个 `prev_space` 标志记录是否遇到了空白；每当遇到非空白字符时，如果之前有空白且结果字符串非空，则插入一个空格，再添加该字符，从而将任意连续的空白序列（包括换行、制表等）压缩为单个标准空格，同时自动消除尾部空白。控制流基于单次线性扫描与条件判断，依赖标准库的 `std::isspace` 检测空白字符，不涉及外部系统或复杂数据结构，保证了轻量且确定性的规范化效果。
 
 ## Side Effects
 
-- allocates a new string
+No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- `text` parameter
-
-## Writes To
-
-- local variable `result`
-- return value (new `std::string`)
+- `text` parameter (`std::string_view`)
 
 ## Usage Patterns
 
-- called by `clore::generate::cache::make_prompt_response_cache_key` to normalize prompt or response text before hashing
-- used to ensure consistent cache keys regardless of whitespace variation
+- Called by `make_prompt_response_cache_key` to normalize input strings before combining into a cache key.
 
 ## Called By
 

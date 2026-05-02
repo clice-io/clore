@@ -1,6 +1,6 @@
 ---
 title: 'Module extract:ast'
-description: 'The extract:ast module is responsible for extracting structured symbol and relation information from C++ source code by traversing the Clang AST. It implements internal visitor classes (SymbolExtractorVisitor, SymbolExtractorConsumer, SymbolExtractorAction) that walk declarations, expressions, and references to compute unique symbol identifiers, capture source snippet bounds, and record edges such as calls, inheritance, and references. Additional helpers handle lexical context description, doc comment extraction, function signature building, and dependency file collection.'
+description: 'The extract:ast module is responsible for parsing C++ translation units via the Clang AST and extracting structured symbol, relation, and dependency information. It owns the public-facing result types ASTResult and ASTError, which convey either successfully extracted data (symbols, relations, dependencies) or an error condition. The primary entry point is the extract_symbols function, which accepts a source identifier and initiates the extraction pipeline. Internally, the module implements a set of Clang AST visitors and consumers that traverse declarations, references, calls, and member accesses to record symbol definitions, reference edges, call edges, and inheritance relationships, filtering results to the main file and its dependencies.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-The `extract:ast` module is responsible for extracting structured symbol and relation information from C++ source code by traversing the Clang AST. It implements internal visitor classes (`SymbolExtractorVisitor`, `SymbolExtractorConsumer`, `SymbolExtractorAction`) that walk declarations, expressions, and references to compute unique symbol identifiers, capture source snippet bounds, and record edges such as calls, inheritance, and references. Additional helpers handle lexical context description, doc comment extraction, function signature building, and dependency file collection.  
-
-Publicly, the module exposes the `extract_symbols` function as the entry point for triggering extraction from a given resource, and two result types: `ASTResult` (which holds extracted symbols, relations, and dependencies) and `ASTError` (which encapsulates extraction failure details). Together these provide a complete interface for analyzing a single translation unit and producing a structured representation of its declarations and their interrelationships.
+The `extract:ast` module is responsible for parsing C++ translation units via the Clang AST and extracting structured symbol, relation, and dependency information. It owns the public-facing result types `ASTResult` and `ASTError`, which convey either successfully extracted data (symbols, relations, dependencies) or an error condition. The primary entry point is the `extract_symbols` function, which accepts a source identifier and initiates the extraction pipeline. Internally, the module implements a set of Clang AST visitors and consumers that traverse declarations, references, calls, and member accesses to record symbol definitions, reference edges, call edges, and inheritance relationships, filtering results to the main file and its dependencies.
 
 ## Imports
 
@@ -34,16 +32,7 @@ Definition: `extract/ast.cppm:26`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The struct `clore::extract::ASTError` is an aggregate error type with a single public data member `message` of type `std::string`. Internally, the struct imposes no invariants beyond those inherited from `std::string`; the `message` field may be empty or contain any valid character sequence. The struct has no user‑declared constructors, destructor, or assignment `operator`s, so the compiler implicitly generates a default constructor, copy/move constructors, and copy/move assignment `operator`s. No member functions or friend definitions are present, making `clore::extract::ASTError` a trivial wrapper used solely to convey an error string across the extraction boundary.
-
-#### Key Members
-
-- message
-
-#### Usage Patterns
-
-- Thrown as an exception when AST extraction encounters an error.
-- Caught by callers to inspect the error message and handle failure.
+The `clore::extract::ASTError` struct serves as a lightweight error wrapper, containing a single `std::string` field named `message`. Its design is intentionally minimal, with no additional state or invariants beyond the stored error description. The struct likely relies on the default special member functions provided by the compiler, as no user‑defined constructors, assignments, or destructor are declared. The `message` member holds the textual representation of the error, and the type as a whole acts as a plain container for propagating error information through the extraction process.
 
 ### `clore::extract::ASTResult`
 
@@ -53,22 +42,7 @@ Definition: `extract/ast.cppm:37`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The struct `clore::extract::ASTResult` serves as a simple aggregate container for the output of AST extraction. Internally, it holds three public member vectors: `symbols` of type `std::vector<SymbolInfo>`, `relations` of type `std::vector<ExtractedRelation>`, and `dependencies` of type `std::vector<std::string>`. No invariants beyond those implied by the types are enforced; each vector may be empty or contain well-formed elements depending on the extraction context. The struct relies on the implicitly defined default constructor, destructor, and copy/move operations, making it trivially copyable and movable. There are no additional member functions or access controls, so all fields are directly modifiable. This design is intentionally lightweight, acting as a straightforward transfer object between the extraction logic and its consumers.
-
-#### Invariants
-
-- No explicit invariants documented beyond the type being an aggregate.
-
-#### Key Members
-
-- symbols
-- relations
-- dependencies
-
-#### Usage Patterns
-
-- Returned as the result type from AST extraction functions.
-- Consumed by downstream processes that analyze or transform the extracted data.
+`clore::extract::ASTResult` is the aggregate container for the output of a single extraction pass. It holds three top‑level members: `symbols`, a `std::vector<SymbolInfo>` that records every extracted symbol; `relations`, a `std::vector<ExtractedRelation>` that captures connectivity among those symbols; and `dependencies`, a `std::vector<std::string>` listing the external module or header dependencies discovered during extraction. A fundamental invariant is that every `ExtractedRelation` in `relations` refers only to symbols present in `symbols` (by index or identifier), ensuring the result is self‑contained and can be used for downstream analysis without further lookups. No additional special members are defined, so the struct is trivially copyable and movable, relying on the default compiler‑generated operations.
 
 ### `clore::extract::ExtractedRelation`
 
@@ -78,24 +52,7 @@ Definition: `extract/ast.cppm:30`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The struct `clore::extract::ExtractedRelation` is an aggregate type that stores a single directed relation between two symbols. It holds two `SymbolID` members, `from` and `to`, which identify the source and target of the relation. Two boolean flags, `is_call` and `is_inheritance`, encode the relation kind; the implementation defaults both to `false` (via in-class initializers), meaning a default-constructed `ExtractedRelation` represents no specific edge type. The only implied invariant is that the flags can be used independently—when `is_inheritance` is `true`, `from` denotes the derived type and `to` the base type. There are no explicit constructors or member functions; the struct relies on default member initializers and aggregate initialization, making it a plain data carrier with trivial copy and move semantics.
-
-#### Invariants
-
-- `from` and `to` are valid `SymbolID` values.
-- At most one of `is_call` or `is_inheritance` may be true? Not specified; both can be false or true.
-
-#### Key Members
-
-- `from`
-- `to`
-- `is_call`
-- `is_inheritance`
-
-#### Usage Patterns
-
-- Used as part of the extraction output to record symbol relationships.
-- Inspected to determine call or inheritance dependencies.
+The struct `clore::extract::ExtractedRelation` is a lightweight data container that pairs two symbol identifiers, stored in `from` and `to`, to form a directed relation between them. Two boolean members, `is_call` and `is_inheritance`, distinguish the relation kind. Neither flag is set by default, and the relation is considered untyped when both are `false`; at most one flag should normally be `true` to preserve the invariant that a single relation instance represents exactly one kind of edge. The struct holds no methods beyond those implicitly defined, and its members are directly accessible, serving as a plain transfer object within the extraction pipeline.
 
 ## Functions
 
@@ -107,30 +64,37 @@ Definition: `extract/ast.cppm:669`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The implementation of `clore::extract::extract_symbols` orchestrates a full Clang-based extraction pass over a single translation unit. After validating that the `CompileEntry` provides a non-empty argument list and successfully constructing a compiler instance, the function forces the frontend into `ParseSyntaxOnly` mode—ensuring no output files are generated—and then drives the `SymbolExtractorAction` through the standard `BeginSourceFile`, `Execute`, and `EndSourceFile` lifecycle. This action, initialized with references to `result.symbols` and a local `raw_relations` vector, populates those containers during traversal via the `SymbolExtractorVisitor`’s `VisitNamedDecl`, `VisitDeclRefExpr`, `VisitCallExpr`, `VisitMemberExpr`, and recursion on `TraverseFunctionDecl` / `TraverseCXXMethodDecl`.
-
-After extraction completes, dependencies are collected using `collect_dependency_files` from the `SourceManager`. Finally, every `RelationEdge` in `raw_relations` is mapped to an `ExtractedRelation`, translating the `RelationKind::Call` and `RelationKind::Inheritance` enumerators into boolean flags. The resulting `ASTResult` is returned, containing `symbols`, `relations`, and `dependencies`; any errors during instance creation or action execution propagate as an `ASTError`.
+The function first validates the `CompileEntry` by checking for an empty argument list, returning an error if necessary. It then creates a compiler instance via `create_compiler_instance` and overrides the frontend options to force parse-only mode, preventing any object or module output. A `SymbolExtractorAction` is constructed, receiving references to `result.symbols` and a local vector of `RelationEdge` objects. The action is used to begin source file processing, execute the AST traversal, and end the source file; any execution failure is consumed and reported as an error. After extraction, dependency files are collected via `collect_dependency_files` and stored in `result.dependencies`. Finally, each `RelationEdge` in `raw_relations` is converted into an `ExtractedRelation` by mapping the `RelationKind` to the boolean fields `is_call` and `is_inheritance`, and the populated `ASTResult` is returned.
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- Creates a compiler instance via `create_compiler_instance`, potentially invoking external toolchain or reading compilation database
+- Runs clang frontend action `SymbolExtractorAction` which parses source files and performs semantic analysis
+- Reads source files and collects dependency file paths via `collect_dependency_files`
+- Mutates `result.symbols`, `result.dependencies`, and `result.relations`
+- Consumes potential errors via `llvm::consumeError`, which may handle or log errors
 
 #### Reads From
 
-- const `CompileEntry` &entry
-- entry`.arguments`
-- entry`.file`
+- `CompileEntry entry` (specifically `entry.arguments` and `entry.file`)
+- Source files accessed through clang's `SourceManager`
+- External toolchain or compilation database via `create_compiler_instance`
+
+#### Writes To
+
+- `ASTResult result` (fields `symbols`, `dependencies`, `relations`)
+- Internal clang frontend state through `SymbolExtractorAction` methods
 
 #### Usage Patterns
 
-- called to extract AST symbols and relations for a single compile entry
-- used in vectorized or async extraction flows
+- Used to extract symbols and relations from a single compilation entry during project analysis
+- Likely invoked in a loop over compile entries to build a complete project model
 
 ## Internal Structure
 
-The `extract:ast` module forms the core AST analysis layer of the extraction pipeline. It depends on `extract:compiler` for compilation‑entry data and on `extract:model` for the output data structures (`ASTResult`, `ASTError`, `ExtractedRelation`). The module also imports the standard library and the `support` utility module. Its public entry point is `extract_symbols`, which accepts a resource identifier and triggers extraction; the result is an `int` status code.
+The module `extract:ast` implements the core C++ AST traversal and symbol extraction logic. Its internal decomposition centers on three key classes within an anonymous namespace: `SymbolExtractorVisitor`, which walks the Clang AST and records symbol definitions and relations such as calls, references, and inheritance; `SymbolExtractorConsumer`, which creates the visitor for a given translation unit; and `SymbolExtractorAction`, which wires the consumer into the Clang compiler frontend. Supporting free functions in the same namespace handle tasks like computing deterministic symbol identifiers, building function signatures, extracting documentation comments, and classifying declarations, keeping the visitor focused on traversal orchestration.
 
-Internally, the module is decomposed into Clang‑based AST traversal machinery, all contained in an anonymous namespace. A `SymbolExtractorVisitor` (a `RecursiveASTVisitor`) traverses the AST, recording symbol metadata via `VisitNamedDecl`, `TraverseFunctionDecl`, and other overrides, and building dependency edges (`RelationEdge`) for calls, references, and inheritance through dedicated methods such as `VisitCallExpr`, `VisitDeclRefExpr`, and `VisitMemberExpr`. The visitor is driven by a `SymbolExtractorConsumer` that receives the translation unit and orchestrates the traversal. A `SymbolExtractorAction` (an `ASTFrontendAction`) wraps the consumer and exposes the extracted symbol and relation vectors to the caller. Supporting utilities—`compute_symbol_id`, `classify_decl`, `describe_lexical_context`, `get_source_snippet_bounds`, `hash_source_snippet_bytes`, and dependency‑file collection—are implemented as free functions in the same namespace, providing a clean internal layering that isolates Clang‑specific logic from the public API.
+The module imports `std`, `support`, `extract:compiler`, and `extract:model`. This layering reflects a separation between lower-level compiler interaction (`extract:compiler` for compilation database support), shared data structures (`extract:model` for output types), and foundational utilities (`support` for hashing, paths, and logging). Internally, the anonymous namespace isolates implementation details; only the public entry point (the `extract_symbols` function) and the result types (`ASTResult`, `ASTError`) are exported. This structure ensures that the module’s core traversal logic remains self-contained while cooperating with the broader extraction pipeline through clearly defined data carriers.
 
 ## Related Pages
 

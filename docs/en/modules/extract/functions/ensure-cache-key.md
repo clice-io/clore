@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::ensurecachekey'
-description: 'The function clore::extract::ensure_cache_key serves as a thin entry point that delegates entirely to the implementation function ensure_cache_key_impl. Its purpose is to separate the public interface from the actual cache-key computation logic, allowing the implementation details—such as argument sanitization, compiler invocation parsing, file normalization, and hash generation—to evolve without affecting callers. The single call to ensure_cache_key_impl handles all internal control flow, including conditional checks for cached toolchain data, error handling for missing or invalid compilation databases, and the final assignment of the CompileEntry::cache_key field.'
+description: 'The function clore::extract::ensure_cache_key acts as a thin public wrapper around the implementation function clore::extract::ensure_cache_key_impl. It receives a mutable reference to a CompileEntry and immediately forwards it to ensure_cache_key_impl, which performs the actual work of computing and storing the cache key. This design separates the public interface from the implementation details, allowing ensure_cache_key_impl to reside in an anonymous namespace or internal translation unit while ensure_cache_key is declared in the module interface. The control flow is therefore trivial: a single delegation call with no additional logic, error handling, or preprocessing.'
 layout: doc
 template: doc
 ---
@@ -23,23 +23,23 @@ auto ensure_cache_key(CompileEntry& entry) -> void {
 }
 ```
 
-The function `clore::extract::ensure_cache_key` serves as a thin entry point that delegates entirely to the implementation function `ensure_cache_key_impl`. Its purpose is to separate the public interface from the actual cache-key computation logic, allowing the implementation details—such as argument sanitization, compiler invocation parsing, file normalization, and hash generation—to evolve without affecting callers. The single call to `ensure_cache_key_impl` handles all internal control flow, including conditional checks for cached toolchain data, error handling for missing or invalid compilation databases, and the final assignment of the `CompileEntry::cache_key` field.
+The function `clore::extract::ensure_cache_key` acts as a thin public wrapper around the implementation function `clore::extract::ensure_cache_key_impl`. It receives a mutable reference to a `CompileEntry` and immediately forwards it to `ensure_cache_key_impl`, which performs the actual work of computing and storing the cache key. This design separates the public interface from the implementation details, allowing `ensure_cache_key_impl` to reside in an anonymous namespace or internal translation unit while `ensure_cache_key` is declared in the module interface. The control flow is therefore trivial: a single delegation call with no additional logic, error handling, or preprocessing.
 
 ## Side Effects
 
-- modifies the cache key field of the `CompileEntry`
+- Calls `ensure_cache_key_impl(entry)`, which may modify the cache key fields of the `CompileEntry` object
 
 ## Reads From
 
-- the `CompileEntry` object (fields may be read to compute the cache key)
+- The `entry` parameter (passed by mutable reference to `ensure_cache_key_impl`)
 
 ## Writes To
 
-- the `CompileEntry` object (specifically the cache key field)
+- The `entry` parameter (through the delegated call to `ensure_cache_key_impl`)
 
 ## Usage Patterns
 
-- called by `query_toolchain_cached` before caching or querying toolchain for a compile entry
+- Called by `query_toolchain_cached` to prepare a cache key before toolchain lookup
 
 ## Calls
 

@@ -1,6 +1,6 @@
 ---
 title: 'clore::generate::cache::normalizetextforhashing'
-description: 'The function first trims leading whitespace by advancing a start index past any characters for which std::isspace returns true. It then iterates over the remaining characters from start to the end of the input, using a prev_space flag to track whether the previous character was whitespace. When a non‑space character is encountered, if prev_space is true and the result string is not empty, a single space character is appended before the character; otherwise only the character is appended. This collapses any run of internal whitespace into exactly one space. The result is a std::string with leading whitespace removed and interior whitespace sequences normalized to single spaces. The implementation avoids allocating extra memory by calling reserve on the result with the original input size, and relies solely on the standard library (std::isspace, std::string, std::size_t).'
+description: 'The implementation of clore::generate::cache::normalize_text_for_hashing applies a two‑pass normalization to an arbitrary input text to produce a canonical form suitable for hashing in cache‑key construction. The first pass trims all leading whitespace characters using std::isspace. The second pass iterates over the remaining characters and collapses any contiguous run of whitespace into a single ASCII space character ('' ''). The internal control flow uses a boolean flag prev_space to track whether the previous character was whitespace; when a non‑space character is encountered and prev_space is true, a single space is appended to the result std::string only if the result is not empty. The function depends only on the C++ standard library, specifically the <cctype> facilities via std::isspace, and uses result.reserve(text.size()) to minimise reallocations. This normalisation ensures that differing amounts of whitespace do not produce distinct hash keys, while preserving the distinction between words separated by any amount of whitespace versus no whitespace.'
 layout: doc
 template: doc
 ---
@@ -46,7 +46,7 @@ auto normalize_text_for_hashing(std::string_view text) -> std::string {
 }
 ```
 
-The function first trims leading whitespace by advancing a `start` index past any characters for which `std::isspace` returns true. It then iterates over the remaining characters from `start` to the end of the input, using a `prev_space` flag to track whether the previous character was whitespace. When a non‑space character is encountered, if `prev_space` is true and the result string is not empty, a single space character is appended before the character; otherwise only the character is appended. This collapses any run of internal whitespace into exactly one space. The result is a `std::string` with leading whitespace removed and interior whitespace sequences normalized to single spaces. The implementation avoids allocating extra memory by calling `reserve` on the result with the original input size, and relies solely on the standard library (`std::isspace`, `std::string`, `std::size_t`).
+The implementation of `clore::generate::cache::normalize_text_for_hashing` applies a two‑pass normalization to an arbitrary input `text` to produce a canonical form suitable for hashing in cache‑key construction. The first pass trims all leading whitespace characters using `std::isspace`. The second pass iterates over the remaining characters and collapses any contiguous run of whitespace into a single ASCII space character (`' '`). The internal control flow uses a boolean flag `prev_space` to track whether the previous character was whitespace; when a non‑space character is encountered and `prev_space` is true, a single space is appended to the result `std::string` only if the result is not empty. The function depends only on the C++ standard library, specifically the `<cctype>` facilities via `std::isspace`, and uses `result.reserve(text.size())` to minimise reallocations. This normalisation ensures that differing amounts of whitespace do not produce distinct hash keys, while preserving the distinction between words separated by any amount of whitespace versus no whitespace.
 
 ## Side Effects
 
@@ -54,15 +54,11 @@ No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- parameter `text`
-
-## Writes To
-
-- local variable `result` (returned by value)
+- the `text` parameter
 
 ## Usage Patterns
 
-- called by `make_prompt_response_cache_key` to normalize prompt and response text before deriving a cache key
+- Used by `make_prompt_response_cache_key` to normalize text before forming a cache key
 
 ## Called By
 

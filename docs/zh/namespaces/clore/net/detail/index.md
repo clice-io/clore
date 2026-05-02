@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::detail'
-description: '该命名空间是 clore::net 网络库的底层实现细节，封装了与 LLM API 交互所需的 HTTP 通信、JSON 数据校验与克隆、环境配置与凭证读取、请求并发控制等内部机制。它包含了用于解析和验证 JSON 结构的一系列“期望”函数（如 expect_array、expect_object、expect_string）、异步与同步 HTTP 请求封装（如 perform_http_request、perform_http_request_async）、以及用于任务同步、超时管理（如 kHttpRequestTimeout、kHttpConnectTimeoutMs）、请求计数器（g_llm_request_counter）和信号量（g_llm_semaphore）等全局状态。此外还提供了 ArrayView、ObjectView、CredentialEnv、EnvironmentConfig、RawHttpResponse 等内部类型，用于在模块内部高效安全地传递和操作 JSON 与 HTTP 响应数据。'
+description: 'clore::net::detail 是 clore::net 模块的内部实现命名空间，封装了与 LLM API 交互所需的核心基础设施。其职责包括：管理异步 HTTP 请求的发起与同步执行（如 perform_http_request、perform_http_request_async），处理 JSON 值的类型断言、克隆与序列化（如 expect_array、clone_value、serialize_value_to_string），从环境变量中读取配置与凭据（如 read_environment、read_required_env），以及通过信号量和原子计数器（g_llm_semaphore、g_llm_request_counter）控制并发请求的速率。此外，还定义了一系列网络超时常量（如 kHttpRequestTimeout、kTcpKeepIntvlSec）和内部辅助类型（如 ArrayView、ObjectView、RawHttpResponse、CredentialEnv），为上层模块提供统一的底层操作原语。这些细节不对外公开，旨在支持 clore::net 命名空间中的高阶接口。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-该命名空间是 `clore::net` 网络库的底层实现细节，封装了与 LLM API 交互所需的 HTTP 通信、JSON 数据校验与克隆、环境配置与凭证读取、请求并发控制等内部机制。它包含了用于解析和验证 JSON 结构的一系列“期望”函数（如 `expect_array`、`expect_object`、`expect_string`）、异步与同步 HTTP 请求封装（如 `perform_http_request`、`perform_http_request_async`）、以及用于任务同步、超时管理（如 `kHttpRequestTimeout`、`kHttpConnectTimeoutMs`）、请求计数器（`g_llm_request_counter`）和信号量（`g_llm_semaphore`）等全局状态。此外还提供了 `ArrayView`、`ObjectView`、`CredentialEnv`、`EnvironmentConfig`、`RawHttpResponse` 等内部类型，用于在模块内部高效安全地传递和操作 JSON 与 HTTP 响应数据。
-
-在 `clore::net` 的架构中，`detail` 命名空间承担了所有与外部服务通信、数据序列化/反序列化、以及输入校验的底层工作，向上层 `clore::net` 的公开接口提供可靠但非公开的基础设施。它通过标准化的错误包装（如 `unexpected_json_error`、`to_llm_unexpected`）和结果解包（`unwrap_caught_result`）机制，将底层错误统一转化为库内部可处理的整数状态码。该命名空间的设计意图是隐藏实现复杂性，确保上层只通过清晰定义的接口访问 LLM 服务，而将所有与协议、格式、连接管理相关的细节隔离在此内部层中。
+`clore::net::detail` 是 `clore::net` 模块的内部实现命名空间，封装了与 LLM API 交互所需的核心基础设施。其职责包括：管理异步 HTTP 请求的发起与同步执行（如 `perform_http_request`、`perform_http_request_async`），处理 JSON 值的类型断言、克隆与序列化（如 `expect_array`、`clone_value`、`serialize_value_to_string`），从环境变量中读取配置与凭据（如 `read_environment`、`read_required_env`），以及通过信号量和原子计数器（`g_llm_semaphore`、`g_llm_request_counter`）控制并发请求的速率。此外，还定义了一系列网络超时常量（如 `kHttpRequestTimeout`、`kTcpKeepIntvlSec`）和内部辅助类型（如 `ArrayView`、`ObjectView`、`RawHttpResponse`、`CredentialEnv`），为上层模块提供统一的底层操作原语。这些细节不对外公开，旨在支持 `clore::net` 命名空间中的高阶接口。
 
 ## Diagram
 
@@ -36,9 +34,9 @@ graph TD
 
 ### `clore::net::detail::ArrayView`
 
-Declaration: `network/protocol.cppm:174`
+Declaration: `network/protocol.cppm:178`
 
-Definition: `network/protocol.cppm:174`
+Definition: `network/protocol.cppm:178`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -46,55 +44,25 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `value` must point to a valid, non-null `kota::codec::json::Array`
-- the underlying array must outlive the view
-- the view provides read-only access only
+- The `value` pointer is expected to point to a valid `kota::codec::json::Array` instance before any member function is called.
+- `ArrayView` does not own the pointed-to array; it is the caller's responsibility to ensure the array outlives the view.
 
 #### Key Members
 
-- `value` field
-- `operator[]`
-- `begin` / `end`
-- `size`
-- `empty`
+- `value` field: the underlying pointer to `kota::codec::json::Array`
+- `operator[]`: element access by index
+- `operator*` and `operator->`: dereference to underlying array
+- `begin`/`end`: iterator access
+- `size`/`empty`: query container size
 
 #### Usage Patterns
 
-- passing a reference to a JSON array without copying
-- iterating over array elements using range-for loops
-- returning a non-owning view from functions to avoid lifetime issues
+- Used as an internal helper in `clore::net` namespace to provide a familiar array interface over a `kota::codec::json::Array`.
+- Typically constructed by initializing the `value` pointer with the address of an existing array, then calling its member functions to inspect elements.
 
 #### Member Functions
 
 ##### `clore::net::detail::ArrayView::begin`
-
-Declaration: `network/protocol.cppm:185`
-
-Definition: `network/protocol.cppm:185`
-
-Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
-
-###### Declaration
-
-```cpp
-const_iterator () const noexcept;
-```
-
-##### `clore::net::detail::ArrayView::empty`
-
-Declaration: `network/protocol.cppm:177`
-
-Definition: `network/protocol.cppm:177`
-
-Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
-
-###### Declaration
-
-```cpp
-auto () const noexcept -> bool;
-```
-
-##### `clore::net::detail::ArrayView::end`
 
 Declaration: `network/protocol.cppm:189`
 
@@ -108,11 +76,39 @@ Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 const_iterator () const noexcept;
 ```
 
+##### `clore::net::detail::ArrayView::empty`
+
+Declaration: `network/protocol.cppm:181`
+
+Definition: `network/protocol.cppm:181`
+
+Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
+
+###### Declaration
+
+```cpp
+auto () const noexcept -> bool;
+```
+
+##### `clore::net::detail::ArrayView::end`
+
+Declaration: `network/protocol.cppm:193`
+
+Definition: `network/protocol.cppm:193`
+
+Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
+
+###### Declaration
+
+```cpp
+const_iterator () const noexcept;
+```
+
 ##### `clore::net::detail::ArrayView::operator*`
 
-Declaration: `network/protocol.cppm:201`
+Declaration: `network/protocol.cppm:205`
 
-Definition: `network/protocol.cppm:201`
+Definition: `network/protocol.cppm:205`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -124,9 +120,9 @@ auto () const noexcept -> const kota::codec::json::Array &;
 
 ##### `clore::net::detail::ArrayView::operator->`
 
-Declaration: `network/protocol.cppm:197`
+Declaration: `network/protocol.cppm:201`
 
-Definition: `network/protocol.cppm:197`
+Definition: `network/protocol.cppm:201`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -138,9 +134,9 @@ auto () const noexcept -> const kota::codec::json::Array *;
 
 ##### `clore::net::detail::ArrayView::operator[]`
 
-Declaration: `network/protocol.cppm:193`
+Declaration: `network/protocol.cppm:197`
 
-Definition: `network/protocol.cppm:193`
+Definition: `network/protocol.cppm:197`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -152,9 +148,9 @@ auto (std::size_t) const -> const kota::codec::json::Value &;
 
 ##### `clore::net::detail::ArrayView::size`
 
-Declaration: `network/protocol.cppm:181`
+Declaration: `network/protocol.cppm:185`
 
-Definition: `network/protocol.cppm:181`
+Definition: `network/protocol.cppm:185`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -176,8 +172,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `base_url_env` and `api_key_env` should point to valid, immutable string views
-- No invariants are enforced by the struct; callers are responsible for ensuring the string views remain valid
+- Fields are `std::string_view` values naming environment variable identifiers.
+- No explicit constraints on the content or validity of the environment variable names are enforced.
 
 #### Key Members
 
@@ -186,8 +182,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Used to pass environment variable names to credential retrieval logic
-- Likely instantiated in higher-level credential handling code
+- Instances are typically initialized with string literals (e.g., `{"MY_BASE_URL", "MY_API_KEY"}`) and passed to credential resolution logic.
+- The struct is used within `clore::net::detail` to decouple environment variable name configuration from the rest of the credential lookup implementation.
 
 ### `clore::net::detail::EnvironmentConfig`
 
@@ -199,24 +195,11 @@ Implementation: [`Module http`](../../../../modules/http/index.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
-#### Invariants
-
-- None documented.
-
-#### Key Members
-
-- `api_base`
-- `api_key`
-
-#### Usage Patterns
-
-- Used as a parameter or member in HTTP client configuration within the `clore::net::detail` namespace.
-
 ### `clore::net::detail::ObjectView`
 
-Declaration: `network/protocol.cppm:152`
+Declaration: `network/protocol.cppm:156`
 
-Definition: `network/protocol.cppm:152`
+Definition: `network/protocol.cppm:156`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -224,39 +207,27 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `value` must point to a valid `kota::codec::json::Object` when accessing its members
-- The underlying object is not owned by `ObjectView` and must outlive the view
+- `value` 指向的 `Object` 必须在 `ObjectView` 使用期间保持有效
+- `value` 可以为 `nullptr`，此时调用 `begin`/`end`/`operator->`/`operator*` 是未定义行为
+- `get` 返回的 `optional` 在键不存在时为空
 
 #### Key Members
 
-- `value`: pointer to the underlying JSON object
-- `get(std::string_view)`: retrieves cursor for a key
-- `begin()` / `end()`: iteration over object entries
-- `operator->()` / `operator*()`: direct access to the underlying object
+- `value` 指针成员
+- `get` 键查找方法
+- `begin` / `end` 迭代器方法
+- `operator->` / `operator*` 解引用运算符
 
 #### Usage Patterns
 
-- Used to pass a JSON object by reference with a consistent interface
-- Provides safe key-based access via `get()` without exposing the raw pointer
-- Can be iterated using range-based for loops
+- 作为函数参数或返回值以非拥有方式传递 JSON 对象视图
+- 代替 `const kota::codec::json::Object&` 以支持可空性
+- 与 `std::optional<kota::codec::json::Cursor>` 结合使用以安全访问嵌套字段
+- 在协议解析代码中用作临时对象以避免不必要的拷贝
 
 #### Member Functions
 
 ##### `clore::net::detail::ObjectView::begin`
-
-Declaration: `network/protocol.cppm:157`
-
-Definition: `network/protocol.cppm:157`
-
-Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
-
-###### Declaration
-
-```cpp
-const_iterator () const noexcept;
-```
-
-##### `clore::net::detail::ObjectView::end`
 
 Declaration: `network/protocol.cppm:161`
 
@@ -270,11 +241,25 @@ Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 const_iterator () const noexcept;
 ```
 
+##### `clore::net::detail::ObjectView::end`
+
+Declaration: `network/protocol.cppm:165`
+
+Definition: `network/protocol.cppm:165`
+
+Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
+
+###### Declaration
+
+```cpp
+const_iterator () const noexcept;
+```
+
 ##### `clore::net::detail::ObjectView::get`
 
-Declaration: `network/protocol.cppm:155`
+Declaration: `network/protocol.cppm:159`
 
-Definition: `network/protocol.cppm:276`
+Definition: `network/protocol.cppm:280`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -286,9 +271,9 @@ auto (std::string_view) const -> std::optional<json::Cursor>;
 
 ##### `clore::net::detail::ObjectView::operator*`
 
-Declaration: `network/protocol.cppm:169`
+Declaration: `network/protocol.cppm:173`
 
-Definition: `network/protocol.cppm:169`
+Definition: `network/protocol.cppm:173`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -300,9 +285,9 @@ auto () const noexcept -> const kota::codec::json::Object &;
 
 ##### `clore::net::detail::ObjectView::operator->`
 
-Declaration: `network/protocol.cppm:165`
+Declaration: `network/protocol.cppm:169`
 
-Definition: `network/protocol.cppm:165`
+Definition: `network/protocol.cppm:169`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -324,8 +309,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `http_status` is set to a valid HTTP status code after a response is received
-- `body` contains the full response body as received from the server
+- `http_status` is an arbitrary `long` value; no validation that it corresponds to a valid HTTP status code
+- `body` is an arbitrary `std::string`; no encoding or length constraints
 
 #### Key Members
 
@@ -334,60 +319,123 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Used internally by the HTTP client to hold raw response data before parsing
-- Constructed by the network layer and then used to build a higher-level response object
+- Serves as a straightforward container for a parsed HTTP response before further processing
+- Likely populated by lower‑level network code and consumed by higher‑level request/response abstractions
 
 ## Variables
 
 ### `clore::net::detail::g_llm_request_counter`
 
-Declaration: `network/http.cppm:94`
+Declaration: `network/http.cppm:97`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-An atomic counter initialized to 0, used to assign unique request numbers to LLM HTTP requests.
+An atomic counter of type `std::atomic<std::uint64_t>`, initialized to `0`, declared in the `clore::net::detail` namespace. It provides a globally unique, monotonically increasing identifier for each LLM HTTP request.
 
 #### Usage Patterns
 
-- assigned to local request number variables
-- accessed in HTTP request context
+- read to obtain a unique request number
+- assigned to the local variable `request_number`
 
 ### `clore::net::detail::g_llm_semaphore`
+
+Declaration: `network/http.cppm:48`
+
+Implementation: [`Module http`](../../../../modules/http/index.md)
+
+`clore::net::detail::g_llm_semaphore` is a global `std::shared_ptr<kota::semaphore>` declared in `network/http.cppm:48`. It is used to enforce a rate limit on concurrent LLM API requests across the networking layer.
+
+#### Usage Patterns
+
+- acquired before LLM request to enforce concurrency limit
+- released after LLM request completes
+
+### `clore::net::detail::g_llm_semaphore_mutex`
 
 Declaration: `network/http.cppm:47`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-`clore::net::detail::g_llm_semaphore` is a global variable of type `std::unique_ptr<kota::semaphore>`, declared `extern` in `network/http.cppm:47`. It represents a semaphore used for rate limiting LLM (large language model) HTTP requests.
+The variable `clore::net::detail::g_llm_semaphore_mutex` is declared as `extern std::mutex` in the `clore::net::detail` namespace at `network/http.cppm:47`. It is an external global mutex intended to synchronize access to shared resources in the LLM rate-limiting subsystem.
 
 #### Usage Patterns
 
-- acquired/released in `perform_http_request_async` for rate limiting
-- passed to initialization and shutdown functions
+- locked in `initialize_llm_rate_limit` to set up the semaphore
+- locked in `current_llm_semaphore` to safely retrieve the shared semaphore pointer
+- locked in `shutdown_llm_rate_limit` to destroy the semaphore
+
+### `clore::net::detail::kConnMaxAgeSec`
+
+Declaration: `network/http.cppm:102`
+
+Implementation: [`Module http`](../../../../modules/http/index.md)
+
+The variable `clore::net::detail::kConnMaxAgeSec` is a `constexpr long` constant declared with value 300.
+
+#### Usage Patterns
+
+- Read in `clore::net::detail::configure_request`
+
+### `clore::net::detail::kDnsCacheTimeoutSec`
+
+Declaration: `network/http.cppm:101`
+
+Implementation: [`Module http`](../../../../modules/http/index.md)
+
+The variable `clore::net::detail::kDnsCacheTimeoutSec` is a `constexpr long` constant with value `300`, declared in `network/http.cppm:101`. It resides in the `clore::net::detail` namespace and serves as a configuration parameter for DNS cache timeout duration.
+
+#### Usage Patterns
+
+- Read by `clore::net::detail::configure_request` to configure DNS cache timeout on HTTP requests
 
 ### `clore::net::detail::kHttpConnectTimeoutMs`
 
-Declaration: `network/http.cppm:96`
+Declaration: `network/http.cppm:99`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-A compile-time constant of type `long` set to `5'000` milliseconds. It resides in `clore::net::detail` and is intended for internal use.
+`clore::net::detail::kHttpConnectTimeoutMs` is a compile-time constant of type `long` that defines the default timeout, in milliseconds, for establishing an HTTP connection.
 
 #### Usage Patterns
 
-- passed to HTTP request configuration in `configure_request`
+- used in `configure_request`
 
 ### `clore::net::detail::kHttpRequestTimeout`
 
-Declaration: `network/http.cppm:97`
+Declaration: `network/http.cppm:100`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-A compile-time constant of type `std::chrono::milliseconds` initialized to `120'000` (120 seconds), intended as the default timeout duration for HTTP requests.
+`clore::net::detail::kHttpRequestTimeout` is a `constexpr` variable of type `std::chrono::milliseconds` initialized to 120'000 milliseconds (120 seconds). It defines the maximum duration allowed for an HTTP request to complete before timing out.
 
 #### Usage Patterns
 
-- used as timeout argument in HTTP request functions
+- used as a timeout value for HTTP request operations
+- read in request processing logic to enforce a deadline
+
+### `clore::net::detail::kTcpKeepIdleSec`
+
+Declaration: `network/http.cppm:103`
+
+Implementation: [`Module http`](../../../../modules/http/index.md)
+
+Constant defining the TCP keep-alive idle timeout in seconds, set to 60.
+
+#### Usage Patterns
+
+- Referenced in `configure_request` for socket option configuration
+
+### `clore::net::detail::kTcpKeepIntvlSec`
+
+Declaration: `network/http.cppm:104`
+
+Implementation: [`Module http`](../../../../modules/http/index.md)
+
+`clore::net::detail::kTcpKeepIntvlSec` is a `constexpr long` constant defined at `network/http.cppm:104` with the value `10`, representing the TCP keepalive interval in seconds.
+
+#### Usage Patterns
+
+- used in `clore::net::detail::configure_request` to configure TCP keepalive
 
 ## Functions
 
@@ -399,271 +447,277 @@ Definition: `network/provider.cppm:43`
 
 Implementation: [`Module provider`](../../../../modules/provider/index.md)
 
-`clore::net::detail::append_url_path` 接受两个 `std::string_view` 参数，返回一个 `std::string`。调用者应提供基础 URL 或路径前缀作为第一个参数，要追加的路径段作为第二个参数；函数会负责处理分隔符（例如 `/`）的规范化，并返回合并后的完整路径字符串。该函数不修改输入参数，也不抛出与格式无效相关的异常。
+函数 `clore::net::detail::append_url_path` 接受两个 `std::string_view` 参数，返回一个 `std::string`。它将第二个参数表示的路径段追加到第一个参数表示的基础 URL 路径末尾，处理必要的斜杠分隔并返回拼接后的完整路径。调用者应确保第一个参数是一个有效的 URL 路径前缀（不含查询或片段），第二个参数是合法的路径段；函数不验证输入的整体 URL 合法性。
 
 #### Usage Patterns
 
-- building HTTP request `URLs`
-- URL path normalization
+- Used to construct a valid HTTP request URL by normalizing the base and path components.
 
 ### `clore::net::detail::clone_array`
 
-Declaration: `network/protocol.cppm:264`
-
-Definition: `network/protocol.cppm:438`
-
-Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
-
-函数 `clore::net::detail::clone_array` 负责对给定的 JSON 数组进行验证和克隆操作。它接受一个 `ArrayView` 参数作为待处理的数组，以及一个 `std::string_view` 参数作为上下文标识（通常用于错误消息的生成），并返回一个 `int` 类型的状态码。调用方应保证传入的 `ArrayView` 指向一个有效的、可访问的 JSON 数组；函数的返回值指示操作是否成功，其中非零值通常表示成功（或特定成功状态），零或负值表示失败，具体约定与同一命名空间下的其他验证函数（如 `clone_object`、`expect_array` 等）保持一致。此函数不负责管理传入数组的生命周期，调用方需确保其有效性直至调用返回。
-
-#### Usage Patterns
-
-- deep copy of array data from an `ArrayView`
-- cloning an array for further processing or modification
-
-### `clore::net::detail::clone_object`
-
-Declaration: `network/protocol.cppm:261`
-
-Definition: `network/protocol.cppm:447`
-
-Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
-
-函数 `clone_object` 接受一个 `ObjectView` 及一个用于错误上下文的 `std::string_view`，生成前者所引用 JSON 对象的深拷贝。调用者负责确保传入的 `ObjectView` 有效、指向一个有效的 JSON 对象，并且该对象的内容可安全复制。返回 `int` 状态码：成功时为零，失败时返回非零值，调用者应据此检查操作结果。
-
-#### Usage Patterns
-
-- Clone a JSON object for mutation or independent ownership.
-- Used when a separate copy of an object view is needed.
-
-### `clore::net::detail::clone_object`
-
-Declaration: `network/protocol.cppm:258`
+Declaration: `network/protocol.cppm:268`
 
 Definition: `network/protocol.cppm:442`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-克隆 `clore::net::detail::ObjectView` 所引用的 JSON 对象。该函数接受一个源对象视图和一个用于错误报告的上下文标签，并返回一个 `int` 状态码，通常为 0 表示成功，非零值表示失败。调用者应确保提供的 `ObjectView` 有效且合法，并在调用后检查返回的状态。
+函数 `clore::net::detail::clone_array` 接受一个 `ArrayView` 和一个 `std::string_view`，返回 `int`。调用者需提供一个有效的 `ArrayView`（例如指向 JSON 数组的视图）以及一个描述性上下文字符串，通常用于在出错时标识操作来源。函数负责创建该数组的一个副本（深层克隆），并通过返回整数指示操作结果：零表示成功，非零表示发生错误。契约要求调用者传入的 `ArrayView` 必须指向一个有效的非空数组，且上下文字符串不应为空或混淆，以确保错误信息有意义。该函数不修改传入的视图本身。
 
 #### Usage Patterns
 
-- Called when a mutable or independently owned copy of an object is required
-- Used in contexts where the original object must remain unchanged after modification of the copy
+- 为后续独立操作克隆一个 JSON 数组
+- 在序列化或验证流程中创建数组的独立副本
 
-### `clore::net::detail::clone_value`
+### `clore::net::detail::clone_object`
 
-Declaration: `network/protocol.cppm:267`
+Declaration: `network/protocol.cppm:265`
 
 Definition: `network/protocol.cppm:451`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-调用者提供一个要克隆的 `const json::Value &` 及一个用于诊断错误的 `std::string_view` 上下文描述。`clore::net::detail::clone_value` 负责生成该 JSON 值的一个独立深层副本，返回 `int` 结果以指示操作是否成功，失败时使用提供的上下文辅助错误报告。调用者应在需要复制 JSON 内容以确保后续修改不干扰原始值时使用此函数。
+`clore::net::detail::clone_object` 创建给定 JSON 对象的深层副本。它接受一个待复制的对象（可以是 `ObjectView` 或 `const json::Object &`）以及一个用于错误报告和日志的上下文字符串。返回一个整数结果码：成功时返回 `0`，失败时返回非零错误码。调用者必须确保提供的对象引用有效，上下文字符串应清晰标识调用位置，以便在出现错误时定位问题。
 
 #### Usage Patterns
 
-- duplicate a JSON value for safe mutation
-- clone a JSON value before validation to avoid modifying the original
+- Cloning a JSON object to obtain an independent mutable copy
+- Creating a deep copy of an `ObjectView`'s content for storage or modification
+
+### `clore::net::detail::clone_object`
+
+Declaration: `network/protocol.cppm:262`
+
+Definition: `network/protocol.cppm:446`
+
+Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
+
+`clore::net::detail::clone_object` 接受一个 `ObjectView` 和一个用作错误上下文的 `std::string_view`，对该 JSON 对象执行深度克隆，并返回一个 `int` 指示操作结果。调用者应保证提供的 `ObjectView` 有效；返回值为零表示成功，非零值表示失败，对应的上下文字符串用于诊断错误原因。该函数是 JSON 值系列克隆函数（如 `clone_value`、`clone_array`）的一部分。
+
+#### Usage Patterns
+
+- deep copy a JSON object
+- prepare object for serialization or manipulation
+
+### `clore::net::detail::clone_value`
+
+Declaration: `network/protocol.cppm:271`
+
+Definition: `network/protocol.cppm:455`
+
+Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
+
+`clore::net::detail::clone_value` 创建一个给定 JSON 值的独立副本。它接受一个输入值及一个用于错误报告的上下文字符串，并返回一个整型指示操作成功（零）或失败（非零错误码）。调用者应确保传入的 `json::Value` 处于有效状态；若克隆成功，调用方可依赖返回的副本而无需关心原值的生命周期。这是底层序列化基础设施中的稳定组件。
+
+#### Usage Patterns
+
+- Used when a caller needs an independent copy of a JSON value, for example before modification or to avoid aliasing.
 
 ### `clore::net::detail::configure_request`
 
-Declaration: `network/http.cppm:126`
+Declaration: `network/http.cppm:150`
 
-Definition: `network/http.cppm:126`
+Definition: `network/http.cppm:150`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-函数 `clore::net::detail::configure_request` 负责对一个给定的 `kota::http::request` 对象进行配置，使其能够用于后续的 HTTP 请求操作。调用者需传入一个可修改的请求引用、一个整型参数（通常用于指定超时或标识）以及一个字符串参数（常用于指定路径、令牌或请求体内容）。该函数会修改请求对象的状态，设置必要的请求属性（如目标 URL、超时值或请求头），并假定所有参数已经过验证。若配置失败，函数行为未定义，但通常期望在配置过程中不抛出异常。由于该函数属于 `detail` 命名空间，它仅供库内部使用，不应被外部代码直接调用。
+将给定的 `kota::http::request` 原地配置为后续网络请求使用。`int` 参数指定连接或响应的超时（单位由实现定义），`std::string` 参数提供要追加的请求路径或资源标识符。函数不返回值，所有副作用直接应用于传入的 `request` 对象。
+
+调用者必须确保 `request` 对象处于有效且可修改的状态。传递的字符串应包含合法的路径成分，整数值应为非负整数。此函数不进行输入校验；非法或越界的参数可能导致未定义行为。该函数是 `clore::net::detail` 命名空间的内部实现，不建议外部代码直接调用。
 
 #### Usage Patterns
 
-- Called before performing an HTTP request to set up headers and body.
-- Used to apply curl options for timeout and keepalive.
+- Called in HTTP request construction pipelines before dispatching the request
+- Used internally by `clore::net::detail::perform_http_request` or related async variants
 
 ### `clore::net::detail::excerpt_for_error`
 
-Declaration: `network/protocol.cppm:219`
+Declaration: `network/protocol.cppm:223`
 
-Definition: `network/protocol.cppm:312`
+Definition: `network/protocol.cppm:316`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::detail::excerpt_for_error` 接受一个 `std::string_view` 参数并返回一个 `std::string`。它从输入的字符串中提取一个适合整合到错误消息或诊断输出中的片段。调用者应当提供一个代表可能冗长或结构化的错误上下文的原始字符串，该函数会将其精炼为一个更紧凑、对人类更友好的表示形式。
+`clore::net::detail::excerpt_for_error` 接受一个 `std::string_view`，它通常是原始的错误消息或上下文文本，并返回一个 `std::string`，即该文本的一个简短、适合错误报告的摘录片段。调用者负责提供内容有意义且长度适当的字符串视图，摘录的长度和边界由内部算法决定，不保证保留原文本的完整语义。该函数专为错误处理使用而设计，应仅由同一命名空间内的其他错误处理函数调用。
 
 #### Usage Patterns
 
-- Used to create safe excerpts of response bodies for error messages
+- used to create a safe excerpt of a server response for inclusion in error diagnostics
+- called when constructing error messages that need a portion of the body
 
 ### `clore::net::detail::expect_array`
 
-Declaration: `network/protocol.cppm:246`
+Declaration: `network/protocol.cppm:250`
 
-Definition: `network/protocol.cppm:402`
+Definition: `network/protocol.cppm:406`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::detail::expect_array` 验证给定的 JSON 值是否为一个 JSON 数组。如果该值不是数组，则返回一个非零错误码；否则返回 `0` 表示成功。第一个参数可以是 `const json::Value &` 或 `json::Cursor`，代表待检查的 JSON 值；第二个参数 `std::string_view` 是一个人类可读的上下文描述（例如字段名或路径），用于在失败时生成有意义的错误报告。调用者应确保提供的 JSON 值是有效的，并负责在返回非零值时进行错误处理。
+函数 `clore::net::detail::expect_array` 验证给定的 `json::Value` 是否表示一个 JSON 数组。调用方提供一个值和一个用于错误诊断的上下文字符串（`std::string_view`）；若该值符合预期类型，函数返回一个成功指示符，否则生成一个适当的错误返回。此函数是 `clore::net` 内部的 JSON 类型检查工具，常用于在解析或处理过程中断言某个 JSON 节点的结构，并在不匹配时向调用方报告错误上下文。
 
 #### Usage Patterns
 
-- Used to safely extract a JSON array from a value before processing its elements.
-- Called by functions that expect an array in a specific context, similar to `expect_object` or `expect_string`.
-- Often used in combination with `ArrayView` methods like `begin`, `end`, `size`, and `operator[]`.
+- extracting a JSON array with error handling
+- validating JSON structure in networking code
+- wrapping an array pointer into an `ArrayView`
 
 ### `clore::net::detail::expect_array`
 
-Declaration: `network/protocol.cppm:249`
+Declaration: `network/protocol.cppm:253`
 
-Definition: `network/protocol.cppm:411`
+Definition: `network/protocol.cppm:415`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::detail::expect_array` 断言一个 JSON 值必须是一个数组。调用者提供要检查的 `json::Cursor` 或 `const json::Value &` 以及一个描述性字符串（通常来自调用点，用于错误报告），函数在值不是数组时返回一个负整数错误码；如果值是合法的数组则返回 `0`。
-
-该函数是 `clore::net::detail` 中解析和验证协议输入的一组“期望”工具之一。调用者应先使用此函数确认值类型，再安全地访问数组内容；错误的类型将触发一个带上下文标签的错误返回，而不会崩溃或不一致。
+`clore::net::detail::expect_array` 断言给定的 JSON 节点必须是一个数组。该函数提供两个重载，分别接受 `json::Cursor` 和 `const json::Value &`，以及一个 `std::string_view` 作为错误描述的上下文。返回值 `int` 在成功时表示可用的数组标识（可用于后续操作），若节点类型不匹配则表示错误。调用者应确保在此之前已确定节点预期为数组，本函数作为运行时契约验证使用。
 
 #### Usage Patterns
 
-- validating JSON cursors as arrays before further processing
-- converting a JSON cursor to an `ArrayView` for iteration or indexing
+- Used to validate JSON arrays during parsing or deserialization
+- Provides an `ArrayView` for indexed or range access
+- Often called with a meaningful context string to aid error reporting
 
 ### `clore::net::detail::expect_object`
 
-Declaration: `network/protocol.cppm:240`
+Declaration: `network/protocol.cppm:244`
 
-Definition: `network/protocol.cppm:384`
+Definition: `network/protocol.cppm:388`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-调用 `clore::net::detail::expect_object` 用于断言给定的 JSON 值（`const json::Value &`）必须是一个 JSON 对象。此函数是 JSON 结构校验链中的一环，专用于期望一个对象类型。调用者需提供上下文描述字符串（`std::string_view`），该字符串会在校验失败时用于生成错误报告。如果传入的 JSON 值确实是一个对象，函数返回表明成功的整数；否则返回一个表示错误的整数。
+`clore::net::detail::expect_object` 验证给定的 JSON 值是否为一个对象。调用者必须提供一个 JSON 值（无论是通过 `const json::Value &` 还是通过 `json::Cursor`）以及一个描述上下文的字符串。如果该值是一个 JSON 对象，函数返回一个表示成功的整数；否则，返回一个错误指示，通常基于提供的上下文字符串构造错误信息。
+
+函数的两个重载允许调用者通过直接引用 JSON 值或通过一个 `json::Cursor`（可能来自对 `ObjectView::get` 的调用）来传递要检验的值。调用者应根据需要选择最合适的重载，并确保提供的上下文字符串对诊断问题有意义。
 
 #### Usage Patterns
 
-- Used to extract a JSON object from a Value with error reporting
-- Called by validation functions to ensure a value is an object
+- used to validate that a JSON value is an object before further processing
+- works alongside `expect_string`, `expect_array` for type-safe JSON extraction
 
 ### `clore::net::detail::expect_object`
 
-Declaration: `network/protocol.cppm:243`
+Declaration: `network/protocol.cppm:247`
 
-Definition: `network/protocol.cppm:393`
+Definition: `network/protocol.cppm:397`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-函数 `clore::net::detail::expect_object` 验证当前指向的 JSON 值是否为一个对象。它接受一个 `json::Cursor`（或 `const json::Value &`）和一个 `std::string_view` 作为上下文描述（通常为字段名或路径）。当值不是对象时，它生成错误并返回一个表示失败的非零整数；成功时返回零。调用者应当在解析已知应包含 JSON 对象的字段时使用此函数来强制执行类型契约。
+`clore::net::detail::expect_object` 要求调用者提供一个有效的 `json::Cursor` 或 `const json::Value &`，以及一个描述性的 `std::string_view`（通常用于错误消息中的上下文标识）。该函数会检查当前游标所指向的 JSON 值是否为一个对象；若不是，则返回一个非零整数以指示失败，并可能通过异常或日志报告错误。调用者应确保传入的游标合法且在有效范围内，函数本身不消耗游标。成功时返回零，表示当前值符合对象格式。该函数不执行深层验证，仅检查 JSON 值的类型是否为对象。
 
 #### Usage Patterns
 
-- Used to validate that a JSON value is an object, returning an `ObjectView` for further field access
-- Commonly called from higher-level parsing functions that require a JSON object at a given path
+- Used to extract an `ObjectView` from a `json::Cursor` while validating that the cursor holds an object
+- Called when parsing JSON responses that must contain a top-level object
 
 ### `clore::net::detail::expect_string`
 
-Declaration: `network/protocol.cppm:255`
+Declaration: `network/protocol.cppm:259`
 
-Definition: `network/protocol.cppm:429`
+Definition: `network/protocol.cppm:433`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-函数 `clore::net::detail::expect_string` 验证给定的 JSON 值或游标是否代表一个字符串。它有两个重载：接受 `const json::Value &` 和 `std::string_view`，或接受 `json::Cursor` 和 `std::string_view`。第二个参数 `std::string_view` 用于提供上下文描述（例如字段路径或名称），以便在验证失败时生成有意义的错误信息。成功时返回零，失败时返回非零错误码。调用方负责提供有效的 JSON 值或游标，并给出一个清晰的上下文字符串，以帮助在解析错误时快速定位问题。
+`clore::net::detail::expect_string` 验证给定的 `json::Value` 是否为一个 JSON 字符串。若值为字符串，则返回表示成功的整数；否则返回表示错误码的整数。第二个 `std::string_view` 参数用于提供上下文标识（例如字段名或键名），便于在验证失败时生成诊断信息。
+
+调用者应检查返回值以确定操作是否成功。该函数仅执行类型断言，不提取或修改字符串值。
 
 #### Usage Patterns
 
-- Used when a JSON value must be a string, e.g., extracting fields from JSON objects or arrays
-- Called by validation functions like `validate_completion_request`
+- extracting a string from a JSON cursor
+- validating JSON string values
+- error propagation for non-string JSON values
 
 ### `clore::net::detail::expect_string`
 
-Declaration: `network/protocol.cppm:252`
+Declaration: `network/protocol.cppm:256`
 
-Definition: `network/protocol.cppm:420`
+Definition: `network/protocol.cppm:424`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::detail::expect_string` 验证给定的 JSON 值是否为字符串。调用者提供一个 `json::Value` 引用以及一个描述操作上下文的 `std::string_view`（通常用于错误消息中的标识符）。如果该值不是字符串，函数返回一个非零整数表示失败；否则返回零。该函数是 JSON 模式验证工具集的一部分，用于在解析和序列化过程中确保字段类型正确。
+函数 `clore::net::detail::expect_string` 断言给定的 JSON 值必须是一个字符串。它接受一个 `const json::Value &`（或 `json::Cursor`）以及一个 `std::string_view`（通常用于描述调用上下文，如字段名或操作位置）。如果值不是字符串类型，函数会返回一个非零的错误码；成功时返回零。调用者应确保传入的 JSON 值有效，并提供有意义的上下文描述以辅助错误诊断。
 
 #### Usage Patterns
 
-- Validate that a JSON value is a string before processing
-- Extract a string view from a JSON value with error handling
+- Validating that a JSON value is a string
+- Extracting string content from JSON during parsing
+- Used in conjunction with other `expect_*` functions like `expect_array` and `expect_object`
 
 ### `clore::net::detail::infer_output_contract`
 
-Declaration: `network/protocol.cppm:627`
+Declaration: `network/protocol.cppm:631`
 
-Definition: `network/protocol.cppm:644`
+Definition: `network/protocol.cppm:648`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-从给定的 `PromptRequest` 推断出应施加于 LLM 输出的输出合约类型。该函数解析请求内的结构参数，并返回一个整型合约标识符，该标识符对应于 `clore::net` 输出验证子系统所识别的某个预定义输出合约变体。
-
-调用者应使用此返回值来配置下游处理管线，特别是当需要根据请求内容动态选择输出格式或约束条件时。返回的整数可传递给如 `validate_prompt_output` 或 `validate_response_format` 等函数，以将输出约束施加于后续请求结果。
+函数 `clore::net::detail::infer_output_contract` 从给定的 `PromptRequest` 中推断并返回一个整数形式的输出合约标识。调用者可以利用该结果决定如何验证或处理模型输出，例如指定输出是纯文本、结构化数据或特定格式。返回值约定为调用者所依赖的合约类型，具体含义由库内其他组件解释。
 
 #### Usage Patterns
 
-- Called to determine the output contract before sending a prompt request
-- Used to validate consistency between `response_format` and `output_contract`
+- Called to infer or validate the output contract before constructing or processing a completion request.
+- Used to ensure that `response_format` and `output_contract` are consistent.
 
 ### `clore::net::detail::insert_string_field`
 
-Declaration: `network/protocol.cppm:211`
+Declaration: `network/protocol.cppm:215`
 
-Definition: `network/protocol.cppm:299`
+Definition: `network/protocol.cppm:303`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-将指定的字符串键和对应的值插入到一个 `json::Object` 中，并返回一个整数指示操作结果。调用者提供目标可变对象 `json::Object &`，以及三个 `std::string_view` 参数 —— 通常第一个代表字段名称，第二个代表字段值，第三个可能用作错误上下文或路径信息。返回值为 `0` 表示成功，非零表示发生了预期错误（如字段已存在或类型不匹配）。该函数是协议构建设施的一部分，确保字符串字段能被安全且一致地写入 JSON 结构中。
+将字符串字段插入到指定的 `json::Object` 中。第一个参数为目标 JSON 对象，第二个参数为字段名，第三个参数为字段值，第四个参数用作错误报告时的上下文标识（通常为调用位置或操作名称）。
+
+调用者须确保传入的对象是可变的且未处于只读状态，字段名与值均非空。函数返回一个 `int` 状态码，成功时指示正常完成，失败时返回错误码；调用者应检查返回值以判断操作是否成功。
 
 #### Usage Patterns
 
-- adding a simple string field to a JSON object
-- building JSON request bodies
+- Used to add a string field to a JSON object when constructing request payloads.
 
 ### `clore::net::detail::make_empty_array`
 
-Declaration: `network/protocol.cppm:227`
+Declaration: `network/protocol.cppm:231`
 
-Definition: `network/protocol.cppm:344`
+Definition: `network/protocol.cppm:348`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`make_empty_array` 是 `clore::net::detail` 命名空间中的一个工具函数，用于创建一个空的 JSON 数组。调用方需要提供一个 `std::string_view` 参数，该参数作为此操作的上下文描述，在发生错误时用于生成详细的诊断信息。函数返回一个 `int` 类型的状态码，成功时为零，失败时为指示错误类型的非零值。此函数常用于需要从零开始构建 JSON 数组的场景，例如在序列化或协议处理流程中初始化一个空的数组容器。
+`clore::net::detail::make_empty_array` 创建一个空的 JSON 数组值，并告知调用者操作是否成功。调用者必须传入一个 `std::string_view` 作为错误报告的上下文标识（通常为调用点的文件名或位置），并检查返回的 `int`：成功时返回 `0`，非零值表示失败。该函数是 `detail` 命名空间中用于底层 JSON 构造的辅助接口，调用者在需要生成空数组值时应使用它，并正确处理返回值以传播错误。
 
 #### Usage Patterns
 
-- Obtain an empty JSON array for a response or data structure
-- Safely produce an initialized empty array
+- creating an empty JSON array as a default or placeholder
+- initializing arrays in JSON construction routines
 
 ### `clore::net::detail::make_empty_object`
 
-Declaration: `network/protocol.cppm:224`
+Declaration: `network/protocol.cppm:228`
 
-Definition: `network/protocol.cppm:336`
+Definition: `network/protocol.cppm:340`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::detail::make_empty_object` 接受一个 `std::string_view` 参数作为调用上下文标签（通常用于错误报告），并返回一个 `int` 值表示操作结果：零表示成功创建了一个空对象，非零表示失败。调用者提供的字符串视图必须在函数调用期间保持有效。
+`clore::net::detail::make_empty_object` 创建一个空的 JSON 对象，并返回一个 `int` 状态码，用于指示成功或失败。调用者必须提供一个 `std::string_view` 作为上下文标签，该标签在出现错误时用于生成描述性的诊断消息。返回零表示成功；非零值表示发生了错误，调用者应停止后续对该空对象的使用。
 
 #### Usage Patterns
 
-- create an empty JSON object for initialization
-- used in net module to produce placeholder objects
+- used to obtain a guaranteed-valid empty JSON object
+- likely called when a default object is needed
+- serves as a helper for initializing empty containers
 
 ### `clore::net::detail::normalize_utf8`
 
-Declaration: `network/protocol.cppm:209`
+Declaration: `network/protocol.cppm:213`
 
-Definition: `network/protocol.cppm:289`
+Definition: `network/protocol.cppm:293`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-函数 `clore::net::detail::normalize_utf8` 接受两个 `std::string_view` 参数并返回一个 `std::string`。该函数负责对提供的 UTF-8 字符串进行标准化处理，调用者应确保传入的字符串是合法的 UTF-8 序列，并且理解标准化行为由两个参数的组合决定。函数不会修改传入的输入，返回一个新的、标准化后的字符串。
+`clore::net::detail::normalize_utf8` 执行两个 UTF-8 字符串视图的规范化处理，并返回一个 `std::string`。调用者应提供有效的 UTF-8 编码输入，并理解此函数仅用于内部实现的一致性要求。第一个参数通常为待规范化的原始数据，第二个参数可能携带附加上下文（如错误诊断标签或来源标识），具体约定由实现定义。本函数不修改输入，返回新创建的规范化字符串。
 
 #### Usage Patterns
 
-- Standardizing user-supplied or LLM-generated text before JSON serialization
-- Ensuring UTF-8 validity in network request/response processing
+- Sanitize UTF-8 input before JSON serialization
+- Log warnings for invalid UTF-8 sequences with a descriptive field name
 
 ### `clore::net::detail::parse_json_object`
 
@@ -673,79 +727,78 @@ Definition: `network/provider.cppm:148`
 
 Implementation: [`Module provider`](../../../../modules/provider/index.md)
 
-调用 `clore::net::detail::parse_json_object` 解析一个以 `std::string_view` 形式提供的 JSON 文本，期望其顶层值为一个 JSON 对象。第一个参数是待解析的 JSON 文本；第二个参数是一个描述性标签（通常为调用处的标识符或文件名），用于在解析失败时生成有意义的错误消息。该函数不抛出异常，而是通过返回值报告结果。
-
-返回值 `int` 表示操作状态：成功时返回 `0`，失败时返回一个非零错误码。调用方必须检查返回值，并可通过 `clore::net::detail::unexpected_json_error` 等辅助函数将错误码转换为更详细的诊断信息。
+函数 `clore::net::detail::parse_json_object` 负责解析第一个参数所指定的 JSON 对象字符串，并将解析结果（或其副作用，如错误报告）返回给调用者。第二个参数是一个用于标识调用上下文的字符串，当解析失败时，该上下文会被用于生成有意义的错误消息。返回值为 `int` 类型，成功时为零，失败时为一个非零的错误代码。调用者需确保提供的字符串是合法的 JSON 对象格式，否则函数将返回相应的错误指示。
 
 #### Usage Patterns
 
-- parsing JSON objects from raw strings with error context
+- 解析网络响应中的 JSON 对象
+- 在解析失败时提供上下文描述以辅助调试
 
 ### `clore::net::detail::parse_json_value`
 
-Declaration: `network/protocol.cppm:234`
+Declaration: `network/protocol.cppm:238`
 
-Definition: `network/protocol.cppm:364`
+Definition: `network/protocol.cppm:368`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-函数 `clore::net::detail::parse_json_value` 是一个模板函数，用于将给定的 `const json::Value &` 解析为指定的类型 `T`。它接受一个 `std::string_view` 作为上下文描述，用于在发生错误时生成有意义的诊断信息。
+模板函数 `clore::net::detail::parse_json_value` 尝试将给定的 `json::Value` 解析为类型 `T`，返回一个 `int` 表示操作结果。该函数用于从已解析的 JSON 节点中提取特定类型的数据，并在失败时返回非零错误码。第二个参数 `std::string_view` 通常用作上下文标签（如字段名或路径），用于在错误消息中标识被解析的 JSON 位置，方便调试。
 
-调用者负责提供有效的 JSON 值和一个描述解析场景的上下文字符串。函数返回一个 `int`，通常为 0 表示成功，非零值表示解析失败或类型不匹配。具体的错误语义由实现定义，但调用者应检查返回值并据此处理错误。
+调用者负责确保 `T` 与 JSON 值的实际类型兼容，并提供一个有意义的名称作为上下文。成功时返回 `0`，失败时返回负值或特定错误码，具体错误细节可通过关联的错误处理设施（如 `clore::net::detail::unexpected_json_error`）获得。
 
 #### Usage Patterns
 
-- Wraps the string parsing overload to accept a `json::Value`
-- Used where a JSON value needs to be parsed into a specific type
+- 从已解析的 JSON 对象中提取字段并直接解析为类型 T
+- 将 JSON 值序列化为字符串以进行后续语法解析
+- 在需要同时处理 JSON 值与上下文错误的场景中简化调用
 
 ### `clore::net::detail::parse_json_value`
 
-Declaration: `network/protocol.cppm:231`
+Declaration: `network/protocol.cppm:235`
 
-Definition: `network/protocol.cppm:353`
+Definition: `network/protocol.cppm:357`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::detail::parse_json_value` 解析给定的 JSON 文本字符串视图并返回一个整数状态码。第一个参数是待解析的 JSON 内容，第二个参数是一个描述性的上下文标签，用于生成错误消息。模板参数 `T` 指示解析后期望的 JSON 值类型，但函数始终以 `int` 形式返回解析结果。调用者必须检查返回码：通常 `0` 表示成功，非零值表示解析失败，失败信息可通过上下文标签追溯。
+尝试将给定的 JSON 字符串解析为内部 JSON 值，并将结果存储在可供后续操作（如 `clore::net::detail::expect_object` 或 `clore::net::detail::expect_array`）使用的隐式上下文中。第一个参数是要解析的原始 JSON 文本，第二个参数是用于错误诊断的描述性标签（通常为来源文件名或调用位置）。返回一个整数状态码：零表示成功，非零表示解析失败或输入的 JSON 格式无效。调用者负责提供合法的 UTF-8 编码且格式完整的 JSON 输入，并在返回值指示错误时根据标签记录或报告上下文。
 
 #### Usage Patterns
 
-- Deserialize JSON configuration or response into a typed struct or value
-- Used in error-handling paths that need contextual failure messages
+- Used to parse JSON strings into type `T` with a context string for error reporting
 
 ### `clore::net::detail::perform_http_request`
 
-Declaration: `network/http.cppm:52`
+Declaration: `network/http.cppm:53`
 
-Definition: `network/http.cppm:139`
+Definition: `network/http.cppm:167`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-`clore::net::detail::perform_http_request` 发起一次 HTTP 请求并返回结果。调用方需提供请求 URL（`const std::string &`）、一个整数配置参数（如超时或重试限制）以及一个字符串视图载荷（`std::string_view`）。函数返回 `std::expected<RawHttpResponse, LLMError>`：请求成功时包含 `RawHttpResponse`，失败时包含 `LLMError`。
+`clore::net::detail::perform_http_request` 是一个同步 HTTP 请求函数。调用者需提供请求的目标 `std::string`、一个整型配置（通常代表端口或超时等参数）以及请求体 `std::string_view`。该函数负责发送 HTTP 请求并等待响应。
 
-调用方必须检查这个 `std::expected` 值，以确定操作是否成功，并相应处理响应或错误。此函数是同步的，会阻塞直到请求完成或出错，因此应确保在合适的执行上下文中调用它。
+返回值是一个 `std::expected<RawHttpResponse, LLMError>`。调用者必须处理两者的可能性：如果请求成功，则包含完整的 `RawHttpResponse` 对象；如果失败，则包含一个 `LLMError` 实例，描述错误原因。函数不抛出异常，所有错误均通过返回值表达。
 
 #### Usage Patterns
 
-- Callers use this function to perform a blocking HTTP request
-- Used to synchronously invoke asynchronous HTTP operations
-- Typically called from non-async contexts where a blocking interface is required
+- Used as a synchronous wrapper around the async HTTP request machinery
+- Called when a blocking HTTP request is needed in synchronous code paths
 
 ### `clore::net::detail::perform_http_request_async`
 
-Declaration: `network/http.cppm:57`
+Declaration: `network/http.cppm:58`
 
-Definition: `network/http.cppm:165`
+Definition: `network/http.cppm:195`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-此函数发起一次异步HTTP请求。调用者需提供目标地址（`std::string`）、端口号（`int`）、请求内容（`std::string`）以及一个活跃的 `async::event_loop &` 引用。函数返回一个 `int`，该值通常用于标识请求或表示操作状态。调用者必须确保事件循环在请求整个生命周期内保持可运行，并在该事件循环中安排结果处理；该函数本身不阻塞也不提供同步等待机制，所有完成事件及响应数据均通过事件循环派发。
+`clore::net::detail::perform_http_request_async` 发起一个异步 HTTP 请求。调用者需要提供一个目标标识（`std::string`）、一个整数参数、一个请求体（`std::string`）以及一个 `async::event_loop` 引用。函数立即返回一个整数，指示请求是否成功调度（0 表示成功，非零表示错误）。调用者必须确保事件循环在请求完成前保持活跃，并保证提供的参数有效。
 
 #### Usage Patterns
 
-- 作为 LLM API 异步调用的核心实现
-- 被高层请求调度函数调用
-- 处理并发限流和错误恢复
+- 以异步方式发起受信号量限制的 HTTP POST 请求
+- 用于 LLM API 调用（日志中包含 'LLM' 标记）
+- 在事件循环上下文中通过 `co_await` 等待完成
+- 与 `SemaphoreGuard` 配合确保信号量释放
 
 ### `clore::net::detail::read_credentials`
 
@@ -755,74 +808,75 @@ Definition: `network/provider.cppm:39`
 
 Implementation: [`Module provider`](../../../../modules/provider/index.md)
 
-`clore::net::detail::read_credentials` 从给定的 `CredentialEnv` 中解析并读取凭证。调用者负责提供一个有效的 `CredentialEnv` 参数；函数返回一个整数值以指示成功或失败，返回 `0` 通常表示成功，非零值表示出错。此函数是网络模块内部凭据处理的底层工具，不直接供外部使用。
+函数 `clore::net::detail::read_credentials` 根据传入的 `CredentialEnv` 对象读取凭据信息。调用者需提供一个有效的 `CredentialEnv` 实例，该实例应包含读取凭据所需的环境配置。函数返回一个 `int` 值，表示操作的状态：成功时返回零，失败时返回非零错误码。调用者应检查返回值以确定凭据是否成功读取。
 
 #### Usage Patterns
 
-- Used to obtain base URL and API key from environment variables for network requests.
-- Called by higher-level functions that require `EnvironmentConfig` initialization.
+- used to retrieve credentials from environment variables for network configuration
+- called when initializing network provider with credential environment settings
 
 ### `clore::net::detail::read_environment`
 
-Declaration: `network/http.cppm:49`
+Declaration: `network/http.cppm:50`
 
-Definition: `network/http.cppm:108`
+Definition: `network/http.cppm:132`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-函数 `clore::net::detail::read_environment` 接受两个 `std::string_view` 参数，并返回 `std::expected<EnvironmentConfig, LLMError>`。调用方负责提供标识环境配置作用域或键的两个字符串；成功时，函数生成一个完整的 `EnvironmentConfig` 对象，其中包含从当前环境解析出的配置信息。如果读取或解析过程中发生错误，则返回一个 `LLMError` 表示失败原因。调用方必须根据返回的 `expected` 检查成功或失败状态，并确保传递的字符串在调用期间保持有效。
+函数 `clore::net::detail::read_environment` 根据调用者提供的环境变量标识符从进程环境中读取并解析配置。它接受两个 `std::string_view` 参数，并返回一个 `std::expected<EnvironmentConfig, LLMError>` 对象：成功时包含一个 `EnvironmentConfig`，失败时包含一个 `LLMError`，描述读取或解析错误的原因。调用方应通过检查 `std::expected` 的状态来处理结果，并在出现错误时采取相应的恢复或报告措施。
 
 #### Usage Patterns
 
-- obtaining LLM API endpoint configuration from environment
-- initializing `EnvironmentConfig` for network requests
+- Used to fetch environment variables for API base URL and API key configuration
 
 ### `clore::net::detail::read_required_env`
 
-Declaration: `network/http.cppm:99`
+Declaration: `network/http.cppm:123`
 
-Definition: `network/http.cppm:99`
+Definition: `network/http.cppm:123`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-`clore::net::detail::read_required_env` 读取一个必需的环境变量。调用者提供环境变量名称（`std::string_view`），函数返回该变量的值（`std::expected<std::string, LLMError>`）。如果环境变量未定义、为空或读取失败，则返回一个 `LLMError` 错误。此函数不提供默认值；环境变量必须存在且有效，否则调用将失败。
+`clore::net::detail::read_required_env` 接受一个代表环境变量名称的 `std::string_view`，并返回 `std::expected<std::string, LLMError>`。该函数尝试读取指定的环境变量；如果该变量存在且可读取，则成功返回其字符串值；如果该变量未设置或读取过程中发生错误，则返回一个 `LLMError` 表示失败。调用者应假定该环境变量是必需的——函数不会对缺失变量提供默认值，而是直接报告错误。此函数通常用于在配置过程的早期获取关键配置值，以便调用者能够决定是否继续执行。
 
 #### Usage Patterns
 
-- 作为配置初始化的一部分，用于读取必需的环境变量
-- 被 `read_environment` 等其他函数调用
+- retrieving mandatory configuration values like API keys or endpoints
+- fallible environment variable lookup with error handling
+- ensuring required environment is present before proceeding
 
 ### `clore::net::detail::request_text_once_async`
 
-Declaration: `network/protocol.cppm:634`
+Declaration: `network/protocol.cppm:638`
 
-Definition: `network/protocol.cppm:676`
+Definition: `network/protocol.cppm:680`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::detail::request_text_once_async` 是一个模板函数，用于异步发起一次文本生成请求。它接受一个 `CompletionRequester` 类型的可调用对象、两个 `std::string_view` 参数（分别表示基址和资源路径）、一个 `PromptRequest` 对象描述请求内容，以及一个 `kota::event_loop` 引用用于调度异步操作。函数返回一个 `int` 值，该值通常表示请求的标识符或操作状态码。调用者必须确保 `CompletionRequester` 在其生命周期内有效，并使事件循环保持运行以完成异步回调。
+`clore::net::detail::request_text_once_async` 是一个异步函数，用于发起一次文本请求（通常是面向 LLM 的完成请求）。调用者必须提供一个 `CompletionRequester` 类型，该类型通常定义如何处理请求的最终结果（成功或失败）。函数接受两个 `std::string_view` 参数（分别表示目标 URL 和凭据，如 API 密钥），一个 `PromptRequest` 结构体（描述请求的提示和参数），以及一个引用传递的 `kota::event_loop`。返回一个 `int` 标识该请求的句柄或状态码。
+
+该函数假定调用者已正确初始化事件循环，并确保其在异步操作期间保持活跃。它封装了 HTTP 请求的发送、响应验证和 JSON 解析，但调用者不直接接触这些中间步骤。返回的整数值可用于跟踪或取消请求（如果底层机制支持）。
 
 #### Usage Patterns
 
-- Used to initiate an async text completion request to an LLM endpoint
-- Typically used within an async context with `co_await`
-- Relies on a `CompletionRequester` to encapsulate the HTTP interaction and response parsing
+- Used to send a single prompt to a language model and obtain its text response asynchronously
+- Often called with a lambda or function object that performs the actual HTTP request
+- Used in contexts where only the first completion text is needed (no streaming)
 
 ### `clore::net::detail::run_task_sync`
 
-Declaration: `network/protocol.cppm:222`
+Declaration: `network/protocol.cppm:226`
 
-Definition: `network/protocol.cppm:318`
+Definition: `network/protocol.cppm:322`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::detail::run_task_sync` 是一个同步执行任务的工具函数。它接受一个转发引用参数，通常是一个可调用对象 `make_task`，该对象生成一个待执行的任务。调用者负责提供一个满足模板约束的 `make_task`，该任务会被立即同步运行。函数返回一个 `int`，表示执行结果（通常为 0 表示成功，非零表示错误）。此函数位于 `clore::net::detail` 命名空间，用于实现内部同步化包装。
+`clore::net::detail::run_task_sync` 是一个模板函数，用于在当前线程中同步执行由调用方提供的任务。它接受一个以转发引用形式传入的参数（类型由 `T` 推导），以及一个任务工厂 `make_task`，并返回一个整数。调用方应确保传入的 `make_task` 可调用且能够生成符合预期的任务对象；返回值通常表示操作成功或失败的状态码。该函数位于 `detail` 命名空间中，是内部实现助手，调用方应遵循其所在模块的特定契约。
 
 #### Usage Patterns
 
-- Used to execute an asynchronous task synchronously in a temporary event loop.
-- Often used with `make_task` lambdas that encapsulate a sequence of async calls.
-- Suitable for test environments or simple synchronous callers.
+- Used to wrap asynchronous tasks in a synchronous blocking call
+- Common when integrating with synchronous code paths
 
 ### `clore::net::detail::select_event_loop`
 
@@ -834,12 +888,12 @@ Implementation: [`Module client`](../../../../modules/client/index.md)
 
 Declaration: [Declaration](functions/select-event-loop.md)
 
-`clore::net::detail::select_event_loop` 接收一个指向 `kota::event_loop` 的可选指针，并返回该事件循环的引用。如果指针非空，函数直接返回其指向的循环；如果指针为空，则返回一个实现定义的默认事件循环（通常是当前线程关联的默认实例）。调用者应确保在异步操作完成之前，所使用的 `kota::event_loop` 对象保持存活，无论是由调用者提供还是由默认实例提供。该函数主要用于将可选的 `kota::event_loop*` 参数转换为一个确定的引用，以便内部逻辑无需处理空指针。
+函数 `clore::net::detail::select_event_loop` 接受一个可选的 `kota::event_loop *` 指针，并返回一个 `kota::event_loop &` 引用。如果传入的指针非空，则返回该指针所指向的事件循环；若指针为空，函数会选择一个默认的事件循环并返回其引用。调用者无需关心默认事件循环的具体选择策略，只需保证在需要自定义事件循环时传入有效指针，否则可传入 `nullptr` 以使用默认实例。该函数主要用于内部异步操作的调度环境决策，确保调用方总能获得一个有效的事件循环引用来注册回调或等待完成。
 
 #### Usage Patterns
 
-- Used by `call_completion_async` and `call_llm_async` to obtain a valid event loop reference from an optional pointer
-- Invoked with a potentially null `kota::event_loop*` to default to the current loop
+- 用于将可选的 `event_loop*` 解析为确定的引用
+- 被 `call_completion_async`、`call_llm_async` 等高层函数调用以获取事件循环
 
 ### `clore::net::detail::serialize_tool_arguments`
 
@@ -849,73 +903,74 @@ Definition: `network/provider.cppm:158`
 
 Implementation: [`Module provider`](../../../../modules/provider/index.md)
 
-该函数接收一个表示工具参数的 JSON 值和一个上下文标识符（用于生成错误消息），并将该值序列化为字符串格式。调用方必须确保传入的 `json::Value` 是有效的工具参数结构；返回值 `int` 指示操作是否成功，其中零表示成功，非零表示某种错误。
-
-如果序列化过程中遇到任何问题（如无效的 JSON 类型或缺失必要字段），它会通过上下文标识符产生错误信息。该函数通常用于在构建请求时将工具参数转换为可发送的表示形式。
+函数 `clore::net::detail::serialize_tool_arguments` 接受一个表示工具参数的 `json::Value` 以及一个用于错误诊断的 `std::string_view` 上下文。它负责将这些参数从 JSON 表示序列化为下游可用的字符串形式，同时隐式验证其结构是否与预期模式匹配。返回值 0 表示成功，非零值表示序列化或验证失败，调用者应据此处理错误。
 
 #### Usage Patterns
 
-- Used to normalize a JSON value by ensuring it can be serialized and deserialized without loss
-- Provides both string and structured representations for downstream processing
-- Called when preparing tool arguments for serialization in network requests
+- round-trip JSON normalization
+- validating tool arguments are serializable
 
 ### `clore::net::detail::serialize_value_to_string`
 
-Declaration: `network/protocol.cppm:237`
+Declaration: `network/protocol.cppm:241`
 
-Definition: `network/protocol.cppm:374`
+Definition: `network/protocol.cppm:378`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::detail::serialize_value_to_string` 将传入的 `json::Value` 序列化为其对应的字符串表示形式。第二个参数 `std::string_view` 充当描述性上下文标签，供调用方在需要生成错误报告时标识当前序列化操作。函数返回一个 `int` 状态码，通常零值表示成功，非零值指示失败；调用者应当检查该返回值以确保序列化过程正确完成。
+`clore::net::detail::serialize_value_to_string` 是一个内部函数，用于将 `json::Value` 序列化为字符串表示。它接受一个需要处理的 JSON 值和一个 `std::string_view` 作为上下文标识（常用于错误报告或诊断），并返回一个 `int` 状态码。调用方应检查该返回值：通常 `0` 表示成功，非零值指示序列化失败。失败可能源于无效的 JSON 结构、内存分配错误或其他内部问题。注意，该函数不直接返回序列化后的字符串；其结果仅通过状态码传达，而实际字符串可能写入内部缓冲区或用于进一步处理。
 
 #### Usage Patterns
 
-- serialize JSON for network requests
-- convert JSON to string with error context
+- 用于将 JSON 值序列化为字符串
+- 在错误处理中提供上下文信息
 
 ### `clore::net::detail::to_llm_unexpected`
 
-Declaration: `network/protocol.cppm:217`
+Declaration: `network/protocol.cppm:221`
 
-Definition: `network/protocol.cppm:308`
+Definition: `network/protocol.cppm:312`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-函数模板 `clore::net::detail::to_llm_unexpected` 将给定的 `Status` 值与一个描述性字符串结合，生成一个整数结果，用于在 LLM 交互的失败路径中表示意外状况。调用者应提供一个表示错误或意外状态的 `Status` 对象，以及一个提供人类可读上下文的 `std::string_view`。返回的整数可以被下游错误处理代码使用，作为转换后的错误指示符，其具体含义由实现定义。此函数不抛出异常。
+该函数 `clore::net::detail::to_llm_unexpected` 将给定类型的 `Status` 值和一个描述性字符串视图转换为一个整数，用于表示 LLM（Large Language Model）交互中发生的意外结果或状态。调用者负责提供泛型 `Status` 实例以及说明意外情况的文本；返回值应被解释为与该意外情况对应的整数编码，通常用于跨调用者的错误处理或日志记录。
 
 #### Usage Patterns
 
-- Returning unexpected `LLMError` from functions that fail with a Status error
+- Converting error statuses into `std::unexpected` for expected-based error handling
+- Used as a utility in functions returning `std::expected` to propagate formatted errors
 
 ### `clore::net::detail::unexpected_json_error`
 
-Declaration: `network/protocol.cppm:206`
+Declaration: `network/protocol.cppm:210`
 
-Definition: `network/protocol.cppm:284`
+Definition: `network/protocol.cppm:288`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-函数 `clore::net::detail::unexpected_json_error` 接受一个上下文描述字符串和一个 `json::error` 对象，返回一个整型错误码。调用者应在解析 JSON 过程中捕获意外错误时调用此函数，其职责是根据提供的错误信息生成统一的失败响应或记录。返回的整数值表示该调用在调用链中传播的后续状态，通常指示操作失败。
+函数 `clore::net::detail::unexpected_json_error` 由调用者在解析 JSON 内容时，当遇到与预期结构不匹配的意外错误时使用。第一个参数 `std::string_view` 表示当前正在处理的上下文或字段名称，用于错误定位；第二个参数 `const json::error &` 携带底层 JSON 解析器报告的具体错误信息。函数返回一个 `int`，其值指示调用者应如何继续（例如，是否终止当前操作或忽略错误）。调用者必须确保传入的上下文描述具有足够的区分度，以便在错误报告中唯一标识出错的点。
 
 #### Usage Patterns
 
-- converting json errors to `LLMError`
-- returning unexpected results from JSON parsing
+- Convert JSON error into `LLMError` for error propagation
+- Used in functions that parse JSON and need to return a standardized error type
 
 ### `clore::net::detail::unwrap_caught_result`
 
-Declaration: `network/http.cppm:63`
+Declaration: `network/http.cppm:64`
 
-Definition: `network/http.cppm:63`
+Definition: `network/http.cppm:64`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-函数 `clore::net::detail::unwrap_caught_result` 负责解包一个被捕获的结果对象（类型 `R`），并将其转换为一个整数状态码。调用者需传入结果对象和一个上下文描述的字符串视图，函数提取结果中的失败或成功信息，返回相应的整数码，通常 0 表示成功，非零表示失败。该函数常用于处理异步或异常路径中产生的结果，使调用者能够以统一的状态码方式处理错误。模板参数 `R` 代表任意可被解包的结果类型，字符串视图提供额外错误上下文。
+函数 `clore::net::detail::unwrap_caught_result` 是一个模板工具，用于将泛型类型 `R` 的结果对象解包为整数状态码。它接受一个表示操作结果的值（类型为 `R`）和一个描述当前上下文的 `std::string_view`，并返回一个 `int`，通常用于指示操作是否成功或携带具体的错误标识。
+
+调用者需要保证传入的 `R` 类型对象可以通过某种内部约定转换为成功/失败语义（例如 `std::expected` 或自定义错误枚举）。返回的 `int` 值应解释为状态码：零通常表示成功，非零值对应错误类型。第二个参数 `std::string_view` 用于在产生错误时提供上下文信息，帮助日志记录或错误传播。此函数不抛出异常，且不拥有底层资源的所有权——它仅对结果进行转换和转发。
 
 #### Usage Patterns
 
-- Used to handle results from async operations that may be cancelled or contain errors, converting them into a coroutine task that either yields the value or fails with `LLMError`.
+- Unwrapping asynchronous HTTP results with cancellation handling
+- Converting a caught result to a task that propagates errors
 
 ### `clore::net::detail::validate_completion_request`
 
@@ -925,27 +980,26 @@ Definition: `network/provider.cppm:61`
 
 Implementation: [`Module provider`](../../../../modules/provider/index.md)
 
-函数 `clore::net::detail::validate_completion_request` 是公开的验证工具，调用者应在构造或接收一个 completion 请求时首先调用它，以确保该请求符合模块内部定义的结构和语义约束。它接受一个 `const int &` 类型的标识（通常为请求 ID 或索引）以及两个 `bool` 标志（可能控制验证的严格模式或可选的拓扑检查），并返回一个 `int` 表示验证结果：成功时返回 `0`，非零值对应特定的错误码。此函数不涉及实际请求的发送或解析，仅执行合约检查，因此所有外部代码在发起 completion 流程前都应履行此验证步骤，以避免后续操作因无效输入而失败。
+`clore::net::detail::validate_completion_request` 验证补全请求的有效性。它接受一个类型为 `const int &` 的参数（可能表示请求的标识或配置引用），以及两个 `bool` 参数（用于控制验证的选项或开关）。函数返回一个 `int` 值，其中零表示请求有效，非零则表示无效或不符合预期格式。调用者应在发起网络请求之前调用此函数，以保证请求符合内部约定，从而避免因无效请求导致运行时错误或不必要的网络开销。此函数只执行检查，不修改传入的状态。
 
 #### Usage Patterns
 
-- Called before sending a completion request to ensure validity
-- Used in request preparation pipeline
+- Called before sending a completion request to ensure input validity
+- Used in the network layer to pre-validate request parameters
 
 ### `clore::net::detail::validate_prompt_output`
 
-Declaration: `network/protocol.cppm:630`
+Declaration: `network/protocol.cppm:634`
 
-Definition: `network/protocol.cppm:662`
+Definition: `network/protocol.cppm:666`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::detail::validate_prompt_output` 负责检查给定的字符串视图是否符合由 `PromptOutputContract` 指定的输出契约。调用者需要提供待验证的原始输出字符串以及一个描述预期格式或约束的契约对象。函数通过返回值指示验证是否通过：通常返回 `0` 表示成功，非零值对应特定的验证失败原因。该函数不修改两个参数，且不产生副作用。
+`clore::net::detail::validate_prompt_output` 负责检查给定的输出字符串是否满足指定的 `PromptOutputContract` 所定义的格式、类型或其他约束条件。调用者必须提供一个待验证的输出视图和一个描述预期契约的对象；函数返回一个 `int` 状态码，通常零表示验证通过，非零表示发现不符合契约的错误。在将提示输出用于后续处理之前，调用方应调用此函数并检查返回值，以确保输出符合预期并避免因格式不符导致的其他故障。
 
 #### Usage Patterns
 
-- validates prompt output format
-- ensures output matches contract type
+- Validate LLM output format against a specified contract
 
 ### `clore::net::detail::validate_response_format`
 
@@ -955,12 +1009,12 @@ Definition: `network/schema.cppm:535`
 
 Implementation: [`Module schema`](../../../../modules/schema/index.md)
 
-函数 `clore::net::detail::validate_response_format` 负责检验某个以 `const int &` 形式给定的响应对象是否符合预期的格式规范。调用者需提供有效且已初始化的响应标识符，函数会检查其结构完整性并返回一个 `int` 状态值：通常零表示格式通过验证，非零值表示格式不合法或存在错误。该函数面向内部实现，用于在后续处理前确保响应数据具备正确的 shape 和约束。
+函数 `clore::net::detail::validate_response_format` 验证传入的响应数据是否满足预定义的格式约束。它接受一个对 `const int` 的引用（表示待校验的响应），并返回一个整数状态码：值为 `0` 表示格式有效；非零值表示格式无效，并携带具体的错误类型。调用者应在使用响应内容前调用此函数，并根据返回值决定是否继续后续处理或执行错误恢复。
 
 #### Usage Patterns
 
-- validate response format before making API requests
-- check `response_format``.name` and schema
+- validating a response format before sending a request
+- ensuring response format constraints are satisfied
 
 ### `clore::net::detail::validate_tool_definition`
 
@@ -970,12 +1024,12 @@ Definition: `network/schema.cppm:545`
 
 Implementation: [`Module schema`](../../../../modules/schema/index.md)
 
-`clore::net::detail::validate_tool_definition` 用于验证一个工具定义是否合法且符合预期契约。调用方需传入一个代表工具定义标识符的 `const int &` 引用，函数返回一个指示验证结果的整数：零表示定义有效，非零表示验证失败。调用方应确保所提供标识符对应一个已正确注册或可访问的工具定义，并且该定义在调用期间保持稳定。
+`clore::net::detail::validate_tool_definition` 函数验证由 `const int &` 引用传入的工具定义是否符合预期格式与约束。返回一个 `int` 值，指示验证成功或失败的具体状态。该函数是工具定义生命周期中的契约检查点，调用者需确保传入有效的定义引用，并根据返回值决定后续处理流程。
 
 #### Usage Patterns
 
-- validate tool definition before API call
-- ensure tool name and description are provided
+- Validate tool definitions before registering them
+- Used in tool definition processing pipeline
 
 ## Related Pages
 

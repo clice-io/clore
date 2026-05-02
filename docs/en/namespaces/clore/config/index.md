@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::config'
-description: 'The clore::config namespace provides a structured framework for loading, validating, and normalizing application configuration data. It defines core data types such as LLMConfig, TaskConfig, and FilterRule to represent distinct configuration domains, alongside dedicated error types (ConfigError, NormalizeError, ValidationError) for robust error handling. The namespace exposes entry points like load_config and load_config_from_string to ingest configuration from file paths or in-memory strings, returning integer status codes that callers must check. Supporting functions validate and normalize enforce constraints and transform configuration values as needed, ensuring that settings are consistent and correct before use.'
+description: 'The clore::config namespace provides the configuration subsystem for the Clore library, responsible for loading, validating, and normalizing configuration data. It defines core data structures such as LLMConfig and TaskConfig to represent application-specific settings, and error types including ConfigError, NormalizeError, ValidationError, and FilterRule to handle various failure modes. Key functions include load_config and load_config_from_string for retrieving configuration from file paths or inline strings, validate to verify configuration values meet constraints, and normalize to transform values into a canonical form.'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,9 @@ template: doc
 
 ## Summary
 
-The `clore::config` namespace provides a structured framework for loading, validating, and normalizing application configuration data. It defines core data types such as `LLMConfig`, `TaskConfig`, and `FilterRule` to represent distinct configuration domains, alongside dedicated error types (`ConfigError`, `NormalizeError`, `ValidationError`) for robust error handling. The namespace exposes entry points like `load_config` and `load_config_from_string` to ingest configuration from file paths or in-memory strings, returning integer status codes that callers must check. Supporting functions `validate` and `normalize` enforce constraints and transform configuration values as needed, ensuring that settings are consistent and correct before use.
+The `clore::config` namespace provides the configuration subsystem for the Clore library, responsible for loading, validating, and normalizing configuration data. It defines core data structures such as `LLMConfig` and `TaskConfig` to represent application-specific settings, and error types including `ConfigError`, `NormalizeError`, `ValidationError`, and `FilterRule` to handle various failure modes. Key functions include `load_config` and `load_config_from_string` for retrieving configuration from file paths or inline strings, `validate` to verify configuration values meet constraints, and `normalize` to transform values into a canonical form.
+
+The namespace acts as a centralized entry point for managing configuration throughout the application, ensuring consistency and correctness of settings. By separating concerns of parsing, validation, and normalization, it allows callers to rely on a uniform configuration interface, with return codes or error types signaling the result of each operation.
 
 ## Diagram
 
@@ -44,16 +46,18 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- message contains descriptive error text
+- The `message` member can be any string, including an empty string.
+- No other members or base classes exist.
 
 #### Key Members
 
-- message
+- `message`
 
 #### Usage Patterns
 
-- thrown or returned as an error from configuration operations
-- message is retrieved for logging or display
+- Thrown as an exception to signal configuration errors.
+- Returned as an error value from configuration parsing functions.
+- The `message` member is read by error-handling code to display or log the error.
 
 ### `clore::config::FilterRule`
 
@@ -67,19 +71,16 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- The `include` and `exclude` vectors can be empty.
-- No constraints exist on the content of the strings beyond being valid pattern representations.
+- No explicit invariants are documented; the members are independent `std::vector<std::string>` with no specified constraints.
 
 #### Key Members
 
-- `include`: list of patterns to include
-- `exclude`: list of patterns to exclude
+- `clore::config::FilterRule::include`
+- `clore::config::FilterRule::exclude`
 
 #### Usage Patterns
 
-- Used as a configuration parameter to specify which items should be included or excluded in some processing.
-- Typically populated from a configuration file or user input.
-- Accessed by other code to filter collections based on the include/exclude lists.
+- Used as a data-only configuration type to specify inclusion and exclusion patterns for filtering operations.
 
 ### `clore::config::LLMConfig`
 
@@ -89,7 +90,21 @@ Definition: `config/schema.cppm:12`
 
 Implementation: [`Module config:schema`](../../../modules/config/schema.md)
 
-The `clore::config::LLMConfig` struct represents the configuration data for a large language model (LLM) component within the system. It is declared in the configuration schema module and is intended to hold settings such as model parameters, endpoints, or other model‑specific options. Alongside related types like `TaskConfig`, `FilterRule`, and various error types, `LLMConfig` forms part of the structured configuration framework that validates and normalizes settings before use.
+Insufficient evidence to summarize; provide more EVIDENCE.
+
+#### Invariants
+
+- `retry_limit` defaults to `0`
+- `system_prompt` is a default-constructed `std::string` (empty)
+
+#### Key Members
+
+- `system_prompt`
+- `retry_limit`
+
+#### Usage Patterns
+
+- Other code creates, reads, or modifies `clore::config::LLMConfig` instances directly by assigning values to its members
 
 ### `clore::config::NormalizeError`
 
@@ -99,19 +114,20 @@ Definition: `config/normalize.cppm:10`
 
 Implementation: [`Module config:normalize`](../../../modules/config/normalize.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+The `clore::config::NormalizeError` struct is an error type that signifies a failure during the normalization step of configuration processing within the `clore::config` namespace. It is used in conjunction with other error and configuration types, such as `clore::config::ConfigError` and `clore::config::ValidationError`, to communicate issues that arise when configuration values are normalized to their canonical forms.
 
 #### Invariants
 
-- No explicit invariants are documented.
+- The `message` member contains a textual description of the error that occurred.
 
 #### Key Members
 
-- `message`: a `std::string` describing the error.
+- `message`: a `std::string` that holds the error description.
 
 #### Usage Patterns
 
-- Used to report errors during configuration normalization.
+- Used as an exception type or error result to convey normalization failures.
+- Its `message` member is accessed to retrieve error details.
 
 ### `clore::config::TaskConfig`
 
@@ -125,22 +141,20 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- All string fields are expected to contain valid filesystem paths
-- `FilterRule` and `LLMConfig` are expected to be default-constructible
+- No invariants are enforced by the type.
 
 #### Key Members
 
-- `compile_commands_path`
 - `project_root`
-- `output_root`
 - `workspace_root`
+- `output_root`
+- `compile_commands_path`
 - `filter`
 - `llm`
 
 #### Usage Patterns
 
-- Loaded or populated by configuration parsing code
-- Consumed by task execution logic to determine paths and behavior
+- Defined as a data structure within the configuration module; its fields are publicly accessible for direct assignment and reading.
 
 ### `clore::config::ValidationError`
 
@@ -154,17 +168,16 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- The `message` member always contains a non-empty string when used
-- No other members or state exist
+- The `message` member is a `std::string` with no additional constraints imposed by the struct.
 
 #### Key Members
 
-- `clore::config::ValidationError::message`
+- `message` stores the error description.
 
 #### Usage Patterns
 
-- Returned from validation functions to indicate failure
-- Used as the error type in `std::expected` or similar patterns
+- Returned or thrown by validation functions to indicate a configuration error.
+- Likely compared or logged by callers to understand the validation failure.
 
 ## Functions
 
@@ -176,13 +189,14 @@ Definition: `config/load.cppm:81`
 
 Implementation: [`Module config:load`](../../../modules/config/load.md)
 
-`clore::config::load_config` is the primary entry point for loading a configuration. It accepts a `std::string_view` that identifies the configuration source (for example, a file path or an in‑memory string) and returns an `int` status code indicating the outcome. The caller is responsible for checking that the return value signals success before relying on any configuration state that may have been loaded.
+The `clore::config::load_config` function is the primary entry point for loading configuration data. It accepts a single `std::string_view` argument that identifies the configuration source (e.g., a file path or an inline configuration string) and returns an `int` value that indicates the outcome of the load operation. The caller is responsible for supplying a valid source; the return code communicates success or failure, with a value of zero typically meaning success and non‑zero indicating an error.  
+
+This function is publicly accessible and forms part of the configuration subsystem’s public contract. The caller must ensure the provided string view remains valid for the duration of the call, and the returned `int` should be checked to determine whether the configuration was loaded successfully.
 
 #### Usage Patterns
 
-- loading configuration from a file path
-- error handling with `std::expected` return type
-- setting workspace root automatically from config file location
+- load configuration at program startup
+- parse a configuration file given its path
 
 ### `clore::config::load_config_from_string`
 
@@ -192,13 +206,12 @@ Definition: `config/load.cppm:110`
 
 Implementation: [`Module config:load`](../../../modules/config/load.md)
 
-The function `clore::config::load_config_from_string` accepts a configuration source provided as a `std::string_view` and returns an `int` indicating the result of the operation. It is the caller’s responsibility to supply a valid configuration string; the function is not expected to modify the input. The exact meaning of the return value (e.g., success, error code) is defined by the library’s error-reporting convention and may be further inspected or validated using associated functions such as `clore::config::validate`. This function serves as a string-based alternative to other loading entry points, offering a direct route from an in-memory buffer to a parsed configuration state.
+The function `clore::config::load_config_from_string` accepts a `std::string_view` that contains configuration data and returns an `int` status code. Callers provide the configuration content as a string; the function interprets this input and produces a result that indicates success or failure. A non‑zero return typically signals an error condition, while zero means the configuration was loaded successfully.
 
 #### Usage Patterns
 
-- loading configuration from a string
-- testing with inline TOML
-- processing embedded configuration
+- called with TOML string from file contents or user input
+- used to deserialize configuration in unit tests and programmatic config loading
 
 ### `clore::config::normalize`
 
@@ -208,12 +221,12 @@ Definition: `config/normalize.cppm:22`
 
 Implementation: [`Module config:normalize`](../../../modules/config/normalize.md)
 
-The `clore::config::normalize` function accepts a mutable reference to an `int` representing a configuration value. It normalizes that value according to the configuration's rules, potentially modifying the referenced integer. The function returns an `int` status code indicating success or the nature of any error encountered. Callers should ensure the provided reference is valid and refers to a configuration parameter that supports normalization. The return value can be used to check whether normalization completed successfully or if an issue arose.
+The `clore::config::normalize` function accepts a mutable reference to an integer configuration value and transforms it into a standardized or canonical form. The integer is modified in place, and the function returns an integer result that typically indicates the operation’s success or an error code. Callers should provide a valid, modifiable reference and may assume that after a successful call the referenced value conforms to the expected configuration constraints.
 
 #### Usage Patterns
 
-- called to normalize a `TaskConfig` after loading
-- ensures all path fields are absolute and use forward slashes
+- Called after loading a `TaskConfig` to ensure paths are absolute and use consistent separators
+- Part of the configuration normalization pipeline before validation
 
 ### `clore::config::validate`
 
@@ -223,12 +236,14 @@ Definition: `config/validate.cppm:42`
 
 Implementation: [`Module config:validate`](../../../modules/config/validate.md)
 
-The function `clore::config::validate` determines whether an integer configuration value satisfies the applicable validation constraints. It accepts a `const int &` parameter representing the value to validate and returns an `int` status code: `0` on success, or a non‑zero error identifier on failure. Callers should check this return value; the input value is not altered by this function.
+The function `clore::config::validate` accepts a `const int &` (presumably a configuration value) and returns an `int`. Its caller-facing responsibility is to verify whether the provided configuration value meets the expected constraints or rules defined by the application. The return value serves as a status code, typically indicating success (often zero) or a specific error condition (non-zero) that the caller must handle accordingly. Callers should only use the validated value after confirming a successful return from `validate`.
+
+The contract of `validate` guarantees that if the function returns a successful status, the given `int` reference refers to a configuration value that is valid for downstream operations, such as those performed by `load_config`, `load_config_from_string`, or `normalize`. The function does not modify the value; it only inspects it. The caller retains ownership of the referenced integer and must ensure it remains alive throughout the validation call.
 
 #### Usage Patterns
 
-- Called after loading configuration to ensure validity before use
-- May be called on both initial configuration and after modifications
+- Called after constructing or loading a `TaskConfig` to ensure configuration validity before use.
+- Returned expected is typically checked with error handling, e.g., logging or propagating the `ValidationError`.
 
 ## Related Pages
 

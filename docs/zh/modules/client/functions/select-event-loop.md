@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::detail::selecteventloop'
-description: '该函数首先检查传入的 loop 指针是否为空；若非空则直接返回其引用，否则回退到通过 kota::event_loop::current() 获取当前线程的默认事件循环。这一选择逻辑依赖于调用方保证当 loop 为空时当前线程已关联一个有效的 kota::event_loop 实例，否则行为未定义。内部没有循环或异步操作，仅是一个简单的条件转发，将外部提供的循环或线程局部默认循环统一为引用返回。'
+description: '该函数的行为基于一个简单的三元分支：如果传入的 loop 指针非空，则直接解引用并返回该 kota::event_loop 对象；否则，调用静态方法 kota::event_loop::current() 获取当前线程的活动事件循环引用。其内部依赖 kota::event_loop 的 current() 实现，该实现必须返回一个有效的事件循环——若当前线程无关联的活跃循环，行为未定义。此函数是 clore::net::detail 命名空间下的一个简化的返回引用工具，用于在其他异步调用函数（如 call_llm_async）中统一获取事件循环实例，避免重复执行空指针检查或默认回退逻辑。'
 layout: doc
 template: doc
 ---
@@ -28,7 +28,7 @@ auto select_event_loop(kota::event_loop* loop) -> kota::event_loop& {
 }
 ```
 
-该函数首先检查传入的 `loop` 指针是否为空；若非空则直接返回其引用，否则回退到通过 `kota::event_loop::current()` 获取当前线程的默认事件循环。这一选择逻辑依赖于调用方保证当 `loop` 为空时当前线程已关联一个有效的 `kota::event_loop` 实例，否则行为未定义。内部没有循环或异步操作，仅是一个简单的条件转发，将外部提供的循环或线程局部默认循环统一为引用返回。
+该函数的行为基于一个简单的三元分支：如果传入的 `loop` 指针非空，则直接解引用并返回该 `kota::event_loop` 对象；否则，调用静态方法 `kota::event_loop::current()` 获取当前线程的活动事件循环引用。其内部依赖 `kota::event_loop` 的 `current()` 实现，该实现必须返回一个有效的事件循环——若当前线程无关联的活跃循环，行为未定义。此函数是 `clore::net::detail` 命名空间下的一个简化的返回引用工具，用于在其他异步调用函数（如 `call_llm_async`）中统一获取事件循环实例，避免重复执行空指针检查或默认回退逻辑。
 
 ## Side Effects
 
@@ -36,13 +36,13 @@ No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- `loop` parameter
-- `kota::event_loop::current()` result
+- `loop` 参数
+- `kota::event_loop::current()` 返回的当前线程事件循环状态
 
 ## Usage Patterns
 
-- Used by `call_completion_async` and `call_llm_async` to obtain a valid event loop reference from an optional pointer
-- Invoked with a potentially null `kota::event_loop*` to default to the current loop
+- 用于将可选的 `event_loop*` 解析为确定的引用
+- 被 `call_completion_async`、`call_llm_async` 等高层函数调用以获取事件循环
 
 ## Called By
 

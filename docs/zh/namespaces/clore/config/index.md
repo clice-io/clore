@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::config'
-description: '命名空间 clore::config 是 clore 库中配置管理的核心模块，负责配置的加载、验证与规范化。它提供了 load_config、load_config_from_string 等加载函数，以及 validate、normalize 等处理函数，确保配置值在使用前符合预期约束并转换为标准形式。该命名空间还定义了 LLMConfig、TaskConfig 等配置结构体，以及 ConfigError、NormalizeError、ValidationError 等错误类型，共同构成了一套完整的配置处理管线。在架构上，它隔离了配置的输入、校验与标准化逻辑，为库的其他部分提供统一的配置访问入口。'
+description: 'clore::config 命名空间封装了配置加载、验证和规范化的完整生命周期。它定义了核心配置数据结构（如 LLMConfig、TaskConfig 和 FilterRule）以及对应的错误类型（ConfigError、NormalizeError、ValidationError），并提供标准接口：load_config 从文件路径加载配置，load_config_from_string 从字符串加载配置，validate 检查配置是否满足预设规则，normalize 将配置值转换为内部标准形式。该命名空间在 clore 架构中充当配置子系统的统一入口，确保所有配置在投入使用前经过可靠解析、验证和规范化，从而为上层业务逻辑提供安全、一致的配置环境。'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-命名空间 `clore::config` 是 clore 库中配置管理的核心模块，负责配置的加载、验证与规范化。它提供了 `load_config`、`load_config_from_string` 等加载函数，以及 `validate`、`normalize` 等处理函数，确保配置值在使用前符合预期约束并转换为标准形式。该命名空间还定义了 `LLMConfig`、`TaskConfig` 等配置结构体，以及 `ConfigError`、`NormalizeError`、`ValidationError` 等错误类型，共同构成了一套完整的配置处理管线。在架构上，它隔离了配置的输入、校验与标准化逻辑，为库的其他部分提供统一的配置访问入口。
+`clore::config` 命名空间封装了配置加载、验证和规范化的完整生命周期。它定义了核心配置数据结构（如 `LLMConfig`、`TaskConfig` 和 `FilterRule`）以及对应的错误类型（`ConfigError`、`NormalizeError`、`ValidationError`），并提供标准接口：`load_config` 从文件路径加载配置，`load_config_from_string` 从字符串加载配置，`validate` 检查配置是否满足预设规则，`normalize` 将配置值转换为内部标准形式。该命名空间在 `clore` 架构中充当配置子系统的统一入口，确保所有配置在投入使用前经过可靠解析、验证和规范化，从而为上层业务逻辑提供安全、一致的配置环境。
 
 ## Diagram
 
@@ -44,17 +44,16 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `message` 应当包含有意义的错误描述
-- 结构体无其他状态约束
+- The `message` member is always a valid `std::string` (default-constructible).
 
 #### Key Members
 
-- `message` 成员
+- `std::string message`
 
 #### Usage Patterns
 
-- 在配置解析失败时构造并返回该错误
-- 用户通过读取 `message` 获取错误信息
+- Returned or thrown to indicate a configuration loading failure.
+- Inspected by callers to retrieve the error description.
 
 ### `clore::config::FilterRule`
 
@@ -68,8 +67,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Each member is independently mutable
-- No constraints between include and exclude lists
+- Both `include` and `exclude` vectors can be empty
+- No implied ordering or mutual exclusivity between the two lists
 
 #### Key Members
 
@@ -78,8 +77,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Used to represent filter configurations
-- Lists can be populated by callers to define filtering behavior
+- Used as a building block in configuration systems to filter items based on inclusion and exclusion criteria
+- Likely checked by other code to decide whether to allow or deny a given element
 
 ### `clore::config::LLMConfig`
 
@@ -93,7 +92,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `retry_limit` 初始化为0
+- `retry_limit` 为无符号整数，值域为 `[0, UINT32_MAX]`
+- `system_prompt` 可以是任意字符串，无长度或内容约束
 
 #### Key Members
 
@@ -102,8 +102,9 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- 作为配置对象传递给LLM接口
-- 从配置文件中解析
+- 直接作为配置参数传递给 LLM 相关的函数或类
+- 通过聚合初始化或成员赋值创建实例
+- 可能被序列化为 JSON 或 YAML 等格式以持久化配置
 
 ### `clore::config::NormalizeError`
 
@@ -117,16 +118,16 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- The `message` field should typically be non-empty when an error is present.
+- No documented invariants beyond the usual validity of `std::string`.
 
 #### Key Members
 
-- `message`: a `std::string` describing the normalization error.
+- `message` – a `std::string` that stores the error description.
 
 #### Usage Patterns
 
-- Returned or thrown by normalization functions to indicate failure.
-- Checked by callers to determine the reason for normalization failure.
+- Used as an error type in normalization-related operations.
+- Likely returned or caught in code paths that validate or transform configuration data.
 
 ### `clore::config::TaskConfig`
 
@@ -140,9 +141,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Paths are stored as `std::string`.
-- `filter` is of type `FilterRule`.
-- `llm` is of type `LLMConfig`.
+- All path fields should refer to valid filesystem locations when the struct is used
+- `filter` and `llm` sub-configurations must be fully initialized before task execution
 
 #### Key Members
 
@@ -155,8 +155,9 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Used as a configuration container passed to task execution functions.
-- Aggregates directory paths and sub-configurations for filtering and LLM interaction.
+- Instantiated and populated from a configuration file or command-line arguments
+- Passed to task infrastructure components to control LLM interaction and file filtering
+- Used as a data transfer object for task setup
 
 ### `clore::config::ValidationError`
 
@@ -170,16 +171,17 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- 无额外不变量，结构体仅作为错误消息的容器。
+- `message` 存储验证失败时的描述文本
+- 不包含任何运行时或编译期约束
 
 #### Key Members
 
-- `std::string message`：存储验证错误消息。
+- `std::string message`
 
 #### Usage Patterns
 
-- 被验证函数返回或赋值以报告错误。
-- 作为错误集合的一部分被收集和检查。
+- 在验证函数中作为返回值类型使用，报告具体的验证失败原因
+- 创建 `ValidationError` 实例并设置 `message` 后传递给调用方
 
 ## Functions
 
@@ -191,12 +193,12 @@ Definition: `config/load.cppm:81`
 
 Implementation: [`Module config:load`](../../../modules/config/load.md)
 
-`clore::config::load_config` 接受一个 `std::string_view` 参数并返回 `int`。调用者应提供表示配置数据的字符串视图；函数负责加载该配置并返回一个结果码，指示操作成功或失败。返回值可以进一步传递给 `clore::config::validate` 以确认配置状态，或用于后续决策。该函数的公共契约保证：只要输入是一个格式正确的配置字符串，它就会尝试处理并返回一个合适的整数结果；调用者无需关心内部如何加载或转换数据。
+函数 `clore::config::load_config` 接受一个 `std::string_view` 参数，解析并加载配置，返回一个 `int` 值表示操作结果。调用者应确保传入的字符串视图在函数执行期间保持有效。返回值为 `0` 通常表示成功，非零值表示错误码，具体含义由调用者依据实现文档解读。该函数不修改其参数，也不持有参数引用。
 
 #### Usage Patterns
 
-- loading application configuration from a configuration file at startup
-- part of a configuration subsystem to parse config files with relative path resolution
+- loading configuration for application startup
+- parsing a user-specified configuration file
 
 ### `clore::config::load_config_from_string`
 
@@ -206,13 +208,13 @@ Definition: `config/load.cppm:110`
 
 Implementation: [`Module config:load`](../../../modules/config/load.md)
 
-函数 `clore::config::load_config_from_string` 接受一个 `std::string_view` 参数，返回一个 `int` 值。调用者应提供包含完整配置数据的字符串视图，函数解析后将结果以整型状态码的形式返回。该函数的契约与 `clore::config::load_config` 类似，但直接从内存中的字符串而非文件路径加载配置。
+函数 `clore::config::load_config_from_string` 接受一个 `std::string_view` 参数，并从该字符串表示的配置内容中加载配置。调用者负责提供有效的配置字符串；函数返回一个 `int` 值，表示加载操作的结果状态。
 
 #### Usage Patterns
 
-- called with a string containing TOML content
-- used in config loaders that receive configuration as text
-- part of the `clore::config` API for parsing configuration strings
+- 从外部源获取TOML字符串后调用
+- 可能由 `clore::config::load_config` 调用以适应文件读取逻辑
+- 在需要从内存中解析配置时作为入口点
 
 ### `clore::config::normalize`
 
@@ -222,12 +224,14 @@ Definition: `config/normalize.cppm:22`
 
 Implementation: [`Module config:normalize`](../../../modules/config/normalize.md)
 
-`clore::config::normalize` 接受一个 `int` 引用并对其执行规范化。调用者负责提供一个可修改的 `int` 对象；函数将该值转换为标准形式，并通过引用参数更新它。返回值通常表示规范化后的结果或指示操作成败的状态码，具体契约依赖于调用 `clore::config::normalize` 的配置上下文。该函数属于配置处理管线，通常与 `clore::config::validate` 配合使用，确保配置值在进一步处理前已标准化。
+`clore::config::normalize` 接受一个 `int` 左值引用，在适当范围内对引用所持有的值进行规范化（可能修改该值），并返回一个 `int` 指示操作结果。调用者应确保传入的值代表一个有效的配置参数；该值可能会被调整为符合内部标准的规范化形式。
+
+返回值是约定的结果码：零通常表示成功，非零值表示特定错误或警告。调用者有责任在后续使用该值前检查返回的状态，并确认规范化后的值满足预期用途。函数对引用参数所做的修改是调用者预期的副作用。
 
 #### Usage Patterns
 
-- Called before using the configuration to ensure all paths are absolute and normalized.
-- Used to prepare a `TaskConfig` for further processing or validation.
+- Called after `clore::config::load_config` to normalize configuration paths
+- Used as part of configuration validation and preparation before further processing
 
 ### `clore::config::validate`
 
@@ -237,14 +241,12 @@ Definition: `config/validate.cppm:42`
 
 Implementation: [`Module config:validate`](../../../modules/config/validate.md)
 
-`clore::config::validate` 对给定的配置值执行验证。它接受一个 `const int &` 参数，该参数表示需要校验的配置值；函数本身不修改该值，仅判断其是否符合预期的约束条件（例如范围、枚举有效性等）。调用方应提供一个已加载或已生成的配置值作为输入。
-
-返回值类型为 `int`，表示验证结果。通常返回 0 表示验证通过，非零值对应特定的错误码或失败原因。调用方应检查返回值以确认输入是否有效，并根据约定处理可能的错误情况。该函数是配置处理流程中的典型校验环节，与 `clore::config::load_config`、`clore::config::load_config_from_string` 及 `clore::config::normalize` 协同工作，确保最终使用的配置合法可靠。
+验证给定的配置表示（作为 `const int &` 传入）是否满足预定义的规则。成功时返回 `0`；非零返回值表示特定的验证失败原因，调用方应据此决定是否忽略、回退或拒绝该配置。该函数通常会在调用 `clore::config::load_config` 或 `clore::config::load_config_from_string` 之后，或在调用 `clore::config::normalize` 之前/之后执行，以确保待处理的配置状态是安全的。
 
 #### Usage Patterns
 
-- validate a loaded `TaskConfig` before use
-- called after `load_config` or `load_config_from_string`
+- called after `load_config` to validate the configuration before use
+- used in configuration parsing pipeline to ensure correctness
 
 ## Related Pages
 

@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::scanmoduledecl'
-description: 'The implementation of clore::extract::scan_module_decl relies entirely on Clang''s dependency directives scanner (clang::scanSourceForDependencyDirectives) to quickly tokenize the file content without running the full preprocessor. This produces a list of dependency_directives_scan::Directive entries, which are then iterated to identify module and import declarations. For each cxx_module_decl or cxx_export_module_decl directive, the function walks the associated tokens past the module keyword, collecting name tokens (identifiers, dots, colons) while skipping whitespace and ignoring punctuation-only tokens that indicate a module fragment. The collected name becomes result.module_name, and result.is_interface_unit is set based on whether the declaration was export module. For each cxx_import_decl directive, tokens after the import keyword are concatenated into an import name, which is then normalized via normalize_partition_import and inserted into result.module_imports after a duplicate check. If the scanner fails (returns non‑zero), the function silently returns without modifying the result, leaving it in its default state.'
+description: 'The implementation of clore::extract::scan_module_decl relies on Clang’s dependency directives scanner to quickly parse a source file’s module-related constructs without invoking the full preprocessor. It calls clang::scanSourceForDependencyDirectives on the input file_content, producing vectors of Token and Directive. If the scanner fails (returns a non‑zero value), the function returns early, leaving the provided ScanResult unchanged. Otherwise, it iterates over each directive. For directives of kind cxx_export_module_decl or cxx_module_decl, the function extracts the module name by skipping the export and module keywords and concatenating subsequent non‑whitespace, non‑punctuation tokens until a semicolon. It checks for a global module fragment (e.g., a :) and, if the fragment is absent and a module name was found, sets result.module_name and result.is_interface_unit (true only for cxx_export_module_decl). For directives of kind cxx_import_decl, the function collects the import name after the import keyword, normalizes it using normalize_partition_import (which handles partition specifiers), and appends the result to result.module_imports if it is not already present. Helper lambdas is_whitespace_only and is_punctuation_only are used to filter tokens during both module‑name and import‑name extraction.'
 layout: doc
 template: doc
 ---
@@ -116,16 +116,19 @@ auto scan_module_decl(std::string_view file_content, ScanResult& result) -> void
 }
 ```
 
-The implementation of `clore::extract::scan_module_decl` relies entirely on Clang's dependency directives scanner (`clang::scanSourceForDependencyDirectives`) to quickly tokenize the file content without running the full preprocessor. This produces a list of `dependency_directives_scan::Directive` entries, which are then iterated to identify module and import declarations. For each `cxx_module_decl` or `cxx_export_module_decl` directive, the function walks the associated tokens past the `module` keyword, collecting name tokens (identifiers, dots, colons) while skipping whitespace and ignoring punctuation-only tokens that indicate a module fragment. The collected name becomes `result.module_name`, and `result.is_interface_unit` is set based on whether the declaration was `export module`. For each `cxx_import_decl` directive, tokens after the `import` keyword are concatenated into an import name, which is then normalized via `normalize_partition_import` and inserted into `result.module_imports` after a duplicate check. If the scanner fails (returns non‑zero), the function silently returns without modifying the result, leaving it in its default state.
+The implementation of `clore::extract::scan_module_decl` relies on Clang’s dependency directives scanner to quickly parse a source file’s module-related constructs without invoking the full preprocessor. It calls `clang::scanSourceForDependencyDirectives` on the input `file_content`, producing vectors of `Token` and `Directive`. If the scanner fails (returns a non‑zero value), the function returns early, leaving the provided `ScanResult` unchanged. Otherwise, it iterates over each directive. For directives of kind `cxx_export_module_decl` or `cxx_module_decl`, the function extracts the module name by skipping the `export` and `module` keywords and concatenating subsequent non‑whitespace, non‑punctuation tokens until a semicolon. It checks for a global module fragment (e.g., a `:`) and, if the fragment is absent and a module name was found, sets `result.module_name` and `result.is_interface_unit` (true only for `cxx_export_module_decl`). For directives of kind `cxx_import_decl`, the function collects the import name after the `import` keyword, normalizes it using `normalize_partition_import` (which handles partition specifiers), and appends the result to `result.module_imports` if it is not already present. Helper lambdas `is_whitespace_only` and `is_punctuation_only` are used to filter tokens during both module‑name and import‑name extraction.
 
 ## Side Effects
 
-- modifies the `module_name`, `is_interface_unit`, and `module_imports` fields of the provided `ScanResult` object
+- populates the provided `ScanResult` with module name, interface unit flag, and imports list
+- calls `normalize_partition_import` to normalize import names
 
 ## Reads From
 
-- the `file_content` string parameter
-- tokens and directives produced by `clang::scanSourceForDependencyDirectives`
+- `file_content` (`string_view`)
+- `result.module_imports` (when checking for duplicate imports)
+- `result.module_name` (passed to `normalize_partition_import`)
+- directives and tokens returned by `clang::scanSourceForDependencyDirectives`
 
 ## Writes To
 
@@ -135,8 +138,8 @@ The implementation of `clore::extract::scan_module_decl` relies entirely on Clan
 
 ## Usage Patterns
 
-- called by `clore::extract::scan_file` to extract module information from source content
-- used as a fast alternative to full preprocessing for module detection
+- called by `scan_file` to fill `ScanResult` fields without full preprocessing
+- used as a fast module detection step before heavy parsing
 
 ## Called By
 

@@ -1,6 +1,6 @@
 ---
 title: 'API Reference'
-description: '本项目是一个名为 clore 的 C++ 库，旨在利用大型语言模型（LLM）来自动探索代码库并生成结构化指南文档。其核心子系统包括：智能代理（agent 模块）驱动 LLM 交互与工具调用的主循环；LLM 通信层（client、network、http、protocol 模块）提供与 OpenAI 和 Anthropic 等提供者的异步请求、响应解析及协议适配；文档生成（generate、extract 模块）负责从源代码提取符号、分析依赖并生成最终文档页面；配置与 schema（config、schema 模块）管理应用设置并自动为 C++ 类型生成兼容的 JSON Schema；以及 支持工具（support 模块）提供 Unicode 文本处理、文件读写、路径规范化等基础能力。读者可将该库视为一个端到端的文档自动编写框架，各模块围绕“代码理解→LLM 调用→文档产出”这一主线解耦协作，上层可灵活组合协议层与生成策略以适配不同 LLM 服务与输出格式。'
+description: 'clore 项目是一个 C++ 工具集，用于自动化生成代码库的指南文档。它通过一个代理循环（agent 模块）驱动整个流程：首先使用 extract 模块从源代码中提取结构化信息（如抽象语法树、依赖关系），然后将这些信息通过 generate 模块组织为文档页面。整个过程中，项目依赖于 net 库（包含 http、client、provider、anthropic、openai、protocol、schema 等模块）与 LLM API（OpenAI 和 Anthropic）进行异步通信，以获取智能辅助。config 模块提供环境配置管理，而 support 模块提供文本处理、文件 I/O 等基础设施。'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,9 @@ template: doc
 
 ## Overview
 
-本项目是一个名为 `clore` 的 C++ 库，旨在利用大型语言模型（LLM）来自动探索代码库并生成结构化指南文档。其核心子系统包括：**智能代理**（`agent` 模块）驱动 LLM 交互与工具调用的主循环；**LLM 通信层**（`client`、`network`、`http`、`protocol` 模块）提供与 `OpenAI` 和 Anthropic 等提供者的异步请求、响应解析及协议适配；**文档生成**（`generate`、`extract` 模块）负责从源代码提取符号、分析依赖并生成最终文档页面；**配置与 schema**（`config`、`schema` 模块）管理应用设置并自动为 C++ 类型生成兼容的 JSON Schema；以及 **支持工具**（`support` 模块）提供 Unicode 文本处理、文件读写、路径规范化等基础能力。读者可将该库视为一个端到端的文档自动编写框架，各模块围绕“代码理解→LLM 调用→文档产出”这一主线解耦协作，上层可灵活组合协议层与生成策略以适配不同 LLM 服务与输出格式。
+clore 项目是一个 C++ 工具集，用于自动化生成代码库的指南文档。它通过一个代理循环（`agent` 模块）驱动整个流程：首先使用 `extract` 模块从源代码中提取结构化信息（如抽象语法树、依赖关系），然后将这些信息通过 `generate` 模块组织为文档页面。整个过程中，项目依赖于 `net` 库（包含 `http`、`client`、`provider`、`anthropic`、`openai`、`protocol`、`schema` 等模块）与 LLM API（`OpenAI` 和 Anthropic）进行异步通信，以获取智能辅助。`config` 模块提供环境配置管理，而 `support` 模块提供文本处理、文件 I/O 等基础设施。
+
+理解该项目时，应将其看作一个分层架构：顶层为业务编排（代理、提取、生成），中层为网络与协议实现（与不同 LLM 提供者的抽象交互），底层为通用工具与 schema 生成。各模块通过 `clore` 命名空间松散耦合，且多数提供同步与异步两种接口。对于希望定制文档生成流程或替换 LLM 提供者的开发者，可以关注 `net` 子库中的协议扩展点以及 `agent` 模块的回调机制。
 
 ## Modules
 

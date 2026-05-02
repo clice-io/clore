@@ -1,6 +1,6 @@
 ---
 title: 'clore::generate::cache::normalizetextforhashing'
-description: 'Normalizes a given input text so that functionally equivalent strings produce an identical result, enabling consistent hashing within the caching system. The caller supplies a std::string_view and receives a std::string that has been transformed according to internal rules (for example, trimming whitespace and reducing letter case) to eliminate benign variations. This normalized string is intended to be used as part of a cache key, ensuring that the same conceptual prompt or system prompt always maps to the same hash regardless of incidental formatting differences.'
+description: 'The function clore::generate::cache::normalize_text_for_hashing accepts a std::string_view and returns a std::string. Its responsibility is to transform an arbitrary text input into a canonical, deterministic form suitable for use as input to a hashing or key‑derivation step. Callers rely on this normalization to ensure that semantically equivalent texts produce the same normalized output, regardless of superficial formatting differences (such as extra whitespace, casing, or control characters).'
 layout: doc
 template: doc
 ---
@@ -21,11 +21,13 @@ Implementation: [`Module generate:cache`](../../../../../modules/generate/cache.
 auto (std::string_view) -> std::string;
 ```
 
-Normalizes a given input text so that functionally equivalent strings produce an identical result, enabling consistent hashing within the caching system. The caller supplies a `std::string_view` and receives a `std::string` that has been transformed according to internal rules (for example, trimming whitespace and reducing letter case) to eliminate benign variations. This normalized string is intended to be used as part of a cache key, ensuring that the same conceptual prompt or system prompt always maps to the same hash regardless of incidental formatting differences.
+The function `clore::generate::cache::normalize_text_for_hashing` accepts a `std::string_view` and returns a `std::string`. Its responsibility is to transform an arbitrary text input into a canonical, deterministic form suitable for use as input to a hashing or key‑derivation step. Callers rely on this normalization to ensure that semantically equivalent texts produce the same normalized output, regardless of superficial formatting differences (such as extra whitespace, casing, or control characters).
+
+This function is a low‑level utility invoked during cache‑key construction. It is used internally by `clore::generate::cache::make_prompt_response_cache_key` to produce a stable hash key for prompt–response pairs. The contract guarantees that the returned string is a well‑defined, repeatable representation of the original text; the caller must not assume any particular transform (e.g., lower‑casing, trimming) beyond the general property that identical inputs always yield identical outputs.
 
 ## Usage Patterns
 
-- called by `make_prompt_response_cache_key` to normalize prompt and response text before deriving a cache key
+- Used by `make_prompt_response_cache_key` to normalize text before forming a cache key
 
 ## Called By
 

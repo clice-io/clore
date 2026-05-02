@@ -426,14 +426,14 @@ auto extract_ast_batch_async(
         co_return;
     };
 
-    kota::async_scope<ExtractError> scope;
+    kota::task_group<ExtractError> scope(loop);
     for(const auto& file: dep_graph.files) {
         scope.spawn(process_file(file));
     }
 
-    auto scope_result = co_await scope;
+    auto scope_result = co_await scope.join();
     if(scope_result.has_error()) {
-        co_await kota::fail(std::move(scope_result.error()));
+        co_await kota::fail(std::move(scope_result.error()[0]));
     }
 
     if(completed_files != dep_graph.files.size()) {

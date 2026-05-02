@@ -734,7 +734,7 @@ using SymbolPendingMap = std::unordered_map<std::string,
                                             clore::support::TransparentStringEqual>;
 
 // ---------------------------------------------------------------------------
-// WorkQueue: priority deque with deferred-symbol staging and stop signalling.
+// WorkQueue: priority deque with deferred-symbol staging and close/abort signalling.
 // Page prompts are enqueued at the front for early rendering; symbol analysis
 // goes to the back. A semaphore is used as a counted wakeup so one enqueued
 // item resumes one worker; kota::event is broadcast-style and can re-enter all
@@ -775,6 +775,10 @@ public:
         return !deferred_.empty();
     }
 
+    auto empty() const -> bool {
+        return queue_.empty();
+    }
+
     auto stopped() const -> bool {
         return stopped_;
     }
@@ -788,7 +792,15 @@ public:
         return work;
     }
 
-    auto stop(std::size_t worker_count) -> void {
+    auto close(std::size_t worker_count) -> void {
+        if(stopped_) {
+            return;
+        }
+        stopped_ = true;
+        available_.release(static_cast<std::ptrdiff_t>(worker_count));
+    }
+
+    auto abort(std::size_t worker_count) -> void {
         if(stopped_) {
             return;
         }
@@ -1106,7 +1118,7 @@ public:
                             kota::event_loop& loop,
                             bool dry_run = false) :
         config_(config), model_(model), context_(context), model_version_(llm_model),
-        worker_count_(rate_limit), loop_(loop), tracker_(context), renderer_(output_root, dry_run) {
+        worker_count_(rate_limit), loop_(loop), scope_(loop), tracker_(context), renderer_(output_root, dry_run) {
     }
 
     auto run() -> kota::task<GenerationSummary, GenerateError> {
@@ -1164,9 +1176,9 @@ public:
 
         maybe_stop_workers();
 
-        auto scope_result = co_await scope_;
+        auto scope_result = co_await scope_.join();
         if(scope_result.has_error()) {
-            co_await kota::fail(std::move(scope_result.error()));
+            co_await kota::fail(std::move(scope_result.error()[0]));
         }
 
         if(retry_limit_exceeded()) {
@@ -1229,6 +1241,26 @@ public:
     }
 
 private:
+    struct WorkerActivity {
+        explicit WorkerActivity(PageGenerationScheduler& scheduler) : scheduler_(scheduler) {
+            scheduler_.in_flight_work_.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        WorkerActivity(const WorkerActivity&) = delete;
+        auto operator=(const WorkerActivity&) -> WorkerActivity& = delete;
+
+        WorkerActivity(WorkerActivity&&) = delete;
+        auto operator=(WorkerActivity&&) -> WorkerActivity& = delete;
+
+        ~WorkerActivity() {
+            scheduler_.in_flight_work_.fetch_sub(1, std::memory_order_relaxed);
+            scheduler_.maybe_stop_workers();
+        }
+
+    private:
+        PageGenerationScheduler& scheduler_;
+    };
+
     auto reset_consecutive_failures(std::string_view reason) -> void {
         auto previous = consecutive_failures_.exchange(0, std::memory_order_relaxed);
         if(previous > 0) {
@@ -1250,7 +1282,7 @@ private:
         }
 
         retry_limit_exceeded_.store(true, std::memory_order_relaxed);
-        work_queue_.stop(worker_count_);
+        work_queue_.abort(worker_count_);
         logging::err("generation failure limit exceeded after {} consecutive failures", count);
         return true;
     }
@@ -1370,6 +1402,8 @@ private:
                 co_await kota::fail(
                     GenerateError{.message = "generation worker woke without queued work"});
             }
+
+            WorkerActivity activity(*this);
 
             if(std::holds_alternative<SymbolAnalysisWork>(*work)) {
                 auto item = std::move(std::get<SymbolAnalysisWork>(*work));
@@ -1849,9 +1883,18 @@ private:
     }
 
     auto maybe_stop_workers() -> void {
-        if(tracker_.finished_count() == tracker_.state_count()) {
-            work_queue_.stop(worker_count_);
+        // Close only once the graph, queue, and currently executing workers are
+        // all drained. Destructive abort is reserved for failure paths.
+        if(tracker_.finished_count() != tracker_.state_count()) {
+            return;
         }
+        if(!work_queue_.empty() || work_queue_.has_deferred()) {
+            return;
+        }
+        if(in_flight_work_.load(std::memory_order_relaxed) != 0) {
+            return;
+        }
+        work_queue_.close(worker_count_);
     }
 
     const config::TaskConfig& config_;
@@ -1861,7 +1904,7 @@ private:
     std::size_t worker_count_ = 0;
     std::size_t pending_base_symbol_prompts_ = 0;
     kota::event_loop& loop_;
-    kota::async_scope<GenerateError> scope_;
+    kota::task_group<GenerateError> scope_;
 
     WorkQueue work_queue_;
     DependencyTracker tracker_;
@@ -1879,6 +1922,7 @@ private:
     std::atomic<std::size_t> expected_llm_requests_ = 0;
     std::atomic<std::size_t> llm_requests_issued_ = 0;
     std::atomic<std::size_t> llm_requests_completed_ = 0;
+    std::atomic<std::size_t> in_flight_work_ = 0;
     std::atomic<std::size_t> consecutive_failures_ = 0;
     std::atomic<bool> retry_limit_exceeded_ = false;
 };

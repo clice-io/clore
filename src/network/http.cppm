@@ -44,7 +44,8 @@ struct RawHttpResponse {
     std::string body;
 };
 
-extern std::unique_ptr<kota::semaphore> g_llm_semaphore;
+extern std::mutex g_llm_semaphore_mutex;
+extern std::shared_ptr<kota::semaphore> g_llm_semaphore;
 
 auto read_environment(std::string_view base_env, std::string_view key_env)
     -> std::expected<EnvironmentConfig, LLMError>;
@@ -76,11 +77,12 @@ auto unwrap_caught_result(R result, std::string_view cancel_message)
 namespace clore::net {
 
 void initialize_llm_rate_limit(std::uint32_t rate_limit) {
+    std::lock_guard lock(detail::g_llm_semaphore_mutex);
     if(rate_limit == 0) {
         detail::g_llm_semaphore.reset();
     } else {
         detail::g_llm_semaphore =
-            std::make_unique<kota::semaphore>(static_cast<std::ptrdiff_t>(rate_limit));
+            std::make_shared<kota::semaphore>(static_cast<std::ptrdiff_t>(rate_limit));
     }
 }
 
@@ -90,11 +92,33 @@ namespace clore::net::detail {
 
 namespace async = kota;
 
-std::unique_ptr<kota::semaphore> g_llm_semaphore;
+std::mutex g_llm_semaphore_mutex;
+std::shared_ptr<kota::semaphore> g_llm_semaphore;
 std::atomic<std::uint64_t> g_llm_request_counter = 0;
 
 constexpr long kHttpConnectTimeoutMs = 5'000;
 constexpr auto kHttpRequestTimeout = std::chrono::milliseconds(120'000);
+constexpr long kDnsCacheTimeoutSec = 300;
+constexpr long kConnMaxAgeSec = 300;
+constexpr long kTcpKeepIdleSec = 60;
+constexpr long kTcpKeepIntvlSec = 10;
+
+namespace {
+    auto get_thread_http_client() -> kota::http::client& {
+        thread_local kota::http::client client;
+        thread_local bool configured = false;
+        if(!configured) {
+            client.record_cookie(false);
+            configured = true;
+        }
+        return client;
+    }
+
+    auto current_llm_semaphore() -> std::shared_ptr<kota::semaphore> {
+        std::lock_guard lock(g_llm_semaphore_mutex);
+        return g_llm_semaphore;
+    }
+}  // namespace
 
 auto read_required_env(std::string_view name) -> std::expected<std::string, LLMError> {
     auto* value = std::getenv(std::string(name).c_str());
@@ -134,6 +158,10 @@ auto configure_request(kota::http::request& request,
     request.curl_option(CURLOPT_CONNECTTIMEOUT_MS, kHttpConnectTimeoutMs);
     request.curl_option(CURLOPT_NOSIGNAL, 1L);
     request.curl_option(CURLOPT_TCP_KEEPALIVE, 1L);
+    request.curl_option(CURLOPT_TCP_KEEPIDLE, kTcpKeepIdleSec);
+    request.curl_option(CURLOPT_TCP_KEEPINTVL, kTcpKeepIntvlSec);
+    request.curl_option(CURLOPT_DNS_CACHE_TIMEOUT, kDnsCacheTimeoutSec);
+    request.curl_option(CURLOPT_MAXAGE_CONN, kConnMaxAgeSec);
 }
 
 auto perform_http_request(const std::string& url,
@@ -141,12 +169,14 @@ auto perform_http_request(const std::string& url,
                           std::string_view request_json)
     -> std::expected<RawHttpResponse, LLMError> {
     async::event_loop loop;
-    auto operation =
-        perform_http_request_async(std::string(url),
-                                   std::vector<kota::http::header>(headers.begin(), headers.end()),
-                                   std::string(request_json),
-                                   loop)
-            .catch_cancel();
+    std::vector<kota::http::header> headers_vec;
+    headers_vec.reserve(headers.size());
+    headers_vec.assign(headers.begin(), headers.end());
+    auto operation = perform_http_request_async(std::string(url),
+                                                std::move(headers_vec),
+                                                std::string(request_json),
+                                                loop)
+                         .catch_cancel();
 
     loop.schedule(operation);
     loop.run();
@@ -166,30 +196,38 @@ auto perform_http_request_async(std::string url,
                                 std::vector<kota::http::header> headers,
                                 std::string request_json,
                                 async::event_loop& loop) -> async::task<RawHttpResponse, LLMError> {
-    if(g_llm_semaphore) {
-        co_await g_llm_semaphore->acquire();
+    auto semaphore = current_llm_semaphore();
+    if(semaphore) {
+        co_await semaphore->acquire();
     }
 
     struct SemaphoreGuard {
-        ~SemaphoreGuard() {
-            if(g_llm_semaphore) {
-                g_llm_semaphore->release();
+        std::shared_ptr<kota::semaphore> semaphore;
+
+        auto release() noexcept -> void {
+            if(semaphore) {
+                semaphore->release();
+                semaphore.reset();
             }
         }
-    } sem_guard;
+
+        ~SemaphoreGuard() {
+            release();
+        }
+    } sem_guard{.semaphore = std::move(semaphore)};
 
     auto request_number = g_llm_request_counter.fetch_add(1, std::memory_order_relaxed) + 1;
     auto request_url = url;
     logging::info("calling LLM #{}: {}", request_number, request_url);
 
-    kota::http::client client;
-    client.timeout(kHttpRequestTimeout);
-
+    auto& client = get_thread_http_client();
     auto request = client.on(loop).post(std::move(url));
+    request.timeout(kHttpRequestTimeout);
     configure_request(request, headers, std::move(request_json));
 
     auto response_result = co_await request.send().catch_cancel();
     if(response_result.is_cancelled()) {
+        sem_guard.release();
         co_await async::fail(
             LLMError(std::format("LLM request #{} cancelled: {}", request_number, request_url)));
     }
@@ -199,13 +237,14 @@ auto perform_http_request_async(std::string url,
                       request_number,
                       request_url,
                       error.message);
+        sem_guard.release();
         co_await async::fail(std::move(error));
     }
 
     auto response = std::move(*response_result);
     auto raw_response = RawHttpResponse{
         .http_status = response.status,
-        .body = response.text_copy(),
+        .body = std::string(response.text()),
     };
 
     logging::info("completed LLM #{}: {} status={} bytes={}",
@@ -213,6 +252,7 @@ auto perform_http_request_async(std::string url,
                   request_url,
                   raw_response.http_status,
                   raw_response.body.size());
+    sem_guard.release();
     co_return raw_response;
 }
 
@@ -221,6 +261,7 @@ auto perform_http_request_async(std::string url,
 namespace clore::net {
 
 void shutdown_llm_rate_limit() noexcept {
+    std::lock_guard lock(detail::g_llm_semaphore_mutex);
     detail::g_llm_semaphore.reset();
 }
 

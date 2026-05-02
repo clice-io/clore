@@ -1,6 +1,6 @@
 ---
 title: 'clore::support::ensureutf8'
-description: 'The function clore::support::ensure_utf8 iterates over the input text character‑by‑character using an offset index. At each position it invokes valid_utf8_sequence_length to determine the byte length of a valid UTF‑8 sequence starting there. If that length is zero — indicating an invalid leading byte or misplaced continuation byte — the algorithm appends the constant kUtf8Replacement (the Unicode replacement character U+FFFD encoded in UTF‑8) to normalized and advances offset by one. Otherwise it appends the identified valid sequence via text.substr(offset, sequence_length) and increments offset by that sequence_length. The result is a std::string that is guaranteed to contain only well‑formed UTF‑8, with any malformed bytes replaced by the standard replacement character.'
+description: 'The function clore::support::ensure_utf8 implements a validation and repair pass over a std::string_view input. It reserves storage for the result and then iterates through the input by calling the helper clore::support::(anonymous namespace)::valid_utf8_sequence_length at each offset. If the sequence length is zero—indicating an invalid lead byte—the single byte is replaced with the constant kUtf8Replacement (the Unicode replacement character U+FFFD encoded as UTF-8) and the offset advances by one. Otherwise it appends the complete valid sequence and jumps the offset forward by that length. The entire algorithm depends solely on valid_utf8_sequence_length and the replacement literal; no other local functions or global state are involved in the loop.'
 layout: doc
 template: doc
 ---
@@ -38,24 +38,28 @@ auto ensure_utf8(std::string_view text) -> std::string {
 }
 ```
 
-The function `clore::support::ensure_utf8` iterates over the input `text` character‑by‑character using an `offset` index. At each position it invokes `valid_utf8_sequence_length` to determine the byte length of a valid UTF‑8 sequence starting there. If that length is zero — indicating an invalid leading byte or misplaced continuation byte — the algorithm appends the constant `kUtf8Replacement` (the Unicode replacement character U+FFFD encoded in UTF‑8) to `normalized` and advances `offset` by one. Otherwise it appends the identified valid sequence via `text.substr(offset, sequence_length)` and increments `offset` by that `sequence_length`. The result is a `std::string` that is guaranteed to contain only well‑formed UTF‑8, with any malformed bytes replaced by the standard replacement character.
+The function `clore::support::ensure_utf8` implements a validation and repair pass over a `std::string_view` input. It reserves storage for the result and then iterates through the input by calling the helper `clore::support::(anonymous namespace)::valid_utf8_sequence_length` at each offset. If the sequence length is zero—indicating an invalid lead byte—the single byte is replaced with the constant `kUtf8Replacement` (the Unicode replacement character U+FFFD encoded as UTF-8) and the offset advances by one. Otherwise it appends the complete valid sequence and jumps the offset forward by that length. The entire algorithm depends solely on `valid_utf8_sequence_length` and the replacement literal; no other local functions or global state are involved in the loop.
 
 ## Side Effects
 
-No observable side effects are evident from the extracted code.
+- Allocates memory for a new `std::string`
+- Appends data to the newly allocated string
 
 ## Reads From
 
 - `text` parameter
+- `valid_utf8_sequence_length` function result
+- `kUtf8Replacement` constant value
+- Bytes of input `text`
 
 ## Writes To
 
-- local `normalized` string (returned by value)
+- Output `std::string` that is returned
 
 ## Usage Patterns
 
-- called by `write_utf8_text_file` to ensure output is valid UTF-8
-- called by `truncate_utf8` to sanitize input before truncation
+- Used by `write_utf8_text_file` to sanitize input before writing
+- Used by `truncate_utf8` to ensure truncated result is valid UTF-8
 
 ## Calls
 

@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::detail::selecteventloop'
-description: 'The function clore::net::detail::select_event_loop provides a single dispatch point for obtaining an active event loop reference. It first checks whether the incoming pointer loop is non‑null; if so, it dereferences and returns that loop directly. When loop is nullptr, the function falls back to kota::event_loop::current(), which must return a valid loop—this precondition is undefined if no event loop is active on the calling thread. The implementation thus relies on the runtime state of the kota::event_loop singleton and ensures the caller always receives a usable loop reference without further validation.'
+description: 'The function implements a simple fallback mechanism: it checks whether the provided loop pointer is non‑null, and if so, returns a reference to that object directly. If the pointer is null, it delegates to kota::event_loop::current(), which is expected to return a reference to the event loop active on the calling thread. The precondition is that a valid loop exists on the thread when the pointer is null; otherwise the behavior is undefined. The only external dependency is the kota::event_loop type and its static current() member.'
 layout: doc
 template: doc
 ---
@@ -28,7 +28,7 @@ auto select_event_loop(kota::event_loop* loop) -> kota::event_loop& {
 }
 ```
 
-The function `clore::net::detail::select_event_loop` provides a single dispatch point for obtaining an active event loop reference. It first checks whether the incoming pointer `loop` is non‑null; if so, it dereferences and returns that loop directly. When `loop` is `nullptr`, the function falls back to `kota::event_loop::current()`, which must return a valid loop—this precondition is undefined if no event loop is active on the calling thread. The implementation thus relies on the runtime state of the `kota::event_loop` singleton and ensures the caller always receives a usable loop reference without further validation.
+The function implements a simple fallback mechanism: it checks whether the provided `loop` pointer is non‑null, and if so, returns a reference to that object directly. If the pointer is null, it delegates to `kota::event_loop::current()`, which is expected to return a reference to the event loop active on the calling thread. The precondition is that a valid loop exists on the thread when the pointer is null; otherwise the behavior is undefined. The only external dependency is the `kota::event_loop` type and its static `current()` member.
 
 ## Side Effects
 
@@ -36,12 +36,13 @@ No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- parameter `loop`
-- thread-local state accessed by `kota::event_loop::current()`
+- parameter `loop` (nullable pointer to `kota::event_loop`)
+- result of `kota::event_loop::current()`
 
 ## Usage Patterns
 
-- Used by async functions like `call_completion_async` and `call_llm_async` to resolve an optional event loop pointer to a valid reference before passing it to internal logic.
+- Resolves an optional event loop pointer into a guaranteed-valid reference for downstream async operations
+- Allows callers to pass `nullptr` to request the current thread's event loop
 
 ## Called By
 

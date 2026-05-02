@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::generate'
-description: 'clore::generate 命名空间是代码文档生成管线的核心实现域，封装了从符号分析数据到最终 Markdown 文档页面的完整转换过程。它定义了页面规划（如 PagePlanSet、PagePlan）、渲染（如 render_page_markdown、render_page_bundle）以及证据组装（如 build_evidence_for_module_summary、build_evidence_for_function_analysis）等关键函数。命名空间还提供了多种结构化类型，如 MarkdownNode、Paragraph、CodeFence 和 BulletList，用于以树状方式构建文档内容；LinkResolver 则负责将实体名称解析为输出目录中的相对路径，确保交叉引用正确。'
+description: 'clore::generate 命名空间是代码文档生成管线的核心，负责将代码分析数据转换为结构化的 Markdown 文档页面。它整合了页面计划构建、证据收集与格式化、LLM 提示组装、响应解析以及最终页面写入等步骤，并通过诸如 build_*（如 build_page_root、build_evidence_for_*）、render_*（如 render_page_markdown、render_mermaid 图）和 generate_pages 系列函数实现完整的生成流程。该命名空间还定义了丰富的类型体系，包括页面计划（PagePlanSet、PageDocLayout）、错误类型（GenerateError、PlanError）、链接解析器（LinkResolver）以及各种分析存储结构（如 SymbolAnalysisStore、TypeAnalysis）。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-`clore::generate` 命名空间是代码文档生成管线的核心实现域，封装了从符号分析数据到最终 Markdown 文档页面的完整转换过程。它定义了页面规划（如 `PagePlanSet`、`PagePlan`）、渲染（如 `render_page_markdown`、`render_page_bundle`）以及证据组装（如 `build_evidence_for_module_summary`、`build_evidence_for_function_analysis`）等关键函数。命名空间还提供了多种结构化类型，如 `MarkdownNode`、`Paragraph`、`CodeFence` 和 `BulletList`，用于以树状方式构建文档内容；`LinkResolver` 则负责将实体名称解析为输出目录中的相对路径，确保交叉引用正确。
+`clore::generate` 命名空间是代码文档生成管线的核心，负责将代码分析数据转换为结构化的 Markdown 文档页面。它整合了页面计划构建、证据收集与格式化、LLM 提示组装、响应解析以及最终页面写入等步骤，并通过诸如 `build_*`（如 `build_page_root`、`build_evidence_for_*`）、`render_*`（如 `render_page_markdown`、`render_mermaid 图`）和 `generate_pages` 系列函数实现完整的生成流程。该命名空间还定义了丰富的类型体系，包括页面计划（`PagePlanSet`、`PageDocLayout`）、错误类型（`GenerateError`、`PlanError`）、链接解析器（`LinkResolver`）以及各种分析存储结构（如 `SymbolAnalysisStore`、`TypeAnalysis`）。
 
-在架构上，`clore::generate` 承担着编排角色：它协调多个子流程——包括页面顶层结构构建（如 `build_page_root`、`build_file_page_root`）、LLM 提示构建（如 `build_prompt`、`build_symbol_analysis_prompt`）、格式化输出（如 `format_evidence_text`）以及最终的页面写入（如 `write_pages`）。通过 `PageType`、`SemanticKind` 和 `PromptKind` 等枚举，命名空间对页面类型、语义种类和提示种类进行了系统分类，使生成管线能够根据符号类别和文档需求灵活选择合适的处理策略。整体而言，该命名空间提供了一个模块化且可扩展的框架，供上层调用者（如 `generate_pages`）驱动文档生成任务。
+在架构中，`clore::generate` 位于代码分析和最终文档输出的中间层，它向上消费由前序分析阶段提供的符号事实和分析结果，向下产出与 `clore` 文档系统兼容的 Markdown 输出。其显著特性包括对多种页面类型（索引、命名空间、模块、文件等）和提示种类（声明摘要、实现摘要、符号分析等）的分层支持，以及干运行与异步生成的灵活控制。通过协调页面间链接解析和依赖图渲染，该命名空间确保了生成文档的内聚性和可导航性。
 
 ## Diagram
 
@@ -124,20 +124,7 @@ Definition: `generate/markdown.cppm:62`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::BlockQuote` 表示 Markdown 文档中的块引用（blockquote）元素。在文档生成过程中，该结构体用于封装引用内容，例如引述文本或嵌套的其他块级元素（如段落、列表、代码块等）。它通常作为 `clore::generate::MarkdownNode` 层次结构的一部分，与其他结构体（如 `Paragraph`、`BulletList`、`CodeFence`）共同构成 Markdown 文档的语义化表示。
-
-#### Invariants
-
-- `fragments` 中的元素顺序表示内联内容的逻辑顺序。
-
-#### Key Members
-
-- `fragments`
-
-#### Usage Patterns
-
-- 作为文档生成中块引用的表示被其他生成代码构造和填充。
-- 其 `fragments` 成员被遍历以生成对应的输出格式。
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 ### `clore::generate::BulletList`
 
@@ -147,21 +134,21 @@ Definition: `generate/markdown.cppm:49`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::BulletList` 表示一个 Markdown 项目符号列表，是文档生成过程中的一种结构化节点。它通常包含多个 `clore::generate::ListItem` 实例，用于呈现无序列表内容。该类型在构造 `clore::generate::MarkdownDocument` 树时使用，作为 `Paragraph`、`CodeFence` 等节点的同级元素，以支持生成包含列表格式的文档片段。
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `items` 存储所有的列表项，顺序与显示顺序一致。
-- `items` 可以包含任意数量的 `ListItem`，包括零个。
+- 列表项的排列顺序反映了输出中的显示顺序
+- 每个 `ListItem` 应包含有效的列表内容
 
 #### Key Members
 
-- `items`：保存所有子弹列表项的向量。
+- `items`：存储所有列表项的向量
 
 #### Usage Patterns
 
-- 通过直接初始化或聚合初始化创建 `BulletList` 实例并填充 `items`。
-- 将 `BulletList` 对象传递给 Markdown 生成函数以渲染为无序列表。
+- 由生成器函数填充 `items` 以构造列表
+- 消费者遍历 `items` 为每个项目生成子弹点格式
 
 ### `clore::generate::CodeFence`
 
@@ -175,18 +162,18 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `language` should be a valid language identifier string.
-- `code` may be empty or contain any text.
+- `language` 和 `code` 均为任意字符串，无格式约束
 
 #### Key Members
 
-- `language`: language identifier for the code block.
-- `code`: the code content.
+- `std::string language`: 代码语言标签
+- `std::string code`: 代码内容
 
 #### Usage Patterns
 
-- Used as a data holder for code fences in Markdown generation.
-- Likely constructed and then serialized into Markdown output.
+- 在 Markdown 生成过程中用于构造代码块
+- 可被直接赋值或初始化以填充语言和代码信息
+- 通常作为数据载体传递给其他生成函数或序列化操作
 
 ### `clore::generate::CodeFragment`
 
@@ -198,13 +185,18 @@ Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
+#### Invariants
+
+- The `code` member is a plain string with no internal constraints.
+
 #### Key Members
 
-- `code` field
+- `code` of type `std::string`
 
 #### Usage Patterns
 
-- Used to represent a fragment of generated code as a string
+- Used to encapsulate code text for markdown generation.
+- Likely constructed with a string and then passed to other functions.
 
 ### `clore::generate::EvidencePack`
 
@@ -218,23 +210,28 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- All fields are intended to be fully populated before use
-- `page_id` and `prompt_kind` uniquely identify the generation task
-- `subject_name` and `subject_kind` describe the target symbol
-- Vectors may be empty if no relevant evidence exists
+- 所有字段在默认构造后均为空
+- 字段填充由外部证据收集过程完成
+- 不保证特定字段非空
 
 #### Key Members
 
-- `subject_name` and `subject_kind`
+- `page_id`
+- `prompt_kind`
+- `subject_name`
+- `subject_kind`
 - `target_facts`
-- `local_context`, `dependency_context`, `reverse_usage_context`
-- `page_id` and `prompt_kind`
+- `local_context`
+- `dependency_context`
+- `reverse_usage_context`
+- `source_snippets`
+- `related_page_summaries`
 
 #### Usage Patterns
 
-- Constructed by evidence gathering subsystems
-- Passed to prompt builders or directly to LLM-based documenters
-- Consumed by documentation generation pipelines for a single symbol
+- 作为 `clore::generate` 命名空间中生成函数的输入
+- 由证据收集步骤填充并传递给生成流水线
+- 为提示构造提供完整的上下文事实
 
 ### `clore::generate::Frontmatter`
 
@@ -248,9 +245,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `layout` defaults to `"doc"`
-- `page_template` defaults to `"doc"`
-- All fields are `std::string` and can be set to any value
+- 所有成员均为 `std::string` 类型，无强制非空约束
+- `layout` 和 `page_template` 默认初始化为 `"doc"`
 
 #### Key Members
 
@@ -261,9 +257,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Constructed with default values for typical documentation pages
-- Fields are assigned individually before serialization
-- Consumed by frontmatter generation code in the `clore::generate` namespace
+- 作为 Markdown 生成流程中的元数据输入结构
+- 在模块内部被填充并传递给下游渲染组件
 
 ### `clore::generate::FunctionAnalysis`
 
@@ -277,8 +272,9 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `has_side_effects` should be true if and only if `side_effects` is non-empty; no explicit enforcement is shown
-- Fields are independent but intended to be consistent with analysis data
+- `has_side_effects` 为 `true` 时，`side_effects` 通常不为空（语义隐含但未强制）
+- 字段内容由分析过程填充，不保证交叉引用的一致性
+- 结构体无自定义构造或赋值操作，使用默认成员初始化
 
 #### Key Members
 
@@ -292,8 +288,9 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Cached and reused across namespace, module, file, and symbol documentation pages
-- Populated by analysis code and consumed by documentation generation
+- 作为函数分析结果的记录类型被缓存
+- 其他代码通过读取这些字段来生成文档内容
+- 被用于命名空间、模块、文件或符号文档页面的重用
 
 ### `clore::generate::GenerateError`
 
@@ -303,20 +300,7 @@ Definition: `generate/model.cppm:69`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
-
-#### Invariants
-
-- no explicit invariants defined in evidence
-
-#### Key Members
-
-- `message`
-
-#### Usage Patterns
-
-- likely used as an exception type or error result in generation functions
-- typically constructed with a descriptive string
+`clore::generate::GenerateError` 是一个在生成流程中使用的错误类型，用于表示文档生成过程（如页面或符号文档的生成）中发生的故障。它通常与同命名空间中的`PlanError`、`RenderError`、`PathError`、`PromptError`等错误类型配合，构成生成阶段的错误处理体系。当生成操作失败时，相关函数或方法可能返回或抛出此结构体的实例，以便调用方区分并处理生成级别的异常情况。
 
 ### `clore::generate::GeneratedPage`
 
@@ -327,23 +311,6 @@ Definition: `generate/model.cppm:55`
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
-
-#### Invariants
-
-- 所有字段默认初始化为空字符串
-- 字段内容由外部填充，无内部一致性约束
-
-#### Key Members
-
-- `title` 字段：页面标题
-- `relative_path` 字段：页面相对路径
-- `content` 字段：页面内容
-
-#### Usage Patterns
-
-- 作为生成流程的输出数据单元
-- 被其他模块填充后传递或存储
-- 直接访问其字段以获取页面信息
 
 ### `clore::generate::GenerationSummary`
 
@@ -357,8 +324,9 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- 每个计数器都是从 0 开始，只能递增
-- 所有计数器均为非负整数
+- 所有计数均为非负整数
+- 默认初始化为0
+- 只能通过直接成员赋值修改
 
 #### Key Members
 
@@ -370,9 +338,9 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- 在代码生成过程中递增相应计数器
-- 用于后续性能分析或调试日志
-- 作为生成结果的元数据返回
+- 在生成过程的最后阶段填充这些字段
+- 用于日志记录或性能报告
+- 可被外部代码读取以获取统计信息
 
 ### `clore::generate::LinkFragment`
 
@@ -386,17 +354,19 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- No documented invariants
+- The struct is trivially copyable and movable due to its members.
+- `code_style` defaults to `false` if not explicitly initialized.
 
 #### Key Members
 
-- `label`
-- `target`
-- `code_style`
+- `label`: the display text of the link
+- `target`: the URL or anchor target of the link
+- `code_style`: whether to apply code font styling to the link
 
 #### Usage Patterns
 
-- No documented usage patterns
+- Initialized using aggregate syntax, e.g., `LinkFragment{"text", "url", true}`.
+- Used as a data carrier for generating markdown link syntax in the `clore::generate` module.
 
 ### `clore::generate::LinkResolver`
 
@@ -406,15 +376,14 @@ Definition: `generate/model.cppm:174`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::LinkResolver` 是一个映射结构，负责将实体名称（如限定类型名称、命名空间名称、模块名称以及文件路径）解析到它们在输出目录中的页面相对路径。它主要用于在生成的 Markdown 文档中创建跨文件引用链接，确保链接目标能够准确指向对应实体的文档页面。
-
-在文档生成过程中，当需要插入指向其他实体（如类型、命名空间或模块）的交叉引用时，通过查询 `LinkResolver` 获取目标实体的相对路径，从而构造出正确的 Markdown 链接。该结构不关心单个成员的实现细节，而是作为整个链接解析机制的核心数据索引，为后续的链接生成步骤提供支持。
+`clore::generate::LinkResolver` 是一个结构体，负责将实体名称（包括限定类型名、命名空间名、模块名或文件路径）映射为它们在输出目录中的页面相对路径。该组件主要用于生成 Markdown 文档中的交叉引用链接，通过解析实体标识符来确定正确的目标页面位置，从而确保生成的链接指向对应的文档页面。
 
 #### Invariants
 
-- Maps are populated before resolution and remain read-only during use
-- Each key maps to at most one value
-- A null pointer indicates an unresolvable name
+- The maps are populated before use and not modified during link resolution.
+- Each accessor returns a valid pointer if the key exists, `nullptr` otherwise.
+- Keys in each map are unique per map.
+- The returned pointers remain valid as long as the `LinkResolver` object exists.
 
 #### Key Members
 
@@ -429,9 +398,10 @@ Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
 #### Usage Patterns
 
-- Used by link generation to find relative paths for entity references
-- Called during markdown output to construct cross-references
-- Provides separate maps for different name categories
+- Used when generating Markdown output to convert entity names into hyperlink targets.
+- Queried for each entity appearance that requires a cross-reference.
+- The `resolve` family of methods is called with entity identifiers to obtain the relative page path.
+- Typically filled before the linking phase and then accessed read-only.
 
 #### Member Functions
 
@@ -503,19 +473,19 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `label` and `target` are expected to be valid strings
-- `code_style` is a boolean flag, initialized to `false`
+- `code_style` is initialized to `false`
+- `label` and `target` are mutable `std::string` values with no constraints on content
 
 #### Key Members
 
-- `label`
-- `target`
-- `code_style`
+- `clore::generate::LinkTarget::label`
+- `clore::generate::LinkTarget::target`
+- `clore::generate::LinkTarget::code_style`
 
 #### Usage Patterns
 
-- Used to represent a link in code generation contexts
-- Passed to functions that render hyperlinks with optional code styling
+- Used as a plain data holder for constructing or rendering link elements
+- Likely populated before being passed to a rendering function or stored in a container
 
 ### `clore::generate::ListItem`
 
@@ -529,7 +499,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `fragments` 存储了列表项的所有行内片段
+- `fragments` 保持有序，片段顺序决定最终渲染顺序
+- 每个 `InlineFragment` 对象在 `fragments` 中有效
 
 #### Key Members
 
@@ -537,7 +508,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- 被其他代码用于构建和表示 Markdown 列表的单个列表项
+- 在生成 Markdown 列表时，向 `fragments` 添加 `InlineFragment` 对象来构建列表项内容
+- 作为 `clore::generate::List` 或其他列表相关类型的一部分被使用
 
 ### `clore::generate::MarkdownDocument`
 
@@ -549,6 +521,21 @@ Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
+#### Invariants
+
+- frontmatter 可选，为空时表示文档没有 YAML 头部
+- children 中的节点顺序反映文档内容结构
+
+#### Key Members
+
+- `frontmatter`
+- `children`
+
+#### Usage Patterns
+
+- 构造并填充该结构体以表示完整的 Markdown 文档
+- 遍历 `children` 以生成最终输出
+
 ### `clore::generate::MarkdownFragmentResponse`
 
 Declaration: `generate/model.cppm:77`
@@ -558,6 +545,18 @@ Definition: `generate/model.cppm:77`
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
+
+#### Invariants
+
+- No documented invariants beyond the type being a plain data holder.
+
+#### Key Members
+
+- `markdown`
+
+#### Usage Patterns
+
+- The struct is intended to be used as a return type in the `clore::generate` namespace, likely from functions that generate markdown fragments. Concrete usage is not shown in the provided evidence.
 
 ### `clore::generate::MarkdownNode`
 
@@ -579,14 +578,20 @@ Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
+#### Invariants
+
+- 成员 `code` 的内容应为有效的 Mermaid 语法字符串（由使用者维护）。
+- 结构体本身不维护任何额外状态或不变式。
+
 #### Key Members
 
-- `code`
+- `code`：存储 Mermaid 图表源代码的字符串。
 
 #### Usage Patterns
 
-- Instantiated to store a Mermaid diagram code string
-- Accessed to retrieve or set the diagram source
+- 作为生成管道中的输出类型，保存图表的文本表示。
+- 可能被传递给渲染器或序列化函数以生成最终图表。
+- 通过直接赋值或移动语义进行构造和复制。
 
 ### `clore::generate::PageDocLayout`
 
@@ -598,23 +603,6 @@ Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
-#### Invariants
-
-- 每个向量只包含对应类型符号的文档计划
-- `index_paths` 键值对表示从符号名称到文件路径的映射
-
-#### Key Members
-
-- `type_docs`
-- `variable_docs`
-- `function_docs`
-- `index_paths`
-
-#### Usage Patterns
-
-- 用于在文档生成过程中收集和组织符号文档计划
-- 由渲染阶段消费以生成最终页面
-
 ### `clore::generate::PageIdentity`
 
 Declaration: `generate/model.cppm:207`
@@ -625,23 +613,6 @@ Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
-#### Invariants
-
-- Fields are default-initialized
-- No constraints on string contents
-
-#### Key Members
-
-- `page_type`
-- `normalized_owner_key`
-- `qualified_name`
-- `source_relative_path`
-
-#### Usage Patterns
-
-- Carried as part of page generation metadata
-- Used to uniquely identify a page within the generation system
-
 ### `clore::generate::PagePlan`
 
 Declaration: `generate/model.cppm:39`
@@ -650,12 +621,14 @@ Definition: `generate/model.cppm:39`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-证据不足，无法总结；请提供更多证据。
+证据不足，无法进行总结；请提供更多证据。
 
 #### Invariants
 
-- `page_id` 通常应唯一标识页面（默认空串可能非唯一）
-- `depends_on_pages` 列表中的页面ID应存在且无循环依赖
+- The `page_id` field is a string that uniquely identifies the page.
+- The `page_type` field defaults to `PageType::File`.
+- The `depends_on_pages` and `linked_pages` fields store strings representing identifiers of other pages.
+- The `prompt_requests` field holds `PromptRequest` objects.
 
 #### Key Members
 
@@ -670,9 +643,8 @@ Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
 #### Usage Patterns
 
-- 生成管线填充 `PagePlan` 并传递给页面生成器
-- 依赖图分析读取 `depends_on_pages` 确定构建顺序
-- 外部工具根据 `page_type` 和 `prompt_requests` 生成内容
+- Used as a blueprint for generating a page in the `clore::generate` pipeline.
+- Populated by other components and consumed by the generation engine.
 
 ### `clore::generate::PagePlanSet`
 
@@ -683,22 +655,6 @@ Definition: `generate/model.cppm:50`
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
-
-#### Invariants
-
-- The size of `generation_order` is equal to the size of `plans` if each plan has a unique identifier.
-- Each string in `generation_order` corresponds to a key or identifier for an element in `plans`.
-
-#### Key Members
-
-- `plans`
-- `generation_order`
-
-#### Usage Patterns
-
-- Populated during generation setup with plan data and ordering information.
-- Iterated over in generation algorithms using the `generation_order` to determine processing sequence.
-- Accessed to retrieve specific plans by their order or identifier.
 
 ### `clore::generate::PageType`
 
@@ -712,19 +668,19 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- 底层类型为 `std::uint8_t`，所有枚举值在 0 到 3 之间
+- The enumerator values are distinct.
+- The enum class scoping prevents unintended implicit conversions.
 
 #### Key Members
 
-- `File`
-- `Namespace`
 - `Index`
 - `Module`
+- `Namespace`
+- `File`
 
 #### Usage Patterns
 
-- 用于指定生成的文档页面的种类
-- 可能作为 `Page` 类或生成函数的参数或数据成员
+- Defines the set of page categories supported by the generation system.
 
 #### Member Variables
 
@@ -788,16 +744,17 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Fragments are stored in the order they appear in the paragraph.
+- `fragments` 中的元素顺序决定段落呈现顺序
+- 所有片段均属于 `InlineFragment` 类型
 
 #### Key Members
 
-- `fragments`
+- `fragments`：段落的内联片段容器
 
 #### Usage Patterns
 
-- Constructed by populating `fragments` with inline elements.
-- Iterated over to process or render the paragraph.
+- 作为段落数据容器被文档生成过程填充或读取
+- 通过遍历 `fragments` 生成段落文本或格式
 
 ### `clore::generate::PathError`
 
@@ -811,15 +768,16 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `message` 成员的值为任意可读字符串，无格式约束
+- The `message` member is a string; its content is set by error-reporting code.
 
 #### Key Members
 
-- `clore::generate::PathError::message`
+- `message`: a `std::string` describing the error.
 
 #### Usage Patterns
 
-- 作为路径生成失败时的返回类型或异常包装
+- Returned from functions in `clore::generate` to convey error details.
+- May be inspected or logged by callers to understand the cause of failure.
 
 ### `clore::generate::PlanError`
 
@@ -829,20 +787,22 @@ Definition: `generate/planner.cppm:11`
 
 Implementation: [`Module generate:planner`](../../../modules/generate/planner.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+证据不足，无法总结；请提供更多证据。
 
 #### Invariants
 
-- `message` should contain a non-empty, meaningful error description when an error occurs
+- The `message` field can contain any string, including an empty string.
+- The struct is trivially constructible and assignable when `std::string` is.
 
 #### Key Members
 
-- `message`
+- `message` – a `std::string` storing the error description.
 
 #### Usage Patterns
 
-- Returned as an error type from planning functions
-- Inspected by callers to extract error details
+- Returned or thrown as an error indicator from plan‑generation functions.
+- May be held in a result type like `std::expected<Plan, PlanError>` to convey failure details.
+- Often examined by callers to extract the error text for logging or user notification.
 
 ### `clore::generate::PromptError`
 
@@ -856,16 +816,17 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `message` 包含可读的错误描述
+- `message` 存储错误描述的文本内容
+- `message` 可以为空字符串
 
 #### Key Members
 
-- `message`
+- `message` 字段
 
 #### Usage Patterns
 
-- 作为错误结果返回
-- 用于传递生成阶段的错误信息
+- 作为函数或操作的错误返回类型
+- 在异常不可用或无需堆栈展开时用于错误传递
 
 ### `clore::generate::PromptKind`
 
@@ -876,29 +837,6 @@ Definition: `generate/model.cppm:18`
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
-
-#### Invariants
-
-- All enumerators are distinct and each represents a specific prompt category.
-- The underlying type is `std::uint8_t`, ensuring compact storage.
-
-#### Key Members
-
-- `NamespaceSummary`
-- `ModuleSummary`
-- `ModuleArchitecture`
-- `IndexOverview`
-- `FunctionAnalysis`
-- `TypeAnalysis`
-- `VariableAnalysis`
-- `FunctionDeclarationSummary`
-- `FunctionImplementationSummary`
-- `TypeDeclarationSummary`
-- `TypeImplementationSummary`
-
-#### Usage Patterns
-
-- Used to select or dispatch prompt generation logic based on the kind of code element.
 
 #### Member Variables
 
@@ -1046,19 +984,20 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `kind` 总是有效的 `PromptKind` 值
-- `target_key` 可为空但非空字符串表示有效目标
+- `target_key` may be an empty string
+- `kind` defaults to `PromptKind::NamespaceSummary`
+- Both fields are publicly accessible for direct assignment
 
 #### Key Members
 
-- `kind` 成员
-- `target_key` 成员
+- `kind` member
+- `target_key` member
 
 #### Usage Patterns
 
-- 通过值传递用于生成请求
-- 在生成器内部解析 `kind` 和 `target_key`
-- 默认构造为 `NamespaceSummary` 和空键
+- Constructed with a specific `target_key` and optional `kind`
+- Passed to generator functions to specify what to document
+- Frequently created as a temporary object for generation invocations
 
 ### `clore::generate::RawMarkdown`
 
@@ -1068,20 +1007,7 @@ Definition: `generate/markdown.cppm:66`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::RawMarkdown` 表示一个原始 Markdown 内容块，通常作为文档生成管线中的中间表示或输入。它用于承载未经解析或预处理的 Markdown 文本，以便在后继阶段（例如渲染或拼接为完整文档）中进行进一步处理。该结构体与 `clore::generate::MarkdownDocument`、`clore::generate::MarkdownFragmentResponse` 等类型协同工作，共同构成从结构化事实到最终 Markdown 输出的转换流程。
-
-#### Invariants
-
-- `markdown` 包含任意字符串内容，通常为 Markdown 格式的文本。
-
-#### Key Members
-
-- `markdown`：存储原始 Markdown 字符串的成员变量。
-
-#### Usage Patterns
-
-- 作为数据传输对象，在生成过程中传递 Markdown 内容。
-- 可能被其他模块读取用于写入文件或进一步处理。
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 ### `clore::generate::RenderError`
 
@@ -1095,16 +1021,17 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `message` may contain any string value
+- `message` 成员应包含有意义的错误描述
+- 无其他明确不变量
 
 #### Key Members
 
-- `std::string message`
+- `message` 成员：存储错误信息的字符串
 
 #### Usage Patterns
 
-- Returned by rendering functions to report errors
-- Inspected by callers to obtain error details
+- 其他代码可以构造 `RenderError` 对象并设置 `message` 以传递错误信息
+- 通常作为渲染操作的错误指示或异常类型使用
 
 ### `clore::generate::SemanticKind`
 
@@ -1118,24 +1045,24 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Each enumerator corresponds to a unique semantic kind.
-- The underlying type is `std::uint8_t`.
+- Each enumerator value uniquely identifies a distinct semantic kind.
+- All enumerators are valid and stable across generation contexts.
 
 #### Key Members
 
-- `Index`
-- `Namespace`
-- `Module`
-- `Type`
-- `Function`
-- `Variable`
-- `File`
-- `Section`
+- `clore::generate::SemanticKind::Index`
+- `clore::generate::SemanticKind::Namespace`
+- `clore::generate::SemanticKind::Module`
+- `clore::generate::SemanticKind::Type`
+- `clore::generate::SemanticKind::Function`
+- `clore::generate::SemanticKind::Variable`
+- `clore::generate::SemanticKind::File`
+- `clore::generate::SemanticKind::Section`
 
 #### Usage Patterns
 
-- Used to specify the kind of a semantic symbol.
-- Used to dispatch generation logic per kind.
+- Used as a parameter to dispatch or select code paths based on the semantic kind of a symbol.
+- Employed in the `clore::generate` module to tag or filter documentation generation tasks.
 
 #### Member Variables
 
@@ -1245,27 +1172,6 @@ Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
-#### Invariants
-
-- `level` 通常为正整数（默认2），表示标题级别
-- 若 `omit_if_empty` 为 true 且 `children` 为空，则章节可能被省略
-
-#### Key Members
-
-- `SemanticKind kind`
-- `std::string heading`
-- `std::uint8_t level`
-- `bool omit_if_empty`
-- `bool code_style_heading`
-- `std::vector<MarkdownNode> children`
-- `std::string subject_key`
-
-#### Usage Patterns
-
-- 作为树节点通过 `children` 容器构建嵌套章节结构
-- 在生成文档时根据 `kind` 和 `heading` 格式化输出
-- 用于模块或命名空间等实体的语义注释生成
-
 ### `clore::generate::SymbolAnalysisStore`
 
 Declaration: `generate/model.cppm:125`
@@ -1278,19 +1184,21 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- The fields are initialized by default constructors of respective cache types
-- All fields are public and can be accessed directly
+- 每个字段对应一种特定的符号类别（函数、类型、变量）
+- 结构体不包含自己的逻辑，仅作为缓存数据的集合
+- 所有成员均为公用，可直接访问
 
 #### Key Members
 
-- `functions`
-- `types`
-- `variables`
+- `clore::generate::SymbolAnalysisStore::functions`
+- `clore::generate::SymbolAnalysisStore::types`
+- `clore::generate::SymbolAnalysisStore::variables`
 
 #### Usage Patterns
 
-- Used as a member in other structures or passed to analysis functions
-- Accessed to retrieve or update analysis results for symbols
+- 作为分析阶段的结果被填充并在文档生成过程中被读取
+- 在多个文档页面之间传递以共享符号分析信息
+- 作为 `clore::generate` 命名空间的一部分，供其他生成工具消费
 
 ### `clore::generate::SymbolDocPlan`
 
@@ -1304,9 +1212,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `symbol` may be null if the plan is a placeholder or root container
-- `children` may be empty indicating no nested symbols
-- `index_path` is expected to be a valid relative path string
+- `symbol` 应指向一个有效的 `extract::SymbolInfo` 对象。
+- `children` 中的每个元素自身也满足相同的不变式。
 
 #### Key Members
 
@@ -1316,8 +1223,9 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Used to build a tree of documentation plans for symbols in a module
-- `children` vector enables recursive traversal for generating nested documentation pages
+- 用于构建符号文档生成的树形结构。
+- 由渲染器遍历并生成最终的文档输出。
+- 作为递归数据结构，支持对符号及其子符号的分层处理。
 
 ### `clore::generate::SymbolDocView`
 
@@ -1328,6 +1236,23 @@ Definition: `generate/render/common.cppm:17`
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
+
+#### Invariants
+
+- The enum has exactly three distinct enumerator values
+- The underlying type is `std::uint8_t`
+- Enumerators are fixed at compile time
+
+#### Key Members
+
+- `Declaration`
+- `Implementation`
+- `Details`
+
+#### Usage Patterns
+
+- The enumerator names suggest it controls which section of a symbol's documentation is rendered
+- No explicit usage or dependency evidence is provided in the source
 
 #### Member Variables
 
@@ -1379,27 +1304,27 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `id` is globally unique
-- `qualified_name` is the fully qualified name
-- `is_template` is `true` if the symbol is a template specialization
+- `id` is always present as an `extract::SymbolID`
+- `is_template` defaults to `false`
+- `declaration_line` defaults to `0`
+- `qualified_name`, `signature`, `kind_label`, `access`, `template_params`, `declaration_file`, and `doc_comment` are default-constructed empty strings unless explicitly set
+- No guarantees about the content or validity of string fields beyond what is provided by the extraction process
 
 #### Key Members
 
 - `id`
 - `qualified_name`
-- `kind_label`
-- `doc_comment`
-- `declaration_file`
-- `declaration_line`
 - `signature`
+- `kind_label`
 - `access`
 - `is_template`
-- `template_params`
+- `doc_comment`
 
 #### Usage Patterns
 
-- Populated by extraction phase
-- Consumed by generation phase to produce documentation output
+- Instantiated to store the result of symbol extraction
+- Passed or stored as a complete record of a symbol's facts for further processing or generation
+- Fields are accessed individually to retrieve specific attributes of the symbol
 
 ### `clore::generate::SymbolTargetKeyView`
 
@@ -1413,18 +1338,18 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `qualified_name` and signature are non-owning string views
-- `qualified_name` and signature must reference valid null-terminated strings for the lifetime of the view
+- `qualified_name` 和 `signature` 所指向的字符串必须由调用方保证在视图生命周期内有效
+- 两个成员之间不存在隐含的关联或一致性约束
 
 #### Key Members
 
 - `qualified_name`
-- signature
+- `signature`
 
 #### Usage Patterns
 
-- Used as a lightweight key to identify symbol targets
-- Passed to functions that need to reference a symbol's identity without copying strings
+- 作为符号目标键的轻量级视图，可能用于映射查找或比较操作
+- 被其他代码用来传递符号的限定名称和签名信息，而无需拷贝底层字符串
 
 ### `clore::generate::TextFragment`
 
@@ -1438,17 +1363,17 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `text` can be any valid `std::string`.
-- No additional constraints beyond those of `std::string`.
+- text 成员可以包含任意字符串内容
+- 该结构体没有额外的约束条件
 
 #### Key Members
 
-- `text`: the stored string content
+- text
 
 #### Usage Patterns
 
-- Used to pass or store a piece of text in the markdown generation pipeline.
-- Likely aggregated into larger structures or sequences.
+- 用于在生成流程中存储和传递文本片段
+- 作为生成的输出数据结构之一
 
 ### `clore::generate::TypeAnalysis`
 
@@ -1458,11 +1383,11 @@ Definition: `generate/model.cppm:91`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+`clore::generate::TypeAnalysis` 表示对一个 C++ 类型（如类、结构体、枚举或类型别名）的分析结果。它通常由代码生成过程的早期阶段填充，并为后续的文档布局和渲染提供结构化信息。该结构体与 `FunctionAnalysis`、`VariableAnalysis` 等一起，构成符号分析的完整集合，共同存储在 `SymbolAnalysisStore` 中，供页面规划 (`PagePlan`) 和文档生成使用。
 
 #### Invariants
 
-- No invariants are enforced by the type.
+- No inherent invariants; fields are independently assignable.
 
 #### Key Members
 
@@ -1474,8 +1399,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Used as a container for caching analysis results across documentation pages.
-- Each field corresponds to a section of generated documentation, consumed by documentation templates.
+- Populated during documentation generation and cached for reuse across documentation pages.
+- Accessed by consuming code to retrieve analysis components.
 
 ### `clore::generate::VariableAnalysis`
 
@@ -1487,6 +1412,25 @@ Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
+#### Invariants
+
+- `is_mutated` 默认初始化为 `false`
+- `mutation_sources` 和 `usage_patterns` 默认初始化为空向量
+- 所有成员均为标准库类型，无特殊所有权或生命周期约束
+
+#### Key Members
+
+- `overview_markdown`
+- `details_markdown`
+- `is_mutated`
+- `mutation_sources`
+- `usage_patterns`
+
+#### Usage Patterns
+
+- 由变量分析算法创建并填充各字段
+- 作为纯数据容器，被其他代码读取以获取变量分析结果
+
 ## Variables
 
 ### `clore::generate::add_prompt_output`
@@ -1495,7 +1439,7 @@ Declaration: `generate/render/common.cppm:142`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-Variable `clore::generate::add_prompt_output` declared at `generate/render/common.cppm:142`.
+`clore::generate::add_prompt_output` is a variable declared with `auto` at line 142 of `generate/render/common.cppm`. The declaration lacks an initializer in the provided snippet, so its type and purpose cannot be determined from the evidence.
 
 ### `clore::generate::add_symbol_analysis_detail_sections`
 
@@ -1503,7 +1447,7 @@ Declaration: `generate/render/common.cppm:170`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-Variable `clore::generate::add_symbol_analysis_detail_sections` is declared at `generate/render/common.cppm:170` with type deduced as `auto`.
+The variable `clore::generate::add_symbol_analysis_detail_sections` is declared in `generate/render/common.cppm:170` with deduced type `auto`. Its declaration suggests it is part of the symbol analysis detail section generation process.
 
 ### `clore::generate::add_symbol_analysis_sections`
 
@@ -1511,7 +1455,7 @@ Declaration: `generate/render/common.cppm:176`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::add_symbol_analysis_sections` is a public variable declared in `generate/render/common.cppm` at line 176 with type deduced via `auto`. Based on its name and surrounding context, it is likely a function or callable that processes symbol analysis sections during rendering.
+Variable `clore::generate::add_symbol_analysis_sections` is declared with type deduced from its initializer. It likely represents a callable used to append analysis sections for a symbol during documentation generation.
 
 ### `clore::generate::add_symbol_doc_links`
 
@@ -1519,11 +1463,11 @@ Declaration: `generate/render/symbol.cppm:43`
 
 Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
-A callable variable declared in `generate/render/symbol.cppm` that adds documentation links to a symbol page.
+A public variable declared at `generate/render/symbol.cppm:43`. Its role is to be used by `clore::generate::(anonymous namespace)::render_symbol_page` for generating symbol documentation links.
 
 #### Usage Patterns
 
-- called in `render_symbol_page` to add documentation links
+- consumed in `clore::generate::(anonymous namespace)::render_symbol_page`
 
 ### `clore::generate::append_symbol_doc_pages`
 
@@ -1531,7 +1475,7 @@ Declaration: `generate/render/symbol.cppm:60`
 
 Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
-The variable `clore::generate::append_symbol_doc_pages` is declared at `generate/render/symbol.cppm:60` with `auto` type deduction, suggesting it is initialized from an expression whose type is deduced. Its role is not fully determined from the available evidence.
+Variable `clore::generate::append_symbol_doc_pages` is declared at `generate/render/symbol.cppm:60` with public access. The snippet shows an `auto` declaration, indicating it is either a local variable or a function object used in the symbol documentation page generation process.
 
 ### `clore::generate::append_type_member_sections`
 
@@ -1539,7 +1483,7 @@ Declaration: `generate/render/symbol.cppm:49`
 
 Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
-A variable declared as `auto append_type_member_sections` in `clore::generate` namespace at `generate/render/symbol.cppm:49`.
+`clore::generate::append_type_member_sections` is a public variable declared at line 49 in `generate/render/symbol.cppm`. Its name suggests it is a function object used to append documentation sections for type members.
 
 ### `clore::generate::push_link_paragraph`
 
@@ -1547,7 +1491,7 @@ Declaration: `generate/render/common.cppm:92`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-变量 `clore::generate::push_link_paragraph` 声明为 `auto`，但其初始化表达式和具体类型未在提供的证据中显示。
+Variable `clore::generate::push_link_paragraph` is declared as an `auto` variable at `generate/render/common.cppm:92`. Its type and initializer are not shown in the evidence, but its name suggests it is a callable entity responsible for generating a paragraph of links.
 
 ### `clore::generate::push_location_paragraph`
 
@@ -1555,11 +1499,11 @@ Declaration: `generate/render/common.cppm:399`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-Variable `clore::generate::push_location_paragraph` is a public callable (likely a function or lambda) that appends a formatted location paragraph for symbols.
+A variable declared as `auto push_location_paragraph` in the `clore::generate` namespace at `generate/render/common.cppm:399`. It is a public variable whose type is deduced from its initializer and is used in the documentation rendering process.
 
 #### Usage Patterns
 
-- called from `clore::generate::build_symbol_source_locations`
+- Referenced in `clore::generate::build_symbol_source_locations`
 
 ### `clore::generate::push_optional_link_paragraph`
 
@@ -1567,7 +1511,7 @@ Declaration: `generate/render/common.cppm:111`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-变量 `clore::generate::push_optional_link_paragraph` 声明为 `auto`，用于控制可选链接段落的推送。
+`clore::generate::push_optional_link_paragraph` 是一个全局变量，声明在 `generate/render/common.cppm` 中，访问权限为 public，用于在文档生成过程中插入可选的链接段落。
 
 ## Functions
 
@@ -1579,12 +1523,12 @@ Definition: `generate/model.cppm:373`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::analysis_details_markdown` 接受一个 `SymbolAnalysisStore` 和一个表示符号标识符的 `int`，并生成该符号详细分析结果的 Markdown 表示。调用者需要提供有效的存储引用和符号 ID；函数返回一个整数句柄，该句柄可以在后续文档构建操作中使用（例如传递给 `render_markdown` 或嵌入到更大的 Markdown 树中）。
+函数 `clore::generate::analysis_details_markdown` 接受一个 `const SymbolAnalysisStore &` 和一个 `const int &`（表示符号标识符），生成该符号的详细分析信息的 Markdown 表示，并返回一个 `int` 结果。调用者应保证提供的 `SymbolAnalysisStore` 包含了给定标识符对应的分析数据，且标识符有效。返回的整数通常表示生成的 Markdown 内容的长度或操作状态。
 
 #### Usage Patterns
 
-- Used to obtain the details markdown for a symbol during page generation
-- Called by page rendering functions to include detailed analysis content
+- Retrieve a symbol's details markdown for inclusion in documentation pages
+- Used in contexts where analysis detail markdown is required, such as `render_page_markdown`
 
 ### `clore::generate::analysis_markdown`
 
@@ -1594,13 +1538,9 @@ Definition: `generate/model.cppm:342`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::analysis_markdown` 是生成符号分析结果 Markdown 表示的函数。它接受一个 `SymbolAnalysisStore` 的常量引用、一个标识目标符号的 `const int &`，以及一个 `FieldAccessor &&` 转发引用可调用对象，用于从分析存储中定制提取或转换所需数据。函数返回一个 `int`，表示生成的 Markdown 内容的句柄或标识符。
+`clore::generate::analysis_markdown` 是一个公开的模板函数，其职责是根据给定的符号分析数据生成相应的 Markdown 文档片段。它接受一个 `const SymbolAnalysisStore &` 作为分析数据源，一个 `const int &` 作为目标符号的标识符，以及一个 `FieldAccessor &&` 可调用对象，该对象用于灵活地从存储中提取或转换字段内容。函数返回一个表示生成结果（通常为 Markdown 文本的长度或状态码）的整数。
 
-调用者有责任提供有效的符号标识符和匹配的 `FieldAccessor`，该访问器应能从给定的 `SymbolAnalysisStore` 中正确获取分析字段。该函数不修改传入的存储或符号标识符。
-
-#### Usage Patterns
-
-- Used to extract specific markdown fields from analysis data for symbol documentation generation.
+调用方必须确保提供的 `SymbolAnalysisStore` 包含有效的分析数据，并且标识符能够正确索引其中的符号。`FieldAccessor` 需满足特定的签名约定（即 `auto(const SymbolAnalysisStore &, int) -> int` 或类似形式），并负责处理字段的具体访问逻辑。该函数不修改传入的分析存储，且假定 `FieldAccessor` 无异常安全要求。返回值为零通常表示成功，非零值可能指示错误或特殊状态，但具体含义需依赖调用方上下文解释。
 
 ### `clore::generate::analysis_overview_markdown`
 
@@ -1610,13 +1550,12 @@ Definition: `generate/model.cppm:366`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-函数 `clore::generate::analysis_overview_markdown` 接受一个 `const SymbolAnalysisStore &` 和一个 `const int &` 作为输入，返回一个 `int`。其目的是根据给定的符号分析存储以及一个标识具体分析目标的整数参数，生成该分析的概述性 Markdown 内容。
-
-调用者必须确保传入的 `SymbolAnalysisStore` 包含有效的符号分析数据，且第二个参数所指示的符号标识符在存储中存在对应的分析记录。函数返回一个整数值，通常表示生成的 Markdown 文本的长度或操作的状态码，调用者应据此判断输出是否成功生成。
+`clore::generate::analysis_overview_markdown` 根据提供的 `SymbolAnalysisStore` 和指定的 `const int &` 标识符生成分析概览的 Markdown 内容。调用者应确保 `SymbolAnalysisStore` 包含了目标条目所需的完整分析数据，且标识符引用了一个有效的分析对象。函数返回一个 `int` 值，表示操作的结果或生成的 Markdown 的特化标识；调用者需按约定处理此返回码。
 
 #### Usage Patterns
 
-- Used to obtain the overview portion of a symbol's analysis for rendering.
+- 从符号分析存储中获取概述文本
+- 作为文档生成管道的一部分被多次调用
 
 ### `clore::generate::analysis_prompt_kind_for_symbol`
 
@@ -1626,12 +1565,13 @@ Definition: `generate/analysis.cppm:286`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-函数 `clore::generate::analysis_prompt_kind_for_symbol` 接受一个表示符号的 `const int &` 参数，并返回一个 `int`，该值标识应对该符号使用的分析提示种类。调用者可将返回值与 `PromptKind` 枚举中的值进行比较，以决定该符号的分析应生成哪种类型的提示。该函数为每个输入符号提供一个确定的、可重复的结果，在符号标识符与分析提示分类之间建立明确的映射。
+给定一个符号引用，`clore::generate::analysis_prompt_kind_for_symbol` 返回该符号对应的分析提示种类（`PromptKind`）。调用方应确保传入的符号引用在上下文中有效；函数将据此确定后续分析提示构建时应采用的具体提示模板类别。返回的整数值可直接用于与 `PromptKind` 枚举或相关提示构建函数交互。
 
 #### Usage Patterns
 
-- Used to map a `SymbolInfo` to a `PromptKind` for analysis
-- Called during analysis prompt generation to determine which prompt to use for a symbol
+- Called to select the analysis prompt kind for a symbol during prompt construction
+- Used in `build_symbol_analysis_prompt` to determine which analysis to perform
+- Central dispatch for mapping symbol kinds to analysis prompt types
 
 ### `clore::generate::apply_symbol_analysis_response`
 
@@ -1641,12 +1581,13 @@ Definition: `generate/analysis.cppm:348`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-`clore::generate::apply_symbol_analysis_response` 接收一个由调用者提供的符号分析响应（以 `std::string_view` 形式传入），并将其应用到当前生成上下文中的指定目标上。函数会通过传入的可变引用修改相关状态，并返回一个整数以指示处理结果。调用者负责确保提供的响应格式与预期的分析协议一致，并在调用前正确设置所有上下文参数。
+该函数处理对一个符号分析请求的响应，将外部提供的分析结果应用到内部状态中。调用者应传入需要更新的符号标识（通过第一个引用参数）、分析上下文所需的引用参数以及一个整数标记和一个表示响应内容的字符串视图。返回值是一个整数，指示操作的成功状态或结果代码。调用者负责确保提供的响应格式符合预期，并基于返回值进行后续处理。
 
 #### Usage Patterns
 
-- Called after receiving a prompt response to persist parsed analysis data
-- Used in the generation pipeline to update symbol analysis results
+- called after receiving an LLM response for a symbol analysis prompt
+- used in the generation pipeline to update the symbol analysis cache
+- dispatches based on `PromptKind` to the appropriate analysis type
 
 ### `clore::generate::build_dry_run_page_summary_texts`
 
@@ -1656,12 +1597,14 @@ Definition: `generate/dryrun.cppm:316`
 
 Implementation: [`Module generate:dryrun`](../../../modules/generate/dryrun.md)
 
-`clore::generate::build_dry_run_page_summary_texts` 负责在干运行模式下为指定页面构建摘要文本。调用者需提供两个整数参数（可能标识页面和目标位置），函数返回一个整数，通常表示操作结果的状态或生成的文本数量。该函数不修改外部状态，专注于文本生成合同。
+函数 `clore::generate::build_dry_run_page_summary_texts` 为干运行页面构建摘要文本。调用者提供两个 `const int &` 参数，分别标识目标页面和相关上下文；该函数使用这些参数生成适用的摘要内容，并以 `int` 形式返回，表示操作是否成功或生成的摘要项数量。
+
+调用者必须确保传入的参数有效且指向已初始化的实体。此函数不会修改其参数，并且不产生直接的副作用。返回值可用于检查结果或控制后续流程。
 
 #### Usage Patterns
 
-- Used in dry run page generation to collect summary texts for each prompt request.
-- Likely called by `generate_dry_run` or related functions.
+- Used in dry-run generation to collect precomputed summary texts for prompt requests
+- Called as part of the dry-run page building pipeline
 
 ### `clore::generate::build_evidence_for_function_analysis`
 
@@ -1671,12 +1614,11 @@ Definition: `generate/evidence_builder.cppm:53`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-`clore::generate::build_evidence_for_function_analysis` 为函数分析阶段组装证据。调用方提供函数标识符、其外围作用域上下文以及（可能表示子页面或索引的）整数值；该函数返回一个整数，用于在后续的提示构建或页面生成过程中引用该证据包。调用方应确保提供的标识符在上下文中有效，且返回的键仅在本次生成会话中有效。
+`clore::generate::build_evidence_for_function_analysis` 为函数分析构建证据。调用者负责提供目标符号的标识符、包含函数分析数据的存储引用以及一个整数约束（可能表示 token 预算或结果大小上限）。返回值是一个表示完整证据包的整数，该包随后用于驱动函数级分析提示的生成。前置条件：存储中必须包含与给定标识符对应的有效 `FunctionAnalysis` 条目，否则结果为未定义。
 
 #### Usage Patterns
 
-- Called during evidence construction for function analysis
-- Possibly used in a builder pattern for generating evidence packs
+- Local context includes other evidence-building functions such as `build_evidence_for_function_implementation_summary` and `build_evidence_for_function_declaration_summary`, suggesting it is part of a family of `build_evidence_for_*` functions used in documentation generation.
 
 ### `clore::generate::build_evidence_for_function_declaration_summary`
 
@@ -1686,7 +1628,13 @@ Definition: `generate/evidence_builder.cppm:238`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-此函数构建用于生成函数声明摘要的证据。调用者提供函数声明及其上下文的必要标识（例如函数声明 ID、分析与限制参数），并接收一个证据包，该包可被后续流程消费，以构造面向 AI 的提示或直接填充摘要模板。它是声明摘要生成管线的一部分，负责将原始符号信息浓缩为结构化、可重用的证据表示。
+`clore::generate::build_evidence_for_function_declaration_summary` 负责为函数声明摘要构造证据包。调用者提供必要的上下文参数（包括引用和整数句柄），该函数返回一个整数类型的证据标识，用于后续生成该函数声明摘要页面的文档内容。此函数是 `clore::generate` 中证据构建族的一部分，专门处理函数声明的摘要证据，与 `build_evidence_for_module_summary`、`build_evidence_for_type_declaration_summary` 等同类函数保持一致的调用契约。
+
+#### Usage Patterns
+
+- Called during documentation generation to prepare evidence for function declaration summary pages
+- Used alongside `build_evidence_for_function_implementation_summary` and other evidence builders
+- Invoked within page construction functions such as `render_page_markdown` or `build_page_doc_layout`
 
 ### `clore::generate::build_evidence_for_function_implementation_summary`
 
@@ -1696,14 +1644,12 @@ Definition: `generate/evidence_builder.cppm:268`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-函数 `clore::generate::build_evidence_for_function_implementation_summary` 负责生成用于构建函数实现摘要的结构化证据数据。调用者需提供两个 `const int &` 类型参数和一个 `int` 类型参数，这些参数共同标识待摘要的函数实现及其关联的分析上下文。该函数利用输入构建证据包并返回一个 `int` 值，成功时返回零，否则返回非零错误码。
-
-调用者应当确保传入的标识符有效（例如代表有效的符号分析存储或源位置），并检查返回值以确认证据构造完成。构造完成的证据后续可被其他生成函数消费，用于生成最终的函数实现摘要文本。
+调用者使用 `clore::generate::build_evidence_for_function_implementation_summary` 来构建用于生成单个函数实现摘要的证据数据。函数接收三个参数：前两个是引用类型的上下文标识符，第三个是一个整型限定符，调用者必须提供这些以指定目标函数和摘要的生成范围。返回一个整型值，该值表示所构建的证据包的标识或构建过程的结果状态，调用者应据此确认证据是否已成功装配。
 
 #### Usage Patterns
 
-- called when generating page markdown for function implementation summaries
-- used in conjunction with `build_evidence_for_function_analysis` and `render_page_markdown`
+- Constructs evidence for function implementation summary pages
+- Called during documentation generation pipeline
 
 ### `clore::generate::build_evidence_for_index_overview`
 
@@ -1713,11 +1659,11 @@ Definition: `generate/evidence_builder.cppm:204`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-`clore::generate::build_evidence_for_index_overview` 生成用于索引概览页面的证据数据。调用者必须提供两个 `const int &` 参数，分别标识页面生成所需的上下文（例如，导航模型和源符号集合）。该函数返回一个 `int` 值，代表构造完成的证据集（或对应的错误状态），调用者可将该结果直接传递给下游的页面渲染或打包步骤。
+`clore::generate::build_evidence_for_index_overview` 接受两个只读整数引用参数，分别代表索引概览的上下文标识符和目标标识符。它构造并返回一个整数结果，表示用于生成索引概览页面的证据数据已成功构建，或指示错误状况。调用者必须确保提供的标识符有效且对应于当前代码库中已注册的索引或页面实体。
 
 #### Usage Patterns
 
-- Called during page generation to produce evidence for the index overview.
+- Called during page generation for index overview evidence construction
 
 ### `clore::generate::build_evidence_for_module_architecture`
 
@@ -1727,13 +1673,12 @@ Definition: `generate/evidence_builder.cppm:173`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-生成并返回用于描述给定模块架构的格式化证据文本。调用方需提供完整的模块标识符、关联文件标识符以及需要包含的证据深度层级。该函数负责整合模块的内部结构与对外关系，以结构化文本的形式构建证据，供后续的文档生成或分析管道使用。
+`clore::generate::build_evidence_for_module_architecture` 根据提供的模块架构相关参数（包括符号标识符、分析存储、页面上下文等），生成用于模块架构层面的证据集合。调用者需传入五个参数，其中四个为 `const int &` 形式（通常表示符号目标键、分析存储索引、页面根节点等），最后一个 `int` 参数可能控制证据的规模或边界。函数返回一个 `int`，代表生成的证据结果（例如证据包的句柄或状态码）。该函数是模块架构页面构建流水线的一环，其输出将被下游组件（如 `clore::generate::build_prompt`）消费，以生成最终的文档或提示内容。调用者应保证传入的标识符有效且对应正确的模块上下文。
 
 #### Usage Patterns
 
-- Called during page generation for module-level documentation
-- Used to populate evidence for architecture summary sections
-- Invoked by `clore::generate::build_page_root` or similar page builders
+- called when constructing evidence for module architecture pages
+- used in the evidence generation pipeline for module documentation
 
 ### `clore::generate::build_evidence_for_module_summary`
 
@@ -1743,11 +1688,12 @@ Definition: `generate/evidence_builder.cppm:142`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-此函数为模块摘要页面构建证据包。调用者须提供模块标识符、相关的符号集合引用与分析上下文，以及一个用于选项或格式化的整数参数。返回一个不透明的句柄，用于后续的证据消费流程（例如排版为 Markdown）。调用者负责确保传入的标识符有效且引用数据在调用期间保持稳定；函数不拥有或延长参数生命周期。
+`clore::generate::build_evidence_for_module_summary` 负责生成模块摘要页面所需的证据数据。调用者需提供模块标识符、分析存储及其他上下文参数（以 `const int&` 形式传递），以及一个枚举或其他整数类型的选项。该函数返回一个整数句柄，代表生成的证据包，供后续的页面渲染流程使用。确保所有输入引用在调用期间保持有效。
 
 #### Usage Patterns
 
-- called when generating module documentation pages
+- Called when generating module summary pages
+- Part of the evidence building pipeline for module-level documentation
 
 ### `clore::generate::build_evidence_for_namespace_summary`
 
@@ -1757,14 +1703,12 @@ Definition: `generate/evidence_builder.cppm:21`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-调用方负责提供用于构建命名空间摘要页面所需的核心标识符：第一个参数表示目标命名空间的标识符，后续两个参数表示其所处模块或文件等上下文依赖的标识符，最后一个参数为整数选项（通常为位标志或配置值）。该函数基于这些输入构建并返回一个代表完整证据集合的整数句柄，该句柄可在下游的页面布局、提示构建或文档生成流程中使用。
-
-调用方应保证所有标识符在当前的符号分析存储和页面规划集中有效，并确保传入的选项值符合预定义的枚举或常量约定。返回值仅在当前生成会话中有效，如果后续对底层分析数据进行了修改，则该句柄可能失效；调用方不应持久化该值或在多个生成会话间重用。
+`clore::generate::build_evidence_for_namespace_summary` 负责为命名空间摘要页面收集并构建结构化的证据数据。它接受与命名空间相关的上下文标识（例如命名空间标识、文件标识等）以及一个整数参数，并返回一个整数类型的证据包标识，供后续的 prompt 构建步骤使用。调用方应确保传入的标识有效且对应于一个已存在的命名空间上下文；该函数不修改这些参数，仅产出用于生成页面摘要的证据。
 
 #### Usage Patterns
 
-- called from page building functions for namespace summaries
-- used in `clore::generate::build_namespace_page_root` or similar
+- Called during namespace summary page generation
+- Part of the evidence-building pipeline for summary pages
 
 ### `clore::generate::build_evidence_for_type_analysis`
 
@@ -1774,12 +1718,14 @@ Definition: `generate/evidence_builder.cppm:82`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-`clore::generate::build_evidence_for_type_analysis` 负责为类型分析阶段组装相关的证据数据。调用方需提供两个上下文标识符（以 `const int &` 形式传入）以及一个附加 `int` 参数，这些参数共同标识待分析的类型和目标位置。函数返回一个 `int` 值，该值是对应证据包的标识符（例如引用句柄或键），供后续分析流程（如 `build_symbol_analysis_prompt` 或 `analysis_markdown`）使用。调用方应确保传入的标识符有效且与当前分析会话中的符号与作用域一致，否则函数行为未定义。
+`clore::generate::build_evidence_for_type_analysis` 为调用者构建一个证据包，用于对特定类型进行符号分析。调用者必须提供与类型分析相关的上下文参数，该函数将返回一个整型句柄，该句柄可传递给 `format_evidence_text` 或 `format_evidence_text_bounded` 以生成人类可读的 Markdown 证据文本。
+
+此函数是数据准备管线的一部分，主要面向需要将类型分析结果包装为标准证据格式的调用者。返回的证据包应被视为只读，并应在后续的生成消费环节中使用。
 
 #### Usage Patterns
 
-- called to build evidence for type analysis pages
-- used in documentation generation pipeline
+- Called to build evidence for type analysis pages
+- Used in conjunction with `find_type_analysis` and `analysis_markdown` functions
 
 ### `clore::generate::build_evidence_for_type_declaration_summary`
 
@@ -1789,12 +1735,14 @@ Definition: `generate/evidence_builder.cppm:302`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-`clore::generate::build_evidence_for_type_declaration_summary` 负责为给定类型的声明摘要构建所需的证据数据。调用者需提供该类型的源位置、相关的符号分析结果以及一个用于区分摘要类别的标志。该函数返回的证据包会被上游组件（如 `build_prompt`）消费，以生成类型声明页面的摘要部分或对应的 LLM 提示。其契约要求输入数据必须完整且对应同一个符号，否则行为未定义。
+函数 `clore::generate::build_evidence_for_type_declaration_summary` 负责为类型声明摘要页面构造证据数据。调用方需提供与待摘要类型相关的符号分析结果、文档视图以及其他页面上下文信息。该函数将收集并整理这些输入，组装成适合后续提示构建的 `EvidencePack`。
+
+作为调用方，你应确保传入的参数正确标识目标类型及其关联的页面布局、分析存储等数据。函数返回一个整数值，指示操作是否成功：零通常表示成功，非零值对应特定错误条件。此函数是声明摘要生成流水线中的关键环节，输出直接用于驱动大语言模型生成类型声明的自然语言摘要。
 
 #### Usage Patterns
 
-- called during `build_page_root` or `render_page_markdown` to provide evidence for type declaration pages
-- used in conjunction with `build_evidence_for_type_analysis` and `build_evidence_for_type_implementation_summary`
+- called when generating evidence summaries for type declarations
+- likely invoked within the documentation generation pipeline for type symbols
 
 ### `clore::generate::build_evidence_for_type_implementation_summary`
 
@@ -1804,14 +1752,13 @@ Definition: `generate/evidence_builder.cppm:334`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-`clore::generate::build_evidence_for_type_implementation_summary` 负责构建用于生成类型实现摘要页面所需的证据包。它接受以下参数：一个引用到符号分析存储的常量引用、一个表示目标类型标识符的常量引用，以及一个表示操作标志或枚举的整数。返回一个整型状态码，以指示是否成功生成证据。
+函数 `clore::generate::build_evidence_for_type_implementation_summary` 负责为指定的类型实现构建摘要证据。调用者须提供类型标识、实现上下文及一个额外的整型参数，函数据此封装与类型实现相关的关键信息（如实现方式、依赖关系或分析结果）。返回的摘要证据可供后续页面生成流水线使用，例如与 `clore::generate::render_page_markdown` 等函数配合，渲染出类型实现部分的文档摘要。
 
-调用者应确保所提供的分析存储包含目标类型的分析数据，并且标识符有效。函数的返回值可以用于检查调用是否成功，或在失败时进行错误处理。
+该函数是文档生成过程中“证据收集”环节的一部分，专注于类型实体的实现层面。调用者应确保传入的类型标识指向有效的类型，且实现上下文已预先填充必要的分析数据。函数不修改输入参数，仅输出一份结构化的证据包，其格式与 `clore::generate` 空间的证据处理机制兼容。
 
 #### Usage Patterns
 
-- Called during page generation for type implementation summary pages
-- Used by page planning functions like `build_page_plan_set`
+- Called during documentation generation to build evidence for type implementation summaries
 
 ### `clore::generate::build_evidence_for_variable_analysis`
 
@@ -1821,12 +1768,12 @@ Definition: `generate/evidence_builder.cppm:113`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-负责为给定的变量分析构建证据数据。调用者需提供分析上下文和变量标识符等必要输入，函数将返回代表生成证据的整型值。该证据通常用于后续的提示构造或页面渲染流程，作为变量分析摘要的素材来源。返回值约定表示成功生成的证据标识，调用方应据此进一步处理。
+`clore::generate::build_evidence_for_variable_analysis` 为指定的变量分析构建证据包。它接受必要的输入参数，这些参数标识要分析的目标变量并限定分析范围，然后返回一个整数值，该值表示构建是否成功或提供后续引用的标识符。调用者必须确保传入的参数指向有效的符号分析数据，否则行为未定义。此函数是证据生成管线的一部分，其输出供下游的文档布局或聚合步骤使用。
 
 #### Usage Patterns
 
-- called to build evidence for variable analysis prompts
-- used in symbol analysis pipeline for variables
+- 在生成变量分析文档页面时调用
+- 配合 `clore::generate::build_evidence_for_function_analysis` 等相似函数使用
 
 ### `clore::generate::build_file_page_root`
 
@@ -1836,12 +1783,14 @@ Definition: `generate/render/page.cppm:345`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-`clore::generate::build_file_page_root` 负责为某个文件页面构建根节点。调用者需要传入六个标识该文件及其所属上下文的整数参数（例如文件 ID、所属模块 ID、命名空间 ID 等），函数将根据这些参数生成并返回一个整数句柄，代表该文件页面的根结构。此句柄供后续页面渲染步骤使用，调用者在调用前应确保提供的参数足以唯一确定目标文件在文档生成管线中的位置。
+`clore::generate::build_file_page_root` 负责为单个文件生成文档页面的根内容。调用者需提供一组标识该文件的上下文参数（通过 `const int &` 引用传递），函数将基于这些参数构建页面顶层结构，并返回一个 `int` 值表示处理结果或页面标识。
+
+该函数假定所有传入的参数均已正确初始化且指向有效的内部资源。调用者必须确保在调用前已完成必要的上下文准备（如符号分析、页面计划等），并妥善处理返回值以判断构建是否成功。
 
 #### Usage Patterns
 
-- Called during file page generation to create the root section.
-- Used as part of the page building pipeline for file documentation.
+- Called during page root construction for file pages
+- Used to assemble includes, included-by, dependency diagram, symbol sections, module info, and related pages
 
 ### `clore::generate::build_index_page_root`
 
@@ -1851,12 +1800,12 @@ Definition: `generate/render/page.cppm:447`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-函数 `clore::generate::build_index_page_root` 负责构建索引页面（通常为文档站点的主索引或目录页）的根内容。调用者需提供与索引页相关的全套上下文参数（例如页面计划、符号分析存储等），这些参数通过引用传入的整数句柄传递。该函数返回一个整数，表示成功构建的页面标识或生成状态码，调用者应确保在调用前相关上下文已正确初始化。
+`clore::generate::build_index_page_root` 负责构建索引页面的根节点。调用方需要提供五个输入标识符，这些标识符指定了构建索引所需的上下文（例如关联的文档布局、符号集合或生成选项）。每个标识符必须对应一个有效的内部对象。函数返回一个整数，标识生成的页面根节点，后续可用于页面渲染或链接解析。
 
 #### Usage Patterns
 
-- called to generate the top-level index page of a documentation site
-- produces the root `SemanticSection` for index page rendering
+- Called when building the root section of a top-level index page
+- Part of a family of page builders (`build_page_root`, `build_namespace_page_root`, `build_file_page_root`, `build_module_page_root`)
 
 ### `clore::generate::build_link_resolver`
 
@@ -1866,12 +1815,12 @@ Definition: `generate/model.cppm:471`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-函数 `clore::generate::build_link_resolver` 根据传入的 `PagePlanSet` 集合构造并返回一个 `LinkResolver` 对象。调用者应保证传入的集合完整、准确地描述了所有待生成的页面及其关系，以便链接解析器能够正确映射页面标题、命名空间、模块等目标。该函数是生成管线的核心工具，供后续页面渲染和交叉引用环节使用。
+`clore::generate::build_link_resolver` 从给定的 `PagePlanSet` 构造一个 `LinkResolver`。该解析器封装了页面计划集中所有已知页面的路径与标识信息，供后续生成流程将符号引用、命名空间、模块等目标解析为文档输出中的实际链接。调用者必须提供一个已完整的页面计划集，以确保返回的 `LinkResolver` 能够正确解析任何页面级别的链接目标；该解析器的生存期通常与生成页面所需的链接解析需求一致。
 
 #### Usage Patterns
 
-- Called during page generation setup to create a resolver for linking symbols to page paths
-- Used to populate a `LinkResolver` that enables module, namespace, and generic name resolution
+- Constructing a link resolver from page plans before generating page output
+- Used in page rendering pipeline to resolve page references
 
 ### `clore::generate::build_list_section`
 
@@ -1881,11 +1830,12 @@ Definition: `generate/render/common.cppm:133`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-函数 `clore::generate::build_list_section` 负责构造文档生成过程中使用的列表部分。调用者提供三个 `int` 参数以指定列表的结构或内容，并返回一个表示生成结果或状态的 `int` 值。其确切行为由传入的参数组合决定，但整体契约承诺生成一个适合嵌入到较大文档结构中的列表分段。
+`clore::generate::build_list_section` 负责根据三个整数参数构建一个列表节（list section）并返回一个整数。调用者应提供特定的整数输入，这些输入可能标识要渲染的列表类型、范围或配置；返回值指示操作结果（例如是否成功完成或返回某种标识符）。该函数是 `clore::generate` 命名空间中用于生成 Markdown 文档结构的工具之一，预期在页面渲染管线中被调用，以在合适的位置插入一个列表式的节。
 
 #### Usage Patterns
 
-- Used within page generation pipelines to wrap a bullet list under a section heading
+- building a section with a bullet list
+- used to wrap a `BulletList` into a `SemanticSection`
 
 ### `clore::generate::build_llms_page`
 
@@ -1895,11 +1845,12 @@ Definition: `generate/dryrun.cppm:333`
 
 Implementation: [`Module generate:dryrun`](../../../modules/generate/dryrun.md)
 
-`clore::generate::build_llms_page` 负责构造一个面向大语言模型（LLM）交互的页面，用于代码生成流程中的干运行阶段。调用者需提供三个整数参数，这些参数标识了构建该页面所需的上下文信息（例如目标符号、文件或模块标识符）。函数返回一个整数，表示所构建页面的引用，调用者可使用该结果进行后续的页面渲染、缓存或写入操作。调用者应确保输入参数的有效性，并遵守前置条件（如对应页面类型在此流程中受支持、上下文标识符已正确解析等）。
+`clore::generate::build_llms_page` 负责构建与 `LLMs` 实体相关的文档页面内容。它接受两个 `const int &` 参数和一个 `int` 参数，这些参数提供页面生成所需的上下文和标识信息。返回值是一个 `int`，表示页面构建的结果状态或生成的页面标识符。调用者必须提供有效的参数，并确保 `clore::generate` 命名空间中的相关流水线已正确初始化。
 
 #### Usage Patterns
 
-- called during documentation generation to produce the `llms.txt` index page
+- Called by the documentation generation pipeline to create the `llms.txt` page
+- Used in dry-run or final page generation workflows
 
 ### `clore::generate::build_module_page_root`
 
@@ -1909,12 +1860,12 @@ Definition: `generate/render/page.cppm:255`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-`clore::generate::build_module_page_root` 负责构造模块级文档页面的根结构。调用者提供七个整数参数，这些参数共同指定模块的上下文信息（如模块标识、分析数据、配置索引等），函数返回一个整数值代表该页面的根对象或处理结果。此函数与 `clore::generate::build_file_page_root`、`clore::generate::build_namespace_page_root` 等页面根构建函数处于同一层级，但专门针对模块页面，为后续渲染管道提供所需的基础框架。
+`clore::generate::build_module_page_root` 接受七个只读整数参数，并返回一个整数。调用方需要提供这些参数，通常代表模块标识符、文档配置及相关分析数据。该函数构建模块文档页面的顶层结构（根节点），负责生成页面标题、概述等基础内容。返回的整数指示操作结果——成功或错误状态。
 
 #### Usage Patterns
 
-- Called during documentation generation to produce the page content for a module
-- Used by higher-level page rendering functions
+- Called during page generation for module documentation
+- Used to assemble the top-level structure of a module page in the renderer
 
 ### `clore::generate::build_namespace_page_root`
 
@@ -1924,14 +1875,12 @@ Definition: `generate/render/page.cppm:165`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-`clore::generate::build_namespace_page_root` 负责为给定的命名空间生成文档页面的根内容。它接受多个标识符参数，这些参数共同标识页面计划、命名空间目标以及相关的文档和符号分析上下文。该函数返回一个整数，指示操作的结果或生成的文档结构，供后续渲染步骤使用。
-
-调用者应确保提供的参数引用有效的、已解析的页面和命名空间标识。该函数是页面生成流水线的一部分，与其他类似函数（如 `clore::generate::build_module_page_root`）协作，以一致的方式为不同作用域构建页面根内容。
+函数 `clore::generate::build_namespace_page_root` 负责构造一个命名空间文档页面的根内容。调用者需提供七个 `const int &` 参数，这些参数分别标识生成该页面所需的目标命名空间、关联符号集合、上下文配置等关键句柄。函数返回一个 `int`，表示操作的结果状态（例如成功代码或生成的根节点数量）。调用者应保证传入的参数在当前的生成计划上下文中有效，且指向一个已注册的命名空间实体；未满足此前提的行为是未定义的。该函数不改变任何外部状态，仅根据参数计算并返回结果。
 
 #### Usage Patterns
 
-- Used as the entry point for building the namespace page root.
-- Called from higher-level page generation logic to compose the namespace documentation tree.
+- Called from higher-level page generation functions such as `render_page_markdown` or `build_module_page_root`.
+- Used as the primary builder for namespace page root sections in the documentation generation pipeline.
 
 ### `clore::generate::build_page_doc_layout`
 
@@ -1941,12 +1890,12 @@ Definition: `generate/render/symbol.cppm:897`
 
 Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
-`clore::generate::build_page_doc_layout` 接受两个 `const int &` 参数，通常代表符号标识符及其上下文，用于构造一个 `PageDocLayout` 布局。该布局描述了单个文档页面中所有符号文档内容的组织方式，后续可通过 `clore::generate::for_each_symbol_doc_group` 遍历其分组。调用方将返回的布局传递给下游渲染函数以生成最终页面内容。
+函数 `clore::generate::build_page_doc_layout` 接受两个 `const int &` 参数（表示符号和页面上下文的标识符），返回一个 `PageDocLayout` 对象。调用者通过该布局可以遍历符号文档组或检索索引路径，从而组织页面的文档结构。该函数是生成页面内容的第一步，负责建立布局契约，供后续渲染或分析使用。
 
 #### Usage Patterns
 
-- Called during page generation to build a layout of sub-document plans
-- Used to organize symbol documentation by kind
+- Used during documentation page generation to organize subpages for symbols in a namespace or implementation context.
+- Called when building the layout for a page that may contain symbol-level documentation subpages.
 
 ### `clore::generate::build_page_plan_set`
 
@@ -1956,13 +1905,15 @@ Definition: `generate/planner.cppm:369`
 
 Implementation: [`Module generate:planner`](../../../modules/generate/planner.md)
 
-`clore::generate::build_page_plan_set` 根据两个整数参数构造并返回一个页面计划集的状态码。调用者应在生成流程初始化时调用此函数，确保传入的参数在语义上与预期的页面标识符或索引一致。返回的整数指示计划集是否成功构建：零通常表示成功，非零值表示错误条件。此计划集随后可用于其他生成函数，例如 `build_link_resolver`。
+函数 `clore::generate::build_page_plan_set` 接受两个 `const int &` 参数，并为调用方构建一个页面计划集。调用方必须提供两个整数标识符，分别代表计划集所针对的目标和上下文（例如，符号标识符与所在作用域的标识符）。该函数不修改传入的参数，并假定这些标识符在调用前已正确初始化且有效。
+
+返回一个 `int`，作为新建页面计划集的句柄。调用方应使用此句柄后续传递给其他生成函数（如 `clore::generate::build_link_resolver`）以完成页面生成流程。该句柄的生命周期由调用方管理，且需在不再使用时通过适当方式释放（具体清理机制由调用方基于生成系统的约定负责）。函数不涉及复杂的内存分配或资源泄漏风险，但其返回的值仅在当前生成会话内有效。
 
 #### Usage Patterns
 
-- Called by page generation entry points
-- Used to create page plan before rendering
-- Part of documentation generation pipeline
+- 作为页面生成管道的初始化步骤被调用
+- 由高级生成函数 `generate_pages` 或 `generate_pages_async` 使用
+- 用于将所有页面计划整合为有序集合
 
 ### `clore::generate::build_page_root`
 
@@ -1972,12 +1923,12 @@ Definition: `generate/render/page.cppm:546`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-`clore::generate::build_page_root` 是一个公共函数，用于构建一个页面的根内容。它接受七个整数引用参数，这些参数共同标识需要生成根内容的页面上下文。调用者必须提供所有必要的标识符，并确保它们指向有效的、已解析的页面实体。该函数返回一个整数，表示构建操作的状态或结果代码。具体的参数语义和返回值含义由页面的生成管线定义，调用者应参考相关文档以了解合法的参数组合。
+函数 `clore::generate::build_page_root` 接受七个 `const int &` 参数，这些参数共同标识生成页面的上下文（例如模块、文件、命名空间、符号等作用域的标识符），并返回一个表示页面根内容的整数句柄。作为页面生成管线的核心，它负责构建文档页面的顶层结构——调用者需保证传入的参数引用有效且一致地描述目标页面，并据此获得可进一步渲染或扩展的根节点。
 
 #### Usage Patterns
 
-- Called by page generation routines to obtain the root `SemanticSectionPtr` for a given page plan.
-- Used in the rendering pipeline to construct the top-level section of a page.
+- Used as a top-level dispatcher to generate the root `SemanticSectionPtr` for a documentation page based on its type
+- Called by page generation infrastructure after preparing `PagePlan`, `TaskConfig`, `ProjectModel`, outputs, analyses, link resolver, and layout
 
 ### `clore::generate::build_prompt`
 
@@ -1987,12 +1938,12 @@ Definition: `generate/evidence.cppm:651`
 
 Implementation: [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-函数 `clore::generate::build_prompt` 接受一个整型标识符和一个 `const EvidencePack &` 引用，构造并返回一个表示该提示的整数值。调用方负责提供有效的标识符以及包含完整相关证据的 `EvidencePack` —— 该返回的整数通常用于标识或索引所构建的提示，以便后续组件引用。该函数是提示构建流程中的一个核心步骤，其契约要求传入的证据包必须已正确填充，且标识符在调用上下文中具有明确含义。
+`clore::generate::build_prompt` 根据传入的整数参数和 `EvidencePack` 组装一个完整的提示。调用方须提供包含所需证据的 `EvidencePack` 及一个整数（可能表示上下文限制或标识符），函数返回一个整数以引用生成的提示内容或状态。
 
 #### Usage Patterns
 
-- Called during prompt construction for different prompt kinds
-- Used by higher-level prompt builders
+- generating an LLM prompt from a kind and collected evidence
+- handling unsupported prompt kinds by returning an error
 
 ### `clore::generate::build_prompt_section`
 
@@ -2002,11 +1953,14 @@ Definition: `generate/render/common.cppm:124`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-函数 `clore::generate::build_prompt_section` 构造 LLM 提示中的一个特定片段。它接受两个整数标识符（可能指定页面种类或符号上下文）和一个指向 `const int` 数组的指针（该数组提供该片段的证据数据），并返回一个 `int` 值，该值传达结果片段的大小或构造状态。调用者负责确保所提供指针指向具有有效内容的数组，并且两个整数标识符正确描述该提示段所属的父上下文。
+`clore::generate::build_prompt_section` 是提示组装管线中的一个构建步骤。调用者提供两个 `int` 和一个指向常量整数的指针 `const int *`，函数返回一个 `int` 值，通常表示操作结果或生成节的大小。调用者负责确保指针的有效性以及整数值的语义正确性，因为函数根据这些输入构造提示的特定子部分。
+
+该函数主要在更高层次的提示构建函数（如 `clore::generate::build_prompt`）内部使用，用于将不同来源的内容格式化为结构化的提示节。调用者应检查返回的 `int` 以确认节是否成功构建，并依据约定解释其含义。
 
 #### Usage Patterns
 
-- Building prompt sections with or without additional markdown content
+- Used to generate a section of a prompt or document with an optional block of raw markdown content
+- Likely invoked within prompt building pipelines such as `clore::generate::build_prompt`
 
 ### `clore::generate::build_related_page_targets`
 
@@ -2016,11 +1970,14 @@ Definition: `generate/render/common.cppm:504`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::build_related_page_targets` 负责构造与指定页面相关联的目标页面集合，并返回生成的目标数量。调用方应提供两个 `const int&` 参数和一个 `int` 参数，以标识当前页面、关联上下文及可能的限制条件。该函数是页面导航和交叉引用生成流程的一部分，其结果可直接用于链接解析或页面计划构建。
+`clore::generate::build_related_page_targets` 根据调用方提供的目标标识符和上下文参数，构建一个与指定目标相关的页面目标集合。第一个 `const int &` 参数标识主目标，第二个 `const int &` 参数限定搜索范围或上下文，第三个 `int` 参数控制返回结果的最大数量或深度。返回值表示操作结果，通常为生成的目标数量，负值表示错误。
+
+调用方必须确保提供的标识符有效且属于已注册的实体。
 
 #### Usage Patterns
 
-- used in page rendering to generate navigation links to related pages
+- building navigation or related-page link lists
+- generating page context for markdown rendering
 
 ### `clore::generate::build_request_estimate_page`
 
@@ -2030,12 +1987,12 @@ Definition: `generate/dryrun.cppm:230`
 
 Implementation: [`Module generate:dryrun`](../../../modules/generate/dryrun.md)
 
-函数 `clore::generate::build_request_estimate_page` 接受三个 `const int&` 参数，分别表示请求标识符、相关符号标识符以及估计上下文中的附加数据。调用者负责提供有效且一致的标识，以描述待估计的生成请求。该函数在干运行模式下为这些输入构建一个请求估计页面，并返回一个 `int` 作为估计结果（例如页面计数或状态码）。调用者应根据返回值判断估计是否成功，并确保在调用前参数所引用的对象保持有效。
+函数 `clore::generate::build_request_estimate_page` 构建一个整数页面标识符，该标识符表示一次生成请求的估计内容页面。调用者提供三个整数参数，这些参数共同标识要生成的请求估计的目标上下文（例如符号标识符、模块标识符或请求种类）。返回的整数值可用作后续页面渲染或链接解析的句柄。该函数不直接处理 I/O 或持久化；它仅根据输入参数创建页面的内部表示。
 
 #### Usage Patterns
 
-- called during dry-run generation
-- builds page for estimating prompt task load
+- called during dry-run generation to produce an estimate page without invoking the LLM
+- used in `build_request_estimate_page` path when `TaskConfig` indicates dry-run mode
 
 ### `clore::generate::build_string_list`
 
@@ -2045,12 +2002,12 @@ Definition: `generate/render/common.cppm:148`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::build_string_list` 接受一个 `const int &` 参数并返回一个 `int`。它用于构建一个与参数标识的实体相关联的字符串列表。调用者必须确保传入的引用在文档生成流程中有效，且函数在正确的上下文中被调用。返回值表示构建结果的状态或句柄，具体含义由生成阶段的约定决定。
+`clore::generate::build_string_list` 接受一个 `const int` 引用类型的输入，并返回一个 `int` 值。该函数根据输入参数构造一个字符串列表，并以整数标识符的形式返回该列表的引用，供调用方在后续操作中使用。调用方应确保传入的参数有效且符合预期语义，返回的标识符仅在当前生成上下文中有效。
 
 #### Usage Patterns
 
-- building a bullet list of code-spanned text items
-- helper for rendering markdown lists
+- converts user-facing text into a formatted bullet list for markdown rendering
+- used by page-building functions in the `clore::generate` namespace
 
 ### `clore::generate::build_symbol_analysis_prompt`
 
@@ -2060,13 +2017,12 @@ Definition: `generate/analysis.cppm:429`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-`clore::generate::build_symbol_analysis_prompt` 构建一个专门用于引导符号分析流程的提示。该函数接受多个标识参数（包括常量引用和值传递的整数），这些参数共同指定要分析的目标符号及其所处的评估上下文。调用者必须提供一致且有效的符号标识与可配置的选项；函数返回一个整数值，用于指示操作状态或生成的提示的唯一标识。该函数不直接参与证据收集或页面渲染，而是专注于产生后续分析步骤所需的提示结构。
+构建并返回一个用于符号分析提示的令牌或标识符。调用方负责提供分析所需的参数（如符号标识、分析上下文等），该函数将这些输入组合成一个可消费的提示对象。返回的整数代表生成的提示，可供后续处理或传递。
 
 #### Usage Patterns
 
-- used to generate analysis prompts for symbols
-- called by prompt generation pipeline
-- dispatches based on prompt kind
+- Called during symbol analysis prompt generation
+- Used to create prompts for different analysis kinds such as function, type, or variable analysis
 
 ### `clore::generate::build_symbol_link_list`
 
@@ -2076,12 +2032,12 @@ Definition: `generate/render/common.cppm:360`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::build_symbol_link_list` 接受两个 `const int &` 引用类型参数、一个 `int` 值参数和一个 `bool` 标志参数，返回一个 `int` 值。调用者使用此函数从提供的符号信息中生成一个符号链接列表；返回值标识该列表，供后续渲染或引用使用。调用者负责确保所有引用参数指向有效数据，且布尔标志正确反映所需的链接生成行为。
+此函数根据调用方提供的引用参数和选项构建一个符号链接列表。第一个参数和第三个参数均为对整数的常量引用，第二个参数为一个按值传递的整数，最后一个布尔参数控制列表的生成行为。返回值是一个整数，表示生成的链接列表的标识符或结果代码。该函数主要在文档生成管线中被其他渲染与构建函数调用，以创建符号间的交叉引用链接结构。
 
 #### Usage Patterns
 
-- Called when generating page content that lists symbols with navigation links
-- Used to produce symbol lists in documentation pages
+- called during page rendering to produce a bullet list of symbol links
+- used in documentation generation to display related symbols with navigation
 
 ### `clore::generate::build_symbol_source_locations`
 
@@ -2091,11 +2047,11 @@ Definition: `generate/render/common.cppm:412`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-函数 `clore::generate::build_symbol_source_locations` 为调用者构建一个符号的源代码位置表示。它接受一个符号标识符以及相关的上下文参数（分别对应三个 `const int &` 和一个 `int`），并返回一个 `int` 值，该值携带该符号在源代码中出现的所有位置信息。调用者可以通过此函数获得符号的源位置集合，以便在生成页面内容时渲染或链接到这些位置。该函数是符号页面构建流程的一部分，与其他 `build_*` 函数协作，共同生成文档中的证据片段或页面根节点。
+此函数负责为给定符号构建一组源位置信息。调用者需传递三个 `const int &` 参数（通常表示源文件标识符、起始行号及列号）以及一个 `int` 参数（可能为符号索引或变体标识），调用后将返回一个 `int` 值，指示成功构建的位置条目数量或错误码。返回值为非负时表示有效结果，调用者可据此获得关联的源位置集合；返回负值则表明构造失败，调用方不应使用输出内容。
 
 #### Usage Patterns
 
-- Used to generate source-location markdown for symbol documentation pages
+- used in page-building functions to embed source location links for symbols
 
 ### `clore::generate::code_spanned_fragments`
 
@@ -2105,12 +2061,13 @@ Definition: `generate/markdown.cppm:693`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::code_spanned_fragments` 为调用者生成一组代码跨度片段，这些片段可用于后续的 Markdown 渲染步骤。它接受一个表示代码跨度上下文的 `int` 参数，并返回一个指示生成结果状态或片段数量的 `int` 值。此函数的设计使其适用于需要将代码范围分解为独立片段进行格式化或处理的场景。
+`clore::generate::code_spanned_fragments` 接受一个整数输入并返回一个整数。该函数负责将代码中标记的片段转换为对应的 Markdown 格式，通常用于在生成的文档中嵌入行内代码。
+
+调用者应当传入一个表示需要处理的片段集合或索引的整数参数。函数的返回值指示处理的结果，例如生成的片段数量或是否成功。该函数不修改传入的参数，也不影响全局状态。
 
 #### Usage Patterns
 
-- Used to extract code spans from a given string
-- Delegates to `append_code_spanned_fragments`
+- Splitting text into inline code fragments for markdown generation
 
 ### `clore::generate::code_spanned_markdown`
 
@@ -2120,11 +2077,12 @@ Definition: `generate/markdown.cppm:699`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::code_spanned_markdown` 接受一个整数参数，并返回一个整数。调用者应提供一个标识符（如代码片段或节点句柄），用于指定需要生成代码跨度（code span）表示的内容。返回的整数代表生成的 markdown 片段，可被后续渲染或组合函数（如 `clore::generate::render_page_markdown` 或 `clore::generate::normalize_markdown_fragment`）使用。该函数是 markdown 生成管线的一部分，负责将原始代码内容封装为符合语法规范的代码跨度格式。
+`clore::generate::code_spanned_markdown` 接受一个表示代码片段的整数句柄，并返回一个表示该片段被格式化为 Markdown 代码跨度（即反引号包裹）的整数句柄。调用者应提供一个有效的、已注册的代码片段句柄；所返回的句柄可直接嵌入到 Markdown 文档中，表示该片段的内联代码样式。
 
 #### Usage Patterns
 
-- convert plain markdown to code-spanned markdown
+- Used to convert markdown text into a form where non-fence content is wrapped with inline code, likely for rendering code documentation.
+- Called by other generation functions that need code‑spanned markdown fragments.
 
 ### `clore::generate::collect_implementation_symbols`
 
@@ -2134,12 +2092,12 @@ Definition: `generate/render/common.cppm:314`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-函数 `clore::generate::collect_implementation_symbols` 根据两个整数参数标识的上下文收集实现符号，并使用模板参数 `Predicate` 指定的可调用对象进行过滤。调用者必须提供符合 `Predicate &&` 签名的谓词，该谓词接收每个符号并返回一个可转换为 `bool` 的值，决定该符号是否被纳入收集结果。函数返回一个整数，表示收集到的符号数量或操作状态码。
+`clore::generate::collect_implementation_symbols` 是一个模板函数模板，接受两个 `const int &` 参数和一个 `Predicate &&` 转发引用谓词，返回一个 `int`。调用者应提供两个用于界定或标识目标符号范围的整数引用，以及一个用于筛选所得符号集合的谓词。函数负责收集满足该谓词的所有实现符号，并以整数形式返回收集到的符号数量（例如计数或状态码），具体语义由调用者通过谓词定义。
 
 #### Usage Patterns
 
-- Called during page generation to gather symbols for documentation output
-- Used by page-building functions like `build_page_root` and `collect_namespace_symbols`
+- Called to gather implementation symbols when building evidence for module, file, function, or type summaries
+- Used with a predicate that filters by symbol kind or other criteria to produce documentation content
 
 ### `clore::generate::collect_namespace_symbols`
 
@@ -2149,12 +2107,12 @@ Definition: `generate/render/common.cppm:289`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::collect_namespace_symbols` 是一个模板函数，用于收集指定命名空间中满足给定条件的符号。它接受一个表示命名空间的 `const int &` 引用、一个 `int` 类型的上下文标识，以及一个 `Predicate &&` 可调用对象，返回一个 `int` 值，通常表示收集到的符号数量或状态。调用者必须确保提供的命名空间引用有效，且 `Predicate` 可调用对象接受合适的参数并返回可转换为 `bool` 的值，以控制哪些符号被纳入收集结果。
+`clore::generate::collect_namespace_symbols` 是一个模板函数，用于在给定的上下文中收集命名空间内的符号。它接受一个 `const int &`（代表符号容器或分析存储）、一个 `int`（通常表示作用域深度或索引限制）以及一个 `Predicate &&` 谓词，后者决定了哪些符号应当被纳入收集结果。函数返回一个 `int`，表示成功收集的符号数量。调用者需确保传入的谓词与内部符号类型兼容，且整数参数指向有效的上下文范围；函数不抛出异常，并假定谓词不会修改被检查的符号状态。
 
 #### Usage Patterns
 
-- Used to gather symbols for namespace page generation
-- Called with `is_page_level_symbol` and custom predicates
+- Used to gather all page-level symbols for a namespace during documentation generation.
+- Likely called by functions that build namespace pages or analyze symbol lists.
 
 ### `clore::generate::compute_page_path`
 
@@ -2164,12 +2122,13 @@ Definition: `generate/model.cppm:576`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-根据提供的 `PageIdentity` 计算出该页面的输出路径。此函数是生成管线的一部分，调用者使用它来获取给定页面身份所对应的唯一路径标识。返回的整数表示操作的结果，通常为 0 表示成功，非零值指示错误。调用者负责确保传入的 `PageIdentity` 有效且已完成适当的验证。
+`clore::generate::compute_page_path` 接受一个 `PageIdentity` 引用，返回一个 `int`。该函数负责根据给定的页面身份标识计算出该页面在文件系统中的目标路径。调用者应保证传入的 `PageIdentity` 有效且包含足够的信息（如页面类型与唯一标识）。返回值指示操作结果：成功返回零，非零值表示路径计算失败或无效的页面身份。该函数不修改传入的参数，其计算逻辑依赖于当前生成配置中设定的输出根目录。
 
 #### Usage Patterns
 
-- Used to determine output file path for a documentation page
-- Called during page generation to map identities to filesystem locations
+- Called by page rendering functions to determine output file path
+- Used in `build_page_root`, `build_index_page_root`, `render_page_bundle`
+- Part of the page generation pipeline for mapping `PageIdentity` to filesystem path
 
 ### `clore::generate::doc_label`
 
@@ -2179,12 +2138,11 @@ Definition: `generate/render/common.cppm:279`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::doc_label` 接受一个 `SymbolDocView` 参数，返回一个用于标识该符号文档视图的整数标签。该标签在生成文档的过程中可用于引用或匹配对应的符号文档，从而支持文档内容的组织、索引和交叉链接。调用方应确保传入的视图有效，并理解返回的标签仅在当前生成上下文中具有意义。
+接受一个 `SymbolDocView` 并返回一个整型标签，该标签在文档生成流程中用于标识或索引该视图对应的符号。调用者应保证传入的 `SymbolDocView` 有效且与当前生成上下文一致；返回的整数标签是一个轻量级内部标识符，可用于后续渲染或缓存操作，但其语义和有效期仅限于当前 `generate` 会话。
 
 #### Usage Patterns
 
-- Used to obtain display labels for `SymbolDocView` values in documentation generation
-- Likely called when rendering section headings or labels for symbol documentation views
+- Obtain a display label for a documentation section based on the symbol view kind
 
 ### `clore::generate::escape_mermaid_label`
 
@@ -2194,11 +2152,11 @@ Definition: `generate/render/diagram.cppm:109`
 
 Implementation: [`Module generate:diagram`](../../../modules/generate/diagram.md)
 
-`clore::generate::escape_mermaid_label` 对 Mermaid 图中使用的标签进行转义，确保标签内容不会与 Mermaid 语法冲突。调用者传入一个代表待转义标签的整数标识符，函数返回一个对应的已转义标签标识符，该标识符可安全地用于后续 Mermaid 图生成操作（如 `make_mermaid`）。调用者无需关心转义的具体规则，只需保证传入的标识符有效即可。
+`clore::generate::escape_mermaid_label` 为 Mermaid 图表中的标签提供转义处理，确保标签文本中的特殊字符不会干扰 Mermaid 语法的正确解析。调用方应将需要嵌入图表的原始标签传入，并获得转义后的安全表示，该返回结果可直接用于构造 Mermaid 代码字符串。该函数是生成 Mermaid 图表流程中的基础工具，适用于任何需要将用户提供或动态产生的文本安全插入图表的场景。
 
 #### Usage Patterns
 
-- Used when rendering Mermaid diagram code to ensure labels do not break the diagram syntax.
+- used to escape labels when constructing Mermaid diagrams
 
 ### `clore::generate::find_declaration_page`
 
@@ -2208,12 +2166,13 @@ Definition: `generate/render/common.cppm:473`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-函数 `clore::generate::find_declaration_page` 接受两个 `const int &` 参数和一个 `int` 参数，并返回一个 `int`。调用者使用它来定位与给定上下文关联的声明页面的标识符。返回的 `int` 值可用于后续的页面渲染或链接解析操作。
+`clore::generate::find_declaration_page` 接受两个 `const int &` 和一个 `int` 参数，并返回一个 `int`。调用者通过这三个参数指定需要定位的声明上下文，函数返回一个标识对应声明页面的整数值。该返回值预期用于后续的页面生成或处理步骤。
 
 #### Usage Patterns
 
-- Used internally during page generation to locate a link to a symbol's declaration page.
-- Often invoked when rendering pages that need to provide a cross-reference to the declaration of a symbol.
+- Used to generate a navigation link to a symbol's declaration page
+- Invoked during page rendering to provide a "Declaration" or namespace page link
+- Callers pass the current page path to avoid self-referencing links
 
 ### `clore::generate::find_doc_index_path`
 
@@ -2223,12 +2182,13 @@ Definition: `generate/render/symbol.cppm:804`
 
 Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
-函数 `clore::generate::find_doc_index_path` 根据提供的 `PageDocLayout` 和一个整数参数，返回一个整数，表示文档索引页面的路径（例如，用于定位或标识生成文档中的索引页面）。调用方负责提供有效的布局和索引标识符，函数返回的整数可用于进一步的路由或页面生成流程。
+函数 `clore::generate::find_doc_index_path` 接受一个 `PageDocLayout` 引用和一个整数，返回一个整数。该调用解析给定布局中的文档索引路径，其返回值指示所请求索引路径的位置或状态。此函数主要用于文档生成流程中，在布局结构内定位具体的索引条目。
 
 #### Usage Patterns
 
-- look up documentation index path by qualified name
-- get pointer to path or nullptr if not found
+- Locating the file path for a symbol's documentation index.
+- Checking whether a qualified name has an associated documentation page.
+- Retrieving an existing index path before generating or linking to a documentation page.
 
 ### `clore::generate::find_function_analysis`
 
@@ -2238,11 +2198,12 @@ Definition: `generate/model.cppm:323`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-接受一个 `const SymbolAnalysisStore &` 和一个整数符号标识符，返回指向常量 `FunctionAnalysis` 的指针。如果存储中存有与给定标识符对应的函数分析信息，返回该对象的地址；否则返回 `nullptr`。调用者应确保存储对象在访问期间保持有效，并且返回的指针在存储对象生命周期内有效；此函数不会修改存储内容。
+函数 `clore::generate::find_function_analysis` 从给定的 `SymbolAnalysisStore` 中根据一个整数键查找与目标函数对应的 `FunctionAnalysis` 对象。它接受一个 `const SymbolAnalysisStore&` 和一个 `int` 类型的键作为参数，返回值为 `const FunctionAnalysis*`。如果指定的键存在关联的分析，则返回指向该分析的指针；否则返回空指针。调用者应确保对返回的指针进行空值检查，以避免解引用无效地址。
 
 #### Usage Patterns
 
-- Used by code generation routines to retrieve a stored function analysis for further processing.
+- Retrieving function analysis for a given symbol target key
+- Used to access cached function analysis data
 
 ### `clore::generate::find_implementation_pages`
 
@@ -2252,14 +2213,12 @@ Definition: `generate/render/common.cppm:433`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::find_implementation_pages` 负责根据调用者提供的一组标识符（类型为 `const int &` 的引用以及一个 `int` 值）定位并返回对应符号实现的文档页面索引。调用者需传入足够的信息（例如符号、作用域或位置标识符）来精确指定目标实体；函数返回的 `int` 值表示找到的实现页面，可用于后续的页面渲染、链接构建等流程。
-
-该函数假定所有输入参数均有效，且目标实现页面已存在于当前生成上下文中。若未找到匹配的实现页面，其行为未定义，调用者应仅在确认相关页面已构建后调用此函数。返回的值仅作为内部页面标识符使用，调用者不应依赖其具体数值或顺序。
+函数 `clore::generate::find_implementation_pages` 接受一个 `int` 类型的参数以及若干 `const int &` 类型的引用参数，返回一个 `int` 值。调用者应提供足够的信息以唯一标识目标符号及其关联的代码实体，该函数负责定位并返回与该符号实现相关的页面标识或数量。契约要求输入参数必须有效且能映射到已知的符号分析数据，否则返回值可能为无效标识或零。该函数不负责页面的渲染或内容生成，仅执行页面查找任务。
 
 #### Usage Patterns
 
-- Generates implementation page links for symbol documentation
-- Used in page rendering to provide navigation to implementation details
+- Called during page generation to find implementation pages for a symbol
+- Used to gather links to a symbol's definition or declaration in generated documentation
 
 ### `clore::generate::find_module_for_file`
 
@@ -2269,12 +2228,11 @@ Definition: `generate/render/common.cppm:496`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::find_module_for_file` 根据给定的文件标识符和上下文参数，确定该文件所属的模块，并返回该模块的标识符。调用者提供文件标识符（`const int &`）及一个关联的整数参数，函数返回模块标识符（`int`）。该函数是生成流水线中将文件映射到其所在模块的核心查找入口，供后续模块级页面构建与证据收集使用。
+`clore::generate::find_module_for_file` 根据给定的文件标识符确定该文件所属的模块标识符。调用者应提供对文件引用的常量引用（`const int &`）以及一个附加的整数参数；函数返回一个表示该模块的整数。此函数是生成过程中的基础查找工具，确保文件能够被正确关联到其定义的模块组件。
 
 #### Usage Patterns
 
-- Determining module membership for a source file
-- Mapping file paths to module names for documentation generation
+- Used to map source files to their containing module for documentation generation.
 
 ### `clore::generate::find_type_analysis`
 
@@ -2284,12 +2242,12 @@ Definition: `generate/model.cppm:329`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-函数 `clore::generate::find_type_analysis` 接受一个 `const SymbolAnalysisStore &` 引用和一个整数标识符，返回指向 `const TypeAnalysis` 的指针。调用者应提供一个有效的存储对象，以及该存储中已为某个类型符号记录的分析标识符。返回的指针指向由存储内部管理的分析结果，调用者不得释放该内存。如果给定的标识符在存储中找不到对应的分析，函数返回 `nullptr`，调用者应当在使用前验证返回值非空。
+函数 `clore::generate::find_type_analysis` 接受一个 `const SymbolAnalysisStore &` 和一个 `int` 标识符，返回一个 `const TypeAnalysis *`。它根据给定的符号标识符在分析存储中查找类型分析结果，如果找到则返回指向该结果的指针，否则返回 `nullptr`。调用者应确保存储对象在函数返回后仍然有效，并且传递的整数是存储内可识别的符号标识符；返回的指针生命周期由存储管理，调用者不得通过它来删除或修改所指向的对象。
 
 #### Usage Patterns
 
-- Look up type analysis for a given symbol target key
-- Retrieve cached analysis data for a type
+- Called by other generation pipeline functions to obtain cached type analysis for a symbol.
+- Used after analysis has been performed and stored in the `SymbolAnalysisStore`.
 
 ### `clore::generate::find_variable_analysis`
 
@@ -2299,13 +2257,12 @@ Definition: `generate/model.cppm:335`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-函数 `clore::generate::find_variable_analysis` 根据提供的一个 `SymbolAnalysisStore` 和一个表示符号索引的整数，查找并返回一个指向 `VariableAnalysis` 的常量指针。如果该索引对应的变量分析存在，则返回对应的分析对象；否则返回 `nullptr`。调用者应确保传入的整数是有效的符号索引，并需在访问返回的指针前检查其是否为 `nullptr`。
+函数 `clore::generate::find_variable_analysis` 在给定的 `SymbolAnalysisStore` 中查找与指定整数标识符对应的变量分析结果。它接受一个对 `SymbolAnalysisStore` 的常量引用和一个代表变量标识符的整数，返回一个指向常量 `VariableAnalysis` 的指针。如果未找到对应分析，则返回 `nullptr`。调用者负责确保传入的标识符有效，并在使用返回值前检查非空。
 
 #### Usage Patterns
 
-- retrieving a variable analysis for a given symbol key
-- querying analysis results
-- accessed by documentation generation functions
+- looking up variable analysis by key from the store
+- retrieving analysis data for rendering or processing
 
 ### `clore::generate::for_each_symbol_doc_group`
 
@@ -2315,11 +2272,12 @@ Definition: `generate/render/symbol.cppm:27`
 
 Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
-`clore::generate::for_each_symbol_doc_group` 遍历给定的 `PageDocLayout` 中的所有符号文档组。对于每一个组，它调用传入的 `Visitor` 可调用对象，使其能够在组上执行自定义处理。该函数不控制迭代过程，访问者负责定义对每个组所执行的操作。
+对给定的 `PageDocLayout` 中的每个符号文档组调用提供的访问器。`Visitor` 必须是可调用的，并接受代表一个符号文档组的参数；该函数将按布局内部定义的顺序遍历各组。
 
 #### Usage Patterns
 
-- Iterating over all symbol doc groups in a page layout to generate markdown sections
+- Apply a callback to each symbol documentation group in a layout
+- Process type, variable, and function documentation groups sequentially
 
 ### `clore::generate::format_evidence_text`
 
@@ -2329,11 +2287,12 @@ Definition: `generate/evidence.cppm:580`
 
 Implementation: [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-Formats the provided evidence pack into a text representation suitable for downstream processing. Returns an integer that indicates the status of the operation; a value of zero typically denotes success, while non‑zero values signal an error condition. The caller must supply a valid `EvidencePack` and is responsible for interpreting the returned status code.
+将此函数用于将指定的 `EvidencePack` 格式化为文本形式的证据摘要。调用者提供一个 `const EvidencePack &`，函数会据此生成格式化文本，并返回一个 `int` 值，该值表示结果的状态或标识符。具体的返回语义取决于内部处理，但调用者应将其视为操作完成的信号。
 
 #### Usage Patterns
 
-- called when the full evidence text is needed without truncation
+- called when unbounded evidence text formatting is needed
+- used as a thin wrapper around `format_evidence_text_bounded`
 
 ### `clore::generate::format_evidence_text_bounded`
 
@@ -2343,58 +2302,51 @@ Definition: `generate/evidence.cppm:584`
 
 Implementation: [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-`clore::generate::format_evidence_text_bounded` 接受一个 `EvidencePack` 和一个 `int` 值，生成该证据包的格式化文本，但将输出限制在由该整数参数指定的边界内。该函数返回一个整数值，用于指示结果（例如实际输出的文本长度或状态码）。调用者应确保提供的边界合理，以满足下游消费场景对长度或规模的约束。
+`clore::generate::format_evidence_text_bounded` 接受一个 `EvidencePack` 引用和一个 `int` 边界值，生成并返回该包的格式化证据文本，但输出被截断或限制在指定的边界范围内。返回值是一个 `int`，表示实际产生的文本长度（或某种状态码），调用者应根据此值判断输出是否被截断。调用者必须提供有效的 `EvidencePack` 和一个非负的边界值；若边界为 0，则可能返回空结果。该函数不修改传入的 `EvidencePack`，并假定调用者已确保其数据有效性。
 
 #### Usage Patterns
 
-- Called by `clore::generate::build_prompt` to format evidence with a size limit.
+- Formatting evidence text for documentation pages with a size limit
+- Called during evidence generation to produce bounded strings
 
 ### `clore::generate::generate_dry_run`
 
 Declaration: `generate/generate.cppm:25`
 
-Definition: `generate/scheduler.cppm:1888`
+Definition: `generate/scheduler.cppm:1932`
 
 Implementation: [`Module generate:scheduler`](../../../modules/generate/scheduler.md) | [`Module generate`](../../../modules/generate/index.md)
 
-执行文档生成的干运行，模拟完整的生成流程而不产生任何实际的输出或副作用。它接受两个 `const int &` 参数，分别表示生成所需的输入配置与上下文，并返回一个 `int` 值，通常用于指示干运行的结果状态（例如成功或失败代码），或提供生成的统计信息（如预估的页面数量）。调用者可通过此函数在提交正式生成前验证输入的有效性、预览生成范围或评估潜在的成本。
-
-#### Usage Patterns
-
-- called to simulate generation without side effects
+执行 `clore::generate::generate_dry_run` 会启动一个干运行生成流程，在不实际写入输出文件的情况下模拟代码生成的完整步骤。调用者提供两个 `const int &` 参数，函数返回一个 `int` 状态码：零表示干运行成功完成，非零值表示过程中的错误或异常。此函数主要用于验证生成配置、检查依赖关系或预览生成结果，而无需承担实际生成带来的副作用。
 
 ### `clore::generate::generate_pages`
 
 Declaration: `generate/generate.cppm:28`
 
-Definition: `generate/scheduler.cppm:1947`
+Definition: `generate/scheduler.cppm:1991`
 
 Implementation: [`Module generate:scheduler`](../../../modules/generate/scheduler.md) | [`Module generate`](../../../modules/generate/index.md)
 
-`clore::generate::generate_pages` 是文档生成的入口函数。它接受分析数据和配置参数，执行完整的页面构建流程，并将结果写入目标位置。调用者需要提供两个整数参数（通常表示文档索引结构与符号分析存储）、输出路径（`std::string_view`）、并发任务数（`std::uint32_t`）以及输出格式标识（`std::string_view`）。函数返回一个整数，表示操作结果：零通常代表成功，非零值指示错误或异常终止。该函数是同步阻塞的，调用者应确保所有前置数据已就绪，并在调用后根据返回值决定后续处理。
-
-该函数不负责数据采集或分析，仅负责将已经准备好的内容渲染为文档页面。它隐含承诺：若返回成功，则输出目录下已存在完整生成的文档集，且页面之间的链接和引用均基于同一套页面规划解析。调用者无需关心内部页面计划的构建顺序或缓存策略。
+`clore::generate::generate_pages` 是文档页面生成过程的同步入口点。它接受生成所需的全部参数（包括标识符引用、字符串视图和数值），执行完整的生成流程，并将结果输出到指定位置。调用该函数前应确保所有必要的输入数据已准备就绪，且输出目录可写。返回值指示生成操作是否成功，非零值对应异常或错误状态。
 
 #### Usage Patterns
 
-- Called as the main generation entry point
+- no explicit usage patterns evident from the evidence
 
 ### `clore::generate::generate_pages_async`
 
 Declaration: `generate/generate.cppm:37`
 
-Definition: `generate/scheduler.cppm:1925`
+Definition: `generate/scheduler.cppm:1969`
 
 Implementation: [`Module generate:scheduler`](../../../modules/generate/scheduler.md) | [`Module generate`](../../../modules/generate/index.md)
 
-`clore::generate::generate_pages_async` 是一个异步页面生成函数，它在指定的 `kota::event_loop` 上执行。该函数接受页面范围、输出路径、配置标记和事件循环引用等参数，并返回一个表示生成任务的对象。
-
-调用者的职责是将返回的任务调度到所提供的 `kota::event_loop` 上，并确保其运行以触发实际的生成过程。若不调度并运行该任务，页面生成不会发生。
+函数 `clore::generate::generate_pages_async` 是一个异步页面生成入口，用于在调用者提供的 `kota::event_loop` 上执行页面生成任务。它接受生成所需的各种参数（如页面标识符、配置视图和输出路径）并返回一个任务对象（以 `int` 形式表示）。调用者必须将返回的任务调度到给定的 `kota::event_loop` 并显式运行它，才能启动实际的页面生成过程；该函数本身仅负责创建任务，不触发任何执行。因此，其契约要求调用者负责任务的生命周期管理，包括确保事件循环正在运行。
 
 #### Usage Patterns
 
-- callers schedule the returned task on the event loop
-- run the scheduled task on the loop
+- Callers must schedule the returned task on the loop and run it.
+- Used for asynchronous page generation.
 
 ### `clore::generate::is_base_symbol_analysis_prompt`
 
@@ -2404,12 +2356,14 @@ Definition: `generate/analysis.cppm:325`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-该函数判断传入的 `PromptKind` 值是否属于“基础符号分析”提示类别。调用者可利用此函数对提示类型进行快速分类，以在生成分析提示或选择处理逻辑时作出分支决策。
+`clore::generate::is_base_symbol_analysis_prompt` 是一个查询函数，用于判断传入的 `int` 参数是否表示一个“基础符号分析”类型的提示。调用者通过传递一个代表提示种类（通常来自 `PromptKind` 枚举的整数值）的参数，获得一个 `bool` 结果，从而确定该提示是否属于基础符号分析类别。
+
+该函数是代码生成管线中常用的一系列提示种类判定函数之一（例如 `is_symbol_analysis_prompt`、`is_page_summary_prompt`）。它帮助调用者在构建分析证据、选择提示模板或路由后续处理逻辑时，依据提示的种类做出分支决策。调用者应保证传入的整数值是有效的提示种类标识符，否则行为未定义。
 
 #### Usage Patterns
 
-- used to filter prompt kinds for base symbol analysis
-- called by other analysis functions to categorize prompts
+- used to classify a `PromptKind` as a base symbol analysis prompt
+- likely used in control flow to branch on analysis type
 
 ### `clore::generate::is_declaration_summary_prompt`
 
@@ -2419,12 +2373,13 @@ Definition: `generate/analysis.cppm:330`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-函数 `clore::generate::is_declaration_summary_prompt` 是一个谓词，用来确定给定的 `PromptKind` 值是否表示一种声明摘要提示。调用者使用它来筛选或判定提示类型：当且仅当该提示对应于某个符号（如函数、类型或变量）的声明摘要时，返回 `true`。返回值直接用于在生成过程中选择性地构建或处理声明摘要相关的证据与提示内容，与 `clore::generate::is_page_summary_prompt` 等同类函数一起构成提示分类的判断接口。
+`clore::generate::is_declaration_summary_prompt` 接受一个标识提示类型的整数参数，返回 `bool`。调用方可通过它判断给定的提示种类是否为声明摘要（declaration summary）提示，并据此选择不同的处理分支。返回 `true` 表示该提示是声明摘要提示，否则不是。
 
 #### Usage Patterns
 
-- Used in conditional logic to branch based on whether a prompt kind is a declaration summary
-- May be called during prompt construction or evidence building
+- classification of prompt kinds
+- guarding generation of declaration summary prompts
+- filtering in prompt dispatch logic
 
 ### `clore::generate::is_function_kind`
 
@@ -2434,12 +2389,12 @@ Definition: `generate/model.cppm:393`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::is_function_kind` 接受一个表示符号种类的整数，并返回一个布尔值，指示该整数是否对应于函数符号种类。调用者可以使用此谓词来筛选符号分类，例如在构建符号列表或确定页面类型时。该函数是只读查询，不会修改任何状态。
+该函数用于判断一个整数是否对应生成系统中的函数种类。调用者传入一个表示符号种类的整数，若该整数代表函数类别则返回 `true`，否则返回 `false`。这一判定在构建符号分析、页面布局或证据收集等流程中用于区分函数型符号与其他符号。
 
 #### Usage Patterns
 
-- Used to filter symbols in generation logic
-- Classifies symbol kinds as function-like
+- 用于过滤符号分析中的函数或方法
+- 作为 `is_function_kind` 谓词传递给算法
 
 ### `clore::generate::is_page_level_symbol`
 
@@ -2449,12 +2404,13 @@ Definition: `generate/model.cppm:405`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::is_page_level_symbol` 是一个谓词函数，用于判断由两个 `const int &` 参数共同标识的符号是否属于页面级别。调用者可通过此函数确定符号是否需要在其专属页面中呈现，或者是否应被纳入其他页面的内容中。
+`clore::generate::is_page_level_symbol` 判断给定符号是否应生成为独立页面。它接受两个 `const int &` 参数（通常表示符号标识符和所在页面或上下文标识），返回 `bool`。调用者可利用此函数确定符号是否需要专属的生成页面，从而控制页面计划集的构建。
 
 #### Usage Patterns
 
-- called during page generation to filter symbols for page creation
-- used in `render_page_bundle` or similar pipelines
+- called during page plan construction to filter symbols that get dedicated pages
+- used in `build_page_plan_set` and similar top-level generation logic
+- likely called for each symbol in the model to decide page creation
 
 ### `clore::generate::is_page_summary_prompt`
 
@@ -2464,11 +2420,12 @@ Definition: `generate/model.cppm:297`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-函数 `clore::generate::is_page_summary_prompt` 判定给定的 `PromptKind` 是否代表一个页面摘要提示。调用者使用此函数来区分页面摘要提示与其他提示类别（如声明摘要或符号分析），以决定如何处理或路由该 `PromptKind`。当 `PromptKind` 对应页面摘要时返回 `true`，否则返回 `false`。
+`clore::generate::is_page_summary_prompt` 是一个谓词，接受一个 `PromptKind` 并返回 `bool`。它确定给定的提示类型是否对应页面摘要提示。调用者可以使用该函数在生成管线中区分提示种类，例如判断是否需要为页面生成摘要内容。该函数假设传入的 `PromptKind` 有效，无其他前置条件。
 
 #### Usage Patterns
 
-- Used to classify prompt kinds for conditional logic in page generation.
+- 用于条件判断是否需要生成命名空间或模块的页面摘要
+- 在提示构建流程中筛选提示类型
 
 ### `clore::generate::is_symbol_analysis_prompt`
 
@@ -2478,14 +2435,11 @@ Definition: `generate/model.cppm:301`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-函数 `clore::generate::is_symbol_analysis_prompt` 接受一个 `PromptKind` 作为输入，并返回一个 `bool` 值。它用于判断给定的提示类型是否属于符号分析提示类别，返回 `true` 表示该提示应当触发符号分析相关流程，返回 `false` 则表示不属于该类别。
-
-调用者可以在决策逻辑中使用此函数来分支处理符号分析提示与其他类型的提示。该函数是纯查询操作，无副作用，其契约完全由输入 `PromptKind` 决定返回值。
+函数 `clore::generate::is_symbol_analysis_prompt` 接受一个 `PromptKind` 参数，返回一个 `bool` 值，用于判断给定的提示种类是否属于符号分析提示类别。调用方可依赖该函数来区分提示类型，从而决定是否应当触发针对符号的深入分析流程。当且仅当参数是表示符号分析请求的变体时，函数返回 `true`。
 
 #### Usage Patterns
 
-- Used to classify prompt kinds into symbol analysis categories
-- Conditional dispatch in prompt generation or evidence building
+- Used to classify a `PromptKind` as a symbol analysis prompt in conditional logic
 
 ### `clore::generate::is_type_kind`
 
@@ -2495,12 +2449,12 @@ Definition: `generate/model.cppm:380`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::is_type_kind` 接受一个整数作为输入，并返回一个布尔值，指示该整数是否代表一个类型种类（type kind）。调用方可以传入来自种类枚举或类似分类体系的值，函数会基于内部映射确定该值是否对应一个类型种类。对于任何整数值输入，该函数的行为都是确定的：如果该值被识别为类型种类则返回 `true`，否则返回 `false`。该函数不依赖外部状态，不产生副作用，每次调用都是纯计算性的。
+`clore::generate::is_type_kind` 判断给定的整数是否对应一个“类型”类别的符号种类。调用者传入一个表示符号种类的整数值（通常来自 `SymbolKind` 枚举或类似分类），函数返回 `true` 当该值与类型相关（例如类、结构体、枚举等），否则返回 `false`。其契约是：输入必须是一个合法的符号种类标识符，函数仅检查该标识符是否属于类型范畴，不涉及其他校验。
 
 #### Usage Patterns
 
-- Used in code generation logic to filter or categorize symbols by kind.
-- Likely called by `build_evidence_for_type_*` functions to determine if a symbol is a type.
+- used to filter or categorize symbol kinds as type related
+- called when determining if a symbol is a type for analysis or page building
 
 ### `clore::generate::is_variable_kind`
 
@@ -2510,12 +2464,13 @@ Definition: `generate/model.cppm:401`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-函数 `clore::generate::is_variable_kind` 接受一个表示符号种类的整数参数。它返回 `true` 如果该种类对应于变量（例如普通变量或成员变量），否则返回 `false`。该谓词用于在符号分类、分析及文档生成流程中区分变量与其他符号（如函数、类型或命名空间）。调用者应确保传入的值是有效的符号种类标识符，且结果仅用于决策，不涉及具体存储或输出格式。
+函数 `clore::generate::is_variable_kind` 是一个公共谓词，接受一个整数参数并返回布尔值。它用于判断传入的整数值是否代表一个变量种类（variable kind）。此函数常用于生成流程中，依据符号的种类对符号进行分类，以便针对变量执行特定的文档构建或分析逻辑。调用者应确保传入的参数是有效的种类标识符，函数将根据其内部映射返回对应的布尔结果。
 
 #### Usage Patterns
 
-- used to filter symbols by variable-like kinds
-- used in predicate checks for symbol classification
+- used as a predicate to filter variable-like symbols in collections
+- paired with other `is_*_kind` functions like `is_function_kind` and `is_type_kind`
+- passed to functions that accept a predicate over `SymbolKind`, such as `collect_namespace_symbols`
 
 ### `clore::generate::make_blockquote`
 
@@ -2525,12 +2480,14 @@ Definition: `generate/markdown.cppm:169`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-将输入的内容包装为 Markdown 块引用（blockquote）。调用者需提供一个整数参数，表示待引用的 Markdown 内容（如通过 `make_raw_markdown` 等函数构建的节点标识）；函数返回一个 `MarkdownNode`，该节点在渲染后会被包裹为块级引用格式。
+函数 `clore::generate::make_blockquote` 用于将一个 Markdown 节点包装为块引用格式的节点。它接受一个表示原始内容的参数，并返回一个 `MarkdownNode` 实例，该实例在渲染时将生成符合 Markdown 语法的块引用结构。
+
+调用方负责提供有效的 Markdown 节点作为输入，该节点通常包含需要引用的文本或内联元素。返回值可直接嵌入到 `MarkdownDocument` 或作为其他节点的子节点使用。该函数不修改输入节点，而是创建新的容器节点。
 
 #### Usage Patterns
 
-- Create blockquote markdown nodes
-- Called when generating markdown content
+- Used to generate blockquote nodes in markdown output.
+- Typically called when constructing markdown fragments for documentation pages.
 
 ### `clore::generate::make_code`
 
@@ -2540,12 +2497,12 @@ Definition: `generate/markdown.cppm:136`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::make_code` 接受一个整数参数（通常表示需要格式化的代码片段或符号的标识），并返回一个整数，该整数代表生成的 Markdown 代码表示（例如，内联代码或代码块）的内部节点 ID。调用者应确保提供的参数在上下文中有效且对应可序列化的代码内容，返回的节点 ID 可用于后续的 Markdown 文档构建操作（如组合段落、节或页面）。该函数不直接执行任何副作用的写入或渲染，仅生成结构化的 Markdown 节点。
+`clore::generate::make_code` 接受一个整数参数，该参数标识待嵌入的代码片段或源位置。它返回一个整数句柄，表示一个代码元素（例如代码块或内联代码），该句柄可在后续的 Markdown 渲染流程中使用。调用者需确保提供的整数在有效范围内。
 
 #### Usage Patterns
 
-- 在 Markdown 渲染中创建内联代码
-- 包装字符串为代码片段
+- wrapping code text into an `InlineFragment` for markdown rendering
+- used in markdown generation functions that produce code spans
 
 ### `clore::generate::make_code_fence`
 
@@ -2555,11 +2512,12 @@ Definition: `generate/markdown.cppm:156`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-函数 `clore::generate::make_code_fence` 创建一个表示 Markdown 代码围栏的 `MarkdownNode`。调用者传入两个整数参数，分别指定代码的语言标识和代码正文内容，该函数返回一个结构化的节点，用于在文档中呈现格式化的代码块。此函数是构建 Markdown 文档的基础工具之一，与 `clore::generate::make_mermaid` 和 `clore::generate::make_blockquote` 等节点构造函数处于同一层级，负责生成常见的 Markdown 容器元素。
+`clore::generate::make_code_fence` 创建一个表示 Markdown 代码围栏的 `MarkdownNode`。调用者需提供两个 `int` 参数，分别指定代码内容及其语法类型或配置标识，函数返回一个可嵌入文档树的节点。该节点在渲染时将生成一个标记有语言标识的代码块。
 
 #### Usage Patterns
 
-- Used to generate a code fence `MarkdownNode` for embedding code snippets in documentation.
+- Used to generate code blocks in documentation
+- Called when rendering code snippets in markdown output
 
 ### `clore::generate::make_link`
 
@@ -2569,14 +2527,14 @@ Definition: `generate/markdown.cppm:140`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::make_link` 创建并返回一个链接表示，该链接基于两个整数参数和一个布尔参数配置。调用者传入目标标识符、附加标识符和是否启用特定行为，函数返回一个整数句柄，该句柄可在后续生成操作中引用此链接。
+函数 `clore::generate::make_link` 接受一个 `int` 类型的链接目标标识符、一个 `int` 类型的链接文本标识符以及一个 `bool` 类型的格式选项，并返回一个 `int` 值，代表生成的链接元素。
 
-调用方负责确保提供的参数在其使用上下文中有效，并期望返回的整数标识符在整个生成过程中保持稳定。此函数不直接处理文本或目标解析，而是提供底层节点构造的基本契约。
+调用者负责确保提供的标识符对应于已定义的内容。返回的值可用于在后续的Markdown构建操作中引用此链接。
 
 #### Usage Patterns
 
-- Building inline links for markdown generation
-- Creating link fragments with optional code formatting
+- Called to produce link fragments in markdown generation
+- Used where a hyperlink or cross-reference node is needed
 
 ### `clore::generate::make_link_target`
 
@@ -2586,12 +2544,11 @@ Definition: `generate/render/common.cppm:81`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-调用 `clore::generate::make_link_target` 时需要三个整数参数和一个布尔参数。该函数根据这些参数构造并返回一个 `LinkTarget` 值，该值封装了用于文档生成中链接的目标信息。整数参数共同指定目标的身份（如符号索引或页面编号），布尔参数控制链接的某些特性（例如是否使用绝对路径）。调用者可将此 `LinkTarget` 传递给其他链接生成函数，以在输出的文档中创建正确的超链接。
+`clore::generate::make_link_target` 根据提供的三个 `int` 参数和一个 `bool` 参数构造一个 `LinkTarget` 实例。调用者负责提供正确的整数值，以唯一标识文档内的目标；布尔参数控制该目标是否应生成为相对链接。返回的 `LinkTarget` 可用于后续的链接渲染。
 
 #### Usage Patterns
 
-- 在生成文档页面时创建链接目标
-- 配合 `make_relative_link_target` 使用以生成相对路径
+- called to create link targets for page navigation or cross-references in documentation generation
 
 ### `clore::generate::make_mermaid`
 
@@ -2601,11 +2558,12 @@ Definition: `generate/markdown.cppm:165`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-调用者可以通过整数参数调用 `clore::generate::make_mermaid` 来请求生成一个表示 Mermaid 图的 `MarkdownNode`。该函数负责根据参数构造符合 Mermaid 语法的标记，调用者可将返回的节点插入到更大的文档结构中，在其输出时将被渲染为对应的图表。节点本身封装了完整的 Mermaid 内容，无需额外格式化。
+The caller provides an integer that represents a Mermaid diagram definition or identifier. `clore::generate::make_mermaid` returns a `MarkdownNode` that wraps the input as a Mermaid code block, ready for embedding in a generated Markdown document. This function is a convenience wrapper for constructing diagram nodes without manually building the Mermaid markup.
 
 #### Usage Patterns
 
-- Wrap Mermaid diagram code into a `MarkdownNode` for markdown generation
+- called to generate Mermaid diagram nodes for documentation pages
+- used as part of render functions that produce Markdown output
 
 ### `clore::generate::make_paragraph`
 
@@ -2615,12 +2573,14 @@ Definition: `generate/markdown.cppm:148`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-函数 `clore::generate::make_paragraph` 创建一个表示 Markdown 段落的节点。它接收一个整数参数，该参数通常标识源文档中的内容片段或相关元数据，并返回一个 `MarkdownNode` 实例。调用者负责提供有效的整数，并可以将返回的节点用于组装更大的 Markdown 文档结构。
+`clore::generate::make_paragraph` 创建一个表示 Markdown 段落的节点。调用者传入一个 `int` 参数，该参数指定段落内容；参数的确切语义由调用者负责约定（例如，可能是一个文本标识符、内容索引或长度）。函数返回一个 `MarkdownNode`，该节点可进一步组合到 `MarkdownDocument` 中，以生成最终的 Markdown 输出。
+
+该函数是 Markdown 节点工厂族的一部分，与 `clore::generate::make_blockquote`、`clore::generate::make_code` 等类似，用于在生成管线中结构化地构建页面内容。调用者应确保传入的参数在调用上下文中有效，且与预期的段落内容一致。
 
 #### Usage Patterns
 
-- creating a paragraph markdown element
-- wrapping text into a paragraph node
+- used as a factory function when building markdown structures that require a paragraph node
+- likely called from higher-level page generation functions
 
 ### `clore::generate::make_raw_markdown`
 
@@ -2630,12 +2590,12 @@ Definition: `generate/markdown.cppm:152`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::make_raw_markdown` 创建一个 `MarkdownNode`，表示一段原始 Markdown 文本，其内容不会经过额外的转义或格式化处理。调用者通过一个整数参数指定要使用的原始 Markdown 内容（例如通过内部表示中的某个标识符）。返回的节点可直接被插入到 Markdown 文档树中，渲染时会原样输出，因此调用者需确保提供的文本是有效的 Markdown 且不包含未闭合的结构。
+`clore::generate::make_raw_markdown` 接受一个整数参数，并返回一个表示原始 Markdown 内容的 `MarkdownNode` 对象。调用者负责提供有效的整数输入，该函数承诺返回一个可直接用于构建 Markdown 文档结构的节点。
 
 #### Usage Patterns
 
-- Constructing a `MarkdownNode` from a raw markdown string
-- Wrapping preformatted markdown content for inclusion in a document
+- constructing a raw markdown node from a string
+- used as a helper to build markdown content
 
 ### `clore::generate::make_relative_link_target`
 
@@ -2645,12 +2605,12 @@ Definition: `generate/render/common.cppm:57`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::make_relative_link_target` 接受两个整数参数，分别表示源和目标位置的标识符，并返回一个用于唯一标识相对链接目标的整数。该函数是文档生成过程中构建页面间导航链接的基础设施，调用者可通过其返回值在链接解析中引用一个相对目标。函数假定传入的标识符有效且属于同一个生成上下文；未定义传入无效标识符时的行为。
+`clore::generate::make_relative_link_target` 根据给定的两个整数参数计算并返回一个整数，该整数用于标识文档生成过程中的相对链接目标。调用方需要提供源位置和目标位置的索引（通常对应于页面或符号的标识符），函数返回的整数值可用于在链接解析或路径生成中表示相对跳转关系。该函数不处理绝对路径或外部资源，仅用于同一文档集合内的相对引用。
 
 #### Usage Patterns
 
-- generates relative href attributes in page links
-- used when constructing cross-references between documentation pages
+- Used by page generation logic to create relative links between markdown pages
+- Called during link resolution for documentation cross-references
 
 ### `clore::generate::make_section`
 
@@ -2660,12 +2620,12 @@ Definition: `generate/markdown.cppm:173`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::make_section` 根据给定的 `SemanticKind` 枚举值、四个整数参数和两个布尔标志构建一个 section，并返回一个 `int` 作为该 section 的标识符或句柄。调用方应提供所有六个参数，并确保参数含义与当前文档生成上下文一致；返回的整数可用于后续对 section 的引用或组装。各参数的具体语义由上层调用约定，函数本身不校验除类型外的参数合法性。
+函数 `clore::generate::make_section` 接受一个 `SemanticKind` 枚举、四个整数参数和两个布尔参数，返回一个整型标识符。它用于根据指定的语义种类和数值参数创建一个 Markdown section。返回的整型值可用于在后续的文档构建中引用该 section。调用者需要提供合理的参数值以确保生成的 section 符合预期的文档结构和内容组织。
 
 #### Usage Patterns
 
-- Creating a semantic section for markdown generation
-- Building a section node in the page structure
+- Called to build `SemanticSection` nodes in a documentation generation pipeline
+- Used within functions like `build_list_section` or `build_prompt_section` to construct document tree structures
 
 ### `clore::generate::make_source_link_target`
 
@@ -2675,11 +2635,12 @@ Definition: `generate/render/common.cppm:383`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-该函数生成一个指向源代码位置的链接目标，调用者通过提供描述源文件或位置的分量（三个整数引用和一个整数）来指定目标。返回的 `LinkTarget` 对象可供后续链接构建使用，从而在文档中生成可导航至对应源代码区域的链接。
+该函数根据给定的源位置信息构造一个用于引用源代码中特定点的 `LinkTarget` 对象。调用方需提供标识目标位置的必要参数（类型为 `const int &` 的三个参数与一个 `int` 参数），并确保其有效性；返回的 `LinkTarget` 可供后续链接生成使用。
 
 #### Usage Patterns
 
-- Used in page rendering to create source code links
+- Creating source link targets for documentation page rendering
+- Generating clickable links from code locations to rendered output
 
 ### `clore::generate::make_source_relative`
 
@@ -2689,12 +2650,12 @@ Definition: `generate/model.cppm:432`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::make_source_relative` 接受两个 `const int&` 参数，返回一个 `int` 值。它根据两个源位置句柄计算出一个表示相对引用的整数标识符，通常用于在生成的文档中建立源文件路径或链接的相对关系。调用方应提供有效的源标识符；内部通过缓存机制保证多次调用同一对标识符时的效率与稳定性。该结果是后续文档渲染步骤中生成相对路径或链接的关键输入之一。
+函数 `clore::generate::make_source_relative` 接受两个 `const int &` 参数，并返回一个 `int`，表示这两个整数之间的某种相对关系（例如相对偏移或索引）。调用者应提供代表源位置或标识符的有效整数引用；返回值可用于在源上下文中进行相对定位或比较。该函数可能利用内部缓存（如 `clore::generate::(anonymous namespace)::source_relative_cache`）来优化重复调用的性能，但调用者无需关心缓存细节，只需确保传入的参数有效且符合预期的语义即可。
 
 #### Usage Patterns
 
-- Called by page generation functions to make paths relative for output
-- Used when building link targets or source locations
+- Computing relative paths for source files
+- Caching path computations for performance
 
 ### `clore::generate::make_symbol_target_key`
 
@@ -2704,12 +2665,13 @@ Definition: `generate/model.cppm:306`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::make_symbol_target_key` 接受一个表示符号标识符的 `const int &`，并生成一个整数键，该键可作为后续查找或映射操作中的目标键使用。调用方应提供有效的符号标识符；返回的键保证在生成上下文内具有唯一性和可逆性——对应的逆操作由 `clore::generate::parse_symbol_target_key` 提供。
+为给定的符号标识符生成一个符号目标键。该函数接受一个 `const int &` 形式的符号标识符，并将其转换为一个唯一的 `int` 键，用于在生成基础设施中标识和查找符号目标。调用者应提供有效的符号标识符，函数保证返回一个可重复的、与输入对应的键值。
 
 #### Usage Patterns
 
-- Used to generate target keys for symbols during page building
-- Called when constructing link targets and symbol references
+- used to produce a lookup key for symbol information
+- paired with `clore::generate::parse_symbol_target_key` to decode the key back
+- likely called when indexing or caching symbol data during documentation generation
 
 ### `clore::generate::make_text`
 
@@ -2719,12 +2681,12 @@ Definition: `generate/markdown.cppm:132`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::make_text` 是一个公开函数，负责根据提供的单个 `int` 参数生成并返回一个 `int` 类型的文本表示。调用者需要传递一个合法的整数输入，并接收一个整数作为结果，该结果可用于后续引用或处理生成的文本内容。函数的具体语义由其参数和返回值的含义决定，调用者应参考相关文档以了解输入值与输出文本之间的对应关系。
+函数 `clore::generate::make_text` 接受一个 `int` 参数，并返回一个 `int`。调用者应提供一个有效的整数标识符，该函数将据此生成并返回一个文本表示的结果。返回的 `int` 值可用于后续处理或标识所生成的文本。调用者需确保传入的参数在预期范围内，且函数不保证对无效输入的处理。
 
 #### Usage Patterns
 
-- building markdown inline fragments
-- converting `std::string` to `TextFragment`
+- creating inline text fragments for markdown generation
+- building `TextFragment` nodes from user-supplied or synthesized strings
 
 ### `clore::generate::namespace_of`
 
@@ -2734,11 +2696,11 @@ Definition: `generate/render/common.cppm:53`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-函数 `clore::generate::namespace_of` 接受一个整数参数（通常表示某个符号的唯一标识），返回该符号所属命名空间的整数标识。调用方应保证传入的标识对应已知符号；如果符号不属于任何命名空间，返回值可能指示全局作用域或未命名命名空间。该函数常用于确定符号的层级归属，以便后续生成命名空间相关的文档结构。
+`clore::generate::namespace_of` 接受一个整数参数，该参数代表一个标识符（例如符号标识符），并返回另一个整数，表示该标识符所属命名空间的标识符。调用者应保证传入的标识符有效且关联的命名空间可解析；对于无效输入，行为未定义。该函数主要用于生成流程中定位符号的命名空间上下文。
 
 #### Usage Patterns
 
-- Used to compute the namespace portion of a qualified symbol name for page generation or analysis.
+- extracts namespace prefix from qualified names in the documentation generation pipeline
 
 ### `clore::generate::normalize_frontmatter_title`
 
@@ -2748,12 +2710,12 @@ Definition: `generate/render/symbol.cppm:885`
 
 Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
-`clore::generate::normalize_frontmatter_title` 接受一个表示前端标题的整数输入，并返回其规范化形式的整数标识符。该函数确保标题符合文档生成的内部格式约定，消除不一致性，使得后续的页面渲染和链接解析能够基于统一的标题表示。调用者应在将标题嵌入最终输出之前调用此函数，以保证标题在文档中的表现一致。
+`clore::generate::normalize_frontmatter_title` 是文档生成流水线中的一个工具函数，负责规范化 frontmatter 标题文本。调用者传入一个表示原始标题的整数句柄（可能是内部字符串标识符），该函数返回一个处理后的新整数句柄，代表规范化后的标题。调用者无需了解规范化具体规则，仅需确保提供的句柄有效且函数执行后对新句柄的生命周期负责（通常由生成系统管理）。该函数在渲染页面 markdown 或构建标题链接等场景中被间接调用，作为标题预处理步骤，保证输出标题格式一致、符合预期。
 
 #### Usage Patterns
 
-- Used to clean page titles extracted from frontmatter metadata
-- Likely invoked during page rendering in the generate module
+- Used to sanitize page titles for frontmatter in page generation
+- Called to ensure a clean, non-empty title string from potentially markdown-formatted input
 
 ### `clore::generate::normalize_markdown_fragment`
 
@@ -2763,12 +2725,12 @@ Definition: `generate/analysis.cppm:267`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-`clore::generate::normalize_markdown_fragment` 接受一对 `std::string_view` 参数：第一个是待规范化的原始 Markdown 片段，第二个是规范化上下文。该函数对片段执行标准化处理，使其符合一致的格式要求，以用于后续的文档生成步骤。返回值是一个 `int`，表示操作的结果状态。调用者应检查该值以确认规范化是否成功。
+函数 `clore::generate::normalize_markdown_fragment` 接受两个 `std::string_view` 参数并返回一个 `int`。调用者应将其视为对给定 Markdown 片段执行规范化的入口：该函数根据内部约定调整片段的格式或结构，并返回一个整数值以指示操作结果（例如成功或错误代码）。调用者负责检查返回值以确认规范化是否成功，并确保传递的字符串视图在函数执行期间保持有效。该函数是 `clore::generate` 命名空间中 Markdown 生成管线的一部分，用于保持输出文档的一致性。
 
 #### Usage Patterns
 
-- normalize AI-generated markdown fragments before rendering
-- validate and clean markdown snippets for documentation pages
+- Called as a preprocessing step before embedding markdown into generated documentation
+- Used in rendering pipelines to ensure fragments are valid and consistently formatted
 
 ### `clore::generate::page_summary_cache_key_for_request`
 
@@ -2778,12 +2740,14 @@ Definition: `generate/dryrun.cppm:293`
 
 Implementation: [`Module generate:dryrun`](../../../modules/generate/dryrun.md)
 
-函数 `clore::generate::page_summary_cache_key_for_request` 负责为给定的页面摘要请求生成一个唯一且确定性的缓存键。调用者需提供两个 `const int &` 参数，其具体语义由调用上下文约定（通常为请求标识或上下文状态），函数返回一个 `int` 类型的键值。此键用于在缓存中索引或检索对应的页面摘要数据，确保相同输入始终映射到相同键。
+函数 `clore::generate::page_summary_cache_key_for_request` 根据两个整型标识符生成一个用于检索页面摘要缓存的唯一键。调用者应提供表示请求上下文的两个标识符（例如页面标识和请求类型），返回的 `int` 可用作缓存桶或查找键。
+
+此函数不执行 I/O 或网络操作，仅基于其参数计算一个确定性键值。调用者需保证传入的参数组合能唯一标识一个缓存条目；若参数组合重复，返回的键可能相同，但缓存一致性由调用方负责。
 
 #### Usage Patterns
 
-- Called to produce a cache key for page summary caching
-- Filters requests that should be cached based on prompt kind
+- Called to generate cache keys for page summary requests during page generation
+- Used to avoid redundant computations when the same summary request is repeated
 
 ### `clore::generate::page_supports_symbol_subpages`
 
@@ -2793,11 +2757,12 @@ Definition: `generate/render/symbol.cppm:893`
 
 Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
-判断给定的页面标识符是否支持符号子页面。此函数接受一个 `const int &` 类型的页面标识符，并返回一个 `bool` 值，指示该页面是否能够包含符号子页面。调用者可以使用此结果来决定是否对相应页面执行子页面相关的渲染或布局操作。
+`clore::generate::page_supports_symbol_subpages` 检查给定的页面是否支持生成符号子页面。调用者传入一个 `int` 类型的页面标识符，函数返回 `bool`，指示该页面是否应包含符号子页面。此函数用于页面生成过程中的条件判断，决定是否对特定页面进一步展开子页面内容。
 
 #### Usage Patterns
 
-- Checking if a page can have subpages for symbols
+- Used to conditionally generate symbol subpages for namespace and module pages during page planning or rendering.
+- Called as a quick predicate to filter page types that support additional subpage structures.
 
 ### `clore::generate::page_type_name`
 
@@ -2807,11 +2772,12 @@ Definition: `generate/model.cppm:263`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-函数 `clore::generate::page_type_name` 接受一个 `PageType` 参数并返回一个 `int`。调用者应提供代表某种页面分类的 `PageType` 值，该函数返回一个整数，用于标识或表示对应页面类型的规范化名称。此返回值通常用于内部路由、缓存键或者生成页面标题的查找依据。调用者需要确保传入的 `PageType` 枚举值在有效范围内，以便获得稳定且有意义的整数映射。
+`clore::generate::page_type_name` 接受一个 `PageType` 枚举值并返回一个整数标识符，该整数标识符唯一对应所给的页面类型。调用者可以将此标识符用作后续页面生成流程中的键或索引，以区分不同类型的页面。调用者需保证传入的 `PageType` 值是有效的枚举成员；函数在契约上承诺为每个已知的页面类型返回一个稳定且非负的整数。
 
 #### Usage Patterns
 
-- Used wherever a string representation of a page type is needed, such as in page generation or naming.
+- Converting page type to string for logging or page construction
+- Used when generating page paths or labels
 
 ### `clore::generate::parse_markdown_prompt_output`
 
@@ -2821,11 +2787,13 @@ Definition: `generate/analysis.cppm:281`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-`clore::generate::parse_markdown_prompt_output` 解析来自提示的 Markdown 格式输出，将结构化内容提取为调用者可用的形式。它接受两个 `std::string_view` 参数——分别代表原始输出和关联的预期格式或上下文信息——并返回一个整型结果代码，指示解析是否成功或标识提取的数据。调用者必须确保传入的字符串视图在函数执行期间保持有效。
+解析由 `clore::generate` 生成的 Markdown prompt 输出。函数接受两个字符串视图：第一个为待解析的原始 Markdown 文本，第二个为可选的规范说明或上下文标识。返回一个整型值，表示解析操作的状态（例如成功或失败）或结果计数。
+
+调用者需确保提供的 Markdown 文本是有效的 prompt 输出，并且第二个参数正确标识了预期的解析规则。此函数不改变输入数据，只负责提取并整理结构化信息以供后续流程使用。
 
 #### Usage Patterns
 
-- used in the generation pipeline to normalize markdown responses from prompt outputs
+- Called to normalize the raw markdown output of a prompt request before further analysis or rendering.
 
 ### `clore::generate::parse_structured_response`
 
@@ -2835,11 +2803,13 @@ Definition: `generate/analysis.cppm:252`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-`clore::generate::parse_structured_response` 是一个模板函数，负责将结构化文本响应（如 AI 生成的格式化输出）解析为调用方可用的整数状态或标识符。调用方提供两个 `std::string_view` 参数：第一个是待解析的响应正文，第二个是用于控制解析行为或指定响应格式的上下文标识符。返回值 `int` 指示解析结果，通常零表示成功，负数表示特定错误原因。函数的实际解析逻辑由模板参数 `T` 特化，但无论特化如何，调用方始终应检查返回值以验证解析是否按预期完成。输入必须是符合预期结构化模式的有效文本，否则函数可能返回错误码。
+函数 `clore::generate::parse_structured_response` 是被模板参数 `T` 参数化并接收两个 `std::string_view` 参数：第一个是结构化响应的原始内容，第二个是标识预期格式或上下文的辅助字符串。调用者必须确保提供的第一个字符串具有与 `T` 所表明的结构相匹配的格式，并且第二个字符串正确指定了解析该响应所需的上下文或模式。该函数返回一个整数结果码，指示解析是否成功——通常 0 表示成功，而非零值表示具体的错误类型。它被设计为将来自下游系统的结构化输出转换为可由调用者检查的状态代码，从而避免直接暴露底层解析机制。
 
 #### Usage Patterns
 
-- called to parse a structured JSON response from an AI prompt into an analysis object
+- parsing structured JSON responses from AI models
+- handling deserialization errors gracefully
+- normalizing parsed data before use
 
 ### `clore::generate::parse_symbol_target_key`
 
@@ -2849,12 +2819,12 @@ Definition: `generate/model.cppm:312`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-函数 `clore::generate::parse_symbol_target_key` 接受一个 `int` 参数，将其解析为一个 `SymbolTargetKeyView` 类型的结果。调用者负责提供一个有效的整数键，该函数返回一个对应的符号目标键视图，供下游生成管道中的查找或引用操作使用。该函数不拥有返回视图所引用的数据；调用者必须确保该视图在其使用期间保持有效。
+函数 `clore::generate::parse_symbol_target_key` 接受一个整数类型的符号目标键，并将其解析为 `SymbolTargetKeyView`。调用方应提供一个从 `make_symbol_target_key` 或类似来源获得的键，该函数保证返回一个与该键对应的结构化视图，用于后续的符号定位或键查找操作。若传入无效键，行为未定义。
 
 #### Usage Patterns
 
-- Used to convert a `std::string_view` symbol target key into a structured view
-- Called when processing symbol references that may include signatures
+- called by other generation functions to normalize symbol target keys
+- used as a fallback when structured parsing fails
 
 ### `clore::generate::prompt_kind_name`
 
@@ -2864,12 +2834,13 @@ Definition: `generate/model.cppm:273`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::prompt_kind_name` 将 `PromptKind` 值转换为一个整数名称标识符。调用方提供一个 `PromptKind` 枚举值，函数返回与该提示种类相对应的唯一整数，该整数可用于在生成过程中标识或比较提示类型。
+函数 `clore::generate::prompt_kind_name` 将给定的 `PromptKind` 值映射为一个唯一的整数标识符，该标识符对应提示种类的名称。调用者可以依赖此映射在每个 `PromptKind` 枚举值与返回的 `int` 之间保持一致性和稳定性，通常用于需要数值标识（例如查找表键或序列化）而非直接使用枚举值或字符串的场合。
 
 #### Usage Patterns
 
-- used in prompt building and identification functions
-- called when generating prompt names for different analysis kinds
+- Obtain a string label for a prompt kind
+- Used in logging or serialization of prompt types
+- Called within prompt building and rendering logic
 
 ### `clore::generate::prompt_output_of`
 
@@ -2879,13 +2850,12 @@ Definition: `generate/render/common.cppm:71`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-函数 `clore::generate::prompt_output_of` 接受一个输入对象（通过 `const int &`）和两个 `int` 参数，并返回一个 `int` 值。调用者应提供这些参数以指定提示上下文和配置细节；函数负责根据这些参数生成并返回对应的提示输出。该输出值的具体含义由调用环境中的约定所定义。
+函数 `clore::generate::prompt_output_of` 负责根据给定的上下文和索引参数生成或提取一个整数形式的提示输出值。它接受一个常量引用 `const int &` 作为输入上下文，以及两个 `int` 参数分别用于指定输出的类型或来源索引，并返回一个 `int` 表示该提示输出的计算结果。调用者应确保第一个参数引用的对象处于有效状态，且后续索引参数在合理的范围内；函数保证返回的整数值可用于后续的提示渲染或分析流程。
 
 #### Usage Patterns
 
-- Used to retrieve prompt output for a specific kind and target key
-- Called by `build_evidence_for_*` functions to access cached analysis results
-- Checked for `nullptr` to handle missing outputs
+- retrieving cached prompt output for a specific prompt kind
+- checking if a prompt output already exists in a generation pipeline
 
 ### `clore::generate::prompt_request_key`
 
@@ -2895,12 +2865,12 @@ Definition: `generate/model.cppm:290`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::prompt_request_key` 接受一个 `PromptRequest` 对象，返回一个作为该请求唯一键的整数。调用者可使用此键来标识、索引或缓存给定的提示请求。该键在请求的生命周期内应保持稳定，可安全用于基于值的关联容器或去重操作。
+从给定的 `PromptRequest` 计算一个整数键，用于生成请求的唯一标识或缓存查找。调用者可以依赖该返回值作为后续操作（如缓存键或请求匹配）的稳定标识。
 
 #### Usage Patterns
 
-- used as a cache key for prompt requests
-- used to index or group prompts by kind and target
+- caching or indexing prompt requests
+- generating a unique key for a `PromptRequest`
 
 ### `clore::generate::render_file_dependency_diagram_code`
 
@@ -2910,12 +2880,12 @@ Definition: `generate/render/diagram.cppm:222`
 
 Implementation: [`Module generate:diagram`](../../../modules/generate/diagram.md)
 
-函数 `clore::generate::render_file_dependency_diagram_code` 生成表示文件依赖关系的图表代码。它接受三个整数标识符（通常为目标文件、项目或模块以及额外的范围或格式参数），并返回一个图表标识符或状态码。调用方应提供正确的标识符，返回的图表代码可用于嵌入 Markdown 文档或供渲染管线进一步处理。该函数属于 clore 生成框架中的图表生成系列，与 `render_import_diagram_code` 和 `render_module_dependency_diagram_code` 等函数功能类似。
+`clore::generate::render_file_dependency_diagram_code` 根据三个标识符参数生成文件依赖关系图的文本表示（例如 Mermaid 代码）。调用者需确保传入的 `const int &` 参数有效且对应预期的文档实体（如源文件、模块或符号）；函数返回一个整数状态码以指示操作是否成功。
 
 #### Usage Patterns
 
-- Called by page rendering functions to generate file dependency diagrams
-- Used in documentation generation to produce Mermaid diagram markup
+- Used in documentation generation to produce Mermaid file dependency diagrams
+- Called as part of page rendering pipeline for file-level overviews
 
 ### `clore::generate::render_import_diagram_code`
 
@@ -2925,12 +2895,13 @@ Definition: `generate/render/diagram.cppm:124`
 
 Implementation: [`Module generate:diagram`](../../../modules/generate/diagram.md)
 
-函数 `clore::generate::render_import_diagram_code` 接受一个 `const int &` 类型的目标标识符，返回一个 `int` 状态码。它负责在当前代码分析上下文中，为指定的符号或模块生成导入关系图的渲染代码（通常为 Mermaid 格式）。调用者必须确保传入的标识符已在符号分析数据中注册，且调用时机位于分析数据收集完成之后。该函数由页面渲染流程调用；返回非零值表明渲染过程遇到错误，生成的图表可能不完整或未输出。
+`clore::generate::render_import_diagram_code` 接受一个表示输入实体的 `const int &` 引用（例如指向模块、文件或命名空间的标识符），并生成该实体对应的导入关系图的文本代码（如 Mermaid 图）。函数返回一个整数值，用于指示操作是否成功或提供错误码。调用者应确保传入的引用有效，并负责将返回的图代码集成到文档或页面的内容管道中。
 
 #### Usage Patterns
 
-- Called during documentation generation to produce import dependency diagrams
-- Used in page rendering pipelines for module pages
+- Called during generation of module documentation pages to create a Mermaid import diagram
+- Part of a set of diagram rendering functions (`render_file_dependency_diagram_code`, `render_module_dependency_diagram_code`, `render_namespace_diagram_code`)
+- Likely used in `build_page_plan_set` or similar page building functions
 
 ### `clore::generate::render_markdown`
 
@@ -2940,12 +2911,11 @@ Definition: `generate/markdown.cppm:730`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-The function `clore::generate::render_markdown` accepts a `const MarkdownDocument &` and returns an `int`. Its primary responsibility is to render the provided Markdown document into a final output artifact (such as a complete string, file, or stream). The return value serves as a status code indicating success or a specific failure condition. Callers must supply a fully constructed `MarkdownDocument`; the function then performs the top-level transformation to produce the final rendered form.
+函数 `clore::generate::render_markdown` 是生成流程中的顶层渲染入口。调用方负责提供一个完整的 `MarkdownDocument` 对象，该对象包含了所有需要输出的 Markdown 内容；函数将根据文档结构执行最终的格式处理与输出操作，并返回一个 `int` 状态码，以指示渲染是否成功。
 
 #### Usage Patterns
 
-- Called by rendering functions to produce a markdown string from a `MarkdownDocument`
-- Used as a building block for page generation
+- Called to convert a `MarkdownDocument` into a plain text Markdown string for writing to files.
 
 ### `clore::generate::render_module_dependency_diagram_code`
 
@@ -2955,12 +2925,14 @@ Definition: `generate/render/diagram.cppm:289`
 
 Implementation: [`Module generate:diagram`](../../../modules/generate/diagram.md)
 
-该函数接收一个模块标识符，用于生成描述该模块与其它模块间依赖关系的图表代码。它属于文档生成管线中的渲染步骤，输出通常为 Mermaid 格式，以供后续嵌入页面。调用者应传入有效的模块标识符，函数返回一个整数值表示操作结果。
+`clore::generate::render_module_dependency_diagram_code` 生成一个模块的依赖关系图的代码表示。调用者提供一个模块标识符（作为 `const int &`），函数返回一个 `int`，代表生成的图表代码。该代码用于在模块文档页面中可视化地展示该模块与其他模块之间的依赖关系。
+
+该函数与其他范围特定的图表渲染函数（如 `render_file_dependency_diagram_code` 和 `render_namespace_diagram_code`）协作，共同支持文档生成系统中的依赖图绘制功能。
 
 #### Usage Patterns
 
-- called during documentation generation to produce module dependency diagram
-- result embedded into Mermaid code blocks
+- called during documentation generation to produce module dependency diagrams
+- used in page rendering of module overviews
 
 ### `clore::generate::render_namespace_diagram_code`
 
@@ -2970,11 +2942,13 @@ Definition: `generate/render/diagram.cppm:168`
 
 Implementation: [`Module generate:diagram`](../../../modules/generate/diagram.md)
 
-函数 `clore::generate::render_namespace_diagram_code` 负责生成描述命名空间结构的可视化图代码（例如适用于 Mermaid 或类似工具的文本表示）。它接受两个参数：第一个参数（类型为 `const int &`）标识目标命名空间或相关的文档上下文，第二个参数（类型为 `int`）指定额外的配置选项（例如图的深度或显示模式）。返回的 `int` 值指示操作的结果状态——通常为成功时的零值，非零值表示错误。调用者必须确保提供的标识符对应一个有效的命名空间，且选项参数在预期范围内。该函数不直接产生输出文件，而是返回可供后续渲染使用的结构化图代码。
+函数 `clore::generate::render_namespace_diagram_code` 生成用于描述命名空间关系的图表代码（例如 Mermaid 格式）。调用者需提供目标命名空间的标识符（`const int &`）和一个表示生成选项的整数（`int`）。函数返回一个整数，表示操作的成功状态或所生成代码的长度——调用者应根据该返回值判断是否继续使用生成的代码片段。此函数被设计为与其他 `render_*_diagram_code` 函数协作，共同为页面生成完整的依赖、模块或命名空间可视化内容。
 
 #### Usage Patterns
 
-- Called during documentation generation to produce namespace diagram markdown.
+- Called when rendering documentation for a namespace page
+- Used to generate the Mermaid diagram code embedded in markdown output
+- Typically invoked within a larger page generation function like `render_page_markdown`
 
 ### `clore::generate::render_page_bundle`
 
@@ -2982,14 +2956,12 @@ Declaration: `generate/render/page.cppm:565`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-调用 `clore::generate::render_page_bundle` 可将六个整数常量引用表示的输入数据渲染为一个页面捆绑包，并返回一个整数指示操作结果。该函数是文档生成管线中的公共接口，调用者仅需提供符合内部约定的参数，无需关心渲染的具体机制。
-
-调用者应保证传入的六个 `const int &` 参数均指向有效状态；返回值零通常表示成功，非零值表示错误或需由上层处理的状态码。函数本身不负责验证参数的语义正确性，因此调用者必须确保参数与当前生成上下文兼容。
+调用者调用 `clore::generate::render_page_bundle` 以生成一个页面束（page bundle），即一组逻辑上关联的页面文档（例如属于同一模块或命名空间的所有页面）。该函数接受六个 `const int &` 参数，分别代表页面生成所需的上下文、数据源及配置项；返回一个 int 值，通常用于指示操作成功（零）或失败（非零错误码）。它负责协调内部渲染过程，确保输出的页面束符合文档生成流程的格式、结构和完整性要求。调用者应确保所有参数正确引用已初始化的资源，并仅在完整的文档生成工作流中调用此函数。
 
 #### Usage Patterns
 
-- Called from page generation pipeline (e.g., `generate_pages` or `generate_pages_async`) to produce a single page bundle.
-- Used as the main rendering step after all analysis and link resolution is available.
+- called by page generation entry points
+- orchestrates page bundle rendering
 
 ### `clore::generate::render_page_bundle`
 
@@ -2997,14 +2969,12 @@ Declaration: `generate/render/page.cppm:573`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-调用 `clore::generate::render_page_bundle` 以渲染一个页面束（bundle），即一组在逻辑上相关联的生成页面。调用者必须提供五个标识参数（均为 `const int &`），这些参数共同明确指定要渲染的束所涉及的作用域、目标或源标识符。函数返回一个 `int` 指示处理结果，通常为正整数表示成功生成的页面数，或为零或负数表示失败或未生成。
-
-调用者应当确保提供的标识符在当前的页面计划上下文中有效且彼此兼容，因为此函数假定这些标识符均对应于同一束定义。违反此契约可能导致未定义行为或错误输出。
+函数 `clore::generate::render_page_bundle` 接受五个 `const int &` 参数，并返回一个 `int`。调用者应通过这些整数参数指定需要渲染的页面捆绑包的内容或配置。函数返回一个整数值，通常用于指示操作的成功与否或提供状态码。
 
 #### Usage Patterns
 
-- Called by higher-level page generation functions like `generate_pages`
-- Used to render a single page bundle as part of a larger documentation generation pipeline
+- Called by higher-level page generation functions like `generate_pages` and `generate_pages_async`
+- Used to render a single page bundle after planning and prompt resolution
 
 ### `clore::generate::render_page_markdown`
 
@@ -3014,11 +2984,11 @@ Definition: `generate/render/page.cppm:582`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-函数 `clore::generate::render_page_markdown` 根据一组页面标识与配置参数生成对应的 Markdown 文本。调用者应确保传入的六个整数参数有效且指向同一页面的上下文；该函数返回一个整型状态码，用于指示渲染操作是否成功。
+`clore::generate::render_page_markdown` 接受六个 `const int &` 标识符，这些标识符共同描述一个特定页面，并生成该页面的 Markdown 内容。调用者必须确保所有标识符引用有效且一致的实体。函数返回一个 `int`，表示生成的文档长度或操作状态；调用者应据此判断渲染是否成功。
 
 #### Usage Patterns
 
-- Used in page generation pipeline to retrieve the final Markdown string for a specific page
+- Used in page generation to produce markdown for a specific page plan.
 
 ### `clore::generate::render_page_markdown`
 
@@ -3028,13 +2998,15 @@ Definition: `generate/render/page.cppm:602`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-函数 `clore::generate::render_page_markdown` 负责根据一组资源标识符生成页面的完整 Markdown 内容。调用者提供五个 `const int &` 参数，这些参数引用构建页面所需的各类内部资源（例如页面规划、符号分析或证据包），函数返回一个 `int` 值，该值标识所生成的 Markdown 文档或代表操作结果。
+`clore::generate::render_page_markdown` 基于传入的标识符参数集，将指定页面内容生成为 Markdown 格式的文本。调用者需提供页面及其相关上下文的必要标识（如符号、分析数据或页面计划），函数负责整合这些信息并输出最终的 Markdown 结果。
 
-调用者在调用时需确保传入的每个 `const int &` 参数都指向有效且与当前渲染上下文匹配的资源标识符。函数不修改任何参数，也不依赖外部状态。返回值可被后续操作使用，例如写入文件或传递给 `clore::generate::render_markdown` 等渲染工具。无需了解实现细节，只需正确传递标识符。
+函数返回一个整数，通常用于指示操作成功与否或返回生成的文本长度。调用方应确保所有参数引用的对象（如其存储、分析或页面标识）在调用期间保持有效。
 
 #### Usage Patterns
 
-- Used when no precomputed symbol analysis data is available
+- 作为页面生成管道的入口点
+- 由其他渲染函数如 `render_page_bundle` 调用
+- 用于生成单个页面的完整 Markdown 输出
 
 ### `clore::generate::short_name_of`
 
@@ -3044,15 +3016,12 @@ Definition: `generate/render/common.cppm:45`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-函数 `clore::generate::short_name_of` 接受一个整数作为输入，并返回另一个整数，表示与给定标识符关联的“简短名称”。它用于将符号或对象的标识符映射到一个紧凑、可区分的整数值，以便在文档生成管线中作为轻量级引用或索引使用。
-
-调用者需保证传入的整数标识符在当前的上下文中是有效且已定义的。返回值是该标识符对应的简短名称的数值表示；其具体语义（例如是否为稳定标识符或仅用于局部作用域）由调用上下文决定。函数对于无效或未注册的输入不保证行为稳定，因此应仅在合适的输入集合上调用。
+接受一个 `int` 参数并返回一个 `int`。该函数为调用方提供从给定的整数输入生成简短名称的能力，返回值即为对应的短名称表示。其具体语义（如输入整数的含义、输出整数的编码方式）由调用方根据上下文约定理解。
 
 #### Usage Patterns
 
-- Used to obtain a symbol's simple name for display purposes
-- Can be used in formatting documentation output
-- Likely called by rendering functions needing short names
+- Extract the short (unqualified) name from a fully qualified name
+- Used wherever only the local name of a symbol is needed
 
 ### `clore::generate::should_emit_mermaid`
 
@@ -3062,14 +3031,14 @@ Definition: `generate/render/diagram.cppm:105`
 
 Implementation: [`Module generate:diagram`](../../../modules/generate/diagram.md)
 
-函数 `clore::generate::should_emit_mermaid` 接受两个 `int` 参数并返回 `bool`，用于判断在当前的生成上下文中是否应当输出 Mermaid 图。调用者负责提供与生成场景相关的两个整数参数（通常表示符号标识符或配置选项），函数根据内部规则返回一个布尔值，指示是否应包含对应的 Mermaid 图表。
+该函数接受两个整数参数，并返回一个布尔值，指示是否应为特定上下文生成 Mermaid 图表。调用者应使用此函数在渲染文件依赖图、导入图、模块依赖图或命名空间图之前做出决策，从而避免不必要地创建图表。
 
-该函数是 `clore::generate` 渲染管线的一部分，用于在生成文档时按需决定图表的启用状态。调用者应当将返回值作为是否调用图表生成逻辑的依据，而不应假设具体的判定条件。
+`clore::generate::should_emit_mermaid` 的契约是：给定两个整数（可能表示某种标识符或阈值），它返回 `true` 表示应发出 Mermaid 图，返回 `false` 表示应跳过生成。具体的映射逻辑由函数内部定义，对调用者透明。
 
 #### Usage Patterns
 
-- called before rendering mermaid diagrams such as dependency graphs
-- used to decide diagram inclusion in documentation pages
+- Check if Mermaid diagram should be emitted
+- Used in diagram generation functions
 
 ### `clore::generate::store_fallback_analysis`
 
@@ -3079,14 +3048,12 @@ Definition: `generate/analysis.cppm:335`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-函数 `clore::generate::store_fallback_analysis` 负责将回退分析的结果存储到由第一个参数 `int &` 引用的对象中。调用者必须提供一个可修改的整数引用以及两个常量整数引用作为输入，函数会利用后两个参数的信息更新第一个参数，以反映相应的回退分析状态。
-
-调用者有责任确保传入的第一个参数引用一个有效的、可写入的整数对象，且该对象在该函数返回后仍然可用。后两个参数作为只读输入，用于提供分析所需的上下文。函数严格按照其参数约定执行，不会在调用者提供的存储之外分配资源。
+函数 `clore::generate::store_fallback_analysis` 负责在无法生成常规分析结果时，将回退分析状态写入提供的分析存储中。调用方应当仅在主要分析过程失败或不存在时调用此函数，以确保生成流程可以继续。该函数接受一个可修改的 `int &` 作为目标存储，以及两个只读的 `const int &` 分别标识需要回退处理的符号与上下文；调用后目标存储会被更新以反映本次回退记录。
 
 #### Usage Patterns
 
-- Used to insert fallback analysis entries into a `SymbolAnalysisStore`
-- Called when primary analysis is unavailable or incomplete
+- Used to populate a `SymbolAnalysisStore` with fallback analyses when detailed analysis is missing
+- Invoked during generation pipeline to ensure every symbol has at least a default analysis
 
 ### `clore::generate::strip_inline_markdown`
 
@@ -3096,12 +3063,11 @@ Definition: `generate/render/common.cppm:33`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::strip_inline_markdown` 接受一个整数标识的 Markdown 内容（例如来自内部表示的片段），并返回一个新整数标识的 Markdown 内容，其中移除了内联格式标记。调用者输入的内容应表示有效的 Markdown 数据结构；函数会剥离如加粗、斜体、内联代码、链接等内联语法，仅保留文本主体。返回的整数句柄代表去除格式后的版本，可用于需要纯文本内容的后续处理（如索引、搜索或文本比较）。调用者需确保传入的句柄有效，且函数不修改原始输入。
+`clore::generate::strip_inline_markdown` 从输入中移除内联 Markdown 标记，返回清理后的结果。调用者提供一个表示原始内容的整数输入，并负责确保其格式符合预期；返回的整数输出可供下游渲染或分析函数使用。
 
 #### Usage Patterns
 
-- cleaning markdown for plain text output
-- preprocessing text for display in contexts where markdown is not allowed
+- producing plain text from Markdown fragments for contexts that disallow inline formatting
 
 ### `clore::generate::symbol_analysis_markdown_for`
 
@@ -3111,12 +3077,12 @@ Definition: `generate/render/common.cppm:161`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::symbol_analysis_markdown_for` 接受三个 `const int &` 标识符参数，生成表示关联符号分析结果的 Markdown 内容。调用者必须确保所提供的标识符对应于有效的分析存储和符号实体。函数返回一个 `int`，指示操作结果或所生成内容的标识符。
+`clore::generate::symbol_analysis_markdown_for` 接受三个整数引用参数，用于标识符号分析上下文的三个关键维度（例如符号标识、分析实例标识和输出配置）。调用者必须确保这些参数有效且对应已存在的分析数据。函数返回一个整数，表示生成的 Markdown 文档的标识符或成功状态。该函数是符号分析 Markdown 生成管线的一部分，用于将结构化分析结果转换为呈现在文档中的 Markdown 片段。
 
 #### Usage Patterns
 
-- Called to produce symbol analysis markdown for a page
-- Uses page type to choose between overview and detailed analysis
+- Called during page generation to retrieve precomputed analysis markdown for a symbol.
+- Dispatches to overview or detailed analysis based on the page type.
 
 ### `clore::generate::symbol_doc_view_for`
 
@@ -3126,11 +3092,12 @@ Definition: `generate/render/common.cppm:269`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::symbol_doc_view_for` 生成并返回一个 `SymbolDocView`，该视图封装了指定符号的文档数据。第一个 `const int &` 参数标识目标符号，第二个 `const int &` 参数提供生成视图所需的上下文信息（例如所属模块或页面）。调用者必须保证传入的引用在调用期间保持有效且指向已注册的符号与上下文。返回的 `SymbolDocView` 所有权转移给调用者，可被用于后续文档渲染或分析操作，其生命周期由调用者管理。
+为给定的符号标识和文档布局上下文构造一个 `SymbolDocView`。这是从符号到其文档表示的核心转换步骤：调用者传入两个 `const int &` 参数，分别代表目标符号以及相关的文档布局信息；其返回值直接用于 `doc_label` 等函数，以生成页面中的文档标签或进一步参与页面组合。函数的契约要求两个参数必须对应于已注册的符号和有效的布局结构，否则行为未定义。返回的 `SymbolDocView` 拥有该符号文档视图的所有权，调用者不应自行修改其内容。
 
 #### Usage Patterns
 
-- Determining symbol documentation view during page generation
+- Used in page rendering to choose documentation mode for symbols
+- Called in contexts where page type and symbol kind influence presentation
 
 ### `clore::generate::symbol_prompt_kinds_for_symbol`
 
@@ -3140,12 +3107,11 @@ Definition: `generate/analysis.cppm:299`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-`clore::generate::symbol_prompt_kinds_for_symbol` 接受一个符号标识符（`const int &`）并返回一个 `int` 值，该值编码了适用于该符号的所有 prompt 种类。调用者使用此函数来查询给定符号应参与生成哪些类型的 prompt（例如，符号分析 prompt 或声明摘要 prompt）。返回的整数可以用于与 `is_symbol_analysis_prompt`、`is_declaration_summary_prompt` 等标签检查函数协作，以在后续的 prompt 构建步骤中进行条件分支。该函数只负责种类决策，不执行 prompt 的组装或渲染。
+函数 `clore::generate::symbol_prompt_kinds_for_symbol` 接受一个符号标识符（`const int &` 类型），返回一个整数，表示应当为该符号生成的分析提示种类集合。该返回值是由 `PromptKind` 枚举成员组成的位掩码，调用者可通过按位运算确定需要构建哪些提示（例如，声明摘要提示、实现分析提示或符号分析提示）。调用该函数是生成针对特定符号的 LLM 提示前的必要步骤，用于决定提示的具体配置。
 
 #### Usage Patterns
 
-- Used to obtain the list of prompts to generate for a symbol
-- Called by prompt-building logic to decide which summary prompts to include
+- Called to decide which prompt kinds to generate for a symbol during documentation page creation
 
 ### `clore::generate::trim_ascii`
 
@@ -3155,12 +3121,12 @@ Definition: `generate/render/common.cppm:23`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::trim_ascii` 接受一个 `int` 值并返回一个 `int`，用于对输入执行基于 ASCII 的修剪操作。调用者可以依赖此函数来标准化或清理标识符、字符码或字节值，确保输出仅保留修剪后的有效 ASCII 部分。返回值的具体范围和行为由实现定义，但契约保证结果代表输入经过 ASCII 修剪后的逻辑表示。
+`clore::generate::trim_ascii` 是一个公共函数，接受一个整数参数并返回一个整数。调用方应保证传入的整数值代表一个可进行 ASCII 修剪操作的数据（例如字符或编码），函数负责去除其首尾的 ASCII 空白或特定 ASCII 字符，返回修剪后的结果。此函数主要用于生成流程中涉及 ASCII 文本的标准化处理，具体修剪规则由内部实现定义，调用方不依赖其精确行为即可满足契约。
 
 #### Usage Patterns
 
-- Used as a utility to sanitize or normalize text input before further processing
-- Likely called by other generate functions to trim whitespace from strings
+- used to clean up whitespace from string views before further processing
+- called to normalize text for markdown rendering or comparison
 
 ### `clore::generate::validate_no_path_conflicts`
 
@@ -3170,12 +3136,11 @@ Definition: `generate/model.cppm:644`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::validate_no_path_conflicts` 校验给定的输入是否存在路径冲突，并返回一个整型结果指示验证状态。调用者应在执行任何可能因目标路径重叠而出错的生成操作之前调用此函数，以确保输出路径的唯一性和无冲突性。该函数的契约要求传入一个标识待验证路径或上下文的整数参数，并返回一个表示验证通过或失败的代码。
+`clore::generate::validate_no_path_conflicts` 接受一个 `const int` 参数并返回 `int`。调用者应使用此函数来确保在生成不同页面的路径时不会发生重复或冲突。返回的整数值指示验证结果：通常返回零表示无冲突，非零值表示存在路径冲突或验证失败。调用者有责任在生成最终输出之前检查此返回值，以保证每个目标路径唯一且有效。
 
 #### Usage Patterns
 
-- Used to ensure unique output paths before generating pages
-- Called during page generation to prevent path collisions
+- Used to validate that generated documentation paths do not conflict before writing output.
 
 ### `clore::generate::write_page`
 
@@ -3185,26 +3150,29 @@ Definition: `generate/render/page.cppm:666`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-函数 `clore::generate::write_page` 接受一个 `const int &` 类型的页面标识符和一个 `int` 类型的输出目标（例如文件描述符或流句柄），负责将单个生成页面持久化到该目标中。调用者应确保提供的标识符对应于一个已构造完成的页面，且输出目标处于可写入状态。返回的 `int` 值指示操作结果：通常为零表示成功，非零表示写入过程中发生了错误。该函数不管理页面的构造或释放，仅处理渲染后内容的输出，是下游写入流程的原子单元。
+调用 `clore::generate::write_page` 以执行单个页面的实际写入操作。它接受一个代表页面标识符的常量整型引用和一个整型参数（通常表示页面序号或变体），并返回一个整型状态码。成功时返回零，非零值表示错误。该函数是页面生成管线中的最终步骤，负责将已构造的页面内容持久化到预期位置。
+
+调用者必须确保传入的页面标识符指向一个已完全构建且有效的页面计划，并且提供的整数参数在合法范围内。返回码应被检查：错误表明写入失败，可能由文件系统问题或无效状态导致。调用者不应依赖未指明的行为，例如重试或回退逻辑，而应作为页面生成循环的一部分自主处理错误。
 
 #### Usage Patterns
 
-- called to output a single generated page file
-- used in the page generation pipeline after building the page content
+- Called after generating page content to persist the page to disk
+- Used in batch document generation pipeline
 
 ### `clore::generate::write_pages`
 
 Declaration: `generate/generate.cppm:44`
 
-Definition: `generate/scheduler.cppm:1966`
+Definition: `generate/scheduler.cppm:2010`
 
 Implementation: [`Module generate:scheduler`](../../../modules/generate/scheduler.md) | [`Module generate`](../../../modules/generate/index.md)
 
-函数 `clore::generate::write_pages` 负责将已生成的文档页面集写出到指定的输出位置。它接受一个 `const int &` 作为页面集合的标识符，以及一个 `std::string_view` 表示目标目录路径。返回一个 `int` 指示操作结果（通常为成功或错误码）。调用者需确保提供的页面集合标识符有效，且输出路径可写；在调用本函数前，应已完成所有必要的页面生成步骤。
+`clore::generate::write_pages` 接收一个 `const int &`（代表待写入的页面计划集合的标识符）和一个 `std::string_view`（输出基路径），并将该集合中的每个页面序列化到文件系统中。返回的 `int` 值指示操作是否成功；调用者应确保提供的路径可写，且计划集合有效。
 
 #### Usage Patterns
 
-- Called during documentation generation to write all pages
+- Called during the documentation generation process to persist all generated pages
+- Likely invoked by higher-level generation functions such as `clore::generate::generate_pages`
 
 ## Related Pages
 

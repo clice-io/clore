@@ -56,21 +56,22 @@ auto select_event_loop(kota::event_loop* loop) -> kota::event_loop& {
 template <typename Protocol>
 auto call_completion_async(clore::net::CompletionRequest request, kota::event_loop* loop)
     -> kota::task<clore::net::CompletionResponse, clore::net::LLMError> {
-    auto& caps = get_probed_capabilities(Protocol::provider_name());
     const bool needs_tools = !request.tools.empty();
 
     for(int probe_attempt = 0; probe_attempt < 4; ++probe_attempt) {
+        auto environment = Protocol::read_environment();
+        if(!environment.has_value()) {
+            co_await kota::fail(std::move(environment.error()));
+        }
+
+        auto& caps =
+            get_probed_capabilities(Protocol::capability_probe_key(*environment, request));
         auto sanitized = sanitize_request_for_capabilities(std::move(request), caps);
         const bool tools_stripped = needs_tools && sanitized.tools.empty();
 
         auto request_json = Protocol::build_request_json(sanitized);
         if(!request_json.has_value()) {
             co_await kota::fail(std::move(request_json.error()));
-        }
-
-        auto environment = Protocol::read_environment();
-        if(!environment.has_value()) {
-            co_await kota::fail(std::move(environment.error()));
         }
 
         auto& active_loop = detail::select_event_loop(loop);

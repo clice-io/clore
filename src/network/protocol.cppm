@@ -123,7 +123,11 @@ struct ProbedCapabilities {
     std::atomic<bool> supports_tools{true};
 };
 
-auto get_probed_capabilities(std::string_view provider) -> ProbedCapabilities&;
+auto get_probed_capabilities(std::string_view cache_key) -> ProbedCapabilities&;
+
+auto make_capability_probe_key(std::string_view provider,
+                               std::string_view api_base,
+                               std::string_view model) -> std::string;
 
 auto sanitize_request_for_capabilities(CompletionRequest request, const ProbedCapabilities& caps)
     -> CompletionRequest;
@@ -722,18 +726,24 @@ auto request_text_once_async(CompletionRequester request_completion,
 // ──────────────────────────────────────────────────────
 namespace clore::net {
 
-auto get_probed_capabilities(std::string_view provider) -> ProbedCapabilities& {
+auto get_probed_capabilities(std::string_view cache_key) -> ProbedCapabilities& {
     static std::mutex mutex;
     static std::unordered_map<std::string, std::unique_ptr<ProbedCapabilities>> cache;
 
     std::lock_guard lock(mutex);
-    auto it = cache.find(std::string(provider));
+    auto it = cache.find(std::string(cache_key));
     if(it != cache.end()) {
         return *it->second;
     }
     auto [inserted_it, _] =
-        cache.emplace(std::string(provider), std::make_unique<ProbedCapabilities>());
+        cache.emplace(std::string(cache_key), std::make_unique<ProbedCapabilities>());
     return *inserted_it->second;
+}
+
+auto make_capability_probe_key(std::string_view provider,
+                               std::string_view api_base,
+                               std::string_view model) -> std::string {
+    return std::format("{}|{}|{}", provider, api_base, model);
 }
 
 auto sanitize_request_for_capabilities(CompletionRequest request, const ProbedCapabilities& caps)

@@ -1,6 +1,6 @@
 ---
 title: 'Module config:schema'
-description: 'The module config:schema defines the core data structures that represent the configuration schema for the clore system. It owns the public types TaskConfig, LLMConfig, and FilterRule, which hold settings such as project paths, LLM parameters, and include/exclude filters. These structs are designed to be the canonical representation of user-provided configuration after validation and normalization.'
+description: 'The module config:schema defines the core data structures that represent the configuration schema for the clore system. It exposes three public structs: FilterRule, LLMConfig, and TaskConfig. These types collectively specify how tasks are configured, including file inclusion/exclusion filters, language model parameters (system prompt and retry limit), and essential filesystem paths (compile commands, project root, workspace root, and output root). This module is the single source of truth for the shape and names of all user-facing configuration options, serving as the public interface for configuration parsing and validation.'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-The module `config:schema` defines the core data structures that represent the configuration schema for the clore system. It owns the public types `TaskConfig`, `LLMConfig`, and `FilterRule`, which hold settings such as project paths, LLM parameters, and include/exclude filters. These structs are designed to be the canonical representation of user-provided configuration after validation and normalization.
+The module `config:schema` defines the core data structures that represent the configuration schema for the clore system. It exposes three public structs: `FilterRule`, `LLMConfig`, and `TaskConfig`. These types collectively specify how tasks are configured, including file inclusion/exclusion filters, language model parameters (system prompt and retry limit), and essential filesystem paths (compile commands, project root, workspace root, and output root). This module is the single source of truth for the shape and names of all user-facing configuration options, serving as the public interface for configuration parsing and validation.
 
 ## Imports
 
@@ -31,23 +31,20 @@ Definition: `config/schema.cppm:7`
 
 Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
-The `clore::config::FilterRule` struct is a plain aggregate that holds two disjoint collections of pattern strings: `include` and `exclude`, each stored in a `std::vector<std::string>`. No special initialization or invariant enforcement is present; the two vectors are independent and expected to be populated by the caller according to the filtering semantics required. The struct serves solely as a container for these two pattern lists, with no member functions beyond the implicitly generated ones.
+The `clore::config::FilterRule` struct is a trivial aggregate that stores two `std::vector<std::string>` fields: `include` and `exclude`. These vectors hold the inclusion and exclusion patterns respectively; no invariants are enforced beyond the default state of an empty vector. The struct relies on compiler-generated default constructors, destructor, and assignment `operator`s, making its implementation minimal and purely data‑driven.
 
 #### Invariants
 
-- The `include` and `exclude` vectors can be empty.
-- No constraints exist on the content of the strings beyond being valid pattern representations.
+- No explicit invariants are documented; the members are independent `std::vector<std::string>` with no specified constraints.
 
 #### Key Members
 
-- `include`: list of patterns to include
-- `exclude`: list of patterns to exclude
+- `clore::config::FilterRule::include`
+- `clore::config::FilterRule::exclude`
 
 #### Usage Patterns
 
-- Used as a configuration parameter to specify which items should be included or excluded in some processing.
-- Typically populated from a configuration file or user input.
-- Accessed by other code to filter collections based on the include/exclude lists.
+- Used as a data-only configuration type to specify inclusion and exclusion patterns for filtering operations.
 
 ### `clore::config::LLMConfig`
 
@@ -57,7 +54,21 @@ Definition: `config/schema.cppm:12`
 
 Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
-`clore::config::LLMConfig` is a plain data structure that aggregates two configuration parameters: `system_prompt`, a `std::string` holding the system-level instruction text, and `retry_limit`, a `std::uint32_t` that defaults to `0` (interpreted as unlimited retries). The struct imposes no additional invariants beyond the natural type constraints of its members; the default value for `retry_limit` is the only implementation‑level choice, establishing a fallback semantics when the field is not explicitly set. All member initialization is trivial.
+The struct `clore::config::LLMConfig` is a plain data aggregate with two public members. The field `retry_limit` is a `std::uint32_t` that explicitly defaults to `0`, establishing the invariant that by default no retries are configured. The field `system_prompt` is a `std::string` that is value‑initialized to an empty string, which is a natural default for an optional text directive. There are no custom constructors, assignment `operator`s, or validation logic; the struct relies entirely on member initializers and the language‑provided defaults to maintain a consistent starting state.
+
+#### Invariants
+
+- `retry_limit` defaults to `0`
+- `system_prompt` is a default-constructed `std::string` (empty)
+
+#### Key Members
+
+- `system_prompt`
+- `retry_limit`
+
+#### Usage Patterns
+
+- Other code creates, reads, or modifies `clore::config::LLMConfig` instances directly by assigning values to its members
 
 ### `clore::config::TaskConfig`
 
@@ -67,28 +78,26 @@ Definition: `config/schema.cppm:17`
 
 Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
-The struct `clore::config::TaskConfig` is implemented as a plain aggregate that holds the configuration for a single task. Its fields are stored by value: `compile_commands_path`, `project_root`, `output_root`, and `workspace_root` are `std::string` path entries, while `filter` and `llm` are embedded `FilterRule` and `LLMConfig` objects respectively. The struct imposes no internal invariants; all validation, normalization, and semantic checks on the field values are delegated to external parsing or application logic. No custom constructors, assignment `operator`s, or other member functions are defined, so the type relies entirely on compiler-generated special member functions for construction, copy, and move.
+The struct `clore::config::TaskConfig` aggregates all parameters required to configure a code analysis task. Its members fall into three categories: filesystem paths (`compile_commands_path`, `project_root`, `output_root`, `workspace_root`), a filtering specification (`filter` of type `FilterRule`), and an LLM configuration (`llm` of type `LLMConfig`). Internally, the struct imposes no invariants on its fields – all strings and sub‑objects are default‑constructible, and the task runner is expected to validate the presence and correctness of paths before execution. The `compile_commands_path` typically points to a `compile_commands.json` file, while the root directories define the scope and output layout for the analysis.
 
 #### Invariants
 
-- All string fields are expected to contain valid filesystem paths
-- `FilterRule` and `LLMConfig` are expected to be default-constructible
+- No invariants are enforced by the type.
 
 #### Key Members
 
-- `compile_commands_path`
 - `project_root`
-- `output_root`
 - `workspace_root`
+- `output_root`
+- `compile_commands_path`
 - `filter`
 - `llm`
 
 #### Usage Patterns
 
-- Loaded or populated by configuration parsing code
-- Consumed by task execution logic to determine paths and behavior
+- Defined as a data structure within the configuration module; its fields are publicly accessible for direct assignment and reading.
 
 ## Internal Structure
 
-The `config:schema` module provides the core data types that define the structure of the configuration system. It is decomposed into three simple, publicly-exported structs: `FilterRule`, `LLMConfig`, and `TaskConfig`, which together form a hierarchical schema. `FilterRule` encapsulates include/exclude path patterns, `LLMConfig` holds model‑specific parameters (such as `system_prompt` and `retry_limit`), and `TaskConfig` aggregates a filter rule, an LLM configuration, and several filesystem path fields (`project_root`, `workspace_root`, `output_root`, `compile_commands_path`). The module depends solely on the C++ standard library (`std`) and contains no additional logic or internal layering; it serves as a pure data definition layer upon which parsers and validators can build.
+The `config:schema` module defines the foundational data structures for representing Clore’s configuration, separating schema definitions from loading and validation logic. It imports only the C++ standard library, ensuring minimal dependencies. The decomposition follows a clear internal layering: `FilterRule` encapsulates include/exclude patterns for file filtering, `LLMConfig` holds the system prompt and retry limits for language model interaction, and `TaskConfig` aggregates these alongside key filesystem paths (`project_root`, `workspace_root`, `output_root`, `compile_commands_path`). This structure promotes type safety, enables independent evolution of each configuration concern, and provides a stable interface for downstream modules that consume or validate configuration data.
 

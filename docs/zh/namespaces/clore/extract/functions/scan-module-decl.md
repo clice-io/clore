@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::scanmoduledecl'
-description: '函数 clore::extract::scan_module_decl 接收一个 std::string_view 表示的待扫描内容和一个可变的 ScanResult 引用。调用者负责提供有效的输入字符串，并确保 ScanResult 对象在其生命周期内有效；函数会向该结果中填充模块名称、是否为接口单元以及模块导入列表等字段，而无需运行完整的预处理器。此函数专为快速扫描模块声明而设计，是更高层函数（如 clore::extract::scan_file）的底层依赖，调用者无需关心其内部实现，但应使用 ScanResult 中填充的信息来构建模块依赖关系。'
+description: '函数 clore::extract::scan_module_decl 对给定的 C++ 源代码字符串执行快速的模块声明扫描，并将结果写入指定的 ScanResult & 对象。它使用 Clang 的依赖指令扫描器，只解析模块声明部分，而无需运行完整的预处理器，因此效率较高。函数会填充 ScanResult 中的 module_name、is_interface_unit 和 module_imports 字段，其余字段保持不变。'
 layout: doc
 template: doc
 ---
@@ -21,12 +21,14 @@ Implementation: [`Module extract:scan`](../../../../modules/extract/scan.md)
 auto (std::string_view, ScanResult &) -> void;
 ```
 
-函数 `clore::extract::scan_module_decl` 接收一个 `std::string_view` 表示的待扫描内容和一个可变的 `ScanResult` 引用。调用者负责提供有效的输入字符串，并确保 `ScanResult` 对象在其生命周期内有效；函数会向该结果中填充模块名称、是否为接口单元以及模块导入列表等字段，而无需运行完整的预处理器。此函数专为快速扫描模块声明而设计，是更高层函数（如 `clore::extract::scan_file`）的底层依赖，调用者无需关心其内部实现，但应使用 `ScanResult` 中填充的信息来构建模块依赖关系。
+函数 `clore::extract::scan_module_decl` 对给定的 C++ 源代码字符串执行快速的模块声明扫描，并将结果写入指定的 `ScanResult &` 对象。它使用 Clang 的依赖指令扫描器，只解析模块声明部分，而无需运行完整的预处理器，因此效率较高。函数会填充 `ScanResult` 中的 `module_name`、`is_interface_unit` 和 `module_imports` 字段，其余字段保持不变。
+
+调用者需提供包含有效 C++ 模块声明源代码的 `std::string_view`，并保证 `ScanResult` 对象在函数调用期间可被写入。该函数为无异常安全契约（`void` 返回），若输入字符串不包含可识别的模块声明，相关字段可能保持默认值，函数本身不报告错误。实际使用时通常由 `clore::extract::scan_file` 等上层函数将整体文件扫描的结果封装为 `std::expected` 形式。
 
 ## Usage Patterns
 
-- Called by `clore::extract::scan_file` to perform fast module scanning on source files.
-- Used as a lightweight alternative to full preprocessing for module dependency discovery.
+- Called by `clore::extract::scan_file` during source file scanning to populate module metadata.
+- Used as a lightweight alternative to full preprocessing for extracting module information.
 
 ## Called By
 

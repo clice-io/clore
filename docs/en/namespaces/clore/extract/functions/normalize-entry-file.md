@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::normalizeentryfile'
-description: 'The function clore::extract::normalize_entry_file accepts a const CompileEntry & and returns a std::string representing the resolved, canonical path to the source file associated with that entry. Callers rely on this function to obtain a normalized file identifier that serves as a stable, comparable key for caching and deduplication. The returned string is used by clore::extract::build_compile_signature and clore::extract::ensure_cache_key_impl to compute compile signatures and cache entries; when the entry.normalized_file field is empty or the compile signature has not yet been computed, this function is invoked to derive the normalized file path before proceeding with further processing. The contract guarantees a consistent, file‑system‑independent representation suitable for look‑up in the compilation database and for use as part of a cache key.'
+description: 'clore::extract::normalize_entry_file accepts a const CompileEntry & and returns a std::string representing the normalized source file path for that entry. The function is responsible for producing a canonical, consistent form of the file path used by the caller to enable reliable caching, signature computation, and key derivation. Callers rely on this normalized path as a prerequisite for operations such as build signature calculation and cache entry construction. The contract guarantees that the returned string uniquely identifies the entry’s source file in a platform‑independent and directory‑resolved manner.'
 layout: doc
 template: doc
 ---
@@ -21,12 +21,12 @@ Implementation: [`Module extract:compiler`](../../../../modules/extract/compiler
 auto (const CompileEntry &) -> std::string;
 ```
 
-The function `clore::extract::normalize_entry_file` accepts a `const CompileEntry &` and returns a `std::string` representing the resolved, canonical path to the source file associated with that entry. Callers rely on this function to obtain a normalized file identifier that serves as a stable, comparable key for caching and deduplication. The returned string is used by `clore::extract::build_compile_signature` and `clore::extract::ensure_cache_key_impl` to compute compile signatures and cache entries; when the `entry.normalized_file` field is empty or the compile signature has not yet been computed, this function is invoked to derive the normalized file path before proceeding with further processing. The contract guarantees a consistent, file‑system‑independent representation suitable for look‑up in the compilation database and for use as part of a cache key.
+`clore::extract::normalize_entry_file` accepts a `const CompileEntry &` and returns a `std::string` representing the normalized source file path for that entry. The function is responsible for producing a canonical, consistent form of the file path used by the caller to enable reliable caching, signature computation, and key derivation. Callers rely on this normalized path as a prerequisite for operations such as build signature calculation and cache entry construction. The contract guarantees that the returned string uniquely identifies the entry’s source file in a platform‑independent and directory‑resolved manner.
 
 ## Usage Patterns
 
-- Called by `build_compile_signature` to derive a unique signature for a compile entry.
-- Called by `ensure_cache_key_impl` to produce a normalized file path for cache key computation.
+- Used by `build_compile_signature` to normalize the entry file path before hashing
+- Used by `ensure_cache_key_impl` to produce a consistent file path representation
 
 ## Called By
 

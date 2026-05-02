@@ -1,6 +1,6 @@
 ---
 title: 'Module network'
-description: 'network 模块是 clore 库中负责 LLM（大语言模型）网络通信的核心。它封装了与 OpenAI 和 Anthropic 等提供者的异步交互，对外提供三个主要接口：validate_llm_provider_environment 用于校验运行时环境（如 API 密钥和基础 URL 等必要配置是否完备）；call_llm_async 用于发起针对 LLM 服务的异步请求；call_completion_async 用于发起异步完成调用。所有异步操作均基于 kota::event_loop 驱动，调用方需保证事件循环在操作期间持续有效。'
+description: '该模块负责处理与 LLM 提供者（如 OpenAI 和 Anthropic）的网络通信，包括检测当前环境中的提供者类型、验证所需环境变量是否到位，以及发起异步 LLM 请求和完成请求。它通过 kota::event_loop 驱动异步操作，并提供 validate_llm_provider_environment、call_llm_async 和 call_completion_async 等公共接口，使调用方能够以非阻塞方式与 LLM 服务交互，同时确保运行时配置的正确性。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-`network` 模块是 `clore` 库中负责 LLM（大语言模型）网络通信的核心。它封装了与 `OpenAI` 和 Anthropic 等提供者的异步交互，对外提供三个主要接口：`validate_llm_provider_environment` 用于校验运行时环境（如 API 密钥和基础 URL 等必要配置是否完备）；`call_llm_async` 用于发起针对 LLM 服务的异步请求；`call_completion_async` 用于发起异步完成调用。所有异步操作均基于 `kota::event_loop` 驱动，调用方需保证事件循环在操作期间持续有效。
-
-模块内部通过匿名命名空间中的辅助函数（如 `detect_provider_from_environment`、`dispatch_completion` 等）实现提供者自动检测、环境变量解析以及完成回调的分发。它维护了 `Provider` 枚举类型和相关的环境变量常量，确保在调用外部 LLM 服务之前能够正确识别和配置目标提供者。整体上，该模块抽象了不同 LLM 提供者的网络调用差异，为上层代码提供了一个简洁、一致的异步网络交互层。
+该模块负责处理与 LLM 提供者（如 `OpenAI` 和 Anthropic）的网络通信，包括检测当前环境中的提供者类型、验证所需环境变量是否到位，以及发起异步 LLM 请求和完成请求。它通过 `kota::event_loop` 驱动异步操作，并提供 `validate_llm_provider_environment`、`call_llm_async` 和 `call_completion_async` 等公共接口，使调用方能够以非阻塞方式与 LLM 服务交互，同时确保运行时配置的正确性。
 
 ## Imports
 
@@ -32,28 +30,30 @@ Definition: `network/network.cppm:150`
 
 Declaration: [`Namespace clore::net`](../../namespaces/clore/net/index.md)
 
-函数 `clore::net::call_completion_async` 的实现采用两步委托模式：首先通过 `detect_provider_from_environment` 从环境变量（如 `kAnthropicApiKeyEnv`、`kOpenAIApiKeyEnv` 等）推断出 `Provider` 枚举值；若提供商检测失败，则通过 `kota::fail` 直接返回错误。成功后，将 `provider`、原始 `request` 和 `loop` 转发给 `dispatch_completion`，该函数内部根据 `Provider` 类型（如 `Anthropic` 或 `OpenAI`）调用对应的 `request_provider_text_async` 或 `call_llm_async` 等具体实现。外层使用 `unwrap_caught_result` 包装 `dispatch_completion` 的 `kota::task`，将取消事件（`cancel`）统一转换为 `LLMError` 类型的失败结果。整个流程依赖 `kota::event_loop` 进行异步编排，并利用模板元函数 `detail::unwrap_caught_result` 捕获协程异常。
+函数 `clore::net::call_completion_async` 是 LLM 完成请求的顶层入口，其实现通过环境变量动态选择底层提供者。首先调用 `detect_provider_from_environment` 检测并验证提供者，若结果无值则通过 `kota::fail` 立即中止协程。随后将成功解包的 `Provider` 值传递给 `dispatch_completion`，该函数负责将 `CompletionRequest` 和 `kota::event_loop` 分派到特定提供者的执行路径。最终通过 `detail::unwrap_caught_result` 包装协程结果，若遇到取消则将其转换为 `co_await` 可捕获的取消错误，确保异常路径一致处理。
 
 #### Side Effects
 
-- Performs I/O to detect the LLM provider from environment variables
-- Makes network calls via `dispatch_completion` to communicate with the LLM API
-- Potentially handles cancellation, which may affect scheduling or resource cleanup
+- reads environment variables via `detect_provider_from_environment`
+- performs network I/O via `dispatch_completion`
+- handles cancellation via `catch_cancel` on the inner task
+- constructs `LLMError` instances on failure
 
 #### Reads From
 
-- Environment variables (through `detect_provider_from_environment`)
-- The `CompletionRequest` parameter
-- The `kota::event_loop&` parameter (for scheduling callbacks)
+- `CompletionRequest` parameter (moved from)
+- environment variables (via `detect_provider_from_environment`)
+- `kota::event_loop` parameter
 
 #### Writes To
 
-- The coroutine return value (`kota::task::promise_type` state) via `co_return`
+- the `kota::task` result encapsulating `CompletionResponse` or `LLMError`
 
 #### Usage Patterns
 
-- Called to perform an asynchronous LLM completion with automatic provider detection from environment
-- Typically used in async contexts that provide a `kota::event_loop`
+- called with a `CompletionRequest` and an event loop to obtain a task
+- awaited to asynchronously retrieve the completion response
+- used in higher‑level async completion workflows
 
 ### `clore::net::call_llm_async`
 
@@ -63,30 +63,31 @@ Definition: `network/network.cppm:126`
 
 Declaration: [`Namespace clore::net`](../../namespaces/clore/net/index.md)
 
-函数 `clore::net::call_llm_async` 首先调用 `clore::net::(anonymous namespace)::detect_provider_from_environment` 来检测当前环境支持的 LLM 提供程序。如果检测失败，则通过 `kota::fail` 立即终止协程；否则，它将获取提供程序对应的标签，并将该标签、`model`、`system_prompt`、`request` 和 `loop` 传递给 `clore::net::(anonymous namespace)::request_provider_text_async`。实际的完成请求调度委托给一个 lambda 表达式，该表达式调用 `clore::net::(anonymous namespace)::dispatch_completion`，根据检测到的提供程序执行底层网络交互。整个流程依赖于 `RequestProviderTextAsync` 和 `dispatch_completion` 的异步协作，以及 `kota::event_loop` 提供的事件驱动调度。
+`clore::net::call_llm_async` 首先调用 `detect_provider_from_environment` 来识别可用的 LLM 提供者。如果提供者检测失败（例如，没有设置环境变量），则通过 `kota::fail` 立即返回错误。成功检测后，它使用 `provider_label` 获取提供者的描述标签，然后委托给 `request_provider_text_async`。这个内部函数接收一个回调 lambda，该 lambda 调用 `dispatch_completion` 来执行实际的完成请求，并返回一个 `kota::task`。整个流程在传入的 `kota::event_loop` 上异步执行，并使用 `.or_fail()` 将错误向上传播。
 
 #### Side Effects
 
-- 执行网络 I/O 调用 LLM API
-- 读取环境变量以确定提供商
+- Reads environment variables to detect the LLM provider
+- Makes asynchronous HTTP requests to the LLM API
 
 #### Reads From
 
-- `model`
-- `system_prompt`
-- `request`
-- `loop`
-- 环境变量（通过 `detect_provider_from_environment`）
+- environment variables
+- `model` parameter
+- `system_prompt` parameter
+- `request` parameter
+- `loop` parameter
 
 #### Writes To
 
-- 返回的 `kota::task` 结果
+- network output via HTTP request to LLM API
+- return value (task that resolves to a string or `LLMError`)
 
 #### Usage Patterns
 
-- 异步调用 LLM 生成文本
-- 配合事件循环使用
-- 错误处理通过 `LLMError`
+- Called to send a prompt to an LLM asynchronously
+- Used in higher-level functions that require provider detection and error handling
+- Part of the async LLM request pipeline
 
 ### `clore::net::validate_llm_provider_environment`
 
@@ -96,7 +97,7 @@ Definition: `network/network.cppm:118`
 
 Declaration: [`Namespace clore::net`](../../namespaces/clore/net/index.md)
 
-`clore::net::validate_llm_provider_environment` 的实现完全委托给 `detect_provider_from_environment`：它首先调用该函数获取一个 `std::expected` 结果，该结果表示环境中的 LLM 提供商配置是否有效。如果 `provider_result` 不持有值（即检测失败），函数立即返回一个 `std::unexpected` 包装的 `LLMError`；否则返回一个空的 `std::expected<void, LLMError>` 表示成功。整个控制流仅包含此单一分支，没有重试或附加验证逻辑，完全依赖 `detect_provider_from_environment` 内部对 `Provider` 枚举（如 `Provider::Anthropic` 和 `Provider::OpenAI`）以及对应环境变量（例如 `kAnthropicApiKeyEnv`、`kOpenAIApiKeyEnv`）的检查。
+函数 `clore::net::validate_llm_provider_environment` 的实现完全委托给内部辅助函数 `clore::net::(anonymous namespace)::detect_provider_from_environment`。该函数首先调用 `detect_provider_from_environment()`，若其返回值没有值（即包含 `std::unexpected`），则立即以同样的 `LLMError` 错误返回 `std::unexpected`；否则返回一个空的 `std::expected<void, LLMError>` 表示成功。整个实现没有额外的逻辑分支或副作用，是一个简单的转发封装，利用匿名命名空间中的环境检测算法完成校验。
 
 #### Side Effects
 
@@ -104,13 +105,13 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- environment variables (via `detect_provider_from_environment`)
+- environment variables via `detect_provider_from_environment()`
 
 #### Usage Patterns
 
-- Called before making LLM API calls to ensure provider is configured
+- called before initiating LLM provider interactions to ensure environment is properly set up
 
 ## Internal Structure
 
-`network` 模块以匿名命名空间隐藏内部实现，仅公开三个异步 LLM 调用接口。内部通过枚举 `Provider` 和一组环境变量常量（如 `kAnthropicApiKeyEnv`）进行提供者检测，`detect_provider_from_environment` 和 `has_nonempty_env` 等辅助函数负责解析运行环境；`dispatch_completion` 和模板函数 `request_provider_text_async` 封装了异步请求的分发与完成逻辑。公共接口 `validate_llm_provider_environment` 作为前置校验，`call_llm_async` 与 `call_completion_async` 向上层提供统一的异步调用入口，底层依赖 `kota::event_loop` 驱动事件循环，实现与控制流解耦。模块仅导入 `std`，无其他外部依赖。
+`network` 模块围绕公共异步调用接口 `call_llm_async`、`call_completion_async` 和 `validate_llm_provider_environment` 进行外部暴露。其内部实现被清晰地分层在匿名命名空间中：通过 `Provider` 枚举（`Anthropic`、`OpenAI`）及对应的环境变量常量（如 `kAnthropicApiKeyEnv`）对 LLM 提供商进行抽象；辅助函数 `detect_provider_from_environment`、`has_provider_env` 和 `provider_label` 负责环境检测与状态映射；而 `dispatch_completion` 和模板函数 `request_provider_text_async` 则完成异步请求的分发与适配。模块依赖仅限于标准库（`std`），并通过 `kota::event_loop` 驱动非阻塞操作，整体采用“公共接口 + 内部辅助层”的结构，将提供商逻辑隔离在匿名作用域中，以降低耦合。
 

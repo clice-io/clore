@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:dryrun'
-description: 'The generate:dryrun module simulates a documentation generation pass without producing final output, enabling accurate estimation of the LLM request counts and resource costs required for full generation. It implements the dry‑run logic by analyzing a PagePlanSet and a configuration to compute a RequestEstimate that breaks down anticipated requests by category (module summaries, symbol analyses, implementation summaries, etc.), and then assembles summary texts and structured LLMs‑compatible pages that present the estimate to the user.'
+description: 'The generate:dryrun module is responsible for constructing and providing dry‑run documentation pages that preview the output of the generation pipeline without actually invoking AI models. It estimates the number and types of AI requests that would be produced (per symbol category such as variables, functions, types, modules, and namespaces), assembles textual summaries for each page, and builds dedicated pages for LLMs content and request‑estimate overviews. The module also supplies a cache key function to uniquely identify page summaries for reuse.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-The `generate:dryrun` module simulates a documentation generation pass without producing final output, enabling accurate estimation of the LLM request counts and resource costs required for full generation. It implements the dry‑run logic by analyzing a `PagePlanSet` and a configuration to compute a `RequestEstimate` that breaks down anticipated requests by category (module summaries, symbol analyses, implementation summaries, etc.), and then assembles summary texts and structured `LLMs`‑compatible pages that present the estimate to the user.
+The `generate:dryrun` module is responsible for constructing and providing dry‑run documentation pages that preview the output of the generation pipeline without actually invoking AI models. It estimates the number and types of AI requests that would be produced (per symbol category such as variables, functions, types, modules, and namespaces), assembles textual summaries for each page, and builds dedicated pages for `LLMs` content and request‑estimate overviews. The module also supplies a cache key function to uniquely identify page summaries for reuse.
 
-The public‑facing implementation scope includes four entry points: `build_dry_run_page_summary_texts`, `build_request_estimate_page`, `build_llms_page`, and `page_summary_cache_key_for_request`. These functions accept page plans or request identifiers (passed as `const int &` references) and return integer status codes or cache keys. The module owns all logic for tallying prompt use, generating labeled sections for the `LLMs` output, deriving project names from configuration, and producing fallback summaries when primary results are unavailable.
+Publicly, the module owns four functions: `build_dry_run_page_summary_texts` which generates pre‑formatted summary fragments for a dry‑run page, `build_request_estimate_page` which constructs the page that details the estimated request counts, `page_summary_cache_key_for_request` which returns a deterministic integer key for caching page summaries, and `build_llms_page` which builds a page specifically for LLM‑related documentation. Internally, the module uses helper types like `RequestEstimate` and `LabeledPage` along with functions such as `estimate_request_count` and `project_name_from_config` to compute and structure the dry‑run output. It depends on configuration, extraction, analysis, and model modules to obtain the project data and prompt plans needed for the estimation.
 
 ## Imports
 
@@ -35,7 +35,9 @@ Definition: `generate/dryrun.cppm:316`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function iterates over each `PromptRequest` in `prompt_requests` and filters out those for which `page_summary_cache_key_for_request` does not yield a value (i.e., no previously computed cache key). For each remaining request, it invokes `fallback_page_summary_for_request` to obtain a dry‑run summary string; if the result is non‑empty, it stores the summary in the output map keyed by `prompt_request_key(request)`. The core logic relies on two dependency functions: `page_summary_cache_key_for_request` determines whether a request is eligible for a dry‑run summary, and `fallback_page_summary_for_request` produces the actual text. The function returns a mapping from request keys to their summary texts, skipping any request that lacks a cache key or produces an empty summary.
+The function iterates over the provided `prompt_requests` and, for each request, checks whether `page_summary_cache_key_for_request` returns a value for the given `plan`. If no cache key exists, the request is skipped. For those that do yield a key, it calls `fallback_page_summary_for_request` to obtain a summary text; if that result is non-empty, the summary is inserted into the output map under a key produced by `prompt_request_key`. The final map contains only requests that have both a cacheable key and a non‑empty fallback summary.
+
+The control flow is a linear scan with two filtering steps: absence of a cache key and an empty fallback both cause the request to be ignored. The function depends on three helpers from the same namespace—`page_summary_cache_key_for_request`, `fallback_page_summary_for_request`, and `prompt_request_key`—and relies on the `PagePlan` and `PromptRequest` types for the input parameters. No external side effects are performed; the result is returned as a new `std::unordered_map`.
 
 #### Side Effects
 
@@ -43,20 +45,14 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `plan` (const reference to `PagePlan`)
-- `prompt_requests` (const reference to `std::vector<PromptRequest>`)
-- `page_summary_cache_key_for_request(plan, request)` return value
-- `fallback_page_summary_for_request(plan, request)` return value
-- `prompt_request_key(request)` return value
-
-#### Writes To
-
-- local variable `summary_texts` (type `std::unordered_map<std::string, std::string>`) which is returned
+- `plan`
+- `prompt_requests`
+- `page_summary_cache_key_for_request` result
+- `fallback_page_summary_for_request` result
 
 #### Usage Patterns
 
-- Called during dry-run page generation to pre-populate summary texts without real LLM inference
-- Used to provide fallback summaries for prompt requests in a dry run context
+- called during dry-run page generation to produce summary key-value pairs
 
 ### `clore::generate::build_llms_page`
 
@@ -66,9 +62,7 @@ Definition: `generate/dryrun.cppm:333`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::build_llms_page` assembles a machine‑readable index page (`llms.txt`) for the generated C++ reference. It first retrieves the project name via `project_name_from_config(config)` and builds a Markdown string containing a top‑level heading, a brief description, and a link to the API reference index. If `request_estimate_path` is non‑empty, it also appends a link to the dry run request estimate page. The core algorithm then delegates to three calls of `append_llms_section`, each passing the shared `plan_set` and a distinct `PageType` (Module, Namespace, File) to produce labeled subsections with their entry lists. The final `GeneratedPage` is returned with the constructed `content`, the project name as the title, and the fixed relative path `"llms.txt"`.
-
-Internally, the function depends on several local helpers and types: `project_name_from_config` for the project name, `append_llms_section` (defined in the anonymous namespace) to format each section, and `PagePlanSet`, `config::TaskConfig`, `PageType`, and `GeneratedPage` from the surrounding module. The control flow is purely sequential, reserving an initial capacity of 2048 bytes for the `content` string to reduce reallocations.
+The function `clore::generate::build_llms_page` constructs a `GeneratedPage` representing an `llms.txt` index file for the generated C++ reference. It first retrieves the project name via `project_name_from_config`, then builds a markdown string content beginning with a top-level heading, a description line, and a link to the API reference markdown file. If the `request_estimate_path` parameter is non‑empty, a link to a dry‑run request estimate page is appended. The remaining content is assembled by calling the helper `append_llms_section` three times with `PageType` values `Module`, `Namespace`, and `File`, each receiving the same `plan_set` and `config`. Finally, the function returns a `GeneratedPage` with the constructed `title`, the fixed `relative_path` `"llms.txt"`, and the assembled `content`.
 
 #### Side Effects
 
@@ -79,15 +73,16 @@ No observable side effects are evident from the extracted code.
 - `plan_set`
 - `config`
 - `request_estimate_path`
+- `project_name_from_config(config)`
 
 #### Writes To
 
-- the returned `GeneratedPage` content
+- local `content` string
+- returned `GeneratedPage` object
 
 #### Usage Patterns
 
-- called during documentation generation to produce the llms`.txt` page
-- used as part of the page generation pipeline
+- called as part of the page generation pipeline to produce the `LLMs` overview file
 
 ### `clore::generate::build_request_estimate_page`
 
@@ -97,7 +92,7 @@ Definition: `generate/dryrun.cppm:230`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function first calls `estimate_request_count` with the `plan_set` and `model` parameters to obtain a `RequestEstimate` containing the breakdown of prompt tasks. It then retrieves the project name by invoking `project_name_from_config` on the `config`. A `std::string` named `content` is pre-allocated with a capacity of 2048 and built sequentially: frontmatter (title, description, layout, `page_template`) followed by Markdown body that uses `std::format` to embed every integer field from the estimate—such as `total_requests`, `page_requests`, `symbol_requests`, `namespace_page_requests`, `module_summary_requests`, subtotals for function/type/variable symbols and their associated analysis and summary request counts—into explanatory lines. No conditional branches or loops are present; the control flow is purely a linear sequence of appending formatted strings. Finally, the assembled content is moved into a `GeneratedPage` struct with a fixed title ("Dry Run Request Estimate") and relative path ("request-estimate`.md`") and returned.
+The function retrieves an estimate by calling `estimate_request_count` with the provided `plan_set` and `model`, and obtains the project name via `project_name_from_config`. It then constructs the `content` string in a fixed order: first embedding a YAML front matter block with title, description, layout, and page template; then printing the project name and a summary section listing the total, page, and symbol prompt tasks from the returned `RequestEstimate`. The following sections break down page‑level tasks (namespace summaries, module summaries and architecture prompts, index overviews) and symbol‑level tasks, using the estimate’s fields such as `function_symbols`, `type_symbols`, `variable_symbols` and their associated request counters for analysis and summary generation. The function finally returns a `GeneratedPage` with a static title, a fixed relative path of `"request-estimate.md"`, and the assembled `content`. No branching or iteration occurs beyond the sequential formatting steps; the primary dependency is the accurate computation of the `RequestEstimate` struct by the helper function `estimate_request_count`.
 
 #### Side Effects
 
@@ -105,18 +100,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `const clore::generate::PagePlanSet& plan_set`
-- `const clore::extract::ProjectModel& model`
-- `const clore::config::TaskConfig& config`
-
-#### Writes To
-
-- Returns a `clore::generate::GeneratedPage` object
+- `plan_set` parameter
+- `model` parameter
+- `config` parameter
+- result of `estimate_request_count(plan_set, model)`
+- result of `project_name_from_config(config)`
 
 #### Usage Patterns
 
-- Called during dry-run page generation to produce a request estimate page
-- Used to inform users about the number of prompt tasks before actual execution
+- called during dry run generation to produce the estimate page
+- likely invoked by `clore::generate::generate_dry_run`
 
 ### `clore::generate::page_summary_cache_key_for_request`
 
@@ -126,7 +119,7 @@ Definition: `generate/dryrun.cppm:293`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::page_summary_cache_key_for_request` computes an optional cache key string based on the kind of a `PromptRequest` and the associated `PagePlan`. Internally, it switches on `request.kind`. For `PromptKind::NamespaceSummary` and `PromptKind::ModuleSummary`, if `plan.owner_keys` is non-empty, the function returns the first element of that container; otherwise it yields `std::nullopt`. For all other enumerated kinds listed in the switch—`ModuleArchitecture`, `IndexOverview`, `FunctionAnalysis`, `TypeAnalysis`, `VariableAnalysis`, `FunctionDeclarationSummary`, `FunctionImplementationSummary`, `TypeDeclarationSummary`, and `TypeImplementationSummary`—the function immediately returns `std::nullopt`. A final fallback return outside the switch also produces `std::nullopt`, ensuring that any unlisted or default prompt kind also results in no cache key. The only dependencies are the `PagePlan` type (specifically its `owner_keys` member) and the `PromptRequest`'s `kind` field; no external state or additional queries are involved.
+The function determines a cache key for a page summary based on the request kind. It checks the `request.kind` via a switch statement. For `PromptKind::NamespaceSummary` and `PromptKind::ModuleSummary`, it attempts to retrieve the first element from `plan.owner_keys` as the cache key; if empty, it returns `std::nullopt`. For all other request kinds—`ModuleArchitecture`, `IndexOverview`, `FunctionAnalysis`, `TypeAnalysis`, `VariableAnalysis`, `FunctionDeclarationSummary`, `FunctionImplementationSummary`, `TypeDeclarationSummary`, and `TypeImplementationSummary`—it unconditionally returns `std::nullopt`, indicating no cache key. A fallback return after the switch also yields `std::nullopt`. The logic depends on the `PagePlan` type (specifically its `owner_keys` member) and the `PromptRequest` type with its `PromptKind` enum, but performs no further computation or external calls.
 
 #### Side Effects
 
@@ -134,19 +127,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `request.kind`
 - `plan.owner_keys`
+- `request.kind`
 
 #### Usage Patterns
 
-- generates cache key for page summaries
-- called when constructing cache entries for dry-run or generation
+- Used to derive a cache key for page summaries, particularly for namespace and module summaries.
 
 ## Internal Structure
 
-The `generate:dryrun` module is decomposed into a small set of public entry points and a collection of private helpers in an anonymous namespace. The public surface comprises `build_dry_run_page_summary_texts`, `build_request_estimate_page`, `build_llms_page`, and `page_summary_cache_key_for_request`, each returning an `int` result. Internally, the module relies on the helper struct `RequestEstimate` to aggregate counts of various request types (module, function, type, variable, index, namespace), and on functions such as `estimate_request_count`, `append_llms_section`, `llms_entry_label`, `fallback_page_summary_for_request`, and `project_name_from_config` to compute estimates, format LLM-specific pages, and derive project metadata. These private utilities operate over `plan`, `plan_set`, `config`, and `estimate` variables, and build summary content in `content` strings and `LabeledPage` structures.
-
-The module imports `config`, `extract`, `generate:analysis`, and `generate:model` to obtain project configuration, extraction results, analysis data, and core page/model types. Its internal layering separates estimation logic from page-construction and summary-text generation, with the anonymous namespace handling all private computation while the exported functions provide a narrow, stable interface to the rest of the `generate` subsystem.
+The `generate:dryrun` module provides the dry‑run stage of the documentation generation pipeline, where it produces descriptive page content and cost estimates without performing the full asynchronous AI queries. It depends on `config` for project settings, `extract` for the parsed project model, `generate:analysis` for structured analysis of symbols, and `generate:model` for core data types like `PagePlan` and `PageType`. Internally, the module is layered around a `RequestEstimate` struct that accumulates counts for various request categories (module summaries, namespace pages, type/function analyses, etc.). Helper functions such as `estimate_request_count`, `project_name_from_config`, and `fallback_page_summary_for_request` compute these estimates and generate textual summaries based on the configuration and a `plan_set`. The public entry points – `build_dry_run_page_summary_texts`, `build_request_estimate_page`, `page_summary_cache_key_for_request`, and `build_llms_page` – use these internals to produce either a textual summary for a dry‑run page, a page‑estimate display, a cache key for repeated summaries, or a dedicated LLM page. This decomposition keeps request‑counting logic separate from page‑building logic and ensures that the module can be used both for interactive dry‑run feedback and for previewing the generated documentation structure.
 
 ## Related Pages
 

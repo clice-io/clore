@@ -1,6 +1,6 @@
 ---
 title: 'Module http'
-description: 'The http module provides the core networking layer for interacting with LLM APIs. It owns responsibilities ranging from environment‑based configuration discovery to building, dispatching, and processing HTTP requests. Public‑facing entities include the perform_http_request function for synchronous calls, perform_http_request_async for asynchronous invocations driven by an event loop, and the read_environment and read_required_env helpers that parse API credentials and base URLs from system variables. Error handling is consolidated in the LLMError type, while rate‑limiting controls are exposed through initialize_llm_rate_limit and shutdown_llm_rate_limit, backed by a global semaphore and a request counter.'
+description: 'The http module provides the foundational HTTP networking layer for LLM (Large Language Model) API communication within the codebase. Its primary responsibility is managing the full lifecycle of HTTP requests – from reading environment variables (API keys, base URLs) and configuring request objects, to performing both synchronous (perform_http_request) and asynchronous (perform_http_request_async) HTTP operations, and interpreting responses and errors via dedicated types such as RawHttpResponse and LLMError. The module also integrates a rate-limiting subsystem (initialize_llm_rate_limit / shutdown_llm_rate_limit) that controls concurrency for LLM requests, using a semaphore and associated counters.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-The `http` module provides the core networking layer for interacting with LLM `APIs`. It owns responsibilities ranging from environment‑based configuration discovery to building, dispatching, and processing HTTP requests. Public‑facing entities include the `perform_http_request` function for synchronous calls, `perform_http_request_async` for asynchronous invocations driven by an event loop, and the `read_environment` and `read_required_env` helpers that parse API credentials and base `URLs` from system variables. Error handling is consolidated in the `LLMError` type, while rate‑limiting controls are exposed through `initialize_llm_rate_limit` and `shutdown_llm_rate_limit`, backed by a global semaphore and a request counter.
+The `http` module provides the foundational HTTP networking layer for LLM (Large Language Model) API communication within the codebase. Its primary responsibility is managing the full lifecycle of HTTP requests – from reading environment variables (API keys, base `URLs`) and configuring request objects, to performing both synchronous (`perform_http_request`) and asynchronous (`perform_http_request_async`) HTTP operations, and interpreting responses and errors via dedicated types such as `RawHttpResponse` and `LLMError`. The module also integrates a rate-limiting subsystem (`initialize_llm_rate_limit` / `shutdown_llm_rate_limit`) that controls concurrency for LLM requests, using a semaphore and associated counters.
 
-Internal details such as the `EnvironmentConfig` and `RawHttpResponse` structs, timeout constants, the request configuration helper `configure_request`, and the semaphore guard are part of the implementation scope. Together, these elements form a complete, self‑contained HTTP client tailored for LLM API integration, with support for synchronous and asynchronous workflows, request formatting, and concurrency throttling.
+Public-facing implementation scope owned by this module includes the rate limit initialization and shutdown functions, the `LLMError` error type, the `detail` sub-namespace containing request execution (`perform_http_request`, `perform_http_request_async`), environment configuration readers (`read_environment`, `read_required_env`), request configuration helper (`configure_request`), error unwrapping utility (`unwrap_caught_result`), and various compile-time networking constants (connection timeouts, DNS cache timeout, TCP keepalive intervals). Internally, it manages a global request identifier counter, a shared semaphore for rate limiting, and per-thread HTTP clients to ensure safe concurrent access.
 
 ## Imports
 
@@ -38,25 +38,28 @@ Definition: `network/http.cppm:23`
 
 Declaration: [`Namespace clore::net`](../../namespaces/clore/net/index.md)
 
-The struct stores a single `std::string` member `message` as its internal payload. Invariants: `message` is always a valid `std::string` (default-constructed empty or move-constructed from the argument). The default constructor leaves `message` empty. The explicit constructor from `std::string` moves the argument into `message` to avoid copying. The explicit constructor from `kota::error` extracts the error description by calling `err.message()` and stores the result, effectively wrapping a `kota::error` into a string-based error representation. No additional state or validation logic is present; the struct serves solely as a lightweight wrapper around a single error message string.
+`clore::net::LLMError` is a minimal error carrier holding a single `std::string message` member that captures a human-readable description of a failure encountered during LLM network interactions. The default constructor is defaulted, leaving `message` empty, which serves as the "no error set" state for default-constructed instances.
+
+The two value constructors are marked `explicit` to prevent implicit conversions: the `std::string` overload moves its argument into `message` via `std::move(msg)`, while the `kota::error` overload bridges from the `kota` error model by storing the result of `err.message()`. There are no additional invariants beyond those of `std::string` itself.
 
 #### Invariants
 
-- `message` holds a human-readable error description
-- Default-constructed `LLMError` has an empty `message`
-- Construction from `kota::error` copies the error's message
+- `message` always holds the error description as a `std::string`
+- constructors taking arguments are `explicit` to prevent implicit conversions
+- default-constructed instances have an empty `message`
 
 #### Key Members
 
-- `std::string message`
-- `LLMError()` default constructor
-- `explicit LLMError(std::string msg)`
-- `explicit LLMError(kota::error err)`
+- `message` field of type `std::string`
+- default constructor `LLMError()`
+- `explicit LLMError(std::string msg)` constructor
+- `explicit LLMError(kota::error err)` constructor adapting from `kota::error`
 
 #### Usage Patterns
 
-- Returned or thrown as an error type for LLM-related failures
-- Constructed from a `kota::error` or an explicit message string
+- constructed from a raw message string
+- constructed by adapting a `kota::error` into an LLM-specific error
+- used as an error representation within `clore::net` HTTP/LLM code paths
 
 #### Member Functions
 
@@ -110,11 +113,12 @@ Definition: `network/http.cppm:37`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The `clore::net::detail::EnvironmentConfig` struct is a Plain-Old-Data aggregate that serves as an internal container for storing two configuration strings: `api_base` (the base URL for API requests) and `api_key` (the authentication key). Both members are `std::string` objects with no special invariants beyond typical string validity; the struct itself carries no member functions or additional logic, acting solely as a lightweight data carrier for environment settings used deeper in the networking layer. Its primary role is to bundle these two parameters together for convenient, consistent passing through internal interfaces.
+The struct `clore::net::detail::EnvironmentConfig` is a plain data aggregate that bundles two `std::string` members: `api_base` and `api_key`. Its role is to hold environment‑specific HTTP configuration parameters—the base URL for API calls and the authentication key—as a single, movable value. No invariants are enforced beyond the default behavior of `std::string`; the caller is responsible for providing suitable non‑empty strings when required. The struct has no user‑defined constructors, assignment `operator`s, or destructor, relying on compiler‑generated implementations that correctly copy or move the contained strings.
 
 #### Invariants
 
-- `api_base` and `api_key` may be empty or contain configuration values
+- Both members are always of type `std::string`
+- No guarantee of non-empty or valid content
 
 #### Key Members
 
@@ -123,8 +127,8 @@ The `clore::net::detail::EnvironmentConfig` struct is a Plain-Old-Data aggregate
 
 #### Usage Patterns
 
-- Passed to network client constructors or initialization functions
-- Populated from environment variables or configuration files
+- Constructed with environment-specific values before initializing higher-level network objects
+- Passed by value or const reference to setup HTTP clients or service wrappers
 
 ### `clore::net::detail::RawHttpResponse`
 
@@ -134,12 +138,12 @@ Definition: `network/http.cppm:42`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The struct `clore::net::detail::RawHttpResponse` is a plain aggregate that serves as a lightweight holder for the two essential parts of a raw HTTP response: the status code and the body content. Its only data members are `http_status` (a `long` defaulting to `0`) and `body` (a `std::string` defaulting to empty). No user‑defined constructors, assignment `operator`s, or destructors are declared; the compiler‑generated special member functions perform shallow copies and trivial destruction, which is sufficient for this internal struct. The key invariant is that `http_status` is expected to hold an integral HTTP status code (e.g., 200, 404) after parsing, while `body` contains the raw response payload. Because the struct is defined in a `detail` namespace, it is not part of the public API; its purpose is to be used internally by HTTP parsing machinery to transport the parsed result without additional processing or validation logic.
+The struct `clore::net::detail::RawHttpResponse` is a simple internal data holder that stores the raw result of an HTTP response before higher‑level processing. It consists of two fields: `http_status`, a `long` initialised to `0`, and `body`, a `std::string`. The type has an implicit invariant that an `http_status` of `0` should be interpreted as “status not yet assigned” or an uninitialised response, while a non‑zero value represents an actual HTTP status code. The `body` field holds the complete response payload as received over the wire, and may be empty if no body was sent. No custom constructors, assignment `operator`s, or destructor are declared; the compiler‑generated versions are sufficient because the struct is trivially copyable and movable. The sole purpose of `RawHttpResponse` is to act as a transient vessel within the HTTP networking internals, decoupling the raw byte acquisition from the subsequent parsing and application‑facing response objects.
 
 #### Invariants
 
-- `http_status` is expected to hold a valid HTTP status code, though no validation is performed.
-- `body` may be empty, representing an absent response body.
+- `http_status` may be zero or any valid HTTP status code
+- `body` may be empty or contain response content
 
 #### Key Members
 
@@ -148,52 +152,103 @@ The struct `clore::net::detail::RawHttpResponse` is a plain aggregate that serve
 
 #### Usage Patterns
 
-- Constructed after parsing an HTTP response to hold the raw status and body.
-- Used internally within the `clore::net` library, likely passed to higher-level response wrappers.
+- Used as a return type or intermediate data holder for HTTP responses
+- Likely populated by HTTP parsing or networking code
 
 ## Variables
 
 ### `clore::net::detail::g_llm_request_counter`
 
-Declaration: `network/http.cppm:94`
+Declaration: `network/http.cppm:97`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-It is referenced by the function `clore::net::detail::perform_http_request_async`, suggesting it tracks the number of HTTP requests made, possibly for rate limiting or logging.
+This counter is incremented each time a new HTTP request is initiated by `perform_http_request_async`. Its value is read atomically to assign a unique numeric identifier to each request, aiding in logging and tracking.
 
-#### Mutation
+#### Mutation Sources
 
-No mutation is evident from the extracted code.
+- incremented inside `perform_http_request_async`
 
 #### Usage Patterns
 
-- Referenced in `clore::net::detail::perform_http_request_async`
+- read to produce a unique request number
+- used in HTTP request lifecycle of `perform_http_request_async`
 
 ### `clore::net::detail::g_llm_semaphore`
+
+Declaration: `network/http.cppm:48`
+
+Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
+
+The semaphore is managed by `clore::net::initialize_llm_rate_limit` which initializes it with a maximum count, and by `clore::net::shutdown_llm_rate_limit` which resets or releases it. It synchronizes access to LLM request operations, enforcing a limit on simultaneous requests.
+
+#### Mutation Sources
+
+- `clore::net::initialize_llm_rate_limit` assigns a new semaphore
+- `clore::net::shutdown_llm_rate_limit` resets or destroys the semaphore
+
+#### Usage Patterns
+
+- referenced in rate‑limiting setup and teardown functions
+- used to enforce a maximum concurrency of LLM requests
+
+### `clore::net::detail::g_llm_semaphore_mutex`
 
 Declaration: `network/http.cppm:47`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-This semaphore controls the maximum number of simultaneous LLM HTTP requests. It is initialized by `clore::net::initialize_llm_rate_limit` and shut down by `clore::net::shutdown_llm_rate_limit`. Inside `clore::net::detail::perform_http_request_async`, the semaphore is likely acquired before sending a request and released after completion.
+This mutex guards the shared LLM semaphore state, such as `clore::net::detail::g_llm_semaphore`. It is used by the functions `clore::net::initialize_llm_rate_limit`, `clore::net::detail::(anonymous namespace)::current_llm_semaphore`, and `clore::net::shutdown_llm_rate_limit` to ensure thread-safe access when modifying or querying the semaphore.
 
-#### Mutation Sources
+#### Mutation
 
-- `clore::net::initialize_llm_rate_limit`
-- `clore::net::shutdown_llm_rate_limit`
+No mutation is evident from the extracted code.
 
 #### Usage Patterns
 
-- Acquired before performing an LLM HTTP request in `perform_http_request_async`
-- Released after the request completes
+- locked/unlocked in `clore::net::initialize_llm_rate_limit`
+- locked/unlocked in `clore::net::detail::(anonymous namespace)::current_llm_semaphore`
+- locked/unlocked in `clore::net::shutdown_llm_rate_limit`
+
+### `clore::net::detail::kConnMaxAgeSec`
+
+Declaration: `network/http.cppm:102`
+
+Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
+
+It defines the maximum age of a connection in seconds, used as a timeout parameter when configuring HTTP requests via `clore::net::detail::configure_request`.
+
+#### Mutation
+
+No mutation is evident from the extracted code.
+
+#### Usage Patterns
+
+- Read by `clore::net::detail::configure_request` to set connection max age
+
+### `clore::net::detail::kDnsCacheTimeoutSec`
+
+Declaration: `network/http.cppm:101`
+
+Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
+
+This variable is used within `clore::net::detail::configure_request` to configure the DNS cache timeout for HTTP requests. As a `constexpr` value, it is evaluated at compile time and cannot be modified at runtime.
+
+#### Mutation
+
+No mutation is evident from the extracted code.
+
+#### Usage Patterns
+
+- Used in `clore::net::detail::configure_request` to set DNS cache timeout
 
 ### `clore::net::detail::kHttpConnectTimeoutMs`
 
-Declaration: `network/http.cppm:96`
+Declaration: `network/http.cppm:99`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-Used in `configure_request` to set the connect timeout on outgoing HTTP connections, ensuring requests are not left hanging if the server does not respond within the specified period.
+This constant is consumed by the function `clore::net::detail::configure_request` to set the connection timeout on HTTP requests. It is used as a timeout parameter to limit how long the system waits for a TCP connection to be established, ensuring that requests do not hang indefinitely.
 
 #### Mutation
 
@@ -201,15 +256,15 @@ No mutation is evident from the extracted code.
 
 #### Usage Patterns
 
-- Referenced in `configure_request` to set connect timeout on HTTP requests
+- passed to `configure_request` to set connection timeout
 
 ### `clore::net::detail::kHttpRequestTimeout`
 
-Declaration: `network/http.cppm:97`
+Declaration: `network/http.cppm:100`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-Used to set the timeout on HTTP requests made by the networking layer. Likely passed to underlying HTTP client functions to control how long to wait for a response.
+Because it is `constexpr`, this value is evaluated at compile time and cannot be modified at runtime. It provides a standardized timeout limit for HTTP request operations, ensuring requests do not hang indefinitely. Its exact consumption site is not shown in the provided evidence, but by naming and context it is likely used to set a timeout on the HTTP client's request handling.
 
 #### Mutation
 
@@ -217,260 +272,293 @@ No mutation is evident from the extracted code.
 
 #### Usage Patterns
 
-- HTTP request timeout configuration
-- passed to HTTP client functions
+- Referenced as a constant timeout value in HTTP request logic (inferred from name and module context).
+
+### `clore::net::detail::kTcpKeepIdleSec`
+
+Declaration: `network/http.cppm:103`
+
+Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
+
+This constant is consumed by the function `clore::net::detail::configure_request`, which uses it to set the TCP keep-alive idle timeout on outgoing HTTP requests. Its value is passed directly to underlying socket options, influencing network connection lifecycle.
+
+#### Mutation
+
+No mutation is evident from the extracted code.
+
+#### Usage Patterns
+
+- reads in `clore::net::detail::configure_request` to set socket keep-alive idle timeout
+
+### `clore::net::detail::kTcpKeepIntvlSec`
+
+Declaration: `network/http.cppm:104`
+
+Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
+
+This constant defines the number of seconds between TCP keepalive probes. It is consumed by the `clore::net::detail::configure_request` function to configure the keepalive interval on HTTP requests, ensuring idle connections are probed and potentially closed if unresponsive.
+
+#### Mutation
+
+No mutation is evident from the extracted code.
+
+#### Usage Patterns
+
+- consumed as a constant in `clore::net::detail::configure_request` to set the TCP keepalive interval
 
 ## Functions
 
 ### `clore::net::detail::configure_request`
 
-Declaration: `network/http.cppm:126`
+Declaration: `network/http.cppm:150`
 
-Definition: `network/http.cppm:126`
+Definition: `network/http.cppm:150`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The function accepts a `kota::http::request` and a span of `kota::http::header` objects along with the request body as a `std::string`. It iterates over each header in the provided span, calling `request.header(header.name, header.value)` to attach them. Afterwards, it assigns the serialised `request_json` to the request body via `request.body()`. Several curl options are configured: `CURLOPT_CONNECTTIMEOUT_MS` is set to the constant `kHttpConnectTimeoutMs`, `CURLOPT_NOSIGNAL` is set to `1L` to avoid signal-based timeouts, and `CURLOPT_TCP_KEEPALIVE` is enabled with `1L`. No branching or error handling occurs; the function is purely a mutating preparation step for the HTTP request object.
+The function `clore::net::detail::configure_request` performs a linear sequence of operations to prepare a `kota::http::request` instance for an outgoing LLM API call. It iterates over the provided `std::span<const kota::http::header>`, calling `request.header(name, value)` for each element to attach HTTP headers. After all headers are set, the function moves the `request_json` string into the request body via `request.body(std::move(request_json))`.
+
+The remaining steps configure low‑level `cURL` settings through a series of `request.curl_option` calls. These set the connection timeout (`CURLOPT_CONNECTTIMEOUT_MS` using `kHttpConnectTimeoutMs`), disable signal handling (`CURLOPT_NOSIGNAL`), enable TCP keep‑alive (`CURLOPT_TCP_KEEPALIVE`), and configure keep‑alive idle time (`CURLOPT_TCP_KEEPIDLE` from `kTcpKeepIdleSec`) and interval (`CURLOPT_TCP_KEEPINTVL` from `kTcpKeepIntvlSec`). DNS cache lifetime is set with `CURLOPT_DNS_CACHE_TIMEOUT` from `kDnsCacheTimeoutSec`, and the maximum connection age is set with `CURLOPT_MAXAGE_CONN` from `kConnMaxAgeSec`. The function has no internal branches or error handling; all constants are defined elsewhere in the detail namespace, and the caller must ensure the request object is valid.
 
 #### Side Effects
 
-- mutates the `request` object by adding headers, setting its body, and modifying curl options
+- Modifies the provided `kota::http::request` object by setting HTTP headers, the request body, and curl options for timeout, keepalive, DNS caching, and connection reuse.
 
 #### Reads From
 
-- `headers` parameter (span of headers)
-- `request_json` parameter (string moved into request)
+- `headers` span of `kota::http::header`
+- `request_json` string
+- constants `kHttpConnectTimeoutMs`, `kTcpKeepIdleSec`, `kTcpKeepIntvlSec`, `kDnsCacheTimeoutSec`, `kConnMaxAgeSec`
 
 #### Writes To
 
-- `request` parameter (mutable reference to `kota::http::request`)
+- The `kota::http::request` object: its headers, body, and curl options (`CURLOPT_CONNECTTIMEOUT_MS`, `CURLOPT_NOSIGNAL`, `CURLOPT_TCP_KEEPALIVE`, `CURLOPT_TCP_KEEPIDLE`, `CURLOPT_TCP_KEEPINTVL`, `CURLOPT_DNS_CACHE_TIMEOUT`, `CURLOPT_MAXAGE_CONN`)
 
 #### Usage Patterns
 
-- called as part of HTTP request construction pipeline
-- used in `perform_http_request` or similar functions to finalize request setup
+- Called during HTTP request preparation to apply standard configuration before sending the request
+- Used in the HTTP client flow to centralize setup of headers, body, and performance-related options
 
 ### `clore::net::detail::perform_http_request`
 
-Declaration: `network/http.cppm:52`
+Declaration: `network/http.cppm:53`
 
-Definition: `network/http.cppm:139`
+Definition: `network/http.cppm:167`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The function acts as a synchronous wrapper around the internal `perform_http_request_async` coroutine. It creates a local `async::event_loop` instance, copies the caller's `url`, `headers`, and `request_json` into owning containers required by the async variant, and then schedules the resulting operation on the loop. After running the loop to completion, it inspects the operation's outcome: if the operation was cancelled, it returns an `LLMError` with a cancellation message; if an error occurred, it moves the error into an unexpected result; otherwise, it moves the successful `RawHttpResponse` into an expected value. This function depends on the async infrastructure (`async::event_loop`, `perform_http_request_async`) and on `LLMError` for error reporting.
+The function `clore::net::detail::perform_http_request` acts as a synchronous wrapper around the asynchronous `clore::net::detail::perform_http_request_async`. It creates a local `async::event_loop`, copies the input `headers` into a `headers_vec`, constructs an async operation from `perform_http_request_async`, and attaches a `.catch_cancel()` handler to it. The operation is scheduled on the loop, which is then run to completion, blocking the caller until the HTTP request finishes.
+
+After the loop terminates, the function inspects the `operation.result()`. If the result was cancelled (e.g., due to `clore::net::shutdown_llm_rate_limit`), it returns a `std::unexpected` containing an `LLMError` with a cancellation message. If the result contains an error, that error is moved into the unexpected return. Otherwise, the contained value (a `RawHttpResponse`) is returned as the expected success. Key dependencies are the asynchronous request internal logic (which handles rate limiting, DNS caching, TLS, and environment-based configuration) and the event loop infrastructure provided by `async::event_loop`.
 
 #### Side Effects
 
-- performs an HTTP request via `perform_http_request_async`
-- creates and runs an event loop
-- allocates and copies headers and request string
-- returns a result or error
+- Performs network I/O via HTTP request
+- Allocates memory for header copy and string copies
+- Runs an event loop synchronously
 
 #### Reads From
 
-- url parameter
-- headers parameter (span of headers)
+- `url` parameter
+- `headers` parameter
 - `request_json` parameter
-- result of async operation
-
-#### Writes To
-
-- event loop (schedule, run)
-- result variable (moved from operation)
-- returned expected value
 
 #### Usage Patterns
 
-- synchronous wrapper over async HTTP request
-- used to perform HTTP requests with async internal implementation
+- Wraps asynchronous HTTP request into synchronous call
+- Used when a blocking HTTP request is needed
 
 ### `clore::net::detail::perform_http_request_async`
 
-Declaration: `network/http.cppm:57`
+Declaration: `network/http.cppm:58`
 
-Definition: `network/http.cppm:165`
+Definition: `network/http.cppm:195`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The function `clore::net::detail::perform_http_request_async` is a coroutine that returns `async::task<RawHttpResponse, LLMError>`, performing an asynchronous HTTP POST request to an LLM endpoint. Upon entry, it checks the global semaphore `g_llm_semaphore`; if active, it co-awaits an acquire before creating a `SemaphoreGuard` that will release the semaphore on scope exit. It then fetches and logs a monotonically increasing request number from `g_llm_request_counter` along with the target `url`.
-
-A `kota::http::client` is configured with `kHttpRequestTimeout` and a POST request is built on the provided `async::event_loop`. The helper `configure_request` attaches the given `headers` and `request_json` body. After sending the request via `co_await request.send().catch_cancel()`, the function handles three outcomes: cancellation produces an `LLMError` with a cancellation message; a transport error produces an `LLMError` with the error's message; on success, a `RawHttpResponse` is constructed from the response status and body text, logged, and co-returned. The control flow relies on `async::task`, the global semaphore for rate limiting, and the `kota::http` networking primitives.
+The function `clore::net::detail::perform_http_request_async` is a coroutine that executes an HTTP POST request to a language model endpoint with rate-limiting support. It first acquires a shared semaphore from `current_llm_semaphore()` using a `co_await`; the semaphore is stored in a RAII `SemaphoreGuard` to ensure release on all exit paths (including cancellation and errors). The request is logged with an incrementing counter from `g_llm_request_counter`. The implementation retrieves a thread‑local HTTP client via `get_thread_http_client()`, constructs a POST on the provided `loop`, sets a timeout using `kHttpRequestTimeout`, and delegates header and body configuration to `configure_request`. The request is sent with `.send().catch_cancel()`; if cancelled or erroneous, the guard releases the semaphore and the coroutine fails with an `LLMError`. On success, a `RawHttpResponse` is constructed from the HTTP status and body text, a completion log is emitted, the semaphore is released, and the response is returned.
 
 #### Side Effects
 
-- Acquires global semaphore `g_llm_semaphore` if present
-- Releases global semaphore `g_llm_semaphore` on return
-- Atomically increments global counter `g_llm_request_counter`
-- Sends an HTTP POST request over the network
-- Logs request and response information via `logging::info` and `logging::warn`
+- acquires and releases a semaphore (`kota::semaphore` via `SemaphoreGuard`)
+- increments the global atomic counter `g_llm_request_counter`
+- calls `logging::info` to log request start and completion
+- calls `logging::warn` on request failure
+- performs an asynchronous HTTP POST request via `request.send()`
+- cancels the asynchronous operation on cancellation via `co_await async::fail`
 
 #### Reads From
 
-- Global semaphore `g_llm_semaphore`
-- Global counter `g_llm_request_counter`
-- Parameter `url`
-- Parameter `headers`
-- Parameter `request_json`
-- Parameter `loop` (event loop reference)
-- Timeout constant `kHttpRequestTimeout`
+- parameter `url` (`std::string`)
+- parameter `headers` (`std::vector<kota::http::header>`)
+- parameter `request_json` (`std::string`)
+- parameter `loop` (`async::event_loop`&)
+- global semaphore returned by `current_llm_semaphore()`
+- global atomic counter `g_llm_request_counter`
+- constant `kHttpRequestTimeout` (presumed integer or duration)
+- thread-local HTTP client from `get_thread_http_client()`
 
 #### Writes To
 
-- Global counter `g_llm_request_counter` (incremented via `fetch_add`)
-- Local variables `client`, `request`, `response`, `raw_response`
-- Logging output
+- global counter `g_llm_request_counter` (via `fetch_add`)
+- semaphore (release via `SemaphoreGuard::release` or destructor)
+- logs via `logging::info` and `logging::warn`
+- local `RawHttpResponse` object returned via `co_return`
 
 #### Usage Patterns
 
-- Called as part of an `async::task` coroutine in the LLM request pipeline
-- Used by higher-level async LLM functions to perform the actual HTTP call
+- called within an asynchronous coroutine context using `co_await`
+- used to send LLM HTTP requests with concurrency limiting via semaphore
+- paired with an `async::event_loop` for non-blocking I/O
+- handles cancellation and error propagation for robust callers
 
 ### `clore::net::detail::read_environment`
 
-Declaration: `network/http.cppm:49`
+Declaration: `network/http.cppm:50`
 
-Definition: `network/http.cppm:108`
+Definition: `network/http.cppm:132`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The implementation of `clore::net::detail::read_environment` follows a straightforward two-step validation pattern. It first calls `read_required_env` with the `base_env` parameter to obtain the API base URL, and then calls `read_required_env` again with the `key_env` parameter to obtain the API key. Each call is checked immediately: if the result does not have a value, the function returns `std::unexpected` containing the moved `LLMError` from the failed result. Only when both environment variables are successfully retrieved does the function construct and return an `EnvironmentConfig` by moving the extracted `api_base` and `api_key` values into its designated initializer fields.
-
-The function depends entirely on `read_required_env` for environment‑variable lookup and error handling, and on `EnvironmentConfig` as the output type. There is no branching beyond the two guard clauses, no asynchronous operations, and no direct interaction with HTTP requests or rate‑limiting constructs—those concerns are handled by callers or by deeper layers invoked later in the pipeline.
+The function sequentially calls `clore::net::detail::read_required_env` with the `base_env` and `key_env` arguments. Each call returns a `std::expected<std::string, LLMError>`. If either call does not contain a value, the function immediately propagates the failure by returning `std::unexpected` containing the moved error from the failed call. Only when both environment lookups succeed does it construct a `clore::net::detail::EnvironmentConfig` with the two resolved values (`api_base` and `api_key`). The algorithm is purely sequential and relies entirely on `read_required_env` for error handling; there is no retry or fallback logic.
 
 #### Side Effects
 
-- Reads process environment variables
+- reads environment variables via `clore::net::detail::read_required_env`
 
 #### Reads From
 
-- process environment variables named by `base_env` and `key_env`
-- `read_required_env` function
+- `base_env` parameter
+- `key_env` parameter
+- environment variables via `clore::net::detail::read_required_env`
 
 #### Writes To
 
-- returned `EnvironmentConfig` object (moved members)
-- error state via `std::unexpected`
+- local variable `api_base`
+- local variable `api_key`
+- return value of type `clore::net::detail::EnvironmentConfig`
 
 #### Usage Patterns
 
-- Called during network stack initialization to retrieve API credentials from environment
+- reading API configuration from environment variables at startup
+- initializing an `EnvironmentConfig` from two named environment variables
 
 ### `clore::net::detail::read_required_env`
 
-Declaration: `network/http.cppm:99`
+Declaration: `network/http.cppm:123`
 
-Definition: `network/http.cppm:99`
+Definition: `network/http.cppm:123`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The function `clore::net::detail::read_required_env` first converts the input `std::string_view name` to a null‑terminated C string via `std::string`. It then calls `std::getenv` to retrieve the environment variable value. If the returned pointer is `nullptr` or points to an empty string (first character `\0`), the function returns `std::unexpected` containing a `clore::net::LLMError` constructed with a formatted message indicating which variable is missing. Otherwise, it returns a `std::expected` success containing a `std::string` copy of the value. This function depends on the standard library environment query (`std::getenv`) and the custom error type (`clore::net::LLMError`) for error reporting. It does not perform any network calls or involve other module components beyond string formatting.
+The function `clore::net::detail::read_required_env` retrieves the value of a mandatory environment variable identified by the parameter `name`. It first converts the `std::string_view` `name` to a C‑string via an intermediate `std::string`, then calls `std::getenv` to obtain the raw pointer. If the pointer is `nullptr` (variable not set) or the first character is the null terminator (empty string), the function returns `std::unexpected` containing an `LLMError` whose message is constructed using `std::format` to indicate the missing variable. Otherwise, it returns a `std::expected<std::string, LLMError>` holding a copy of the value as a `std::string`. The only external dependencies are the standard library functions `std::getenv` and `std::format`, plus the custom error type `LLMError`.
 
 #### Side Effects
 
-- reads environment variable via `std::getenv`
-- allocates heap memory for the returned string and error message
+- reads from the process environment
+- allocates heap memory for the returned `std::string` and the temporary `std::string` argument to getenv
 
 #### Reads From
 
-- parameter `name`
-- process environment (via `std::getenv`)
-
-#### Writes To
-
-- return value (string or `LLMError`)
-- heap memory for string and error message
+- environment variable named by the parameter `name`
 
 #### Usage Patterns
 
-- reading required configuration from environment variables
-- validating presence of mandatory environment variables
+- required configuration variable retrieval
+- validate existence and non-emptiness of an environment variable
 
 ### `clore::net::detail::unwrap_caught_result`
 
-Declaration: `network/http.cppm:63`
+Declaration: `network/http.cppm:64`
 
-Definition: `network/http.cppm:63`
+Definition: `network/http.cppm:64`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
-The function checks for cancellation first by calling `R::is_cancelled()` on the incoming `result`. If the result was cancelled, it `co_awaits` `kota::fail(LLMError(...))` using the provided `cancel_message` to construct the error. If the result is not cancelled, it then checks `R::has_error()`. When an error is present, the function `co_awaits` `kota::fail(...)` with the error moved from `result`. Finally, if neither condition holds, it `co_returns` the value extracted from the result via `std::move(*result)`. The function relies on `kota::task` and `kota::fail` from the coroutine library, and on `LLMError` as the error type for failure signals. The control flow is strictly sequential: cancellation takes precedence over error reporting, and a valid value is only produced when neither condition is met.
+The function first evaluates the cancellation state of the incoming `result` by calling `result.is_cancelled()`. If true, it immediately `co_awaits` `kota::fail` with an `LLMError` constructed from the provided `cancel_message`, converting the message string into the error type. Otherwise, it checks `result.has_error()`; if an error is present, it `co_awaits` `kota::fail` forwarding the error via `std::move(result).error()`. If neither condition holds, the function proceeds to `co_return` the value extracted from the result (`std::move(*result)`), unwrapping the successful payload. This control flow ensures that cancellation and error propagation are handled before returning the inner value, relying on the `LLMError` type for error representation and on `kota::task`’s coroutine primitives for asynchronous failure injection.
 
 #### Side Effects
 
-- May cancel or fail the coroutine task via `co_await` `kota::fail`
+- Invokes `kota::fail`, which records or propagates an error through the coroutine's failure mechanism when the result is cancelled or has an error.
 
 #### Reads From
 
-- result parameter (via `is_cancelled()`, `has_error()`, and dereference)
-- `cancel_message` parameter
+- `result` (via `is_cancelled()`, `has_error()`, `operator*()`)
+- `cancel_message` (used to create an `LLMError` on cancellation)
 
 #### Writes To
 
-- coroutine task result (via `co_return` or failure)
-- result (moves error out)
+- Sets the coroutine's error state via `co_await kota::fail(LLMError(...))` or `co_await kota::fail(std::move(result).error())`
 
 #### Usage Patterns
 
-- Used to convert a caught result into a coroutine task that either yields the value or fails
-- Called in async contexts where a result may be cancelled or erroneous
+- Used in asynchronous result handling to unwrap a `R` type that may indicate cancellation or error into a `kota::task`.
+- Typically called at the end of an async operation to convert a caught result from `perform_http_request_async` or similar into a task result.
 
 ### `clore::net::initialize_llm_rate_limit`
 
 Declaration: `network/http.cppm:19`
 
-Definition: `network/http.cppm:78`
+Definition: `network/http.cppm:79`
 
 Declaration: [`Namespace clore::net`](../../namespaces/clore/net/index.md)
 
-The function `clore::net::initialize_llm_rate_limit` modifies the module‑global rate‑limiting semaphore `detail::g_llm_semaphore`.  If the provided `rate_limit` is zero, the semaphore is reset (set to `nullptr`), effectively disabling rate limiting for subsequent requests.  Otherwise, a new `kota::semaphore` is constructed with a capacity equal to the given `rate_limit` (cast to `std::ptrdiff_t`).  This semaphore is later acquired via a `SemaphoreGuard` inside `detail::perform_http_request_async` to control concurrency of LLM API calls.  No other dependencies are invoked, and no error handling is performed; the function simply replaces or clears the shared synchronization primitive.
+The function acquires a mutex lock on `detail::g_llm_semaphore_mutex` to safely modify the global semaphore instance stored in `detail::g_llm_semaphore`. If the provided `rate_limit` is zero, the semaphore is reset to a null pointer, effectively disabling rate limiting. Otherwise, a new `kota::semaphore` is allocated with an initial count equal to the integer `rate_limit` (cast to `std::ptrdiff_t`), which governs the maximum number of concurrent LLM requests allowed by downstream functions such as `clore::net::detail::perform_http_request_async`. This function serves as the initialization point for the rate‑limiting mechanism and is typically paired with `clore::net::shutdown_llm_rate_limit` for teardown.
 
 #### Side Effects
 
-- Resets or creates the global LLM semaphore `detail::g_llm_semaphore`.
+- acquires mutex `detail::g_llm_semaphore_mutex`
+- modifies global `detail::g_llm_semaphore`
+- allocates a new `kota::semaphore` if `rate_limit` > 0
+- resets the global semaphore if `rate_limit` == 0
 
 #### Reads From
 
-- `rate_limit` parameter
+- parameter `rate_limit`
 
 #### Writes To
 
-- `detail::g_llm_semaphore` global variable
+- global `detail::g_llm_semaphore`
 
 #### Usage Patterns
 
-- Called during initialization to set the LLM rate limit.
-- Can be called with zero to disable rate limiting.
+- called during startup to set LLM rate limit
+- called with 0 to disable rate limiting
 
 ### `clore::net::shutdown_llm_rate_limit`
 
 Declaration: `network/http.cppm:21`
 
-Definition: `network/http.cppm:223`
+Definition: `network/http.cppm:263`
 
 Declaration: [`Namespace clore::net`](../../namespaces/clore/net/index.md)
 
-The implementation of `clore::net::shutdown_llm_rate_limit` is a single direct invocation of `detail::g_llm_semaphore.reset()`. This call immediately clears the internal state of the global counting semaphore `clore::net::detail::g_llm_semaphore`, releasing any threads currently blocked on the semaphore and disabling future rate‑limiting enforcement until the semaphore is re‑initialized (e.g., via `clore::net::initialize_llm_rate_limit`). No error handling or external dependencies beyond the semaphore object are involved; the function is marked `noexcept` and simply resets the synchronization primitive.
+The implementation of `clore::net::shutdown_llm_rate_limit` is straightforward: it acquires exclusive access via a `std::lock_guard` on `clore::net::detail::g_llm_semaphore_mutex`, then resets (`std::shared_ptr::reset`) the `clore::net::detail::g_llm_semaphore` shared pointer. This destruction of the underlying `kota::semaphore` object releases any waiting threads and disables the rate‑limiting mechanism. The function is `noexcept` and relies solely on the global mutex and semaphore variables defined in the `clore::net::detail` namespace. No other dependencies or control flow branching exist—the lock is the only synchronisation point, ensuring safe teardown even if concurrent calls to `perform_http_request_async` are still active.
 
 #### Side Effects
 
-- Reset of the global semaphore `detail::g_llm_semaphore`
+- Acquires the global mutex `detail::g_llm_semaphore_mutex`.
+- Resets the global semaphore `detail::g_llm_semaphore`, modifying its internal state.
 
 #### Reads From
 
-- global variable `detail::g_llm_semaphore`
+- `detail::g_llm_semaphore_mutex` (via locking)
+- `detail::g_llm_semaphore` (via its `reset()` method)
 
 #### Writes To
 
-- global variable `detail::g_llm_semaphore`
+- `detail::g_llm_semaphore` (reset to a default/empty state)
 
 #### Usage Patterns
 
-- Called during shutdown or reinitialization of LLM rate limiting
+- Called to disable or reinitialize the LLM rate limiter during shutdown
+- Complement to `initialize_llm_rate_limit` for lifecycle management
 
 ## Internal Structure
 
-The `http` module, a component of the `clore::net` namespace, is decomposed into a minimal public API and a more extensive internal implementation. The public side provides `initialize_llm_rate_limit` and `shutdown_llm_rate_limit` to manage a global rate‑limiting subsystem, plus the `LLMError` type for uniform error propagation. Everything else lives in the `clore::net::detail` namespace, which encapsulates environment configuration (`EnvironmentConfig`), raw HTTP response handling (`RawHttpResponse`), request preparation (`configure_request`), and both synchronous (`perform_http_request`) and asynchronous (`perform_http_request_async`) HTTP execution. The module imports `std` for standard types and the `support` module for UTF‑8 text processing, file I/O, and structured logging. Under the hood, a global semaphore and an atomic request counter enforce concurrency limits, while constants like `kHttpRequestTimeout` and `kHttpConnectTimeoutMs` define default timeouts. This layering keeps the public surface focused and allows the internal helpers to evolve independently, all built on the foundational utilities provided by the `support` module.
+The `http` module (defined in `network/http.cppm`) belongs to the `clore::net` namespace and provides HTTP communication capabilities for LLM (Large Language Model) API interactions. It imports the standard library and a `support` module for foundational utilities. The module is decomposed into a public interface and an internal `detail` namespace. The public API exposes `LLMError` for structured error reporting, along with initialization and shutdown functions for rate limiting (`initialize_llm_rate_limit`, `shutdown_llm_rate_limit`). The `detail` namespace encapsulates all implementation internals, including environment configuration (`EnvironmentConfig`, `read_environment`, `read_required_env`), synchronous and asynchronous HTTP request functions (`perform_http_request`, `perform_http_request_async`), request configuration (`configure_request`), and error conversion (`unwrap_caught_result`).
+
+Internally, the module is layered around rate-limited HTTP access. A global semaphore (`g_llm_semaphore`) and its mutex (`g_llm_semaphore_mutex`) control concurrent LLM requests, while an atomic counter (`g_llm_request_counter`) assigns unique identifiers. Thread-local HTTP clients are managed via `get_thread_http_client`, and a local `SemaphoreGuard` ensures proper semaphore release during asynchronous operations. Compile-time constants (`kHttpConnectTimeoutMs`, `kHttpRequestTimeout`, `kDnsCacheTimeoutSec`, `kTcpKeepIdleSec`, `kTcpKeepIntvlSec`, `kConnMaxAgeSec`) define networking timeouts and keep-alive settings. The implementation separates synchronous blocking requests from event-loop-driven asynchronous requests, both relying on the same configuration and rate-limiting infrastructure.
 
 ## Related Pages
 

@@ -739,6 +739,13 @@ struct Protocol {
     static auto provider_name() -> std::string_view {
         return "LLM";
     }
+
+    static auto capability_probe_key(const clore::net::detail::EnvironmentConfig& environment,
+                                     const CompletionRequest& request) -> std::string {
+        return clore::net::make_capability_probe_key(provider_name(),
+                                                     environment.api_base,
+                                                     request.model);
+    }
 };
 
 }  // namespace clore::net::openai::detail

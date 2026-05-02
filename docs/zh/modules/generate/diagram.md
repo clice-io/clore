@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:diagram'
-description: '模块 generate:diagram 负责将符号分析结果（模块、命名空间、文件依赖关系等）渲染为可视化的 Mermaid 图表代码。它提供一组面向外部的渲染函数（如 render_import_diagram_code、render_module_dependency_diagram_code、render_namespace_diagram_code、render_file_dependency_diagram_code），以及 should_emit_mermaid 和 escape_mermaid_label 等辅助工具，用于控制图表的启用条件与标签转义。这些函数接受符号或上下文的整数标识符，返回图表文本或状态码，调用者无需了解内部渲染细节。'
+description: 'generate:diagram 模块负责为文档生成系统提供各种图表（如 Mermaid 格式）的文本渲染能力。它通过一系列公开的 render_*_diagram_code 函数实现文件依赖图、导入图、命名空间图和模块依赖图的生成，并配套提供 escape_mermaid_label 用于标签转义、should_emit_mermaid 用于决策是否生成图表。模块内部使用匿名命名空间封装了辅助逻辑（如符号收集、名称缩短、缓存渲染），并以 node_count、edge_count 等变量追踪图表结构，确保生成的 Mermaid 代码可直接集成到页面内容中。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-模块 `generate:diagram` 负责将符号分析结果（模块、命名空间、文件依赖关系等）渲染为可视化的 Mermaid 图表代码。它提供一组面向外部的渲染函数（如 `render_import_diagram_code`、`render_module_dependency_diagram_code`、`render_namespace_diagram_code`、`render_file_dependency_diagram_code`），以及 `should_emit_mermaid` 和 `escape_mermaid_label` 等辅助工具，用于控制图表的启用条件与标签转义。这些函数接受符号或上下文的整数标识符，返回图表文本或状态码，调用者无需了解内部渲染细节。
-
-该模块的实现完全封装在 `generate/render/diagram.cppm` 中，依赖 `config`、`extract`、`generate:model` 和 `support` 模块提供的配置、提取和模型数据。内部通过匿名命名空间中的辅助函数（如 `collect_implementation_symbols_for_diagram`、`render_cached_diagram`）组织图表构建逻辑，并利用 `node_id`、`edge_count`、`node_count`、`result` 等局部变量存储中间状态，最终输出可供嵌入文档的 Mermaid 代码。
+`generate:diagram` 模块负责为文档生成系统提供各种图表（如 Mermaid 格式）的文本渲染能力。它通过一系列公开的 `render_*_diagram_code` 函数实现文件依赖图、导入图、命名空间图和模块依赖图的生成，并配套提供 `escape_mermaid_label` 用于标签转义、`should_emit_mermaid` 用于决策是否生成图表。模块内部使用匿名命名空间封装了辅助逻辑（如符号收集、名称缩短、缓存渲染），并以 `node_count`、`edge_count` 等变量追踪图表结构，确保生成的 Mermaid 代码可直接集成到页面内容中。
 
 ## Imports
 
@@ -49,7 +47,7 @@ Definition: `generate/render/diagram.cppm:109`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数遍历输入字符串中的每个字符，通过一个 `switch` 语句处理三种转义情况：反斜杠 `\\` 和双引号 `"` 分别被替换为转义序列 `\\\\` 和 `\\"`，换行符与回车符统一替换为空格字符，其余字符原样保留。所有转义结果依次追加到预先分配好容量的 `std::string` 对象中，最终返回转义后的字符串。整个实现不依赖任何外部库或模块，仅使用标准库的字符串操作。
+该函数通过一次遍历输入字符串 `text` 来实现转义。它首先创建一个名为 `escaped` 的 `std::string`，并调用 `reserve` 预分配 `text.size()` 的容量，以减少多次内存重分配。随后使用基于范围的 `for` 循环依次检查每个字符，并借助 `switch` 语句处理四种情况：遇到反斜杠字符时追加 `\\`（两个反斜杠字符），遇到双引号时追加 `\"`，遇到换行符或回车符时替换为单个空格字符，其余字符则原样追加。函数最终返回构造好的 `escaped` 字符串。其内部流程完全依赖标准库的 `std::string_view` 输入和 `std::string` 输出，不涉及其他外部依赖。
 
 #### Side Effects
 
@@ -57,15 +55,15 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `text` parameter (the input string)
+- the input parameter `text` of type `std::string_view`
 
 #### Writes To
 
-- returns a new `std::string`
+- the local variable `escaped` which is returned as a `std::string`
 
 #### Usage Patterns
 
-- Used when rendering Mermaid diagram code to ensure labels do not break the diagram syntax.
+- used to escape labels when constructing Mermaid diagrams
 
 ### `clore::generate::render_file_dependency_diagram_code`
 
@@ -75,7 +73,9 @@ Definition: `generate/render/diagram.cppm:222`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数首先检查 `plan.owner_keys` 是否为空，若为空则直接返回空字符串。随后调用 `render_cached_diagram` 并传入一个 lambda 作为渲染逻辑。在 lambda 内部，通过 `model.files` 查找当前文件对应的记录，若不存在则返回空字符串。接着从文件记录的 `includes` 列表构造包含文件标签（使用 `make_source_relative` 将路径转换为相对于项目根目录的短名，缺失时保留原路径），并经过排序和去重。随后调用 `collect_implementation_symbols_for_diagram` 收集满足谓词（`is_type_kind`、`is_variable_kind_local` 或 `is_function_kind`）的符号。结合包含文件数量和符号数量计算出总边数 `edge_count`，再计算总节点数 `node_count`，并调用 `should_emit_mermaid` 决定是否实际生成图表；若不应发射则返回空字符串。最后构造 Mermaid 源码：以文件自身作为主节点 `F`，为每个包含文件创建 `I` 前缀的节点并添加指向 `F` 的边，为每个符号创建 `S` 前缀的节点并添加从 `F` 指向它们的边，所有标签均经过 `escape_mermaid_label` 转义，符号名称则通过 `short_name_of_local` 简化。生成的字符串由 `render_cached_diagram` 返回。该函数依赖 `collect_implementation_symbols_for_diagram` 完成符号收集，并通过 `render_cached_diagram` 提供可能的缓存支持。
+该函数首会检查 `plan.owner_keys` 是否为空，若为空则立即返回空字符串。随后通过 `render_cached_diagram` 封装实际生成逻辑，该包装可能提供针对已渲染结果的缓存机制。在内部 lambda 中，从 `model.files` 查找第一个 owner 键对应的文件记录，若未找到则直接返回空。从 `file_it->second.includes` 中收集包含路径列表，依次调用 `make_source_relative` 转换为相对路径，并对结果排序去重。接着使用 `collect_implementation_symbols_for_diagram` 并传入一个谓词（筛选类型、局部变量和函数三种符号种类）来收集当前文件实现的符号集合。基于包含路径数量和符号数量计算出 `edge_count` 和 `node_count`（节点数为 `1 + edge_count`），并交由 `should_emit_mermaid` 依据 `kMermaidMinNodes` 和 `kMermaidMinEdges` 决定是否实际生成图表；若不应生成则返回空字符串。
+
+若需要生成，则先通过 `make_source_relative` 得到文件标签，然后用 `escape_mermaid_label` 转义后写入 Mermaid 的 `graph LR` 开头。为文件自身创建节点 `F`，为每个包含路径创建节点 `I<index>` 并从该节点指向 `F`（表示文件包含了这些头文件）。为每个符号创建节点 `S<index>`，符号标签优先使用 `short_name_of_local` 提取的结果，若为空则回退至 `qualified_name` 或 `name`；边方向为从 `F` 指向符号节点。最终返回拼接的 Mermaid 代码字符串。整个流程依赖多个内部辅助函数：`collect_implementation_symbols_for_diagram` 负责符号收集，`make_source_relative` 处理路径相对化，`escape_mermaid_label` 和 `short_name_of_local` 分别处理标签转义与符号名称简化，`is_type_kind`、`is_variable_kind_local`、`is_function_kind` 提供种类判断，`should_emit_mermaid` 依据阈值控制输出与否，而 `render_cached_diagram` 提供可缓存的执行环境。
 
 #### Side Effects
 
@@ -83,20 +83,19 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
+- `plan`
+- `config`
+- `model`
 - `plan.owner_keys`
-- `model.files`
 - `config.project_root`
-- `file_it->second.includes`
-- `symbols` (result of `collect_implementation_symbols_for_diagram`)
-
-#### Writes To
-
-- local string `result` (returned)
+- `model.files`
+- file includes
+- symbol info (`kind`, `qualified_name`, `name`)
 
 #### Usage Patterns
 
-- Called by page rendering functions to generate file dependency diagrams
-- Used in documentation generation to produce Mermaid diagram markup
+- Used in documentation generation to produce Mermaid file dependency diagrams
+- Called as part of page rendering pipeline for file-level overviews
 
 ### `clore::generate::render_import_diagram_code`
 
@@ -106,9 +105,7 @@ Definition: `generate/render/diagram.cppm:124`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::render_import_diagram_code` 首先通过 `render_cached_diagram` 包装其核心逻辑以实现结果缓存。内部流程始于对 `mod_unit.imports` 的判空检查，若为空则直接返回空字符串。随后使用 `top_module` lambda 从模块全名中提取顶层模块标签（取冒号之前的部分），并调用 `is_std_name` 判断该标签是否为标准库命名空间，若是则同样提前返回。接着遍历所有导入，对每个导入也提取顶层标签，并利用 `seen` 集合进行去重、过滤掉与自身模块相同以及标准库标签，将剩余导入存入本地 `imports` 向量。在得到有效导入列表后，计算 `edge_count` 和 `node_count`，通过 `should_emit_mermaid` 决定是否生成图表；若决定不生成则返回空字符串。最后对 `imports` 排序，构造 Mermaid 格式的 `graph LR` 图：根节点 `M0` 代表当前模块，每个导入作为独立节点（依次命名为 `I0`、`I1`……），并向 `M0` 添加有向边。所有标签均经过 `escape_mermaid_label` 转义。
-
-控制流的核心是三元分支：空导入、标准库模块、不满足 `should_emit_mermaid` 阈值时均提前终止；否则通过去重、排序、构建字符串完成输出。该函数依赖多个辅助工具：`render_cached_diagram` 提供缓存层，`is_std_name` 过滤标准库，`should_emit_mermaid` 控制图表规模（基于节点数和边数），以及 `escape_mermaid_label` 确保标签安全。所有内部处理均在 lambda 中完成，并由缓存函数统一管理生命周期。
+该函数生成描述模块导入关系的 Mermaid 图代码。它首先检查 `mod_unit.imports` 是否为空，若是则返回空字符串。接着通过 `top_module` 从当前模块名中提取顶层模块作为 `module_label`，若其被 `is_std_name` 判定为标准库名称，则提前返回。随后遍历 `mod_unit.imports`，对每个导入应用 `top_module` 得到标签，过滤掉与当前模块相同、为标准库或已通过 `seen` 集合去重的项，收集到 `imports` 向量中。计算 `edge_count` 和 `node_count`，若 `should_emit_mermaid` 返回 `false` 则返回空字符串。最后对 `imports` 排序，构建 Mermaid 的 `graph LR` 格式字符串：当前模块作为 `M0`，每个导入分配一个 `I` 编号节点，每个导入节点指向 `M0`。生成过程整体包裹在 `render_cached_diagram` 中以避免重复计算。依赖的辅助函数包括匿名命名空间内的 `is_std_name`、`should_emit_mermaid`、`escape_mermaid_label` 以及 `render_cached_diagram` 本身。
 
 #### Side Effects
 
@@ -116,17 +113,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `mod_unit`'s `name` field
-- `mod_unit`'s `imports` vector
-
-#### Writes To
-
-- the returned `std::string` containing Mermaid diagram code
+- `mod_unit` parameter: reads `mod_unit.name` and `mod_unit.imports`
+- calls `is_std_name` on module label and import labels
+- calls `should_emit_mermaid` with node and edge counts
+- calls `escape_mermaid_label` for node labels
 
 #### Usage Patterns
 
-- Called during documentation generation to produce import dependency diagrams
-- Used in page rendering pipelines for module pages
+- Called during generation of module documentation pages to create a Mermaid import diagram
+- Part of a set of diagram rendering functions (`render_file_dependency_diagram_code`, `render_module_dependency_diagram_code`, `render_namespace_diagram_code`)
+- Likely used in `build_page_plan_set` or similar page building functions
 
 ### `clore::generate::render_module_dependency_diagram_code`
 
@@ -136,9 +132,7 @@ Definition: `generate/render/diagram.cppm:289`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数将实际图生成逻辑委托给 `render_cached_diagram`，由内部闭包实现 Mermaid 代码的构造。闭包首先遍历 `model.modules`，筛选出 `mod_unit.is_interface` 为真的模块接口单元，并利用辅助 lambda `top_module` 从每个模块全名中提取顶级模块名（即首个冒号之前的部分）。仅处理非标准库（通过 `is_std_name` 过滤）的模块，将其插入 `modules` 集合；同时遍历每个接口单元的 `imports`，对每个非自身、非标准库的导入也提取顶级模块名，并将依赖关系记录在 `deps` 映射中。若最终 `modules` 大小不足 2，则直接返回空字符串。随后计算总边数 `edge_count`，调用 `should_emit_mermaid` 检查是否值得生成图；若否，同样返回空字符串。
-
-若需生成，则将模块名排序并分配形如 `M0`、`M1` 的节点 ID，使用 `escape_mermaid_label` 对标签进行转义。构建 `graph LR` 格式的 Mermaid 代码：先为每个模块添加节点，再按排序顺序遍历 `deps`，为每个依赖对添加从目标节点指向源节点的边（`to --> from`）。最终返回完整字符串。该函数依赖 `render_cached_diagram` 提供缓存机制，并依赖 `is_std_name`、`escape_mermaid_label`、`should_emit_mermaid` 等内部辅助函数。
+该函数通过 `render_cached_diagram` 包裹一个 lambda 来生成 Mermaid 格式的模块依赖关系图。在 lambda 内部，首先定义一个 `top_module` 局部函数，用于从完整模块名中提取顶层模块名（第一个冒号之前的部分）。然后遍历 `model.modules`，仅处理 `is_interface` 为 true 的模块单元，并跳过 `is_std_name` 返回 true 的模块。对于每个接口模块，收集其所有导入，再次使用 `top_module` 提取依赖的顶层模块名，并排除自依赖和标准库模块，从而构建出从源模块到目标模块集合的映射 `deps`，同时维护所有涉及的顶层模块集合 `modules`。如果 `modules` 中元素数量少于 2，则直接返回空字符串。否则计算所有边的总数 `edge_count`，并调用 `should_emit_mermaid` 根据节点数和边数判断是否满足生成图表的最小阈值；若不满足，也返回空字符串。通过后，对 `modules` 排序得到 `sorted` 列表，然后构造一个形如 `"M0", "M1", ...` 的节点 ID 映射。首先循环遍历 `sorted`，为每个模块添加节点定义（使用 `escape_mermaid_label` 对标签进行转义），再遍历 `sorted` 从 `deps` 中取出每个模块的目标依赖列表，排序后为每个依赖添加边，方向为被依赖模块指向依赖模块（即 `"M{目标} --> M{源}"`）。最终将构建的 Mermaid 代码字符串返回给 `render_cached_diagram` 进行缓存处理。
 
 #### Side Effects
 
@@ -146,17 +140,19 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `const extract::ProjectModel& model`
 - `model.modules`
-
-#### Writes To
-
-- returned `std::string` (diagram code)
+- `mod_unit.name`
+- `mod_unit.is_interface`
+- `mod_unit.imports`
+- `is_std_name`
+- `should_emit_mermaid`
+- `escape_mermaid_label`
+- `std::format`
 
 #### Usage Patterns
 
-- called during documentation generation to produce module dependency diagram
-- result embedded into Mermaid code blocks
+- called during documentation generation to produce module dependency diagrams
+- used in page rendering of module overviews
 
 ### `clore::generate::render_namespace_diagram_code`
 
@@ -166,33 +162,32 @@ Definition: `generate/render/diagram.cppm:168`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::render_namespace_diagram_code` 使用缓存机制 `render_cached_diagram` 生成表示命名空间结构的 Mermaid 图表代码。它首先通过 `extract::ProjectModel` 中的 `namespaces` 映射查找指定的 `namespace_name`；若不存在则返回空字符串。接着收集该命名空间内的类型符号（通过 `is_type_kind` 过滤、去重并按照 `qualified_name` 排序）以及子命名空间列表（过滤掉包含 `"(anonymous namespace)"` 或满足 `is_std_name` 的项，并使用 `short_name_of_local` 提取短名称后去重排序）。然后根据节点数（1 + 类型数量 + 子命名空间数量）和边数（类型与子命名空间的总数）调用 `should_emit_mermaid` 决定是否输出图表；若否，返回空字符串。最后构建 Mermaid `graph TD` 格式的字符串：根节点为当前命名空间的短名称（经 `escape_mermaid_label` 转义），每个类型和子命名空间作为独立节点，并从根节点引出箭头连接。生成的字符串由 `render_cached_diagram` 包装后返回。
+函数 `clore::generate::render_namespace_diagram_code` 通过 `render_cached_diagram` 包裹生成逻辑以实现结果缓存。内部首先在 `model.namespaces` 中查找目标命名空间，若不存在则直接返回空字符串；随后遍历该命名空间的符号列表，利用 `is_type_kind` 过滤并去重得到类型符号集合，并按 `qualified_name` 排序；同时收集子命名空间的短名称（排除匿名命名空间和通过 `is_std_name` 识别的标准库名称），去重排序。接着根据类型数量与子命名空间数量计算总节点数（1 个根节点加二者数量之和）和总边数（二者数量之和），并调用 `should_emit_mermaid` 判断是否满足最小节点/边阈值，若不满足则返回空字符串。在满足条件时，构建 Mermaid `graph TD` 字符串：以根节点 `NS` 表示当前命名空间（标签经 `short_name_of_local` 和 `escape_mermaid_label` 处理），对每个类型生成节点 `T<i>` 并添加从 `NS` 指向该节点的边，对每个子命名空间生成节点 `NSC<j>` 并同样添加边。所依赖的关键内部函数包括 `extract::lookup_symbol`、`is_type_kind`、`short_name_of_local`、`is_std_name`、`should_emit_mermaid` 和 `escape_mermaid_label`。
 
 #### Side Effects
 
-- Caches the generated diagram string, potentially modifying an internal cache.
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `extract::ProjectModel`
-- `namespace_name` (`string_view`)
+- `const extract::ProjectModel& model`
+- `std::string_view namespace_name`
 - `model.namespaces`
-- namespace symbols
-- children
-- `should_emit_mermaid`
-- `is_type_kind`
-- `lookup_symbol`
+- `extract::lookup_symbol(model, sym_id)`
+- `sym->kind`, `sym->id`, `sym->qualified_name`
+- `should_emit_mermaid(node_count, edge_count)`
 - `short_name_of_local`
 - `escape_mermaid_label`
 
 #### Writes To
 
-- Returned string
-- Internal cache via `render_cached_diagram`
+- local `std::string result` (return value)
 
 #### Usage Patterns
 
-- Called during documentation generation to produce namespace diagram markdown.
+- Called when rendering documentation for a namespace page
+- Used to generate the Mermaid diagram code embedded in markdown output
+- Typically invoked within a larger page generation function like `render_page_markdown`
 
 ### `clore::generate::should_emit_mermaid`
 
@@ -202,9 +197,7 @@ Definition: `generate/render/diagram.cppm:105`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数根据给定的节点数和边数决定是否应该生成Mermaid图表。它通过将 `node_count` 与 `kMermaidMinNodes` 进行不小于比较，以及将 `edge_count` 与 `kMermaidMinEdges` 进行不小于比较，若任一条件成立则返回 `true`。整个控制流仅包含一条返回语句，逻辑直接且无分支或循环。
-
-`kMermaidMinNodes` 和 `kMermaidMinEdges` 是内部定义的常量，用于控制图表生成的阈值。该函数被多个上游渲染函数（如 `render_module_dependency_diagram_code`、`render_import_diagram_code` 等）作为判定依据，确保仅在图表具有足够信息量时才触发 `render_cached_diagram` 等渲染操作，从而避免生成规模过小的无意义图表。
+函数 `clore::generate::should_emit_mermaid` 通过比较给定的 `node_count` 和 `edge_count` 与两个内部常量 `kMermaidMinNodes` 和 `kMermaidMinEdges` 来决定是否应该生成 Mermaid 图。它返回 `node_count >= kMermaidMinNodes || edge_count >= kMermaidMinEdges`，即当节点数或边数至少有一个达到对应阈值时返回 `true`，否则返回 `false`。该函数没有额外的控制流，直接依赖这两个匿名命名空间中的常量来执行阈值检查。
 
 #### Side Effects
 
@@ -212,19 +205,21 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `node_count`
-- `edge_count`
-- `kMermaidMinNodes`
-- `kMermaidMinEdges`
+- parameter `node_count`
+- parameter `edge_count`
+- global constant `kMermaidMinNodes`
+- global constant `kMermaidMinEdges`
 
 #### Usage Patterns
 
-- called before rendering mermaid diagrams such as dependency graphs
-- used to decide diagram inclusion in documentation pages
+- Check if Mermaid diagram should be emitted
+- Used in diagram generation functions
 
 ## Internal Structure
 
-模块 `generate:diagram` 是文档生成管线中的图表渲染单元，负责将符号分析结果转换为 Mermaid 格式的结构化图代码。它通过导入 `extract` 模块获取符号依赖数据，依赖 `generate:model` 提供的页面计划和模块模型，并借助 `config` 与 `support` 模块处理配置与基础文本操作。内部实现沿用了清晰的层级划分：匿名命名空间内封装了 `is_std_name`、`short_name_of_local`、`is_variable_kind_local` 等类型/名称判断工具，以及 `collect_implementation_symbols_for_diagram` 和 `render_cached_diagram` 这类通用渲染辅助函数；公开接口则按图类型分离为多个独立的渲染函数（如 `render_import_diagram_code`、`render_file_dependency_diagram_code`、`render_namespace_diagram_code`、`render_module_dependency_diagram_code`），它们均依赖同一套节点/边计数（`kMermaidMinNodes`、`kMermaidMinEdges`）和转义工具（`escape_mermaid_label`），并通过 `should_emit_mermaid` 控制输出开关。这种正交分解使得不同种类的图表可独立开发与测试，同时复用底层的标签处理与 Mermaid 生成逻辑。
+模块 `generate:diagram` 是一个独立的 C++20 模块单元（位于 `generate/render/diagram.cppm`），专注于为文档生成 Mermaid 格式的各种关系图。它导入了四个核心模块：`config`（配置）、`extract`（结构化数据提取）、`generate:model`（页面模型和查询）以及 `support`（文本处理和 I/O 基础设施），并将标准库作为全局依赖引入。这种导入关系使其能够利用上游模块的符号、页面计划和配置阈值，是文档生成管道中负责可视化输出的关键环节。
+
+在内部，模块被分解为按图表类型划分的公共渲染函数（如 `render_file_dependency_diagram_code`、`render_import_diagram_code`、`render_namespace_diagram_code` 和 `render_module_dependency_diagram_code`），以及一组匿名命名空间中的辅助函数和常量。辅助层包括标签转义 (`escape_mermaid_label`)、名称和符号提取 (`short_name_of_local`, `collect_implementation_symbols_for_diagram`<Predicate>) 以及基于节点/边数的阈值判断 (`should_emit_mermaid`, 常量 `kMermaidMinNodes`/`kMermaidMinEdges`)。这些辅助工具通过模板 `render_cached_diagram` 与缓存逻辑结合，实现了“先判断是否生成、再收集数据、最后输出代码”的分层处理模式。整个模块没有暴露内部数据结构，所有状态均在函数调用时通过参数传递，保持了良好的封装性和可测试性。
 
 ## Related Pages
 

@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::openai::detail'
-description: 'The clore::net::openai::detail namespace encapsulates internal implementation details for the OpenAI network layer. It defines the Protocol struct, which provides a cohesive set of methods for constructing API requests (build_url, build_request_json, build_headers), parsing responses (parse_response), reading environment configuration (read_environment), and identifying the provider (provider_name). This struct centralizes OpenAI-specific protocol logic, separating it from higher-level abstractions.'
+description: 'The clore::net::openai::detail namespace contains implementation‑level components for communicating with the OpenAI API. Its primary element is the Protocol struct, which provides methods to construct HTTP URLs, request JSON bodies, headers, and capability probe keys, as well as to parse responses and read environment variables. Supporting variables such as request, environment, and raw_response indicate state management for individual API interactions.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-The `clore::net::openai::detail` namespace encapsulates internal implementation details for the `OpenAI` network layer. It defines the `Protocol` struct, which provides a cohesive set of methods for constructing API requests (`build_url`, `build_request_json`, `build_headers`), parsing responses (`parse_response`), reading environment configuration (`read_environment`), and identifying the provider (`provider_name`). This struct centralizes `OpenAI`-specific protocol logic, separating it from higher-level abstractions.
+The `clore::net::openai::detail` namespace contains implementation‑level components for communicating with the `OpenAI` API. Its primary element is the `Protocol` struct, which provides methods to construct HTTP `URLs`, request JSON bodies, headers, and capability probe keys, as well as to parse responses and read environment variables. Supporting variables such as `request`, `environment`, and `raw_response` indicate state management for individual API interactions.
 
-In addition to the core `Protocol` struct, the namespace holds mutable state variables (`request`, `environment`, `raw_response`) that track the current request, environment settings, and raw response data. The namespace thus serves as a private, non-exported module that manages all `OpenAI` protocol details, forming the foundation on which public-facing components rely.
+Architecturally, this namespace encapsulates `OpenAI`‑specific protocol details, isolating them from the broader networking layer and higher‑level abstractions. By keeping these internals in a `detail` scope, the interface is simplified for consumers while maintaining a clear separation of concerns for maintainability and testing.
 
 ## Types
 
@@ -27,10 +27,10 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- All member functions are static and constexpr-compatible on compilers supporting constexpr `std::string`?
-- No mutable state is held by the struct.
-- Environment variables `OPENAI_BASE_URL` and `OPENAI_API_KEY` must be set for `read_environment` to succeed.
-- `build_request_json` and `parse_response` rely on external protocol utilities.
+- All member functions are `static`; there is no instance state.
+- Environment configuration is derived solely from environment variables at call time.
+- HTTP request construction assumes a JSON-based chat completions endpoint.
+- Response parsing delegates error handling for empty bodies and HTTP error codes.
 
 #### Key Members
 
@@ -40,14 +40,13 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 - `build_request_json`
 - `parse_response`
 - `provider_name`
+- `capability_probe_key`
 
 #### Usage Patterns
 
-- Called by a client to obtain environment configuration for constructing HTTP requests.
-- `build_url` and `build_headers` are used to prepare the HTTP request.
-- `build_request_json` serializes a `CompletionRequest` to JSON.
-- `parse_response` deserializes the HTTP response body into `CompletionResponse`.
-- `provider_name` is used for logging or identification.
+- Used as a concrete policy in higher-level code that dispatches to provider-specific networking logic.
+- `build_url`, `build_headers`, `build_request_json`, and `parse_response` are called in sequence to perform a chat completion request.
+- `provider_name` and `capability_probe_key` are used to cache or distinguish capabilities per model and base URL.
 
 #### Member Functions
 
@@ -91,6 +90,20 @@ Implementation: [`Module openai`](../../../../../modules/openai/index.md)
 
 ```cpp
 auto (const int &) -> std::string;
+```
+
+##### `clore::net::openai::detail::Protocol::capability_probe_key`
+
+Declaration: `network/openai.cppm:743`
+
+Definition: `network/openai.cppm:743`
+
+Implementation: [`Module openai`](../../../../../modules/openai/index.md)
+
+###### Declaration
+
+```cpp
+auto (const int &, const int &) -> std::string;
 ```
 
 ##### `clore::net::openai::detail::Protocol::parse_response`

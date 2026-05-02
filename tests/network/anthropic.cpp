@@ -1,4 +1,5 @@
 #include <string>
+#include <string_view>
 
 #include "kota/zest/zest.h"
 
@@ -59,6 +60,15 @@ TEST_CASE(parse_response_supports_tool_use_blocks) {
     EXPECT_EQ(response->message.tool_calls[0].id, "toolu_1");
     EXPECT_EQ(response->message.tool_calls[0].name, "search_repo");
     EXPECT_EQ(response->message.tool_calls[0].arguments_json, R"({"query":"llm","limit":1})");
+}
+
+TEST_CASE(parse_response_truncates_http_error_body_when_json_is_invalid) {
+    std::string oversized_body(260, 'x');
+    auto excerpt = clore::net::detail::excerpt_for_error(oversized_body);
+
+    EXPECT_EQ(excerpt.size(), 200u);
+    EXPECT_EQ(excerpt, std::string(200, 'x'));
+    EXPECT_NE(excerpt, oversized_body);
 }
 
 };  // TEST_SUITE(anthropic_llm)

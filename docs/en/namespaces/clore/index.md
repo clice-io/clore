@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore'
-description: 'The clore namespace serves as the primary container for configuration and task‑management utilities in a system that appears to execute multi‑step workflows or generations. Its main component is the Options struct, which aggregates a hierarchy of nested option groups (_DecoOptStruct_0 through _DecoOptStruct_10). Each sub‑group exposes typed aliases such as Step, Action, result_type, _deco_base_t, and _deco_callback_base_t, suggesting a decorator‑based design that allows callers to configure distinct stages or components of a process.'
+description: 'The clore namespace defines a configuration and orchestration framework for task-based optimization, focusing on the Options struct and its internal _DecoOptStruct types. These internal types form a nested DSL that exposes fields such as deco_field_ty, Step, Action, result_type, _deco_base_t, and _deco_callback_base_t, which together allow fine-grained control over solver behavior, including per-field customization of steps, callbacks, and result types. The Options struct itself acts as a centralized specification object that encapsulates all tuning parameters for an optimization run.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-The `clore` namespace serves as the primary container for configuration and task‑management utilities in a system that appears to execute multi‑step workflows or generations. Its main component is the `Options` struct, which aggregates a hierarchy of nested option groups (`_DecoOptStruct_0` through `_DecoOptStruct_10`). Each sub‑group exposes typed aliases such as `Step`, `Action`, `result_type`, `_deco_base_t`, and `_deco_callback_base_t`, suggesting a decorator‑based design that allows callers to configure distinct stages or components of a process.
+The `clore` namespace defines a configuration and orchestration framework for task-based optimization, focusing on the `Options` struct and its internal `_DecoOptStruct` types. These internal types form a nested DSL that exposes fields such as `deco_field_ty`, `Step`, `Action`, `result_type`, `_deco_base_t`, and `_deco_callback_base_t`, which together allow fine-grained control over solver behavior, including per-field customization of steps, callbacks, and result types. The `Options` struct itself acts as a centralized specification object that encapsulates all tuning parameters for an optimization run.
 
-Beyond configuration, the namespace provides two free functions: `log_generation_summary` to log results for a given generation index, and `await_task_result` to synchronously wait for a task object and return its outcome as `std::expected<Value, Error>`. Variables like `ex`, `result`, `summary`, `name`, and `task` hint at broader workspace elements. Architecturally, `clore` encapsulates the building blocks for structured, callback‑driven configuration and asynchronous task coordination, making it a central domain for workflow setup and execution monitoring.
+Beyond configuration, the namespace provides two key free functions. `log_generation_summary` records a diagnostic summary for a given generation identifier, enabling post-hoc analysis of generation-level state. `await_task_result` is a blocking utility that waits for a task to complete and returns its result or error via `std::expected`, streamlining synchronous task orchestration within the optimization pipeline. Together, these elements position `clore` as a modular, type-rich library for defining, configuring, and executing iterative optimization processes.
 
 ## Diagram
 
@@ -198,13 +198,15 @@ Declaration: `main.cpp:18`
 
 Definition: `main.cpp:18`
 
-`clore::Options` is a public struct that serves as a top-level container for a collection of configurable option groups. Internally, it defines a series of nested types—such as `_DecoOptStruct_0` through `_DecoOptStruct_10`—each of which encapsulates a distinct category of options. These sub-groups expose typed aliases like `Step`, `Action`, `result_type`, and `_deco_callback_base_t`, suggesting that the struct is designed to model a structured, possibly callback-driven, configuration for a multi-step process or workflow. The `_DecoOptStruct` naming hints at a decorator pattern or code generation technique used to build the option hierarchy. Typically, user code would access the nested types via `clore::Options` to read or specify settings for each stage or component.
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- All fields have `required=false` by default
-- `rate_limit` defaults to `0` or value-initialized `uint32_t`
-- Boolean flags default to `false`
+- all options declared with `required = false`
+- key/value options use `KVStyle::JoinedOrSeparate`
+- `rate_limit` is a `std::uint32_t`
+- string options use `std::string`
+- each option carries a `help` description
 
 #### Key Members
 
@@ -219,11 +221,15 @@ Definition: `main.cpp:18`
 - `agent_mode`
 - `help`
 - `version`
+- nested `_DecoOptStruct_0` through `_DecoOptStruct_10`
 
 #### Usage Patterns
 
-- Populated by the CLI argument parser in `main`
-- Read by application initialization to configure behavior
+- parsed from command-line arguments at program entry
+- used to drive LLM generation parameters via `--model` and `--rate-limit`
+- controls dry-run prompt assembly via `--dry-run`
+- enables experimental agent mode via `--experimental-agent-mode`
+- provides `-h`/`--help` and `-v`/`--version` reporting
 
 #### Member Types
 
@@ -961,13 +967,13 @@ Declaration: `main.cpp:92`
 
 Definition: `main.cpp:92`
 
-The function template `clore::await_task_result` synchronously waits for the completion of the task object referenced by the first argument and returns the outcome as an `std::expected<Value, Error>`. The `Value` and `Error` template parameters are automatically deduced from the `Task` type’s nested `value_type` and `error_type` aliases. The second parameter, a `std::string_view`, supplies a caller‑provided label or description for the awaited task, typically used for diagnostic or logging purposes. The caller is responsible for ensuring the task remains valid during the call; the function will not modify the task after it returns.
+The function `clore::await_task_result` accepts a reference to a `Task` and a `std::string_view` identifier, then blocks until that task completes. It returns a `std::expected<Value, Error>`, where `Value` defaults to `Task::value_type` and `Error` defaults to `Task::error_type`. On success the expected holds the task’s result value; on failure it contains the task’s error type. The caller must ensure the task is valid for blocking and that the string view remains valid for the duration of the call.
 
 #### Usage Patterns
 
-- Awaiting the result of an asynchronous task.
-- Handling task cancellation and errors.
-- Converting exceptions to expected errors.
+- Awaiting task completion and extracting result
+- Checking task cancellation and errors
+- Wrapping task outcome into `std::expected`
 
 ### `clore::log_generation_summary`
 
@@ -975,11 +981,12 @@ Declaration: `main.cpp:73`
 
 Definition: `main.cpp:73`
 
-Accepts a constant reference to an integer representing a generation index or identifier, and logs a summary of that generation’s results. The caller must provide a valid generation identifier that corresponds to a generation whose data has already been computed or otherwise populated.
+The function `clore::log_generation_summary` accepts a `const int &` representing a generation identifier and records a summary of that generation's state or results. Callers use this function to produce a diagnostic output for a specific generation, typically after its processing is complete, for auditing or analysis purposes. The function returns `void` and is expected to be called once per generation when a summary is needed.
 
 #### Usage Patterns
 
-- Called after a generation operation to report results and cache statistics
+- Called after generation to output statistics.
+- Used in the generation pipeline to provide feedback on cache performance and output count.
 
 ## Related Pages
 

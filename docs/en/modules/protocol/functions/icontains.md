@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::icontains'
-description: 'The function clore::net::icontains implements a case‑insensitive substring search using a straightforward brute‑force algorithm. It first performs an early‑exit check: if the length of needle exceeds the length of haystack, it returns false immediately. Otherwise, it iterates over each possible starting index i from 0 to haystack.size() - needle.size() inclusive. For each i, it sets a match flag to true and enters an inner loop over index j from 0 to needle.size() - 1. Inside the inner loop it compares haystack[i + j] and needle[j] after converting both to lowercase via std::tolower(static_cast<unsigned char>(…)). If any pair differs, match is set to false and the inner loop is broken. After the inner loop, if match remains true the function returns true immediately. If no starting position yields a full match, the function returns false. The only external dependency is std::tolower from the C++ standard library; no project‑specific utilities are used.'
+description: 'The function clore::net::icontains performs a case‑insensitive substring search using a brute‑force sliding‑window algorithm. It first rejects empty or oversized needles with an early return when needle.size() exceeds haystack.size(). The outer loop iterates over every possible starting offset i in haystack, up to haystack.size() - needle.size(). For each offset, an inner loop compares the needle character by character; both characters are lowercased via std::tolower with an explicit cast to unsigned char to avoid implementation‑defined behavior on negative char values. If all positions match, the function returns true; otherwise it continues searching. If no offset produces a full match, it returns false. The implementation relies solely on the standard library (function template std::tolower, class std::string_view); no locale or external data structures are involved, and the algorithm completes in O(n·m) time where n is the length of haystack and m the length of needle.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module protocol](../index.md)
 
-Declaration: `network/protocol.cppm:758`
+Declaration: `network/protocol.cppm:768`
 
-Definition: `network/protocol.cppm:758`
+Definition: `network/protocol.cppm:768`
 
 Declaration: [`Namespace clore::net`](../../../namespaces/clore/net/index.md)
 
@@ -39,7 +39,7 @@ auto icontains(std::string_view haystack, std::string_view needle) -> bool {
 }
 ```
 
-The function `clore::net::icontains` implements a case‑insensitive substring search using a straightforward brute‑force algorithm. It first performs an early‑exit check: if the length of `needle` exceeds the length of `haystack`, it returns `false` immediately. Otherwise, it iterates over each possible starting index `i` from `0` to `haystack.size() - needle.size()` inclusive. For each `i`, it sets a `match` flag to `true` and enters an inner loop over index `j` from `0` to `needle.size() - 1`. Inside the inner loop it compares `haystack[i + j]` and `needle[j]` after converting both to lowercase via `std::tolower(static_cast<unsigned char>(…))`. If any pair differs, `match` is set to `false` and the inner loop is broken. After the inner loop, if `match` remains `true` the function returns `true` immediately. If no starting position yields a full match, the function returns `false`. The only external dependency is `std::tolower` from the C++ standard library; no project‑specific utilities are used.
+The function `clore::net::icontains` performs a case‑insensitive substring search using a brute‑force sliding‑window algorithm. It first rejects empty or oversized needles with an early return when `needle.size()` exceeds `haystack.size()`. The outer loop iterates over every possible starting offset `i` in `haystack`, up to `haystack.size() - needle.size()`. For each offset, an inner loop compares the `needle` character by character; both characters are lowercased via `std::tolower` with an explicit cast to `unsigned char` to avoid implementation‑defined behavior on negative char values. If all positions match, the function returns `true`; otherwise it continues searching. If no offset produces a full match, it returns `false`. The implementation relies solely on the standard library (function template `std::tolower`, class `std::string_view`); no locale or external data structures are involved, and the algorithm completes in `O(n·m)` time where `n` is the length of `haystack` and `m` the length of `needle`.
 
 ## Side Effects
 
@@ -47,12 +47,13 @@ No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- `haystack` parameter
-- `needle` parameter
+- parameter `haystack` contents and size
+- parameter `needle` contents and size
 
 ## Usage Patterns
 
-- Used by `is_feature_rejection_error` to check for substring patterns in error messages.
+- invoked by `clore::net::is_feature_rejection_error` to detect feature-rejection keywords inside error message text
+- general case-insensitive substring matching within the `clore::net` module
 
 ## Called By
 

@@ -452,6 +452,16 @@ TEST_CASE(parse_response_api_error) {
     EXPECT_EQ(result.error().message, "LLM API error: bad request");
 }
 
+TEST_CASE(capability_probe_key_includes_base_url_and_model) {
+    auto first_key = make_capability_probe_key("LLM", "https://example.test/v1", "gpt-4.1");
+    auto second_key =
+        make_capability_probe_key("LLM", "https://example.test/v1", "gpt-4.1-mini");
+
+    EXPECT_EQ(first_key, "LLM|https://example.test/v1|gpt-4.1");
+    EXPECT_EQ(second_key, "LLM|https://example.test/v1|gpt-4.1-mini");
+    EXPECT_NE(first_key, second_key);
+}
+
 TEST_CASE(parse_response_supports_utf8_content) {
     auto result = extract_text_response(
         R"({"id":"resp_utf8","model":"deepseek-chat","choices":[{"finish_reason":"stop","message":{"content":"中文摘要：负责生成文档。"}}]})");

@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::extract'
-description: 'The clore::extract namespace is the core extraction layer of the Clore analysis system. It provides the logic and data types to process compilation databases, scan source files, parse ASTs, and build a complete, queryable representation of a C++ project. Central types include ProjectModel (aggregating all extracted data), CompilationDatabase, CompileEntry, ModuleUnit, SymbolInfo, and SymbolID. The namespace also defines a family of error types (ASTError, CompDbError, ScanError, PathResolveError) and supports asynchronous workflows via functions like extract_project_async and build_dependency_graph_async.'
+description: 'The clore::extract namespace provides the core extraction pipeline for analyzing C++ source code. It defines the types and operations responsible for scanning source files, parsing abstract syntax trees, building dependency graphs, and extracting symbol and module information from a compilation database. Central types include CompileEntry, CompilationDatabase, ProjectModel, ModuleUnit, SymbolInfo, ScanResult, ScanCache, and the SymbolKind enumeration, while error handling is addressed through distinct error types such as ASTError, ExtractError, CompDbError, ScanError, and PathResolveError.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-The `clore::extract` namespace is the core extraction layer of the Clore analysis system. It provides the logic and data types to process compilation databases, scan source files, parse `ASTs`, and build a complete, queryable representation of a C++ project. Central types include `ProjectModel` (aggregating all extracted data), `CompilationDatabase`, `CompileEntry`, `ModuleUnit`, `SymbolInfo`, and `SymbolID`. The namespace also defines a family of error types (`ASTError`, `CompDbError`, `ScanError`, `PathResolveError`) and supports asynchronous workflows via functions like `extract_project_async` and `build_dependency_graph_async`.
+The `clore::extract` namespace provides the core extraction pipeline for analyzing C++ source code. It defines the types and operations responsible for scanning source files, parsing abstract syntax trees, building dependency graphs, and extracting symbol and module information from a compilation database. Central types include `CompileEntry`, `CompilationDatabase`, `ProjectModel`, `ModuleUnit`, `SymbolInfo`, `ScanResult`, `ScanCache`, and the `SymbolKind` enumeration, while error handling is addressed through distinct error types such as `ASTError`, `ExtractError`, `CompDbError`, `ScanError`, and `PathResolveError`.
 
-Key functions handle symbol queries (`find_symbol`, `lookup_symbol`, `find_symbols`), module resolution (`find_module_by_name`, `find_module_by_source`), path normalization (`normalize_entry_file`, `canonical_graph_path`), and index reconstruction (`rebuild_model_indexes`, `rebuild_lookup_maps`). The namespace also includes utilities for merge (`merge_symbol_info`, `append_unique`), filtering (`matches_filter`, `filter_root_path`), and sanity‑checking compilation arguments (`sanitize_driver_arguments`, `sanitize_tool_arguments`). Overall, `clore::extract` implements the core extraction pipeline, transforming raw build database entries and source code into an enriched project model suitable for further analysis and symbol resolution.
+Key operations within this namespace include loading and sanitizing compilation databases (`load_compdb`, `sanitize_driver_arguments`, `sanitize_tool_arguments`), scanning files and module declarations (`scan_file`, `scan_module_decl`), extracting symbols and building models (`extract_symbols`, `extract_project_async`), constructing dependency graphs (`build_dependency_graph_async`, `topological_order`), and providing lookup and query utilities (`find_symbol`, `lookup_symbol`, `find_module_by_name`, `find_modules_by_name`, `lookup`). Supporting functions handle path normalization, cache key management, signature computation, and data merging. Collectively, this namespace forms the data acquisition and transformation layer between raw build configurations and the structured project model used for further analysis.
 
 ## Diagram
 
@@ -84,16 +84,7 @@ Definition: `extract/ast.cppm:26`
 
 Implementation: [`Module extract:ast`](../../../modules/extract/ast.md)
 
-The `clore::extract::ASTError` struct represents an error condition that occurs during the extraction of abstract syntax tree (AST) information in the Clore extraction pipeline. It encapsulates details about failures encountered while parsing or analyzing source files, such as malformed code or unsupported language constructs. This type is used to propagate AST-related errors from extraction operations, allowing callers to handle or report specific extraction failures separately from other error types like `clore::extract::ScanError` or `clore::extract::CompDbError`.
-
-#### Key Members
-
-- message
-
-#### Usage Patterns
-
-- Thrown as an exception when AST extraction encounters an error.
-- Caught by callers to inspect the error message and handle failure.
+`clore::extract::ASTError` is a struct that represents a specific error that occurs during the AST extraction phase of the `clore` extraction pipeline. It is used to encapsulate failure information when the system encounters problems while parsing or analyzing the abstract syntax tree of a translation unit, as opposed to other extraction‑related errors such as `clore::extract::ScanError` or `clore::extract::ExtractError`. This type enables callers to distinguish and handle AST‑level failures separately from other categories of extraction errors.
 
 ### `clore::extract::ASTResult`
 
@@ -103,22 +94,9 @@ Definition: `extract/ast.cppm:37`
 
 Implementation: [`Module extract:ast`](../../../modules/extract/ast.md)
 
-The `clore::extract::ASTResult` struct represents the outcome of an AST extraction operation. It is used to hold the result of processing a single source file or translation unit, encapsulating both successfully extracted data and any errors that occurred during parsing or analysis. Together with related types such as `clore::extract::ScanResult` and `clore::extract::ExtractError`, it forms part of the extraction pipeline, where callers can inspect the result to retrieve extracted symbols, relations, or diagnostics.
+The struct `clore::extract::ASTResult` encapsulates the outcome of an Abstract Syntax Tree (AST) extraction operation within the extraction pipeline. It serves as a return type for functions that parse C++ sources, carrying either the extracted structured data or an error condition.
 
-#### Invariants
-
-- No explicit invariants documented beyond the type being an aggregate.
-
-#### Key Members
-
-- symbols
-- relations
-- dependencies
-
-#### Usage Patterns
-
-- Returned as the result type from AST extraction functions.
-- Consumed by downstream processes that analyze or transform the extracted data.
+This type is central to the extraction process, providing a uniform way to propagate results—whether containing extracted symbols, relations, and file information, or indicating a failure via associated error types such as `ASTError`. As a result, `clore::extract::ASTResult` acts as the primary data carrier between extraction stages and downstream consumers like model builders and analysis tools.
 
 ### `clore::extract::CompDbError`
 
@@ -128,20 +106,21 @@ Definition: `extract/compiler.cppm:38`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-The `clore::extract::CompDbError` struct represents an error that occurs during the handling of a compilation database within the extraction pipeline. It is used to signal failures when reading, parsing, or otherwise processing a `clore::extract::CompilationDatabase`, such as missing files, malformed data, or unsupported configurations. As one of several error types in the `clore::extract` module alongside `clore::extract::ASTError`, `clore::extract::ScanError`, and `clore::extract::ExtractError`, `CompDbError` provides a consistent mechanism for propagating and handling database‑related faults during code extraction.
+The `clore::extract::CompDbError` struct represents an error that occurs when interacting with a compilation database. It is used within the extraction pipeline to signal issues such as malformed database files, missing entries, or other failures that prevent reading or interpreting the compilation database. This type is part of the error handling hierarchy in the `clore::extract` module, alongside `clore::extract::ASTError`, `clore::extract::PathResolveError`, and `clore::extract::ScanError`, allowing callers to specifically catch and handle compilation database–related failures separately from other extraction errors.
 
 #### Invariants
 
-- The `message` member holds a valid `std::string` (default-constructed or assigned).
+- The `message` member always contains a textual description of the error.
+- No additional error codes or other data are stored.
 
 #### Key Members
 
-- `message`: a `std::string` representing the error description.
+- `message` – the error description string
 
 #### Usage Patterns
 
-- Returned as a result type from extraction operations to indicate failure.
-- Inspected by callers to retrieve detailed error text.
+- Returned or thrown to indicate errors in compiler database extraction code.
+- Likely used in conjunction with exception handling or error propagation in the `clore::extract` module.
 
 ### `clore::extract::CompilationDatabase`
 
@@ -155,20 +134,21 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- entries may be empty
-- `toolchain_cache` maps toolchain identifiers to flag lists
-- `has_cached_toolchain()` returns true if `toolchain_cache` contains any keys
+- The `entries` vector holds all compile entries for the database and may be empty.
+- The `toolchain_cache` maps toolchain identifiers to associated strings; its contents are managed externally.
+- The struct does not enforce any relationship between `entries` and `toolchain_cache`.
 
 #### Key Members
 
-- entries
-- `toolchain_cache`
-- `has_cached_toolchain`
+- `entries` : `std::vector<clore::extract::CompileEntry>`
+- `toolchain_cache` : `std::unordered_map<std::string, std::vector<std::string>>`
+- `has_cached_toolchain() const -> bool`
 
 #### Usage Patterns
 
-- Used to store and pass around parsed compilation database data
-- `toolchain_cache` can be populated and queried to avoid repeated toolchain resolution
+- Instantiated to store a set of compile commands and an optional toolchain cache.
+- The `has_cached_toolchain()` method is used to query whether toolchain data has been previously stored.
+- External code populates the `entries` vector and manages the `toolchain_cache` map.
 
 #### Member Functions
 
@@ -194,19 +174,18 @@ Definition: `extract/compiler.cppm:21`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+The struct `clore::extract::CompileEntry` represents an individual compilation entry within a compilation database. It encapsulates the information required to compile a single translation unit, such as the source file path, the working directory, and the command-line arguments. This type is employed throughout the extraction pipeline to record and manage the data for each compilation unit as it is processed, often as part of a collection held within a `clore::extract::CompilationDatabase`.
 
 #### Invariants
 
-- All string fields may be empty
-- `compile_signature` is zero-initialized if not set
-- `source_hash` is `std::nullopt` if not available
+- All fields are default-initialized as shown in the definition.
+- `compile_signature` defaults to `0`, and `source_hash` is an empty `std::optional`.
 
 #### Key Members
 
-- file
-- directory
-- arguments
+- `file`
+- `directory`
+- `arguments`
 - `normalized_file`
 - `compile_signature`
 - `source_hash`
@@ -214,9 +193,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Used to store compilation entries from `clore::extract::Extractor`
-- Populated from build system output like `compile_commands.json`
-- Accessed by caching and reproducibility systems
+- Used throughout the extraction pipeline to represent individual compile commands from a compilation database.
+- Derived fields are populated after the initial raw entry is read, enabling further processing such as deduplication and caching.
 
 ### `clore::extract::DependencyEdge`
 
@@ -226,24 +204,22 @@ Definition: `extract/scan.cppm:51`
 
 Implementation: [`Module extract:scan`](../../../modules/extract/scan.md)
 
-The struct `clore::extract::DependencyEdge` represents a single directed edge within a dependency graph, modeling a dependency relationship between two entities. It is typically used in conjunction with `clore::extract::DependencyGraph` to capture and navigate the interconnection of project components during extraction or scanning operations.
+The `clore::extract::DependencyEdge` struct represents a directed edge within a dependency graph, typically connecting two entities such as source files, modules, or symbols. It is used as a building block of the `clore::extract::DependencyGraph` type to capture dependencies extracted during source analysis, enabling traversal and querying of dependency relationships across a project.
 
 #### Invariants
 
-- `from` and `to` are distinct identifiers (implied by edge semantics, not enforced)
-- Members are public and may be mutated directly
-- No ownership or lifetime constraints beyond those of `std::string`
+- both `from` and `to` are `std::string` objects with no additional constraints
+- the struct has no user‑defined constructors, destructors, or member functions
 
 #### Key Members
 
-- `from`: the source node identifier
-- `to`: the target node identifier
+- `from`
+- `to`
 
 #### Usage Patterns
 
-- Used to construct dependency graphs or lists
-- Stored in containers such as `std::vector<DependencyEdge>`
-- Iterated over to extract source/target pairs for further processing
+- used to model a directed dependency from `from` to `to` in dependency analysis
+- likely aggregated into collections or graphs for further processing
 
 ### `clore::extract::DependencyGraph`
 
@@ -257,18 +233,18 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- No explicitly documented invariants.
-- All members are public and default-initialized to empty vectors.
+- All dependency information is stored in the two vectors.
+- No additional constraints on the ordering or content of `files` or `edges` are indicated.
 
 #### Key Members
 
-- `files`
-- `edges`
+- `files`: the list of file names involved
+- `edges`: the list of dependency connections between files
 
 #### Usage Patterns
 
-- Instantiated and populated by dependency extraction routines.
-- Consumed by downstream analysis or serialization code.
+- Filled by extraction logic and consumed by downstream processing steps.
+- Expected to be passed by value or reference as a complete dependency snapshot.
 
 ### `clore::extract::ExtractError`
 
@@ -278,20 +254,22 @@ Definition: `extract/extract.cppm:21`
 
 Implementation: [`Module extract`](../../../modules/extract/index.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+The `clore::extract::ExtractError` struct represents an error that occurs during the extraction process, such as when parsing source files or building the project model. It is used as the error type in operations within the `clore::extract` module that may fail, allowing callers to handle extraction-specific failures uniformly alongside other error types like `clore::extract::ASTError` or `clore::extract::ScanError`.
 
 #### Invariants
 
-- No invariants beyond the validity of the underlying `std::string`
+- The `message` member conforms to all invariants of `std::string` (e.g., valid state, no null pointer).
+- The `message` may be empty, indicating a generic error.
 
 #### Key Members
 
-- `message`
+- `std::string message`
 
 #### Usage Patterns
 
-- Thrown or returned by extraction functions to indicate failure
-- Caught or inspected by callers to obtain an error description
+- Used as the `what()` or error payload in exception types or `std::error_code`-based error handling.
+- May be constructed with a string literal or localised error description.
+- Potentially returned as part of a `std::expected` or similar outcome type.
 
 ### `clore::extract::ExtractedRelation`
 
@@ -303,23 +281,6 @@ Implementation: [`Module extract:ast`](../../../modules/extract/ast.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
-#### Invariants
-
-- `from` and `to` are valid `SymbolID` values.
-- At most one of `is_call` or `is_inheritance` may be true? Not specified; both can be false or true.
-
-#### Key Members
-
-- `from`
-- `to`
-- `is_call`
-- `is_inheritance`
-
-#### Usage Patterns
-
-- Used as part of the extraction output to record symbol relationships.
-- Inspected to determine call or inheritance dependencies.
-
 ### `clore::extract::FileInfo`
 
 Declaration: `extract/model.cppm:122`
@@ -328,24 +289,23 @@ Definition: `extract/model.cppm:122`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-The `clore::extract::FileInfo` struct represents metadata about a single file processed during extraction. It is part of the extraction model and is typically used to store identifying and descriptive information for source files encountered when scanning or compiling, such as their path, role, or extraction status. Alongside related types like `IncludeInfo`, `ModuleUnit`, and `SourceLocation`, `FileInfo` provides the foundation for tracking file-level details within extraction results such as `ScanResult` or `ASTResult`.
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `path` should be a valid filesystem path
-- `symbols` may be empty
-- `includes` may be empty
+- No invariants enforced beyond type safety of the fields
+- All fields are public and mutable
 
 #### Key Members
 
-- `path`
-- `symbols`
-- `includes`
+- `path`: the filesystem path of the source file
+- `symbols`: a vector of `SymbolID` representing symbols defined or declared in the file
+- `includes`: a vector of strings representing include directives encountered in the file
 
 #### Usage Patterns
 
-- Used as output of extraction to represent a translation unit
-- Consumed by downstream processing that expects symbol and include lists
+- Populated by extraction logic to record symbolic information per file
+- Consumed by downstream analysis or serialization to retrieve file-level extraction results
 
 ### `clore::extract::IncludeInfo`
 
@@ -355,12 +315,12 @@ Definition: `extract/scan.cppm:24`
 
 Implementation: [`Module extract:scan`](../../../modules/extract/scan.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+The `clore::extract::IncludeInfo` struct represents metadata associated with a source file inclusion directive (such as `#include`) encountered during code scanning or extraction. It is part of the `clore::extract` namespace, which provides types for modeling compilation units, dependencies, and extraction results. `IncludeInfo` is used alongside types like `FileInfo`, `ModuleUnit`, and `CompileEntry` to record the details of a file inclusion, including how and where the inclusion occurs. Its primary role is to enable analysis of include relationships within a project’s source files, supporting dependency graph construction and extraction tasks.
 
 #### Invariants
 
-- `is_angled` distinguishes angle-bracket includes from quoted includes.
-- `path` can be any string, including empty.
+- `path` may be empty or contain a file path string.
+- `is_angled` is `true` for angle-bracket includes, `false` otherwise.
 
 #### Key Members
 
@@ -369,8 +329,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Returned by parsing functions to represent a single include directive.
-- Consumed by downstream logic to determine include search behavior.
+- Used as a record type to store include directive data during scanning.
+- Likely populated by parsing include lines and then consumed for further processing or reporting.
 
 ### `clore::extract::ModuleUnit`
 
@@ -380,15 +340,15 @@ Definition: `extract/model.cppm:135`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-The `clore::extract::ModuleUnit` struct represents a single C++20 module unit, whether an interface unit or a partition. It is part of the `clore::extract` namespace and is used to model module-level abstractions within the extraction and analysis pipeline. Each instance captures the identity and role of a particular module unit in the compiled project.
+The `clore::extract::ModuleUnit` struct represents a single C++20 module unit, which may be an interface unit or a partition unit. It is used within the extraction and analysis pipeline to model the structural information of module units encountered during compilation database processing, typically as part of the data produced by scanning or parsing operations.
 
 #### Invariants
 
-- `is_interface` is true for export module declarations
-- `name` is the fully qualified module name
-- `source_file` is a normalized file path
-- `imports` lists all module imports
-- `symbols` contains all symbol `IDs` declared in this unit
+- `name` is a full module name in `"module"` or `"module:partition"` form.
+- `is_interface` is `true` for `export module` units, `false` for internal partition units.
+- `source_file` is a normalized filesystem path.
+- `imports` contains only module names, not header units or other imports.
+- `symbols` lists all symbols declared within that unit.
 
 #### Key Members
 
@@ -400,9 +360,9 @@ The `clore::extract::ModuleUnit` struct represents a single C++20 module unit, w
 
 #### Usage Patterns
 
-- Populated by a module parser or extractor
-- Gathered into a collection to represent an entire module's translation units
-- Iterated over to analyze or serialize module structure
+- Populated during module extraction and used as a data carrier for further analysis.
+- Accessed by other parts of `clore::extract` to query module metadata.
+- Stored in collections or containers for processing across multiple module units.
 
 ### `clore::extract::NamespaceInfo`
 
@@ -412,12 +372,13 @@ Definition: `extract/model.cppm:128`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+The `clore::extract::NamespaceInfo` struct represents metadata about a namespace encountered during the extraction of C++ source code. It is part of the project model, sitting alongside types like `clore::extract::SymbolInfo` and `clore::extract::FileInfo`, and is used to capture namespace-related information for later analysis or building a `clore::extract::ProjectModel`. Instances of this struct are typically created during the extraction phase and stored within the model to document the namespace structure of the codebase.
 
 #### Invariants
 
-- All fields are public and can be freely modified.
-- No invariants are enforced by the type itself; correctness depends on external usage.
+- The `name` uniquely identifies the namespace within its parent scope
+- `symbols` contains only `IDs` of symbols defined directly in this namespace, not inherited
+- `children` contains names of direct child namespaces, not transitive
 
 #### Key Members
 
@@ -427,8 +388,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Used as a data container to represent a parsed namespace hierarchy.
-- Instances are aggregated to form the full namespace tree during extraction.
+- Populated during the namespace extraction phase by iterating over declarations
+- Later read by documentation generators to produce namespace pages and links to contained symbols and sub-namespaces
 
 ### `clore::extract::PathResolveError`
 
@@ -438,20 +399,20 @@ Definition: `extract/filter.cppm:8`
 
 Implementation: [`Module extract:filter`](../../../modules/extract/filter.md)
 
-The `clore::extract::PathResolveError` struct represents an error that occurs during path resolution within the extraction pipeline. It is used to indicate that a file path (e.g., from an include directive or compilation database entry) could not be successfully resolved to an actual file on disk, enabling callers to handle such failures gracefully. Alongside other error types in the `clore::extract` namespace, it participates in reporting and propagating extraction-related failures.
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- The `message` member is always initialized (default-constructed or assigned).
+- The struct is an aggregate with one data member.
+- The `message` member may be empty or contain a human-readable error description.
 
 #### Key Members
 
-- `std::string message`
+- `message` - the error description string
 
 #### Usage Patterns
 
-- Constructed with a descriptive error message when path resolution fails.
-- Likely returned as an error from functions or stored in `std::expected` or similar error-handling mechanisms.
+- No specific usage patterns are provided in the evidence; it is assumed to be used for error reporting.
 
 ### `clore::extract::ProjectModel`
 
@@ -461,30 +422,7 @@ Definition: `extract/model.cppm:143`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-The `clore::extract::ProjectModel` struct serves as the top-level representation of a C++ project’s extracted structure and metadata. It aggregates the results of scanning and parsing a compilation database, encompassing all relevant components such as compilation entries, file information, module units, include relationships, dependency graphs, and symbol tables. Use of `ProjectModel` typically occurs when the extraction phase completes, providing a unified, queryable description of the entire project to facilitate further analysis, indexing, or transformation.
-
-#### Invariants
-
-- `uses_modules` is true iff at least one module declaration exists
-- `symbol_ids_by_qualified_name` may contain multiple `IDs` for overloaded names
-- `modules` keys are normalized source file paths
-- `module_name_to_sources` keys are exact module names
-- `file_order` matches the order in which files were processed
-
-#### Key Members
-
-- `symbols`
-- `files`
-- `namespaces`
-- `modules`
-- `symbol_ids_by_qualified_name`
-- `uses_modules`
-
-#### Usage Patterns
-
-- Used by generation and evidence building passes for qualified name lookup
-- Used for cross-linking via module name lookup
-- Provides access to all extracted symbols, files, and namespaces
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 ### `clore::extract::ScanCache`
 
@@ -494,21 +432,23 @@ Definition: `extract/scan.cppm:40`
 
 Implementation: [`Module extract:scan`](../../../modules/extract/scan.md)
 
-The `clore::extract::ScanCache` struct is a persistent cache intended to be reused across successive dependency scans of the same project. Its primary purpose is to avoid redundant work by storing information that remains valid as long as the compilation database and the file system state do not change. When either of those underlying data sources is modified (for example, after editing source files or updating build flags), callers are responsible for clearing or discarding this cache to ensure fresh results.
+The `clore::extract::ScanCache` struct is a persistent cache designed to store intermediate results across successive dependency scans. Its primary purpose is to avoid redundant computations and speed up repeated scanning of the same project. However, to ensure correctness, callers must clear or discard the cache whenever the compilation database or the underlying file system state changes; otherwise, the cached data may become stale.
 
 #### Invariants
 
-- Cache entries are valid only until compilation DB or file system state changes.
-- The `scan_results` map is unordered; iteration order is not guaranteed.
+- Cache entries remain valid only while the compilation DB and file system state are unchanged.
+- The `scan_results` map is initially empty.
+- Callers are responsible for invalidating the cache when external state changes.
 
 #### Key Members
 
-- `scan_results`: maps file paths to cached `ScanResult` objects.
+- `scan_results` (`std::unordered_map<std::string, clore::extract::ScanResult>`)
 
 #### Usage Patterns
 
-- Shared across successive dependency scans to avoid redundant work.
-- Callers must clear or discard the cache when compilation DB or file system state changes.
+- Stores and retrieves previously computed scan results by file path to avoid redundant scans.
+- Passed into scan functions to provide cached results across successive invocations.
+- Cleared or replaced by callers upon compilation DB or file system changes.
 
 ### `clore::extract::ScanError`
 
@@ -518,20 +458,21 @@ Definition: `extract/scan.cppm:20`
 
 Implementation: [`Module extract:scan`](../../../modules/extract/scan.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+`clore::extract::ScanError` represents an error that occurs during the scanning phase of the code extraction process. It is used to report issues such as failures in parsing source files, resolving includes, or processing compilation database entries.  
+
+This type is typically returned or thrown when a scanning operation cannot complete successfully, allowing callers to distinguish scanning-specific errors from other error categories like extraction errors or compilation database errors.
 
 #### Invariants
 
-- `message` may be empty or contain any valid string
+- No explicit invariants documented.
 
 #### Key Members
 
-- `std::string message`
+- `message`
 
 #### Usage Patterns
 
-- Returned as an error result from scanning functions
-- Likely used with `std::expected` or similar error-handling mechanisms
+- No usage patterns documented in the evidence.
 
 ### `clore::extract::ScanResult`
 
@@ -545,19 +486,19 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Fields are default-initialized to empty strings, false, or empty vectors.
+- Fields are default-initialized when the struct is value-initialized.
+- No additional invariants are enforced by the struct.
 
 #### Key Members
 
 - `module_name`
 - `is_interface_unit`
-- includes
+- `includes`
 - `module_imports`
 
 #### Usage Patterns
 
-- Used as a return type from scanning functions
-- Consumed to process module information
+- Used as a return type for scanning operations.
 
 ### `clore::extract::SourceLocation`
 
@@ -571,21 +512,22 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `line == 0` indicates the location is unknown
-- Valid source lines start at `1`
-- `is_known()` returns `false` only when `line == 0`
+- Line 0 signifies an unknown location; valid lines start at 1.
+- Column may be 0 even for known locations, indicating an unknown column.
+- The `file` string is stored as-is without validation.
 
 #### Key Members
 
-- `file` (string)
-- `line` (`uint32_t`)
-- `column` (`uint32_t`)
+- `file` field
+- `line` field
+- `column` field
 - `is_known()` method
 
 #### Usage Patterns
 
-- Used to capture source positions in extraction results
-- Checked for validity via `is_known()`
+- Track source positions in extracted or generated code.
+- Check with `is_known()` before relying on `line` or `column` values.
+- Default-constructed locations are treated as unknown.
 
 #### Member Functions
 
@@ -611,22 +553,23 @@ Definition: `extract/model.cppm:75`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-The `clore::extract::SourceRange` type represents a contiguous span of source code within a translation unit. It is used alongside `clore::extract::SourceLocation` to describe the extent of extracted constructs—such as symbol declarations, macro expansions, or include directives—by capturing both the beginning and end positions. This struct is a fundamental building block in the extraction model, enabling precise mapping of extracted AST elements back to their original textual locations in the source files.
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- The `begin` and `end` members define the start and end of the range.
-- No ordering or validity guarantees are specified in the evidence.
+- Both `begin` and `end` are valid `SourceLocation` values.
+- The struct is trivially copyable and movable as an aggregate.
 
 #### Key Members
 
-- `begin`: the starting `SourceLocation` of the range.
-- `end`: the ending `SourceLocation` of the range.
+- `begin`
+- `end`
 
 #### Usage Patterns
 
-- Used as a field in other parsing or extraction structures to store the source location of a parsed construct.
-- Returned by functions that produce a range covering a parsed token or node.
+- Used to represent a source code span, likely for diagnostics or code extraction.
+- Can be passed by value or returned from functions that produce a location range.
+- Expected to be compared or ordered, though no `operator`s are shown in evidence.
 
 ### `clore::extract::SymbolID`
 
@@ -640,23 +583,22 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Valid `IDs` have non-zero hash.
-- Zero hash represents invalid/null sentinel.
-- Equality and ordering are based on both hash and signature.
+- A `SymbolID` with `hash == 0` is invalid/null; all valid `IDs` have non-zero hash.
+- The `hash` and `signature` together form a unique identity for a symbol.
 
 #### Key Members
 
-- `hash` field
-- `signature` field
-- `is_valid()` method
-- `operator==`
-- `operator<=>`
+- `std::uint64_t hash`
+- `std::uint32_t signature`
+- `bool is_valid() const noexcept`
+- `bool operator==(const SymbolID&) const = default`
+- `auto operator<=>(const SymbolID&) const = default`
 
 #### Usage Patterns
 
-- Used as a key or identifier for symbols in extraction logic.
-- Defaulted comparisons enable use in associative containers.
-- Collision disambiguation relies on the signature field.
+- Used as a key or identifier for symbols in extraction pipelines.
+- Comparison `operator`s enable use in sorted containers and equality checks.
+- `is_valid()` guards against using default-constructed or sentinel values.
 
 #### Member Functions
 
@@ -710,35 +652,7 @@ Definition: `extract/model.cppm:80`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-The `clore::extract::SymbolInfo` struct represents the metadata for a single symbol encountered during source code extraction. It is a core component of the extraction model, used to associate a `SymbolKind`, source location information (`SourceRange`, `SourceLocation`), and identity (`SymbolID`) with a particular declaration or reference in the codebase. This struct is typically populated during an AST traversal and collected within larger data structures such as `ASTResult` or `ScanResult` to form a complete picture of the extracted project.
-
-#### Invariants
-
-- `id` uniquely identifies the symbol across an extraction session
-- `source_snippet_offset`, `source_snippet_length`, `source_snippet_file_size`, and `source_snippet_hash` are consistent if `source_snippet` is empty
-- `declaration_location` is always present; `definition_location` is optional
-- `parent`, `children`, `bases`, `derived`, `calls`, `called_by`, `references`, `referenced_by` store relationships as `SymbolID` values that refer to other `SymbolInfo` instances
-
-#### Key Members
-
-- `id`
-- `kind`
-- `name`
-- `qualified_name`
-- `declaration_location`
-- `parent` and `children`
-- `bases` and `derived`
-- `calls` and `called_by`
-- `references` and `referenced_by`
-- `source_snippet` and related offset fields
-- `doc_comment`
-
-#### Usage Patterns
-
-- Populated by extraction tools to describe each discovered symbol
-- Traversed by code analysis utilities to build dependency graphs or inheritance hierarchies
-- Linked via `SymbolID` fields to form a forest of symbol trees
-- Examined to generate cross-references, call graphs, or documentation
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 ### `clore::extract::SymbolKind`
 
@@ -752,9 +666,9 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Each enumerator has a distinct integer value assigned by the compiler.
-- The `Unknown` enumerator serves as a default or error indicator.
-- The enum is intended to be used as a discriminator in variant-like structures or as a label in symbol metadata.
+- Each enumerator is a distinct integer value within `std::uint8_t` range.
+- All possible symbol kinds are represented by named enumerators; `Unknown` acts as a catch-all.
+- The enum is not a bitmask; values are mutually exclusive.
 
 #### Key Members
 
@@ -776,9 +690,9 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Other code compares against these enumerators to determine the kind of a symbol.
-- The enum is likely used in switch statements or lookup tables.
-- It may be serialized or compared with equality.
+- Used as a member in symbol data structures to indicate the kind of symbol.
+- Switched upon in extraction or serialization logic to handle each kind appropriately.
+- Stored alongside symbol name and location to enable type-safe operations on symbols.
 
 #### Member Variables
 
@@ -970,7 +884,7 @@ Declaration: `extract/merge.cppm:12`
 
 Implementation: [`Module extract:merge`](../../../modules/extract/merge.md)
 
-A public function template `clore::extract::append_unique` declared at `extract/merge.cppm:12` with template parameter `<typename T>`. It returns `void` and is intended to append a value to a collection only if it is not already present.
+The variable `clore::extract::append_unique` is a public template variable declared at line 12 in `extract/merge.cppm`. Its type and initialization are not directly observable from the evidence.
 
 ### `clore::extract::append_unique_range`
 
@@ -978,7 +892,7 @@ Declaration: `extract/merge.cppm:19`
 
 Implementation: [`Module extract:merge`](../../../modules/extract/merge.md)
 
-A public variable template `append_unique_range` declared in `extract/merge.cppm` at line 19. The available evidence provides no additional context about its type, initialization, or how it is used in the codebase.
+`clore::extract::append_unique_range` is a public variable template declared at `extract/merge.cppm:19` with template parameter `<typename T>` and a type that suggests a function signature `void`. Its specific role is not documented by surrounding code.
 
 ### `clore::extract::deduplicate`
 
@@ -986,7 +900,7 @@ Declaration: `extract/merge.cppm:49`
 
 Implementation: [`Module extract:merge`](../../../modules/extract/merge.md)
 
-The variable `clore::extract::deduplicate` is declared in `extract/merge.cppm:49` as `void deduplicate`.
+The variable `clore::extract::deduplicate` is a public template variable declared in `extract/merge.cppm` at line 49. The source snippet shows `void deduplicate`, indicating it is likely a function or function pointer with no parameters.
 
 ## Functions
 
@@ -998,12 +912,12 @@ Definition: `extract/compiler.cppm:110`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-`clore::extract::build_compile_signature` accepts a `const CompileEntry &` and returns a `std::uint64_t` that serves as a deterministic, content-based identifier for that compile entry. It is designed to produce a compact fingerprint that can be used by callers to cache or deduplicate compile actions, compare entries for equivalence, or track them across different stages of extraction. The function internally normalizes the entry file via `clore::extract::normalize_entry_file` and delegates to `clore::extract::(anonymous namespace)::build_compile_signature_impl` to compute the final value, ensuring that equivalent entries yield the same signature regardless of superficial representation differences.
+Computes a 64-bit identifier uniquely representing the full compilation context of a given `CompileEntry`. The caller can use the returned signature to detect equivalent compilation commands, cache toolchains or scan results, or index build artifacts. The function internally normalizes the entry file and applies a deterministic algorithm to produce the signature; it is intended to be stable across runs on the same build configuration.
 
 #### Usage Patterns
 
-- computing a unique hash for compile entries
-- caching compile signatures to avoid redundant computation
+- Called to retrieve or compute a compile signature for a `CompileEntry`
+- Used for caching and deduplication of compilation invocations
 
 ### `clore::extract::build_dependency_graph_async`
 
@@ -1013,11 +927,12 @@ Definition: `extract/scan.cppm:370`
 
 Implementation: [`Module extract:scan`](../../../modules/extract/scan.md)
 
-The function `clore::extract::build_dependency_graph_async` asynchronously constructs a `DependencyGraph` for the project identified by the given integer handle. It accepts a reference to a `DependencyGraph` object that will be populated with the result, an optional `ScanCache` pointer (may be null to disable caching), and a `kota::event_loop` reference that schedules the asynchronous work. The caller must ensure the event loop remains active until the operation completes. The function returns an integer status code indicating success or failure; the actual graph data is made available through the output parameter after the asynchronous task finishes.
+Constructs a dependency graph for the project identified by the given project index. This asynchronous function populates the provided `DependencyGraph` with dependencies discovered from the source files, using the supplied `kota::event_loop` for scheduling and completion. The optional `ScanCache` can be used to reuse previously scanned results. It returns an integer status code indicating success or error; the caller must ensure the event loop remains active until the operation completes.
 
 #### Usage Patterns
 
-- Called to asynchronously compute a dependency graph for a project given a compilation database
+- Called to asynchronously build a dependency graph for a set of compilation entries
+- Used in pipeline that constructs project model for code analysis
 
 ### `clore::extract::canonical_graph_path`
 
@@ -1027,12 +942,13 @@ Definition: `extract/filter.cppm:103`
 
 Implementation: [`Module extract:filter`](../../../modules/extract/filter.md)
 
-`clore::extract::canonical_graph_path` computes a canonical representation of a graph path identified by an integer handle. The caller supplies a `const int &` referencing the input path identifier; the function returns an `int` that uniquely represents the canonical equivalent of that path. This contract ensures that different path descriptions that map to the same logical path are normalized to the same integer value, enabling consistent comparison and indexing within the extraction pipeline.
+`clore::extract::canonical_graph_path` accepts a `const int &` representing a path identifier and returns an `int`. Its caller-facing responsibility is to compute a canonical form of the given graph path, producing a normalized representation that is consistent across equivalent inputs. The returned `int` serves as a stable key for use in graph traversal, comparison, or indexing operations within the extraction process. The function guarantees that identical logical paths always yield the same canonical identifier, while differing paths produce distinct values.
 
 #### Usage Patterns
 
-- normalizing paths for dependency graph nodes
-- computing a unique key for a filesystem path
+- Used to obtain a stable, canonical path key for graph nodes
+- Called when constructing or looking up dependency graph entries
+- Relies on filesystem to normalize path representations
 
 ### `clore::extract::create_compiler_instance`
 
@@ -1042,12 +958,12 @@ Definition: `extract/compiler.cppm:297`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-The function `clore::extract::create_compiler_instance` accepts a `const CompileEntry &` and returns an `int`. Its caller-facing responsibility is to materialize a compiler instance appropriate for the given compile entry, abstracting away the details of compiler selection and initialization. The caller must provide a valid `CompileEntry` describing the translation unit and its compilation parameters. The returned `int` serves as an opaque handle or status indicator representing the created compiler instance; the caller should treat this value as a resource that may require later cleanup or lifecycle management. No assumptions about the internal state or lifetime of the instance beyond the immediate call are warranted.
+The function `clore::extract::create_compiler_instance` accepts a `const CompileEntry &` and returns an `int`. It is responsible for creating a compiler instance based on the provided compilation entry. The caller must supply a valid `CompileEntry` that contains the necessary compilation parameters. The return value is an integer identifier that can be used to refer to the created compiler instance within the extraction framework.
 
 #### Usage Patterns
 
-- Called in extraction pipeline to obtain a Clang compiler instance for a compilation unit.
-- Used as part of the process to analyze source code and extract symbol information.
+- used to obtain a configured clang compiler instance for a compile entry
+- typically called during extraction to set up a clang tool
 
 ### `clore::extract::ensure_cache_key`
 
@@ -1059,11 +975,13 @@ Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md
 
 Declaration: [Declaration](functions/ensure-cache-key.md)
 
-The function `clore::extract::ensure_cache_key` takes a mutable reference to a `CompileEntry` and returns `void`. It is responsible for ensuring that the given entry has a valid, unique cache key that can be used by caching mechanisms such as `clore::extract::query_toolchain_cached`. As a caller, you should invoke this function before operations that rely on cached toolchain information to avoid repeated, expensive computations. The function modifies the `CompileEntry` in place; after the call, the entry's internal cache key is guaranteed to be initialized and consistent.
+The function `clore::extract::ensure_cache_key` modifies a given `CompileEntry` to guarantee that a valid cache key is present on the object. Its primary responsibility is to prepare the entry for use in caching mechanisms—most notably by `clore::extract::query_toolchain_cached`—so that subsequent cache lookups operate on a consistent, comparable key.
+
+Callers that intend to perform cacheable operations on a `CompileEntry` should invoke this function beforehand. The contract is that after the call, the `CompileEntry` contains a key derived from its properties (for example, from the compiler, flags, or source file); the function is designed to be idempotent in the sense that it either sets the key if absent or ensures the existing key remains valid. The specific derivation logic is encapsulated in `clore::extract::ensure_cache_key_impl`, but direct callers need only rely on the postcondition that a cache key is established.
 
 #### Usage Patterns
 
-- called by `query_toolchain_cached` before caching or querying toolchain for a compile entry
+- Called by `query_toolchain_cached` to prepare a cache key before toolchain lookup
 
 ### `clore::extract::ensure_cache_key_impl`
 
@@ -1075,11 +993,11 @@ Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md
 
 Declaration: [Declaration](functions/ensure-cache-key-impl.md)
 
-The function `clore::extract::ensure_cache_key_impl` serves as the core implementation for generating and assigning a cache key to a `CompileEntry`. It modifies the given entry in place to include a unique identifier that can later be used by caching subsystems such as `clore::extract::query_toolchain_cached`. As a caller, you should not invoke this function directly; instead, call `clore::extract::ensure_cache_key`, which delegates to this implementation. The cache key is derived from the normalized source file path, an optional source file content hash via `try_hash_source_file`, and the full compile signature produced by `build_compile_signature_impl`. After this function returns, the `CompileEntry` is guaranteed to have a valid and consistent cache key.
+The function `clore::extract::ensure_cache_key_impl` is an internal helper that computes and assigns a cache key to a given `CompileEntry`. It is invoked by `clore::extract::ensure_cache_key` to perform the actual key derivation logic. The caller’s responsibility is to provide a `CompileEntry` with sufficient properties (e.g., source file path, compiler arguments) so that a meaningful key can be derived. After the call, the `CompileEntry` is guaranteed to hold a computed cache key that uniquely identifies the entry for caching purposes, such as for toolchain query caching. This function is not intended for direct external use; callers should prefer `clore::extract::ensure_cache_key` which delegates to this implementation.
 
 #### Usage Patterns
 
-- called by `ensure_cache_key` to populate cache key for a compile entry
+- Called by `clore::extract::ensure_cache_key` to populate cache-related fields on a `CompileEntry`.
 
 ### `clore::extract::extract_project_async`
 
@@ -1089,13 +1007,13 @@ Definition: `extract/extract.cppm:539`
 
 Implementation: [`Module extract`](../../../modules/extract/index.md)
 
-`clore::extract::extract_project_async` initiates asynchronous extraction of project data. It accepts a project identifier (passed as `const int &`) and a `kota::event_loop &` to schedule and drive the asynchronous work. The function returns an `int` — typically a status code or a handle that the caller can monitor for completion. This is the top-level entry point for extracting a project's symbols, modules, and dependency graphs; it is non-blocking and relies on the provided event loop for execution. Callers must ensure the event loop remains active until extraction finishes.
+The function `clore::extract::extract_project_async` initiates an asynchronous extraction of project data. It accepts a project identifier as a `const int &` and a `kota::event_loop &` to schedule and drive the asynchronous work. The caller is responsible for ensuring the event loop remains active for the lifetime of the operation and that the referenced project identifier remains valid. The return value of `int` serves as a handle or status indicator for the initiated extraction; its exact semantics are defined by the surrounding extraction framework.
 
 #### Usage Patterns
 
-- called as the main extraction function in the clore extraction pipeline
-- typically invoked from a command-line tool that provides config and event loop
-- used in conjunction with async caching and AST extraction utilities
+- top-level entry point for project extraction
+- asynchronously called with a task configuration and event loop
+- used in clore tool to generate project model from compile commands
 
 ### `clore::extract::extract_symbols`
 
@@ -1105,14 +1023,12 @@ Definition: `extract/ast.cppm:669`
 
 Implementation: [`Module extract:ast`](../../../modules/extract/ast.md)
 
-The function `clore::extract::extract_symbols` accepts a `const int &` identifier and returns an `int`. Callers supply a reference to an integer that designates a specific resource—such as a project model handle, compilation database identifier, or similar internal index—and receive a scalar integer result that typically indicates the number of symbols extracted or a status code. The precise interpretation of the parameter and return value is defined by the surrounding extraction pipeline; callers should refer to the associated documentation for the resource type and expected outcomes.
-
-This function is the entry point for triggering symbol extraction from the given resource. It does not mutate the caller’s identifier. The returned integer allows the caller to assess the result of the operation (e.g., success or failure, extracted symbol count) without exposing internal extraction details.
+The function `clore::extract::extract_symbols` accepts a `const int &` representing a source or identifier, extracts symbol information from it, and returns an `int` that indicates the outcome or a count of extracted symbols. The caller is responsible for providing a valid reference to an integer that identifies the extraction target; the return value communicates whether the extraction succeeded or how many symbols were found. No side effects on the argument are permitted, as the parameter is `const`.
 
 #### Usage Patterns
 
-- called to extract AST symbols and relations for a single compile entry
-- used in vectorized or async extraction flows
+- Used to extract symbols and relations from a single compilation entry during project analysis
+- Likely invoked in a loop over compile entries to build a complete project model
 
 ### `clore::extract::filter_root_path`
 
@@ -1122,11 +1038,12 @@ Definition: `extract/filter.cppm:161`
 
 Implementation: [`Module extract:filter`](../../../modules/extract/filter.md)
 
-The function `clore::extract::filter_root_path` accepts a root path identifier (as a constant integer reference) and returns an integer result. It is responsible for filtering or processing a root path, likely to restrict the scope of a subsequent extraction operation or to validate the path against project‑specific criteria. The caller supplies a valid root path identifier and expects a return value that indicates whether the path passed filtering or that provides a transformed identifier for use in further extraction steps.
+The function `clore::extract::filter_root_path` accepts a root path (represented as a `const int &`) and returns an `int` that provides a filtered or normalized version of that path. It is a caller‑facing utility that performs transformation or validation of the root path, ensuring it meets the contract required by the extraction pipeline. Use this function to obtain a cleaned or canonical root path before passing it to other extraction operations.
 
 #### Usage Patterns
 
-- Obtain the normalized root path for filtering operations.
+- computing canonical root path for filtering operations
+- providing a normalized base directory for path comparisons
 
 ### `clore::extract::find_module_by_name`
 
@@ -1136,12 +1053,12 @@ Definition: `extract/model.cppm:416`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-Given a `const ProjectModel &` and an integer identifier for a module name, `clore::extract::find_module_by_name` returns a pointer to the corresponding `const ModuleUnit` if that module exists in the model. The integer parameter is expected to be a valid module-name index or identifier from the project’s internal naming system. If no module with the given name is found, the function returns `nullptr`. The caller is responsible for ensuring that the provided `ProjectModel` object is fully populated and that the name identifier references a known module in that model.
+Searches for a module within the given `ProjectModel` using a numeric identifier that represents a module name. Returns a pointer to the `ModuleUnit` if found, or a null pointer if no matching module exists. The caller is responsible for providing a valid `ProjectModel` and a correct identifier.
 
 #### Usage Patterns
 
-- Used by callers to resolve a module name to a single unambiguous module unit
-- Typically invoked during project extraction or symbol lookup when a module context is needed
+- Resolving a unique module from a project model by name
+- Handling ambiguous module name lookups after extraction
 
 ### `clore::extract::find_module_by_source`
 
@@ -1151,12 +1068,12 @@ Definition: `extract/model.cppm:449`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-The function `clore::extract::find_module_by_source` retrieves the module associated with a given source file within a project model. It accepts a reference to `const ProjectModel` and an integer that identifies a specific source entry (such as a compile entry index or source file ID). The function returns a pointer to `const ModuleUnit` if the source file is part of a module, or `nullptr` if no module is found for that source. The caller is responsible for ensuring the provided source identifier is valid within the model; the function performs no ownership transfer—the returned pointer remains valid only as long as the `ProjectModel` is alive and unchanged.
+The function `clore::extract::find_module_by_source` retrieves the module associated with a given source identifier within a project model. It accepts a `const ProjectModel &` and an `int` representing the source index, and returns a pointer to a `const ModuleUnit` if a matching module exists, or `nullptr` otherwise. The caller is responsible for ensuring the model is properly initialized and the source index is valid within the model's source collection.
 
 #### Usage Patterns
 
-- used to retrieve a module unit by its source file path
-- likely called when mapping a source location to its containing module
+- Used to obtain the module unit associated with a given source file path
+- Typical in module resolution or when accessing module metadata from a source location
 
 ### `clore::extract::find_modules_by_name`
 
@@ -1166,12 +1083,11 @@ Definition: `extract/model.cppm:395`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-Searches the given `ProjectModel` for all modules matching a specific name identified by an integer identifier. The function returns an integer representing the result of the search, such as the number of modules found or a status code indicating success or failure.
+The `clore::extract::find_modules_by_name` function searches the provided `ProjectModel` for all modules that match the specified name identifier. The caller supplies a reference to the project model and an integer that represents the name (typically derived from the model’s internal name table). The function returns an integer that indicates the number of modules found, allowing the caller to process the set of matches. This is in contrast to the singular `find_module_by_name` function, which returns a pointer to a single matching `ModuleUnit`.
 
 #### Usage Patterns
 
-- Used to retrieve all `ModuleUnit` pointers with a specific module name.
-- Called when multiple sources define the same module name.
+- Lookup all modules with a given name in the project model
 
 ### `clore::extract::find_symbol`
 
@@ -1181,12 +1097,12 @@ Definition: `extract/model.cppm:371`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-Retrieves information about a symbol from the given `ProjectModel` using an integer identifier. Returns a pointer to a constant `SymbolInfo` object if the symbol is found, or `nullptr` if no matching symbol exists. Overloads of this function accept additional integer arguments to support more specific symbol lookups.
+The function `clore::extract::find_symbol` performs a lookup in a given `ProjectModel` to locate a symbol identified by one or more integer parameters. It returns a pointer to a constant `SymbolInfo` if the symbol is found, or `nullptr` if no matching symbol exists. Multiple overloads accept different combinations of parameters, allowing the caller to specify the symbol by a direct identifier or by additional contextual keys such as a module or scope index. The caller is responsible for ensuring the `ProjectModel` is properly initialized and that the provided identifiers correspond to valid symbols as defined in the project's extraction data.
 
 #### Usage Patterns
 
-- Resolve a qualified name to a unique symbol
-- Lookup symbol by fully qualified name
+- Callers use this function when they need to look up a single symbol by its fully qualified name and expect exactly one match.
+- Typically employed in code that resolves symbol names from user input or configuration where uniqueness is guaranteed.
 
 ### `clore::extract::find_symbol`
 
@@ -1196,12 +1112,12 @@ Definition: `extract/model.cppm:379`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-The function `clore::extract::find_symbol` retrieves a pointer to a `const SymbolInfo` from the given `ProjectModel` using two integer parameters that together uniquely identify a symbol within the extracted model. The first integer typically denotes a source file or module index, and the second an offset, line, or internal symbol index; this composite key enables direct lookup when the caller has positional or internal identifiers rather than a `SymbolID` object. If no symbol matches the provided coordinates, the function returns a null pointer.
+`clore::extract::find_symbol` searches for a symbol in a given `ProjectModel` using either a symbol identifier or source location coordinates. It accepts the model and one or two `int` parameters—the first overload interprets a single integer as a symbol identifier, while the second overload takes two integers representing a line and column offset. The function returns a pointer to the corresponding `SymbolInfo` structure if the symbol is found, or a null pointer if no match exists. Callers should ensure the `ProjectModel` contains populated symbol data before invoking this function, and must not dereference the returned pointer without first checking for null.
 
 #### Usage Patterns
 
-- Searching for a symbol by qualified name and signature
-- Obtaining a symbol pointer for further inspection
+- Used internally for efficient symbol lookup by numeric `IDs`
+- Complemented by `find_symbol` overloads using `std::string_view` parameters
 
 ### `clore::extract::find_symbols`
 
@@ -1211,13 +1127,12 @@ Definition: `extract/model.cppm:354`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-The function `clore::extract::find_symbols` is a query operation on a `ProjectModel`. It takes a reference to the project model and an integer parameter that serves as a search criterion or context identifier. The return value is an integer representing the number of matching symbols found, or a status code indicating the success or failure of the search.  
-
-Callers should ensure the `ProjectModel` is fully constructed and that the integer parameter corresponds to a valid identifier (such as a file or module index) within the model. The function does not modify the model; it performs a read-only lookup to locate symbols that satisfy the given criterion.
+The function `clore::extract::find_symbols` locates symbols within a project model based on an integer criterion provided by the caller. The caller supplies a reference to a valid `ProjectModel` and an `int` argument that specifies which symbols to retrieve; the exact semantics of this criterion (for example, a module index or identifier) are defined by the extraction logic. The function returns an `int`, which may represent the number of matching symbols found or a status indicator. This function is intended for callers who need to query symbol information from the project model using a numeric key, complementing related lookup functions like `find_symbol` and `lookup_symbol`.
 
 #### Usage Patterns
 
-- retrieve all symbols matching a qualified name
+- retrieve all symbols that share a given qualified name
+- query the model for multiple overloads or entities with the same name
 
 ### `clore::extract::join_qualified_name_parts`
 
@@ -1227,12 +1142,12 @@ Definition: `extract/model.cppm:328`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-The function `clore::extract::join_qualified_name_parts` combines the specified qualified name parts into a single qualified name. It accepts a reference to the first part identifier and an integer count of parts to include, and returns an integer that represents the resulting joined name. This is typically used after splitting or processing name components to reconstruct a fully qualified name.
+The function `clore::extract::join_qualified_name_parts` combines two components of a qualified name, represented as integer values. The first component is passed by const reference, the second by value, and the result is an integer that encodes the fully qualified name formed by joining these parts. Callers should provide the parts in the order they appear in the qualified name, where the first part typically represents a prefix such as a namespace or class scope, and the second part is the immediate name to append.
 
 #### Usage Patterns
 
-- reconstructing fully qualified symbol names from component parts
-- building qualified names for lookup or display
+- Used to reassemble qualified names from a split vector of components
+- Likely called during symbol extraction or name resolution to construct fully qualified names
 
 ### `clore::extract::load_compdb`
 
@@ -1242,13 +1157,12 @@ Definition: `extract/compiler.cppm:127`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-The function `load_compdb` accepts a `std::string_view` representing the file path of a compilation database. It attempts to load that database and returns an `int` that acts as a handle or status indicator. The caller must supply a valid, accessible path; the return value signals success or failure of the load operation, and a successful result can be passed to other extraction functions that require a database reference.
+The function `clore::extract::load_compdb` loads a compilation database from the provided `std::string_view` input. The caller supplies a path or textual representation of the database, and the function returns an `int` representing the outcome, such as a success indicator, a handle, or an error code. The caller is responsible for ensuring the input is valid, and the return value must be checked to determine whether the database was loaded successfully.
 
 #### Usage Patterns
 
-- Loading a compilation database from a path to `compile_commands.json`
-- Initializing extraction processes for a project
-- Providing compile commands to build dependency graphs or symbol indexes
+- Called to initialize a compilation database from a file path
+- Used before extracting symbols or building dependency graphs
 
 ### `clore::extract::lookup`
 
@@ -1258,12 +1172,11 @@ Definition: `extract/compiler.cppm:164`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-The function `clore::extract::lookup` performs a caller-facing lookup within a compilation database based on a given name or path. It accepts a `const CompilationDatabase &` and a `std::string_view` argument, and returns an `int`. The return value is intended to be used as an opaque identifier or index representing the result of the lookup, though its exact semantics are defined by the broader extraction framework. Callers should ensure the supplied `std::string_view` is valid for the lifetime of the call and that the `CompilationDatabase` has been properly initialized and populated before invoking this function.
+The function `clore::extract::lookup` accepts a `CompilationDatabase` and a `std::string_view` identifier. It returns an `int` representing the result of a lookup operation—typically an index, a status code, or a handle that can be used for subsequent queries. The caller is responsible for providing a valid database and a string that conforms to the expected key format; the meaning of the returned integer is defined by the database’s contract and should be interpreted accordingly.
 
 #### Usage Patterns
 
-- Used to find compile entries corresponding to a source file path
-- Called during extraction to associate a source file with its build configuration
+- Used to retrieve compile entries matching a given file path from the compilation database.
 
 ### `clore::extract::lookup_symbol`
 
@@ -1273,15 +1186,13 @@ Definition: `extract/model.cppm:349`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-The function `clore::extract::lookup_symbol` retrieves the `SymbolInfo` associated with a given `SymbolID` within a project model. It accepts a reference to a `ProjectModel` and a `SymbolID`, and returns a pointer to the constant `SymbolInfo` if the symbol is found, or `nullptr` if it is not present in the model.
-
-The caller is responsible for ensuring that the `ProjectModel` is fully populated (e.g., after extraction) and that the `SymbolID` is valid—typically obtained from a prior query such as `clore::extract::find_symbol`. The returned pointer remains valid as long as the `ProjectModel` is not modified or destroyed.
+The `clore::extract::lookup_symbol` function retrieves a pointer to the `const SymbolInfo` associated with a given `SymbolID` within the specified `ProjectModel`. It performs a direct lookup using the symbol’s unique identifier, returning `nullptr` if no symbol with that `SymbolID` exists in the model. The caller is responsible for ensuring that the provided `ProjectModel` and `SymbolID` are valid; the function does not modify the model or the identifier.
 
 #### Usage Patterns
 
-- retrieving symbol details for a specific ID
-- checking existence of a symbol
-- used by code generation or analysis passes
+- Retrieve symbol information by ID
+- Check if a symbol exists in the model
+- Perform safe lookup with nullptr check
 
 ### `clore::extract::matches_filter`
 
@@ -1291,12 +1202,12 @@ Definition: `extract/filter.cppm:124`
 
 Implementation: [`Module extract:filter`](../../../modules/extract/filter.md)
 
-The function `clore::extract::matches_filter` determines whether a particular integer satisfies a filter condition defined by two additional integer arguments. It returns `true` if the condition is met, `false` otherwise. The exact semantics of the filter depend on the calling context, but the function serves as a generic predicate to decide inclusion or matching during extraction operations.
+The function `clore::extract::matches_filter` is a predicate that determines whether a given integer value satisfies a filter defined by two additional integer parameters. It returns `true` if the input matches the filter criteria, and `false` otherwise. The caller supplies the value to test and the two filter parameters, which together specify the rule for inclusion or exclusion; the exact interpretation of these parameters is encapsulated by the implementation and is not exposed.
 
 #### Usage Patterns
 
-- filtering source files during symbol extraction
-- applying user-defined include/exclude rules
+- used in extraction pipeline to filter source files based on include/exclude rules
+- called after obtaining a normalized file path and before further processing
 
 ### `clore::extract::merge_symbol_info`
 
@@ -1306,12 +1217,9 @@ Definition: `extract/merge.cppm:211`
 
 Implementation: [`Module extract:merge`](../../../modules/extract/merge.md)
 
-The function `clore::extract::merge_symbol_info` merges the symbol information carried by the second argument into the first argument. The first argument is a mutable reference to an existing symbol info object, which will be updated or extended with the data from the second argument. The second argument is passed as an rvalue reference, indicating that the caller transfers ownership of that object — after the call, the second argument is left in a valid but unspecified state. Callers must ensure that the first argument is in a state suitable to receive merged data, and that the second argument is a temporary or has been moved. There is no return value; the merge is performed via side effects on the first argument.
+The function `clore::extract::merge_symbol_info` accepts a mutable reference to a symbol info object as its first argument and a const reference to another symbol info object as its second argument. It merges the data from the second argument into the first, updating the first object with combined information. This operation is intended for situations where symbol data is gathered from multiple sources or extraction passes and must be unified into a single record.
 
-#### Usage Patterns
-
-- called during symbol extraction to combine partial symbol information
-- used to merge newly discovered symbol attributes into an existing record
+Callers must provide two symbol info objects that are semantically compatible for merging; the function does not validate compatibility beyond its internal rules. The first argument is always modified in place. There is no return value beyond `void`.
 
 ### `clore::extract::merge_symbol_info`
 
@@ -1321,12 +1229,12 @@ Definition: `extract/merge.cppm:215`
 
 Implementation: [`Module extract:merge`](../../../modules/extract/merge.md)
 
-The function `clore::extract::merge_symbol_info` merges symbol information from a source into a target. The first argument is a mutable reference to the target symbol info that will be updated. The second argument provides the source symbol info; the const reference overload leaves the source unchanged, while the rvalue reference overload may move its contents. After the call, the target holds the combined information, typically including additional locations, definitions, or references from the source.
+The function `clore::extract::merge_symbol_info` merges symbol information from a source into a target. The first argument (a non-`const` reference) is updated in place with data contributed from the second argument (a `const` reference). The caller is responsible for providing a valid target that can accept the merge; the source remains unchanged. No return value is produced—the effect is purely a mutating operation on the first argument.
 
 #### Usage Patterns
 
-- Called by code that needs to combine symbol data from multiple sources
-- Used during symbol extraction or update phases
+- called during symbol extraction to merge symbol information from multiple sources
+- used when multiple compile entries contribute data to the same symbol
 
 ### `clore::extract::namespace_prefix_from_qualified_name`
 
@@ -1336,12 +1244,12 @@ Definition: `extract/model.cppm:341`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-The function `clore::extract::namespace_prefix_from_qualified_name` accepts an integer representing a qualified name and returns an integer representing the namespace prefix extracted from that name. It is used to decompose qualified names into their namespace and local name components during symbol extraction.
+The function `clore::extract::namespace_prefix_from_qualified_name` returns the portion of a qualified name that corresponds to its leading namespace scope. Given a qualified name (typically represented by an integer identifier in the extraction data model), it yields the length or index representing the namespace prefix—i.e., everything up to and including the last scope‑resolution `operator` (`::`), or an indication that no namespace prefix exists. Callers can use this to decompose a fully qualified symbol name into its enclosing namespace context and the local name part, enabling operations like grouping symbols by namespace or constructing relative references. The function does not modify the input; it is a pure query that assumes the provided identifier refers to a valid qualified name within the current extraction state.
 
 #### Usage Patterns
 
-- Used to derive the namespace scope of a qualified name
-- Called during symbol extraction to separate namespace from name
+- Extract namespace prefix from a fully qualified symbol name before further processing
+- Utility used in symbol and namespace extraction logic
 
 ### `clore::extract::normalize_argument_path`
 
@@ -1351,11 +1259,13 @@ Definition: `extract/compiler.cppm:188`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-The function `clore::extract::normalize_argument_path` accepts two `std::string_view` parameters and returns an `int`. It is responsible for normalizing a file path that appears as a command-line or compilation argument, converting it into a canonical form that can be used reliably by other extraction routines. The first argument is the path to normalize; the second likely specifies a base directory or root context for resolving relative components. The return value indicates success or failure, with a non‑zero value representing an error condition.
+The `clore::extract::normalize_argument_path` function accepts two `std::string_view` arguments—typically a target path and a base or reference path—and returns an `int`. Its responsibility is to resolve and normalize the provided path argument into a canonical form, suitable for use in compiler argument processing. Contracts: the caller must supply valid path strings; the function returns a non‑negative value on success, or a negative error code if the path cannot be normalized or is invalid.
 
 #### Usage Patterns
 
-- Normalize compiler argument paths for consistent processing
+- normalizing file path arguments from compilation entries
+- combining a relative path with a directory to obtain an absolute path
+- producing a canonical path for argument paths that may contain symbolic links
 
 ### `clore::extract::normalize_entry_file`
 
@@ -1367,12 +1277,12 @@ Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md
 
 Declaration: [Declaration](functions/normalize-entry-file.md)
 
-The function `clore::extract::normalize_entry_file` accepts a `const CompileEntry &` and returns a `std::string` representing the resolved, canonical path to the source file associated with that entry. Callers rely on this function to obtain a normalized file identifier that serves as a stable, comparable key for caching and deduplication. The returned string is used by `clore::extract::build_compile_signature` and `clore::extract::ensure_cache_key_impl` to compute compile signatures and cache entries; when the `entry.normalized_file` field is empty or the compile signature has not yet been computed, this function is invoked to derive the normalized file path before proceeding with further processing. The contract guarantees a consistent, file‑system‑independent representation suitable for look‑up in the compilation database and for use as part of a cache key.
+`clore::extract::normalize_entry_file` accepts a `const CompileEntry &` and returns a `std::string` representing the normalized source file path for that entry. The function is responsible for producing a canonical, consistent form of the file path used by the caller to enable reliable caching, signature computation, and key derivation. Callers rely on this normalized path as a prerequisite for operations such as build signature calculation and cache entry construction. The contract guarantees that the returned string uniquely identifies the entry’s source file in a platform‑independent and directory‑resolved manner.
 
 #### Usage Patterns
 
-- Called by `build_compile_signature` to derive a unique signature for a compile entry.
-- Called by `ensure_cache_key_impl` to produce a normalized file path for cache key computation.
+- Used by `build_compile_signature` to normalize the entry file path before hashing
+- Used by `ensure_cache_key_impl` to produce a consistent file path representation
 
 ### `clore::extract::path_prefix_matches`
 
@@ -1382,12 +1292,12 @@ Definition: `extract/filter.cppm:33`
 
 Implementation: [`Module extract:filter`](../../../modules/extract/filter.md)
 
-`clore::extract::path_prefix_matches` takes two `int` arguments and returns a `bool`. It determines whether the path identified by the first argument is a path‑prefix of the path identified by the second argument. The exact interpretation of the integer arguments (e.g., path indices, handles, or integer‑encoded path components) depends on the caller’s context within the extraction pipeline. The function returns `true` if a prefix relationship holds, enabling the caller to filter or group paths based on directory ancestry. No side effects are expected, and the function does not modify any state visible to the caller.
+Checks whether a given path, identified by its first integer argument, begins with the prefix specified by its second integer argument. The function returns `true` if the path starts with the prefix, and `false` otherwise. The contract assumes both arguments are valid identifiers of previously resolved paths within the extraction context; no error is reported for invalid identifiers.
 
 #### Usage Patterns
 
-- Used to filter compilation entries by file path prefixes
-- Applied when checking if a source file belongs to a given directory pattern
+- used by path-filtering logic
+- called by `matches_filter` in the extract module
 
 ### `clore::extract::project_relative_path`
 
@@ -1397,12 +1307,12 @@ Definition: `extract/filter.cppm:64`
 
 Implementation: [`Module extract:filter`](../../../modules/extract/filter.md)
 
-The function `clore::extract::project_relative_path` accepts two parameters representing a project root path and a target path, both given as opaque identifiers (the `int` type). It computes and returns a relative path from the project root to the target path, also as an `int` identifier. The caller is responsible for providing valid path identifiers that correspond to actual filesystem locations. The returned identifier represents the resulting relative path, which may be used by other extraction functions in the `clore::extract` module.
+The function `clore::extract::project_relative_path` computes the relative path of a given source path with respect to a designated project root. Both inputs are integer identifiers representing paths, and the function returns an integer identifier for the resulting relative path. The first argument should identify the root directory of the project, and the second argument should identify a path that lies under that root; the caller is responsible for ensuring this relationship holds. The returned integer handle can be used with other path‑related functions in the `clore::extract` namespace.
 
 #### Usage Patterns
 
-- path validation before extraction
-- ensuring file is within project root
+- Used to derive a project-local path for source files during extraction.
+- Likely employed when normalizing file paths relative to a project root for indexing or analysis.
 
 ### `clore::extract::query_toolchain_cached`
 
@@ -1412,12 +1322,12 @@ Definition: `extract/compiler.cppm:233`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-The function `clore::extract::query_toolchain_cached` retrieves toolchain information for a given `CompileEntry`, using the provided `CompilationDatabase` as the source and cache store. It first ensures the compile entry has a proper cache key (via `clore::extract::ensure_cache_key`), then either returns the cached toolchain result or performs a fresh query and caches it. The integer return value indicates success or an error condition; callers can rely on the database’s `has_cached_toolchain` method to check availability before invoking.
+The function `clore::extract::query_toolchain_cached` accepts a reference to a `CompilationDatabase` and a `const CompileEntry` and returns an `int`. It is responsible for retrieving or resolving the toolchain configuration (e.g., compiler path, arguments, and related options) for the given compile entry, leveraging an internal cache maintained by the database. The caller should provide a `CompilationDatabase` that supports caching (see `CompilationDatabase::has_cached_toolchain`), as the function relies on the database to store and retrieve previously computed toolchain data. The returned `int` indicates success or an error condition. Internally, the function may call `clore::extract::ensure_cache_key` to establish a cache key for the entry before performing the query.
 
 #### Usage Patterns
 
-- Used to obtain sanitized tool arguments with memoization
-- Callers rely on caching to avoid redundant calls to `sanitize_tool_arguments`
+- Used when a caller wants sanitized tool arguments with automatic caching
+- Called internally by extraction routines to avoid redundant sanitization
 
 ### `clore::extract::rebuild_lookup_maps`
 
@@ -1427,14 +1337,12 @@ Definition: `extract/merge.cppm:428`
 
 Implementation: [`Module extract:merge`](../../../modules/extract/merge.md)
 
-The function `clore::extract::rebuild_lookup_maps` updates the internal lookup structures used for fast symbol resolution within the extraction model. It accepts a mutable reference to the underlying model state (represented as an `int`) and repopulates the name‑to‑symbol and location‑to‑symbol maps to reflect the current set of extracted symbols.
-
-Callers should invoke this function after any batch of symbol extraction or model modifications that could invalidate the existing lookup tables. The contract guarantees that subsequent queries via functions such as `clore::extract::lookup_symbol` or `clore::extract::find_symbol` will operate on a consistent, up‑to‑date view of the model.
+The function `clore::extract::rebuild_lookup_maps` accepts a reference to an `int` (representing a project model or similar data structure) and updates its internal lookup tables to reflect the current state of the extracted symbols and modules. After calling this function, name-based and identifier-based lookups (such as those performed by `lookup_symbol`, `find_module_by_name`, or `find_module_by_source`) will return results consistent with the most recent extraction or merging operations. The caller is responsible for ensuring that the referenced model has been fully populated with symbol and module data before invoking this function; no guaranteed behavior is provided for incomplete or partially modified models.
 
 #### Usage Patterns
 
-- Called after merging symbol info into a `ProjectModel`
-- Invoked to refresh lookup caches when symbol or module data changes
+- Called after initial population of the `ProjectModel` to synchronize lookup indices
+- May be invoked again after modifying symbols or modules to refresh cached maps
 
 ### `clore::extract::rebuild_model_indexes`
 
@@ -1444,13 +1352,13 @@ Definition: `extract/merge.cppm:219`
 
 Implementation: [`Module extract:merge`](../../../modules/extract/merge.md)
 
-The function `clore::extract::rebuild_model_indexes` is responsible for reconstructing the internal index structures of the project model. A caller invokes this function after performing modifications to the model that could invalidate its current indexing, ensuring that subsequent lookups and queries operate on a consistent state. The function takes a read‑only reference to an integer parameter (likely identifying the model or a change token) and a mutable reference to an integer (probably an output or state indicator), and returns `void`.
+The function `clore::extract::rebuild_model_indexes` accepts an opaque model identifier (a constant `int` reference) and a mutable output `int` reference. It reconstructs internal index structures for the given model, ensuring that subsequent lookup and extraction operations see a consistent, up‑to‑date state. After the call, the caller can rely on the indexes being valid for the identified model; the function does not return a value but signals completion through the side effect of the output parameter. The caller is responsible for providing a valid model identifier and not modifying the model concurrently during the rebuild.
 
 #### Usage Patterns
 
-- called after extraction or merging to refresh indexes
-- part of the model finalization pipeline
-- ensures consistency of file, namespace, and parent-child associations
+- called after merging symbol information to rebuild efficient lookup structures
+- used to prepare a `ProjectModel` for queries or display
+- invokes heavy parallelization to improve performance on large models
 
 ### `clore::extract::resolve_path_under_directory`
 
@@ -1460,12 +1368,13 @@ Definition: `extract/filter.cppm:79`
 
 Implementation: [`Module extract:filter`](../../../modules/extract/filter.md)
 
-The function `clore::extract::resolve_path_under_directory` accepts two identifiers (represented as `const int &`) and returns a resolved identifier (also `int`). The first argument identifies a directory, and the second argument identifies a path that is expected to be relative to that directory. The call resolves the path under the given directory, producing a canonical or absolute identifier for the resulting location. The caller is responsible for providing valid identifiers that refer to existing directory and path objects within the current extraction context. The returned identifier may be used for subsequent operations that require a fully resolved location.
+The function `clore::extract::resolve_path_under_directory` takes two integer handles: the first represents a target path, and the second represents a root directory. It resolves the target path strictly under the given directory, ensuring that the result is a normalized, directory-canonical path that does not escape the root. The return value is an integer handle referring to the resolved absolute path, or an error sentinel if the path cannot be resolved or is outside the directory. The caller must supply valid handles that correspond to previously registered path or directory objects; the function does not accept raw string inputs.
 
 #### Usage Patterns
 
-- Resolve compilation database entry file path
-- Normalize relative source paths
+- Resolves file paths from `compile_commands``.json` entries
+- Combines relative paths with the compilation directory
+- Used as a helper for normalizing entry file paths
 
 ### `clore::extract::resolve_source_snippet`
 
@@ -1475,13 +1384,14 @@ Definition: `extract/model.cppm:455`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-The function `clore::extract::resolve_source_snippet` populates the `source_snippet` member of a given `SymbolInfo` object by reading the referenced file from disk. It uses the offset and length fields already stored in the `SymbolInfo` to extract the exact text region. The function returns `true` if the snippet was successfully resolved (or was already cached), and `false` otherwise. The caller must supply a non-const `SymbolInfo` reference whose file-location metadata is valid.
+`clore::extract::resolve_source_snippet` populates the `source_snippet` member of the provided `SymbolInfo` object by reading the on-disk file at the recorded `source_snippet_offset` and `source_snippet_length` fields. It returns `true` if the snippet was successfully resolved or if it was already cached in the `SymbolInfo`.
+
+The caller must supply a valid `SymbolInfo` whose source location fields reference an existing file. After a successful call, the `source_snippet` is guaranteed to contain the extracted text. If the function returns `false`, the snippet was not resolved and the `source_snippet` remains unchanged; this typically indicates that the underlying file is missing or the recorded offset and length are invalid.
 
 #### Usage Patterns
 
-- Called to lazily load a symbol's source text after extraction
-- Invoked during symbol display or search result rendering
-- Used to populate the snippet view in documentation or code navigation
+- Called to populate the `source_snippet` field of a `SymbolInfo` after extraction
+- Used in symbol resolution pipelines to lazily load source text from disk
 
 ### `clore::extract::sanitize_driver_arguments`
 
@@ -1491,12 +1401,12 @@ Definition: `extract/compiler.cppm:207`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-The function `clore::extract::sanitize_driver_arguments` processes a given `CompileEntry` to cleanse and normalize the driver‑level command‑line arguments it contains. Its caller‑facing responsibility is to accept a compile entry and produce a revised argument list that is safe and consistent for subsequent extraction steps. The precise interpretation of the returned `int` — whether it signals success, a count of sanitized arguments, or an error code — is part of the function’s contract; callers rely on this value to determine whether the sanitization succeeded and to proceed accordingly.
+The function `clore::extract::sanitize_driver_arguments` performs sanitization of driver-level arguments stored within a given `CompileEntry`. It is a caller-facing interface that modifies or validates the argument list to ensure it conforms to expected conventions before downstream processing. The contract specifies that the caller provides a valid `CompileEntry` reference; the function returns an `int` indicating success or failure.
 
 #### Usage Patterns
 
-- used to remove the source file from compiler arguments
-- called before building compile signature or invoking compiler
+- Called to strip the source file argument from a driver argument list
+- Used to sanitize compile command arguments before further analysis
 
 ### `clore::extract::sanitize_tool_arguments`
 
@@ -1506,12 +1416,13 @@ Definition: `extract/compiler.cppm:221`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-`clore::extract::sanitize_tool_arguments` accepts a `const CompileEntry &` and returns an `int`. Its responsibility is to validate and normalize the compiler tool arguments extracted from the given compile entry, ensuring they conform to a canonical form required by later extraction stages. The function is part of the toolchain argument processing pipeline and is called before operations such as creating a compiler instance or building a compile signature. A non‑zero return value signals a failure to sanitize, typically due to invalid, missing, or malformed arguments in the entry.
+The function `clore::extract::sanitize_tool_arguments` accepts a `CompileEntry` reference and returns an `int`. Its caller‑facing responsibility is to transform the tool arguments stored in the entry into a canonical, reproducible form. By removing or normalizing environment‑sensitive or non‑deterministic parts (such as temporary file paths, machine‑specific flags, or absolute paths), the function ensures that the resulting arguments can be reliably compared, cached, or used as part of a compilation signature. The returned integer serves as a status indicator—typically a non‑zero value signals success or a count of modifications, while zero may indicate failure or no change needed. This sanitization is a prerequisite for downstream operations like `build_compile_signature` or `ensure_cache_key`, which require a stable representation of the compilation command.
 
 #### Usage Patterns
 
-- Used when normalizing compile arguments
-- Called during extraction pipeline
+- normalize compile arguments before toolchain query
+- strip compiler path and sanitize driver flags
+- prepare argument list for further extraction steps
 
 ### `clore::extract::scan_file`
 
@@ -1521,14 +1432,13 @@ Definition: `extract/scan.cppm:238`
 
 Implementation: [`Module extract:scan`](../../../modules/extract/scan.md)
 
-The function `clore::extract::scan_file` accepts an integral identifier (likely a file descriptor or handle) and returns a `std::expected<ScanResult, ScanError>`. It is the primary entry point for scanning a single file within the extraction pipeline: on success the caller receives a `ScanResult` containing the extracted information from that file; on failure a `ScanError` describing the problem is returned. The caller must provide a valid, open file identifier and is responsible for checking the returned `std::expected` before using the result.
+The function `clore::extract::scan_file` accepts a file identifier (as `const int &`) and returns a `std::expected<ScanResult, ScanError>`. It is the caller’s responsibility to supply a valid identifier representing a source file to be scanned. On success, the result contains the extracted information for that file; on failure, an error describing the cause is returned.
 
 #### Usage Patterns
 
-- called for each source file during project extraction
-- used in conjunction with `extract_project_async` and dependency graph building
-- typically invoked after compiling a compilation database entry
-- may be called from worker threads in a parallel extraction pipeline
+- Called to scan a single compile entry during project extraction
+- Used after `normalize_entry_file` to process source files
+- Part of the extraction pipeline that populates `ScanResult` with module and symbol information
 
 ### `clore::extract::scan_module_decl`
 
@@ -1540,14 +1450,12 @@ Implementation: [`Module extract:scan`](../../../modules/extract/scan.md)
 
 Declaration: [Declaration](functions/scan-module-decl.md)
 
-The caller provides a source text (as `std::string_view`) and a mutable reference to a `ScanResult` object. The function performs a fast scan of the source to extract the module declaration, using Clang's dependency directives scanner. It populates the `module_name`, `is_interface_unit`, and `module_imports` fields of the `ScanResult` without running the full preprocessor. This is a lightweight alternative to a full parse and is intended to be used during the initial scanning phase.
-
-The caller must ensure the `std::string_view` remains valid for the duration of the call, and the `ScanResult` is in a default‑initialized state (or at least that its relevant fields are overwritten). After the call, the caller can inspect the populated fields to determine module‑related properties of the source. The function does not throw exceptions; any failure to extract the declaration is reflected by the state of the `ScanResult` after the call, typically as an empty or invalid `module_name`.
+The function `clore::extract::scan_module_decl` performs a fast scan of a C++ module declaration using Clang’s dependency directives scanner. It avoids running the full preprocessor and instead directly populates the `module_name`, `is_interface_unit`, and `module_imports` fields of a provided `ScanResult` object. The caller supplies a `std::string_view` containing the source text of the translation unit and a mutable reference to a `ScanResult` that will receive the extracted module information. The function returns `void` and relies on the caller to ensure the source text is valid and the `ScanResult` is properly initialized.
 
 #### Usage Patterns
 
-- called by `clore::extract::scan_file` to extract module information from source content
-- used as a fast alternative to full preprocessing for module detection
+- called by `scan_file` to fill `ScanResult` fields without full preprocessing
+- used as a fast module detection step before heavy parsing
 
 ### `clore::extract::split_top_level_qualified_name`
 
@@ -1557,13 +1465,13 @@ Definition: `extract/model.cppm:265`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-The function `clore::extract::split_top_level_qualified_name` decomposes a qualified name (for example, a C++ nested-name-specifier) into its outermost name component and the remaining nested portion. It is the caller’s responsibility to provide a valid representation of a qualified name; the function returns a structure or value that encodes the split result, enabling efficient access to the top-level segment without re-parsing the entire string. The split operation may be cached internally, but the interface guarantees a deterministic and reusable decomposition for a given input.
+The function `clore::extract::split_top_level_qualified_name` accepts a qualified name (likely a string or identifier) and splits it into its top‑level component and the remainder of the qualified name. It returns a result that allows callers to isolate the outermost name (e.g., a namespace or class) from any nested parts. This operation is used internally when processing or decomposing fully qualified identifiers, and it may cache results to avoid redundant splitting.
 
 #### Usage Patterns
 
-- parse qualified names for scope decomposition
-- used by other extract functions needing top-level name parts
-- cached to optimize repeated calls with the same qualified name
+- called during symbol name resolution to obtain top-level name components
+- used internally to cache repeated splitting of the same qualified name
+- employed in preprocessing steps for module or symbol identification
 
 ### `clore::extract::strip_compiler_path`
 
@@ -1573,11 +1481,13 @@ Definition: `extract/compiler.cppm:181`
 
 Implementation: [`Module extract:compiler`](../../../modules/extract/compiler.md)
 
-`clore::extract::strip_compiler_path` accepts a `const int &` representing a compiler‑associated identifier (such as a path index or handle) and returns an `int` that is the result of removing compiler‑specific components. The caller is responsible for ensuring that the input value is meaningful in the extraction context; the function does not modify the original value. The returned integer may be used as a canonical form for further processing, such as comparing or mapping paths without compiler‑embedded suffixes.
+The function `clore::extract::strip_compiler_path` accepts a constant reference to an `int` and returns an `int`. It is responsible for removing the compiler path component from the supplied value, which typically represents a resource or path identifier. The caller can expect the returned integer to correspond to the same underlying entity but with the compiler path portion stripped away. The exact interpretation of the input and output values is determined by the broader extraction pipeline, but the contract guarantees that the compiler path is no longer present in the result.
 
 #### Usage Patterns
 
-- used to obtain compiler flags without the program name
+- Extracting compile flags after discarding the compiler path
+- Used in preprocessing compile entries like `sanitize_driver_arguments`
+- Building compile signatures without the executable name
 
 ### `clore::extract::symbol_kind_name`
 
@@ -1587,12 +1497,13 @@ Definition: `extract/model.cppm:244`
 
 Implementation: [`Module extract:model`](../../../modules/extract/model.md)
 
-The function `clore::extract::symbol_kind_name` provides a caller-facing mechanism to obtain an integer representation corresponding to a given `SymbolKind`. The returned `int` serves as a stable, domain‑specific identifier for the symbol kind’s name, enabling callers to distinguish between different symbol categories without relying on the original enumeration values. The contract requires that the supplied `SymbolKind` be a valid member of its enumeration; the resulting integer is guaranteed to be non‑negative and unique within the set of known symbol kinds for the current extraction context.
+This function returns an integer that represents the textual name of a given `SymbolKind`. It provides a compact, deterministic mapping from the `SymbolKind` enumeration to an identifier suitable for use as a lookup key or internal label. The caller must supply a valid `SymbolKind` value; the returned `int` is guaranteed to be unique for each distinct kind and does not change over the lifetime of the process. The mapping is meant for efficient storage or comparison rather than human-readable output.
 
 #### Usage Patterns
 
-- Used for logging or display of symbol kinds
-- Obtain a string representation of a `SymbolKind`
+- converting symbol kind to display name
+- serialization of symbol kind
+- debug output
 
 ### `clore::extract::topological_order`
 
@@ -1602,11 +1513,12 @@ Definition: `extract/scan.cppm:495`
 
 Implementation: [`Module extract:scan`](../../../modules/extract/scan.md)
 
-The function `clore::extract::topological_order` accepts a `const DependencyGraph &` and returns an `int`. It computes a topological ordering of the graph’s nodes, providing the caller with a sequence that respects the partial order defined by dependencies. The returned integer indicates the outcome of the computation—commonly representing success or an error condition, or the count of nodes successfully ordered. The caller must supply an immutable graph reference; the function does not modify the graph.
+The function `clore::extract::topological_order` computes a topological ordering of the nodes in the provided `DependencyGraph`. It is the caller's responsibility to supply a fully constructed dependency graph; no modifications are made to the input. The returned `int` indicates the success or failure of the ordering operation—a non‑zero value signals that the graph contains a cycle or that ordering could not be produced.
 
 #### Usage Patterns
 
-- Ordering files for sequential processing according to include dependencies.
+- used to obtain a dependency-resolved sequence of files for compilation or analysis
+- topological sort with cycle detection in a build system context
 
 ## Related Pages
 

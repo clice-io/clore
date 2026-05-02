@@ -1,6 +1,6 @@
 ---
 title: 'clore::support::striputf8bom'
-description: '函数 clore::support::strip_utf8_bom 通过一次简单的顺序判断移除 UTF-8 字节顺序标记（BOM）。它首先检查输入 text 的长度是否足够容纳 BOM 的三个字节，然后逐字节与常量 kUtf8Bom 比较。若完全匹配，则返回从 BOM 之后开始的子视图；否则直接返回原视图。整个过程不涉及额外内存分配或复杂分支，依赖仅局限于对该匿名命名空间常量的引用。'
+description: '函数 clore::support::strip_utf8_bom 在接收到一个 std::string_view 后，首先判断其长度是否不小于 UTF-8 BOM 字节序列（即常量 kUtf8Bom，对应 0xEF, 0xBB, 0xBF）的长度。若满足条件，则依次将输入的前三个字节通过 static_cast<unsigned char> 转换为无符号字符，并与 kUtf8Bom 中的对应字节进行相等性比较。仅在三个字节全部匹配时，才调用 text.substr(...) 跳过前三个字节并返回剩余部分的视图；否则直接返回原始 text 视图。该函数不涉及外部依赖，仅依赖同一匿名命名空间内定义的 kUtf8Bom 常量。'
 layout: doc
 template: doc
 ---
@@ -29,7 +29,7 @@ auto strip_utf8_bom(std::string_view text) -> std::string_view {
 }
 ```
 
-函数 `clore::support::strip_utf8_bom` 通过一次简单的顺序判断移除 UTF-8 字节顺序标记（BOM）。它首先检查输入 `text` 的长度是否足够容纳 BOM 的三个字节，然后逐字节与常量 `kUtf8Bom` 比较。若完全匹配，则返回从 BOM 之后开始的子视图；否则直接返回原视图。整个过程不涉及额外内存分配或复杂分支，依赖仅局限于对该匿名命名空间常量的引用。
+函数 `clore::support::strip_utf8_bom` 在接收到一个 `std::string_view` 后，首先判断其长度是否不小于 UTF-8 BOM 字节序列（即常量 `kUtf8Bom`，对应 `0xEF, 0xBB, 0xBF`）的长度。若满足条件，则依次将输入的前三个字节通过 `static_cast<unsigned char>` 转换为无符号字符，并与 `kUtf8Bom` 中的对应字节进行相等性比较。仅在三个字节全部匹配时，才调用 `text.substr(...)` 跳过前三个字节并返回剩余部分的视图；否则直接返回原始 `text` 视图。该函数不涉及外部依赖，仅依赖同一匿名命名空间内定义的 `kUtf8Bom` 常量。
 
 ## Side Effects
 
@@ -37,11 +37,12 @@ No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- 参数 `text`
+- the parameter `text` of type `std::string_view`
+- the internal constant `kUtf8Bom` (presumably a byte array)
 
 ## Usage Patterns
 
-- 用于从文件读取的 UTF-8 文本中剥离 BOM 前缀
+- used by `clore::support::read_utf8_text_file` to remove a BOM before further text processing
 
 ## Called By
 
