@@ -83,6 +83,24 @@ auto validate(const TaskConfig& config) -> std::expected<void, ValidationError> 
     if(auto r = validate_nonzero(config.llm.retry_limit, "llm.retry_limit"); !r)
         return r;
 
+    // Validate symbol filter config
+    if(config.filter.symbols.has_value()) {
+        const auto& sym_filter = *config.filter.symbols;
+        for(const auto& prefix: sym_filter.exclude_name_prefixes) {
+            if(prefix.empty()) {
+                return std::unexpected(ValidationError{
+                    .message = "filter.symbols.exclude_name_prefixes must not contain empty strings"});
+            }
+        }
+        for(const auto& segment: sym_filter.exclude_namespace_segments) {
+            if(segment.empty()) {
+                return std::unexpected(ValidationError{
+                    .message =
+                        "filter.symbols.exclude_namespace_segments must not contain empty strings"});
+            }
+        }
+    }
+
     return {};
 }
 

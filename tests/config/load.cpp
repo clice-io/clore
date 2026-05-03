@@ -174,4 +174,43 @@ min_chain_symbols = 2
     EXPECT_FALSE(result.has_value());
 }
 
+TEST_CASE(load_filter_symbols_section) {
+    auto toml = std::string(kMinimalValidConfig) + R"(
+[filter]
+include = []
+exclude = []
+
+[filter.symbols]
+hide_private = true
+hide_protected = false
+exclude_name_prefixes = ["_impl_", "_detail_"]
+exclude_namespace_segments = ["detail", "internal"]
+)";
+    auto result = load_config_from_string(toml);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result->filter.symbols.has_value());
+    auto& sym = *result->filter.symbols;
+    EXPECT_TRUE(sym.hide_private);
+    EXPECT_FALSE(sym.hide_protected);
+    ASSERT_EQ(sym.exclude_name_prefixes.size(), 2u);
+    EXPECT_EQ(sym.exclude_name_prefixes[0], "_impl_");
+    EXPECT_EQ(sym.exclude_name_prefixes[1], "_detail_");
+    ASSERT_EQ(sym.exclude_namespace_segments.size(), 2u);
+    EXPECT_EQ(sym.exclude_namespace_segments[0], "detail");
+    EXPECT_EQ(sym.exclude_namespace_segments[1], "internal");
+}
+
+TEST_CASE(validate_rejects_empty_prefix) {
+    auto toml = std::string(kMinimalValidConfig) + R"(
+[filter]
+include = []
+exclude = []
+
+[filter.symbols]
+exclude_name_prefixes = [""]
+)";
+    auto result = load_config_from_string(toml);
+    EXPECT_FALSE(result.has_value());
+}
+
 };  // TEST_SUITE(config_load)

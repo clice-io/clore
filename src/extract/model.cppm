@@ -2,6 +2,7 @@ export module extract:model;
 
 import std;
 import support;
+import config;
 
 export namespace clore::extract {
 
@@ -198,6 +199,11 @@ auto find_module_by_source(const ProjectModel& model, std::string_view source_fi
 /// source_snippet_offset / source_snippet_length fields.  Returns true
 /// if the snippet was successfully resolved (or already cached).
 auto resolve_source_snippet(SymbolInfo& sym) -> bool;
+
+/// Returns true if the symbol should be included in documentation output
+/// according to the given symbol filter configuration.
+auto matches_symbol_filter(const SymbolInfo& sym,
+                           const config::SymbolFilterConfig& rule) -> bool;
 
 }  // namespace clore::extract
 
@@ -508,6 +514,32 @@ auto resolve_source_snippet(SymbolInfo& sym) -> bool {
     }
 
     sym.source_snippet = std::move(normalized);
+    return true;
+}
+
+auto matches_symbol_filter(const SymbolInfo& sym,
+                           const config::SymbolFilterConfig& rule) -> bool {
+    if(rule.hide_private && sym.access == "private") {
+        return false;
+    }
+    if(rule.hide_protected && sym.access == "protected") {
+        return false;
+    }
+    for(const auto& prefix: rule.exclude_name_prefixes) {
+        if(!prefix.empty() && sym.name.starts_with(prefix)) {
+            return false;
+        }
+    }
+    if(!rule.exclude_namespace_segments.empty()) {
+        auto parts = split_top_level_qualified_name(sym.enclosing_namespace);
+        for(const auto& part: parts) {
+            for(const auto& segment: rule.exclude_namespace_segments) {
+                if(part == segment) {
+                    return false;
+                }
+            }
+        }
+    }
     return true;
 }
 

@@ -466,7 +466,9 @@ auto update_page_summary_cache(PageSummaryCache& summaries,
     }
 }
 
-auto collect_page_symbols(const PagePlan& plan, const extract::ProjectModel& model)
+auto collect_page_symbols(const PagePlan& plan,
+                          const extract::ProjectModel& model,
+                          const config::FilterRule& filter_rule)
     -> std::vector<const extract::SymbolInfo*> {
     std::vector<const extract::SymbolInfo*> symbols;
     std::unordered_set<extract::SymbolID> seen;
@@ -481,6 +483,10 @@ auto collect_page_symbols(const PagePlan& plan, const extract::ProjectModel& mod
         }
         if(!is_type_kind(sym->kind) && !is_function_kind(sym->kind) &&
            !is_variable_kind(sym->kind)) {
+            return;
+        }
+        if(filter_rule.symbols.has_value() &&
+           !extract::matches_symbol_filter(*sym, *filter_rule.symbols)) {
             return;
         }
         symbols.push_back(sym);
@@ -535,7 +541,8 @@ auto collect_page_symbols(const PagePlan& plan, const extract::ProjectModel& mod
     return symbols;
 }
 
-auto collect_documentable_symbols(const extract::ProjectModel& model)
+auto collect_documentable_symbols(const extract::ProjectModel& model,
+                                  const config::FilterRule& filter_rule)
     -> std::vector<const extract::SymbolInfo*> {
     std::unordered_map<std::string,
                        std::size_t,
@@ -555,6 +562,10 @@ auto collect_documentable_symbols(const extract::ProjectModel& model)
             continue;
         }
         if(symbol_prompt_kinds_for_symbol(symbol).empty()) {
+            continue;
+        }
+        if(filter_rule.symbols.has_value() &&
+           !extract::matches_symbol_filter(symbol, *filter_rule.symbols)) {
             continue;
         }
         symbols.push_back(&symbol);
@@ -629,7 +640,7 @@ auto prepare_generation_context(const config::TaskConfig& config,
     context.prompt_requests_by_plan.reserve(context.plan_set.plans.size());
     context.symbol_targets_by_plan.reserve(context.plan_set.plans.size());
 
-    for(const auto* sym: collect_documentable_symbols(model)) {
+    for(const auto* sym: collect_documentable_symbols(model, config.filter)) {
         auto prompt_kinds = symbol_prompt_kinds_for_symbol(*sym);
         if(prompt_kinds.empty()) {
             continue;
@@ -647,7 +658,7 @@ auto prepare_generation_context(const config::TaskConfig& config,
             deduplicate_prompt_requests(context.plan_set.plans[i]));
 
         std::vector<std::string> symbol_targets;
-        for(const auto* sym: collect_page_symbols(context.plan_set.plans[i], model)) {
+        for(const auto* sym: collect_page_symbols(context.plan_set.plans[i], model, config.filter)) {
             symbol_targets.push_back(make_symbol_target_key(*sym));
         }
         context.symbol_targets_by_plan.push_back(std::move(symbol_targets));

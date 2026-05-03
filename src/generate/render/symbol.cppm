@@ -21,6 +21,7 @@ struct PageDocLayout {
     std::vector<SymbolDocPlan> variable_docs;
     std::vector<SymbolDocPlan> function_docs;
     std::unordered_map<std::string, std::string> index_paths;
+    std::unordered_set<extract::SymbolID> hidden_symbols;
 };
 
 template <typename Visitor>
@@ -34,8 +35,9 @@ auto normalize_frontmatter_title(std::string_view page_title) -> std::string;
 
 auto page_supports_symbol_subpages(const PagePlan& plan) -> bool;
 
-auto build_page_doc_layout(const PagePlan& plan, const extract::ProjectModel& model)
-    -> PageDocLayout;
+auto build_page_doc_layout(const PagePlan& plan,
+                           const extract::ProjectModel& model,
+                           const config::FilterRule& filter_rule) -> PageDocLayout;
 
 auto find_doc_index_path(const PageDocLayout& layout, std::string_view qualified_name)
     -> const std::string*;
@@ -839,8 +841,10 @@ auto append_type_member_sections(std::vector<MarkdownNode>& nodes,
                           "Member Types",
                           collect_member_symbols(model,
                                                  sym,
-                                                 [](const extract::SymbolInfo& child) {
-                                                     return is_type_kind(child.kind);
+                                                 [&layout](const extract::SymbolInfo& child) {
+                                                     return is_type_kind(child.kind) &&
+                                                            !layout.hidden_symbols.contains(
+                                                                child.id);
                                                  }),
                           config,
                           model,
@@ -854,8 +858,10 @@ auto append_type_member_sections(std::vector<MarkdownNode>& nodes,
                           "Member Variables",
                           collect_member_symbols(model,
                                                  sym,
-                                                 [](const extract::SymbolInfo& child) {
-                                                     return is_variable_kind(child.kind);
+                                                 [&layout](const extract::SymbolInfo& child) {
+                                                     return is_variable_kind(child.kind) &&
+                                                            !layout.hidden_symbols.contains(
+                                                                child.id);
                                                  }),
                           config,
                           model,
@@ -869,8 +875,10 @@ auto append_type_member_sections(std::vector<MarkdownNode>& nodes,
                           "Member Functions",
                           collect_member_symbols(model,
                                                  sym,
-                                                 [](const extract::SymbolInfo& child) {
-                                                     return is_function_kind(child.kind);
+                                                 [&layout](const extract::SymbolInfo& child) {
+                                                     return is_function_kind(child.kind) &&
+                                                            !layout.hidden_symbols.contains(
+                                                                child.id);
                                                  }),
                           config,
                           model,
@@ -894,8 +902,9 @@ auto page_supports_symbol_subpages(const PagePlan& plan) -> bool {
     return plan.page_type == PageType::Namespace || plan.page_type == PageType::Module;
 }
 
-auto build_page_doc_layout(const PagePlan& plan, const extract::ProjectModel& model)
-    -> PageDocLayout {
+auto build_page_doc_layout(const PagePlan& plan,
+                           const extract::ProjectModel& model,
+                           const config::FilterRule& filter_rule) -> PageDocLayout {
     PageDocLayout layout;
     if(!page_supports_symbol_subpages(plan)) {
         return layout;
@@ -917,6 +926,16 @@ auto build_page_doc_layout(const PagePlan& plan, const extract::ProjectModel& mo
         });
     }();
 
+    // Compute hidden symbols from symbol filter config
+    if(filter_rule.symbols.has_value()) {
+        const auto& sym_rule = *filter_rule.symbols;
+        for(const auto* sym: page_symbols) {
+            if(sym != nullptr && !extract::matches_symbol_filter(*sym, sym_rule)) {
+                layout.hidden_symbols.insert(sym->id);
+            }
+        }
+    }
+
     std::vector<const extract::SymbolInfo*> type_symbols;
     std::vector<const extract::SymbolInfo*> variable_symbols;
     std::vector<const extract::SymbolInfo*> function_symbols;
@@ -926,6 +945,9 @@ auto build_page_doc_layout(const PagePlan& plan, const extract::ProjectModel& mo
 
     for(const auto* sym: page_symbols) {
         if(sym == nullptr) {
+            continue;
+        }
+        if(layout.hidden_symbols.contains(sym->id)) {
             continue;
         }
         if(is_type_kind(sym->kind)) {

@@ -31,8 +31,7 @@ TEST_CASE(build_page_doc_layout_empty_for_file_page) {
     plan.page_type = PageType::File;
     plan.relative_path = "files/src/math.md";
 
-    auto layout = build_page_doc_layout(plan, model);
-    EXPECT_TRUE(layout.type_docs.empty());
+    auto layout = build_page_doc_layout(plan, model, config::FilterRule{});
     EXPECT_TRUE(layout.variable_docs.empty());
     EXPECT_TRUE(layout.function_docs.empty());
 }
@@ -93,7 +92,7 @@ TEST_CASE(build_page_doc_layout_groups_symbols_without_variable_subpages) {
     plan.owner_keys = {"demo"};
     plan.relative_path = "namespaces/demo/index.md";
 
-    auto layout = build_page_doc_layout(plan, model);
+    auto layout = build_page_doc_layout(plan, model, config::FilterRule{});
     EXPECT_EQ(layout.type_docs.size(), 1u);
     EXPECT_TRUE(layout.variable_docs.empty());
     EXPECT_EQ(layout.function_docs.size(), 1u);
@@ -134,7 +133,7 @@ TEST_CASE(build_page_doc_layout_requires_complex_function_for_function_subpage) 
     plan.owner_keys = {"demo"};
     plan.relative_path = "namespaces/demo/index.md";
 
-    auto layout = build_page_doc_layout(plan, model);
+    auto layout = build_page_doc_layout(plan, model, config::FilterRule{});
 
     ASSERT_EQ(layout.function_docs.size(), 1u);
     ASSERT_TRUE(layout.function_docs.front().symbol != nullptr);

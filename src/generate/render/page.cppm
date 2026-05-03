@@ -27,6 +27,9 @@ auto append_standard_symbol_sections(std::vector<MarkdownNode>& root_children,
         [&](std::string heading, SemanticKind entity_kind, auto&& predicate) -> void {
         auto section = make_section(SemanticKind::Section, {}, std::move(heading), 2);
         for(const auto* sym: collect_symbols(predicate)) {
+            if(layout.hidden_symbols.contains(sym->id)) {
+                continue;
+            }
             auto entity =
                 make_section(entity_kind, sym->qualified_name, sym->qualified_name, 3, true, true);
             auto locations = build_symbol_source_locations(*sym, config, links, plan.relative_path);
@@ -347,7 +350,8 @@ auto build_file_page_root(const PagePlan& plan,
                           const extract::ProjectModel& model,
                           const std::unordered_map<std::string, std::string>&,
                           const SymbolAnalysisStore& analyses,
-                          const LinkResolver& links) -> SemanticSectionPtr {
+                          const LinkResolver& links,
+                          const PageDocLayout& layout) -> SemanticSectionPtr {
     auto root = make_section(SemanticKind::File, plan.owner_keys.front(), plan.title, 1, false);
 
     if(auto file_it = model.files.find(plan.owner_keys.front()); file_it != model.files.end()) {
@@ -402,7 +406,7 @@ auto build_file_page_root(const PagePlan& plan,
         analyses,
         plan,
         links,
-        PageDocLayout{},
+        layout,
         [&](auto&& predicate) {
             return collect_implementation_symbols(plan,
                                                   model,
@@ -525,6 +529,11 @@ auto build_index_page_root(const PagePlan& plan,
                 symbols.push_back(&sym);
             }
         }
+        if(config.filter.symbols.has_value()) {
+            std::erase_if(symbols, [&](const extract::SymbolInfo* s) {
+                return !extract::matches_symbol_filter(*s, *config.filter.symbols);
+            });
+        }
         std::sort(symbols.begin(),
                   symbols.end(),
                   [](const extract::SymbolInfo* lhs, const extract::SymbolInfo* rhs) {
@@ -557,7 +566,7 @@ auto build_page_root(const PagePlan& plan,
         case PageType::Module:
             return build_module_page_root(plan, config, model, outputs, analyses, links, layout);
         case PageType::File:
-            return build_file_page_root(plan, config, model, outputs, analyses, links);
+            return build_file_page_root(plan, config, model, outputs, analyses, links, layout);
     }
     return make_section(SemanticKind::Section, {}, plan.title, 1, false);
 }
@@ -614,7 +623,7 @@ auto render_page_bundle(const PagePlan& plan,
                         const SymbolAnalysisStore& analyses,
                         const LinkResolver& links)
     -> std::expected<std::vector<GeneratedPage>, RenderError> {
-    auto layout = build_page_doc_layout(plan, model);
+    auto layout = build_page_doc_layout(plan, model, config.filter);
 
     MarkdownDocument document;
     document.children.push_back(MarkdownNode{

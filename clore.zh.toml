@@ -2,6 +2,12 @@
 include = ["src/"]
 exclude = []
 
+[filter.symbols]
+hide_private = true
+hide_protected = false
+exclude_name_prefixes = ["_impl_", "_detail_"]
+exclude_namespace_segments = ["detail", "internal"]
+
 [llm]
 system_prompt = "您是一名 C++ 文档编写员。请为 C++ 代码元素生成简洁准确的文档。重点关注代码元素的用途、设计意图及其在代码库中的作用。输出的文档必须为 Markdown 格式，且适合嵌入到文档页面中。使用中文生成。"
 retry_limit = 20

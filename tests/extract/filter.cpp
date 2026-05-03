@@ -109,4 +109,79 @@ TEST_CASE(filter_root_path_falls_back_to_project) {
     EXPECT_EQ(filter_root_path(config), fs::path("/proj").lexically_normal());
 }
 
+TEST_CASE(symbol_filter_allows_public_by_default) {
+    SymbolInfo sym;
+    sym.id = SymbolID{.hash = 1};
+    sym.name = "Widget";
+    sym.access = "public";
+    sym.enclosing_namespace = "demo";
+
+    SymbolFilterConfig rule;
+    EXPECT_TRUE(matches_symbol_filter(sym, rule));
+}
+
+TEST_CASE(symbol_filter_hide_private) {
+    SymbolInfo sym;
+    sym.id = SymbolID{.hash = 2};
+    sym.name = "impl_";
+    sym.access = "private";
+    sym.enclosing_namespace = "demo";
+
+    SymbolFilterConfig rule;
+    rule.hide_private = true;
+    EXPECT_FALSE(matches_symbol_filter(sym, rule));
+
+    // Public symbols not affected
+    sym.access = "public";
+    EXPECT_TRUE(matches_symbol_filter(sym, rule));
+}
+
+TEST_CASE(symbol_filter_hide_protected) {
+    SymbolInfo sym;
+    sym.id = SymbolID{.hash = 3};
+    sym.name = "helper";
+    sym.access = "protected";
+    sym.enclosing_namespace = "base";
+
+    SymbolFilterConfig rule;
+    rule.hide_protected = true;
+    EXPECT_FALSE(matches_symbol_filter(sym, rule));
+
+    // Private not affected by hide_protected alone
+    sym.access = "private";
+    EXPECT_TRUE(matches_symbol_filter(sym, rule));
+}
+
+TEST_CASE(symbol_filter_exclude_name_prefix) {
+    SymbolInfo sym;
+    sym.id = SymbolID{.hash = 4};
+    sym.name = "_impl_helper";
+    sym.access = "public";
+    sym.enclosing_namespace = "detail";
+
+    SymbolFilterConfig rule;
+    rule.exclude_name_prefixes = {"_impl_"};
+    EXPECT_FALSE(matches_symbol_filter(sym, rule));
+
+    // Non-matching prefix not filtered
+    sym.name = "Widget";
+    EXPECT_TRUE(matches_symbol_filter(sym, rule));
+}
+
+TEST_CASE(symbol_filter_exclude_namespace_segment) {
+    SymbolInfo sym;
+    sym.id = SymbolID{.hash = 5};
+    sym.name = "Impl";
+    sym.access = "public";
+    sym.enclosing_namespace = "clore::detail";
+
+    SymbolFilterConfig rule;
+    rule.exclude_namespace_segments = {"detail"};
+    EXPECT_FALSE(matches_symbol_filter(sym, rule));
+
+    // Different namespace not filtered
+    sym.enclosing_namespace = "clore::extract";
+    EXPECT_TRUE(matches_symbol_filter(sym, rule));
+}
+
 };  // TEST_SUITE(extract_filter)
