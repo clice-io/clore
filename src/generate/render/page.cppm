@@ -83,11 +83,14 @@ auto append_module_item(BulletList& list,
 
 auto append_file_item(BulletList& list,
                       std::string_view current_page_path,
+                      const config::TaskConfig& config,
                       const LinkResolver& links,
                       std::string label,
                       const std::string& file_path) -> void {
     ListItem item;
-    if(auto* target_path = links.resolve(file_path)) {
+    if(auto external_url = make_external_source_link(config, file_path); external_url.has_value()) {
+        item.fragments.push_back(make_link(std::move(label), std::move(*external_url), false));
+    } else if(auto* target_path = links.resolve(file_path)) {
         item.fragments.push_back(
             make_link(std::move(label),
                       make_relative_link_target(current_page_path, *target_path),
@@ -360,6 +363,7 @@ auto build_file_page_root(const PagePlan& plan,
             for(const auto& include: file_it->second.includes) {
                 append_file_item(list,
                                  plan.relative_path,
+                                 config,
                                  links,
                                  make_source_relative(include, config.project_root),
                                  include);
@@ -385,6 +389,7 @@ auto build_file_page_root(const PagePlan& plan,
             for(const auto& file_path: file_paths) {
                 append_file_item(list,
                                  plan.relative_path,
+                                 config,
                                  links,
                                  make_source_relative(file_path, config.project_root),
                                  file_path);
@@ -484,18 +489,30 @@ auto build_index_page_root(const PagePlan& plan,
     root->children.push_back(MarkdownNode{build_list_section("Files", 2, [&]() {
         BulletList list;
         std::vector<std::pair<std::string, std::string>> files;
+        bool has_external_source_base =
+            config.project.source_base.has_value() &&
+            !trim_ascii(*config.project.source_base).empty();
+
         for(const auto& [path, _]: model.files) {
-            if(links.resolve(path) != nullptr) {
+            if(has_external_source_base || links.resolve(path) != nullptr) {
                 files.emplace_back(make_source_relative(path, config.project_root), path);
             }
         }
         std::sort(files.begin(), files.end());
         for(const auto& [label, key]: files) {
             ListItem item;
-            item.fragments.push_back(
-                make_link(label,
-                          make_relative_link_target(plan.relative_path, *links.resolve(key)),
-                          true));
+            if(auto external_url = make_external_source_link(config, key);
+               external_url.has_value()) {
+                item.fragments.push_back(
+                    make_link(label, std::move(*external_url), false));
+            } else if(auto* target_path = links.resolve(key)) {
+                item.fragments.push_back(
+                    make_link(label,
+                              make_relative_link_target(plan.relative_path, *target_path),
+                              true));
+            } else {
+                item.fragments.push_back(make_code(label));
+            }
             list.items.push_back(std::move(item));
         }
         return list;

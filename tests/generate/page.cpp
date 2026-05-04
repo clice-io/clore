@@ -846,4 +846,186 @@ TEST_CASE(render_page_markdown_omits_reading_guide_section_from_index) {
     EXPECT_NE(result->find("(files/demo.md)"), std::string::npos);
 }
 
+TEST_CASE(symbol_source_location_uses_external_link_with_line_when_source_base_configured) {
+    ScopedTempDir temp("symbol_external_link");
+    fs::create_directories(temp.path / "src");
+
+    auto config = make_config(temp.path);
+    config.project.source_base = "https://github.com/example/project/blob/main";
+
+    extract::ProjectModel model;
+    auto file = (temp.path / "src" / "widget.cpp").generic_string();
+    auto widget = make_function_symbol(1000, "run", "demo::run", "void run()", file, "demo");
+    auto widget_id = widget.id;
+    auto widget_key = make_symbol_target_key(widget);
+    add_symbol(model, std::move(widget));
+    add_namespace(model, "demo", {widget_id});
+
+    PagePlan file_plan{
+        .page_id = "file:" + file,
+        .page_type = PageType::File,
+        .title = "File `src/widget.cpp`",
+        .relative_path = "files/src/widget.md",
+        .owner_keys = {file},
+        .prompt_requests = {},
+    };
+
+    PagePlanSet plan_set{.plans = {file_plan}};
+    auto links = build_link_resolver(plan_set);
+    auto markdown = render_page_markdown(file_plan, config, model, {}, links);
+
+    ASSERT_TRUE(markdown.has_value());
+    EXPECT_NE(markdown->find("[src/widget.cpp:1](https://github.com/example/project/blob/main/src/widget.cpp#L1)"),
+              std::string::npos);
+    EXPECT_NE(markdown->find("[src/widget.cpp:3](https://github.com/example/project/blob/main/src/widget.cpp#L3)"),
+              std::string::npos);
+}
+
+TEST_CASE(index_files_links_to_external_source_when_source_base_configured) {
+    ScopedTempDir temp("index_external_files");
+    fs::create_directories(temp.path / "src");
+
+    auto config = make_config(temp.path);
+    config.project.source_base = "https://github.com/example/project/blob/main";
+
+    extract::ProjectModel model;
+    auto file_path = (temp.path / "src" / "math.cpp").generic_string();
+    model.files.emplace(file_path,
+                        extract::FileInfo{
+                            .path = file_path,
+                            .symbols = {},
+                            .includes = {},
+                        });
+
+    PagePlan index_plan{
+        .page_id = "index",
+        .page_type = PageType::Index,
+        .title = "API Reference",
+        .relative_path = "index.md",
+    };
+    PagePlan file_plan{
+        .page_id = "file:" + file_path,
+        .page_type = PageType::File,
+        .title = "File `src/math.cpp`",
+        .relative_path = "files/src/math.md",
+        .owner_keys = {file_path},
+    };
+
+    PagePlanSet plan_set{.plans = {index_plan, file_plan}};
+    auto links = build_link_resolver(plan_set);
+    auto outputs =
+        make_prompt_outputs({PromptRequest{.kind = PromptKind::IndexOverview}}, "Overview");
+
+    auto result = render_page_markdown(index_plan, config, model, outputs, links);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result->find("(https://github.com/example/project/blob/main/src/math.cpp)"),
+              std::string::npos);
+    EXPECT_EQ(result->find("(files/src/math.md)"), std::string::npos);
+}
+
+TEST_CASE(file_includes_links_to_external_source_when_source_base_configured) {
+    ScopedTempDir temp("file_includes_external");
+    fs::create_directories(temp.path / "src");
+    fs::create_directories(temp.path / "include");
+
+    auto config = make_config(temp.path);
+    config.project.source_base = "https://github.com/example/project/blob/main";
+
+    extract::ProjectModel model;
+    auto header = (temp.path / "include" / "engine.hpp").generic_string();
+    auto source = (temp.path / "src" / "engine.cpp").generic_string();
+
+    model.files.emplace(header,
+                        extract::FileInfo{
+                            .path = header,
+                            .symbols = {},
+                            .includes = {},
+                        });
+    model.files.emplace(source,
+                        extract::FileInfo{
+                            .path = source,
+                            .symbols = {},
+                            .includes = {header},
+                        });
+
+    PagePlan source_plan{
+        .page_id = "file:" + source,
+        .page_type = PageType::File,
+        .title = "File `src/engine.cpp`",
+        .relative_path = "files/src/engine.cpp.md",
+        .owner_keys = {source},
+    };
+
+    PagePlanSet plan_set{.plans = {source_plan}};
+    auto links = build_link_resolver(plan_set);
+    auto markdown = render_page_markdown(source_plan, config, model, {}, links);
+
+    ASSERT_TRUE(markdown.has_value());
+    EXPECT_NE(markdown->find("[include/engine.hpp](https://github.com/example/project/blob/main/include/engine.hpp)"),
+              std::string::npos);
+}
+
+TEST_CASE(no_source_base_keeps_existing_internal_link_behavior) {
+    ScopedTempDir temp("no_source_base_internal");
+    fs::create_directories(temp.path / "src");
+
+    auto config = make_config(temp.path);
+    EXPECT_FALSE(config.project.source_base.has_value());
+
+    extract::ProjectModel model;
+    auto file = (temp.path / "src" / "widget.cpp").generic_string();
+    auto widget = make_function_symbol(2000, "run", "demo::run", "void run()", file, "demo");
+    auto widget_id = widget.id;
+    add_symbol(model, std::move(widget));
+    add_namespace(model, "demo", {widget_id});
+
+    PagePlan file_plan{
+        .page_id = "file:" + file,
+        .page_type = PageType::File,
+        .title = "File `src/widget.cpp`",
+        .relative_path = "files/src/widget.md",
+        .owner_keys = {file},
+    };
+
+    PagePlanSet plan_set{.plans = {file_plan}};
+    auto links = build_link_resolver(plan_set);
+    auto markdown = render_page_markdown(file_plan, config, model, {}, links);
+
+    ASSERT_TRUE(markdown.has_value());
+    EXPECT_NE(markdown->find("`src/widget.cpp:1`"), std::string::npos);
+    EXPECT_EQ(markdown->find("github.com"), std::string::npos);
+}
+
+TEST_CASE(blank_source_base_treated_as_not_configured) {
+    ScopedTempDir temp("blank_source_base");
+    fs::create_directories(temp.path / "src");
+
+    auto config = make_config(temp.path);
+    config.project.source_base = "   ";
+
+    extract::ProjectModel model;
+    auto file = (temp.path / "src" / "widget.cpp").generic_string();
+    auto widget = make_function_symbol(2100, "run", "demo::run", "void run()", file, "demo");
+    auto widget_id = widget.id;
+    add_symbol(model, std::move(widget));
+    add_namespace(model, "demo", {widget_id});
+
+    PagePlan file_plan{
+        .page_id = "file:" + file,
+        .page_type = PageType::File,
+        .title = "File `src/widget.cpp`",
+        .relative_path = "files/src/widget.md",
+        .owner_keys = {file},
+    };
+
+    PagePlanSet plan_set{.plans = {file_plan}};
+    auto links = build_link_resolver(plan_set);
+    auto markdown = render_page_markdown(file_plan, config, model, {}, links);
+
+    ASSERT_TRUE(markdown.has_value());
+    EXPECT_NE(markdown->find("`src/widget.cpp:1`"), std::string::npos);
+    EXPECT_EQ(markdown->find("http"), std::string::npos);
+}
+
 };  // TEST_SUITE(generate_page)

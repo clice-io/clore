@@ -30,6 +30,7 @@ namespace {
 struct RawTaskConfig {
     std::optional<FilterRule> filter;
     std::optional<LLMConfig> llm;
+    std::optional<ProjectConfig> project;
 };
 
 auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
@@ -43,6 +44,11 @@ auto to_config(RawTaskConfig&& raw) -> std::expected<TaskConfig, ConfigError> {
         return std::unexpected(ConfigError{.message = "missing required section [llm]"});
     }
     cfg.llm = std::move(*raw.llm);
+
+    if(raw.project.has_value()) {
+        cfg.project = std::move(*raw.project);
+    }
+
     return cfg;
 }
 
@@ -50,6 +56,7 @@ auto reject_unknown_top_level_keys(const ::toml::table& table) -> std::expected<
     constexpr std::string_view allowed_keys[] = {
         "filter",
         "llm",
+        "project",
     };
 
     auto contains_key = [](const auto& keys, std::string_view key) {

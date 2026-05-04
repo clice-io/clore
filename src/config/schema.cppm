@@ -22,6 +22,10 @@ struct LLMConfig {
     std::uint32_t retry_limit = 0;
 };
 
+struct ProjectConfig {
+    std::optional<std::string> source_base;
+};
+
 struct TaskConfig {
     std::string compile_commands_path;
     std::string project_root;
@@ -30,6 +34,7 @@ struct TaskConfig {
 
     FilterRule filter;
     LLMConfig llm;
+    ProjectConfig project;
 
 };
 

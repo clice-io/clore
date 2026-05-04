@@ -213,4 +213,52 @@ exclude_name_prefixes = [""]
     EXPECT_FALSE(result.has_value());
 }
 
+TEST_CASE(load_project_section_with_source_base) {
+    auto toml = std::string(kMinimalValidConfig) + R"(
+[project]
+source_base = "https://github.com/example/project/blob/main"
+)";
+    auto result = load_config_from_string(toml);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result->project.source_base.has_value());
+    EXPECT_EQ(*result->project.source_base, "https://github.com/example/project/blob/main");
+}
+
+TEST_CASE(load_project_section_without_source_base) {
+    auto toml = std::string(kMinimalValidConfig) + R"(
+[project]
+)";
+    auto result = load_config_from_string(toml);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_FALSE(result->project.source_base.has_value());
+}
+
+TEST_CASE(load_without_project_section) {
+    auto toml = std::string(kMinimalValidConfig);
+    auto result = load_config_from_string(toml);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_FALSE(result->project.source_base.has_value());
+}
+
+TEST_CASE(load_project_with_empty_source_base) {
+    auto toml = std::string(kMinimalValidConfig) + R"(
+[project]
+source_base = ""
+)";
+    auto result = load_config_from_string(toml);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result->project.source_base.has_value());
+    EXPECT_TRUE(result->project.source_base->empty());
+}
+
+TEST_CASE(load_project_with_whitespace_source_base) {
+    auto toml = std::string(kMinimalValidConfig) + R"(
+[project]
+source_base = "   "
+)";
+    auto result = load_config_from_string(toml);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result->project.source_base.has_value());
+}
+
 };  // TEST_SUITE(config_load)

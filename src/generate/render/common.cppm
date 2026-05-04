@@ -380,12 +380,60 @@ auto build_symbol_link_list(const std::vector<const extract::SymbolInfo*>& symbo
     return list;
 }
 
+auto make_external_source_link(const config::TaskConfig& config,
+                               const std::string& file_path,
+                               std::uint32_t line = 0) -> std::optional<std::string> {
+    if(!config.project.source_base.has_value()) {
+        return std::nullopt;
+    }
+
+    auto base = config.project.source_base->empty()
+                    ? std::string_view{}
+                    : std::string_view(*config.project.source_base);
+    auto trimmed = trim_ascii(base);
+    if(trimmed.empty()) {
+        return std::nullopt;
+    }
+
+    while(!trimmed.empty() && trimmed.back() == '/') {
+        trimmed.remove_suffix(1);
+    }
+
+    if(trimmed.empty()) {
+        return std::nullopt;
+    }
+
+    std::string url;
+    url.reserve(trimmed.size() + file_path.size() + 32);
+
+    url.append(trimmed);
+    url.push_back('/');
+    url.append(make_source_relative(file_path, config.project_root));
+
+    if(line > 0) {
+        url.append("#L");
+        url.append(std::to_string(line));
+    }
+
+    return url;
+}
+
 auto make_source_link_target(const extract::SourceLocation& location,
                              const config::TaskConfig& config,
                              const LinkResolver& links,
                              std::string_view current_page_path) -> LinkTarget {
     auto label = make_source_relative(location.file, config.project_root) + ":" +
                  std::to_string(location.line);
+
+    if(auto external_url = make_external_source_link(config, location.file, location.line);
+       external_url.has_value()) {
+        return LinkTarget{
+            .label = std::move(label),
+            .target = std::move(*external_url),
+            .code_style = false,
+        };
+    }
+
     if(auto* target_path = links.resolve(location.file)) {
         return make_link_target(current_page_path, std::move(label), *target_path, true);
     }
