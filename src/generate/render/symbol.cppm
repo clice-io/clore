@@ -1,6 +1,24 @@
+module;
+
+#include <algorithm>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <map>
+#include <memory>
+#include <optional>
+#include <set>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
+
 export module generate:symbol;
 
-import std;
 import :markdown;
 import :model;
 import :common;

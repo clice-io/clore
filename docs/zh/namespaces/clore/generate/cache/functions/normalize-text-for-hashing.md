@@ -1,6 +1,6 @@
 ---
 title: 'clore::generate::cache::normalizetextforhashing'
-description: '函数 clore::generate::cache::normalize_text_for_hashing 将输入的文本转换为适合哈希运算的规范化形式。它接受一个 std::string_view 并返回一个 std::string；调用者应传入需要保证哈希一致性的文本，例如在构造缓存键之前对提示或响应文本进行预处理。规范化后的输出是确定性的，对于逻辑上等价的不同输入（例如忽略大小写或空白差异），会生成相同的字符串，从而确保缓存查找的正确性。该函数不涉及外部状态，也不抛出异常，适用于性能敏感的路径。'
+description: 'clore::generate::cache::normalize_text_for_hashing 函数接受一个 std::string_view 并返回一个 std::string。它负责在文本用作散列输入之前对其进行规范化，从而确保语义上相同的文本在缓存键生成过程中产生一致的规范化表示。此函数由 clore::generate::cache::make_prompt_response_cache_key 调用，用于规范化系统提示和用户请求提示，作为构建复合缓存键的一部分。调用者可以依赖该函数生成的规范化结果来保证缓存查找的确定性。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Namespace clore::generate::cache](../index.md)
 
-Declaration: `generate/cache.cppm:192`
+Declaration: `src/generate/cache.cppm:211`
 
-Definition: `generate/cache.cppm:192`
+Definition: `src/generate/cache.cppm:211`
 
 Implementation: [`Module generate:cache`](../../../../../modules/generate/cache.md)
 
@@ -21,11 +21,11 @@ Implementation: [`Module generate:cache`](../../../../../modules/generate/cache.
 auto (std::string_view) -> std::string;
 ```
 
-函数 `clore::generate::cache::normalize_text_for_hashing` 将输入的文本转换为适合哈希运算的规范化形式。它接受一个 `std::string_view` 并返回一个 `std::string`；调用者应传入需要保证哈希一致性的文本，例如在构造缓存键之前对提示或响应文本进行预处理。规范化后的输出是确定性的，对于逻辑上等价的不同输入（例如忽略大小写或空白差异），会生成相同的字符串，从而确保缓存查找的正确性。该函数不涉及外部状态，也不抛出异常，适用于性能敏感的路径。
+`clore::generate::cache::normalize_text_for_hashing` 函数接受一个 `std::string_view` 并返回一个 `std::string`。它负责在文本用作散列输入之前对其进行规范化，从而确保语义上相同的文本在缓存键生成过程中产生一致的规范化表示。此函数由 `clore::generate::cache::make_prompt_response_cache_key` 调用，用于规范化系统提示和用户请求提示，作为构建复合缓存键的一部分。调用者可以依赖该函数生成的规范化结果来保证缓存查找的确定性。
 
 ## Usage Patterns
 
-- Called by `make_prompt_response_cache_key` to normalize input strings before combining into a cache key.
+- Called by `make_prompt_response_cache_key` to normalize text before hashing.
 
 ## Called By
 

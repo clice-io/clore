@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:page'
-description: 'The generate:page module is responsible for orchestrating the construction and rendering of individual documentation pages and page bundles within the generation pipeline. It owns the public functions that build the top‑level page structure for each page type—index, namespace, module, file, and bundle—by composing content from analysis data, symbol documentation, and layout plans. These functions return page root handles that are subsequently rendered into Markdown content via render_page_markdown and persisted to the filesystem by write_page.'
+description: 'The generate:page module is the top-level orchestration layer for producing complete documentation pages. It owns the pipeline that constructs page roots for index, namespace, module, and file overviews (build_index_page_root, build_namespace_page_root, build_module_page_root, build_file_page_root, and the generic build_page_root), then renders those roots into final Markdown content via render_page_markdown. It also provides bundling (render_page_bundle) and output serialization (write_page) to write rendered pages to disk. Internally, the module coordinates with the generate:model, generate:symbol, generate:markdown, and generate:common modules, and leverages config and extract for configuration and analysis data, while private helpers handle frontmatter assembly, symbol section appending, prompt output resolution, and description source selection.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-The `generate:page` module is responsible for orchestrating the construction and rendering of individual documentation pages and page bundles within the generation pipeline. It owns the public functions that build the top‑level page structure for each page type—index, namespace, module, file, and bundle—by composing content from analysis data, symbol documentation, and layout plans. These functions return page root handles that are subsequently rendered into Markdown content via `render_page_markdown` and persisted to the filesystem by `write_page`.
-
-The module’s public interface also includes `render_page_bundle`, which produces rendered output for a collection of related pages, and several builder functions such as `build_file_page_root`, `build_module_page_root`, and `build_namespace_page_root`. It relies on the `generate:model`, `generate:symbol`, `generate:markdown`, and `generate:common` modules for intermediate data structures, symbol documentation plans, Markdown node construction, and shared utilities, respectively. The module encapsulates all page‑level concerns from planning through output, ensuring that each page is correctly assembled before final rendering and writing.
+The `generate:page` module is the top-level orchestration layer for producing complete documentation pages. It owns the pipeline that constructs page roots for index, namespace, module, and file overviews (`build_index_page_root`, `build_namespace_page_root`, `build_module_page_root`, `build_file_page_root`, and the generic `build_page_root`), then renders those roots into final Markdown content via `render_page_markdown`. It also provides bundling (`render_page_bundle`) and output serialization (`write_page`) to write rendered pages to disk. Internally, the module coordinates with the `generate:model`, `generate:symbol`, `generate:markdown`, and `generate:common` modules, and leverages `config` and `extract` for configuration and analysis data, while private helpers handle frontmatter assembly, symbol section appending, prompt output resolution, and description source selection.
 
 ## Imports
 
@@ -21,7 +19,6 @@ The module’s public interface also includes `render_page_bundle`, which produc
 - [`generate:markdown`](markdown.md)
 - [`generate:model`](model.md)
 - [`generate:symbol`](symbol.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Imported By
@@ -45,13 +42,13 @@ graph LR
 
 ### `clore::generate::build_file_page_root`
 
-Declaration: `generate/render/page.cppm:345`
+Declaration: `src/generate/render/page.cppm:364`
 
-Definition: `generate/render/page.cppm:345`
+Definition: `src/generate/render/page.cppm:364`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function constructs a `SemanticSection` tree representing the root node for a file page. It first retrieves the file metadata from the `model` and, if found, appends two bullet-list sections: "Includes" (listing every include directive via `append_file_item`) and "Included By" (iterating all files in the model to find reverse inclusions, sorting by relative path). It then attempts to generate a Mermaid dependency diagram via `render_file_dependency_diagram_code`; if non‑empty, that diagram is placed in a dedicated sub‑section. Next, it delegates to `append_standard_symbol_sections` to populate symbol subsections (e.g., function, class, macro definitions) discovered through `collect_implementation_symbols`, adding an optional declaration link for each symbol. If the file belongs to a module (determined by `find_module_for_file`), a "Module Information" section is created with a link or code reference to the module name. Finally, a "Related Pages" bullet list is built from `build_related_page_targets`. The assembled root node is returned to the caller for further nesting, typically inside `build_page_root` or other page‑building functions.
+The function constructs a `SemanticSectionPtr` representing the root of a file documentation page. It first queries the `ProjectModel` for the file identified by `plan.owner_keys.front()`; if the file exists, it builds two bullet lists — one for the file’s own includes (using `append_file_item` with a source-relative path) and one for files that include this file, sorted by their relative paths. An optional “Dependency Diagram” section is appended if `render_file_dependency_diagram_code` returns non‑empty content, embedded as a Mermaid block. Control then flows into `append_standard_symbol_sections`, which collects implementation symbols via `collect_implementation_symbols` and adds a “Declaration:” link paragraph (resolved through `find_declaration_page`) for each symbol. A “Module Information” section is conditionally added when `find_module_for_file` returns a module name; if the module has a known page target (from `links.resolve_module`), a hyperlink is rendered, otherwise inline code is used. Finally, a “Related Pages” section enumerates targets from `build_related_page_targets`, each rendered as a link item. The assembled children are returned as the root section.
 
 #### Side Effects
 
@@ -59,107 +56,60 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `plan.owner_keys`
-- `plan.title`
-- `plan.relative_path`
-- `config.project_root`
-- `model.files` (including includes)
-- `analyses` (via `append_standard_symbol_sections`)
-- `links` (via `resolve_module`, `find_declaration_page`, `build_related_page_targets`)
-- return values from `render_file_dependency_diagram_code`, `collect_implementation_symbols`, `find_module_for_file`, `build_related_page_targets`
+- `plan`
+- `config`
+- `model.files`
+- `analyses`
+- `links`
 
 #### Usage Patterns
 
-- called to generate the root semantic section for a file page in the documentation generation pipeline
-- used within page-building functions such as `build_page_root`
-- combines multiple sections into a single root for a file-level document
+- Called during documentation page generation to create the top-level semantic structure for a file page.
 
 ### `clore::generate::build_index_page_root`
 
-Declaration: `generate/render/page.cppm:447`
+Declaration: `src/generate/render/page.cppm:466`
 
-Definition: `generate/render/page.cppm:447`
+Definition: `src/generate/render/page.cppm:466`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function first constructs a root `SemanticSection` with kind `Index` and the provided page title. It then appends an "Overview" prompt section. If the project model uses modules, it builds a sorted "Modules" bullet list of interface module names that have a resolved link, filtering duplicates. A "Files" subsection follows, collecting source‑relative file paths, sorting them, and creating links. Next, a "Namespaces" list is generated from all namespaces except anonymous ones, again filtered by link resolution and sorted. A "Types" list uses `build_symbol_link_list` after filtering for type kinds and excluding anonymous symbols, sorted by qualified name. Finally, if the model provides a module dependency diagram, the function renders it as a Mermaid code block and appends it as a subsection. Throughout, the function depends on `clore::generate::LinkResolver` for resolving targets relative to the current page path, the `ProjectModel` for data, and helper utilities such as `build_list_section`, `build_symbol_link_list`, and `render_module_dependency_diagram_code` to produce the Markdown‑compatible content.
+The function constructs the root `SemanticSectionPtr` for an index page by first creating a section with `SemanticKind::Index` and then appending a series of child sections in a fixed order. It begins with a prompt-based overview section built via `build_prompt_section` using the output keyed by `PromptKind::IndexOverview`. If the project model indicates that modules are used, it inserts a "Modules" bullet list that iterates over interface modules, deduplicates by name, sorts them, and creates links resolved through the `LinkResolver`. Next, it adds a "Files" list that pairs each file path with a source-relative label, sorts by label, and links to each file. A "Namespaces" list follows, excluding entries containing the anonymous namespace, sorted alphabetically. The "Types" list collects symbols whose kind satisfies `is_type_kind`, excludes anonymous namespace qualified names, sorts them by qualified name, and delegates rendering to `build_symbol_link_list`. Finally, if `render_module_dependency_diagram_code` returns a non-empty string, a "Module Dependency Diagram" section is appended as a Mermaid diagram. The function relies on page-plan metadata (`PagePlan::title`, `PagePlan::relative_path`), the `LinkResolver` to validate and resolve links, and the `extract::ProjectModel` to enumerate modules, files, namespaces, and symbols.
 
 #### Side Effects
 
-- allocates a `SemanticSection` and populates its `children` vector
-- mutates the returned `SemanticSectionPtr` tree by appending `MarkdownNode` objects
+- Allocates and returns a new `SemanticSectionPtr`
+- May trigger prompt generation via `build_prompt_section`
 
 #### Reads From
 
-- parameter `plan`
-- parameter `config`
-- parameter `model`
-- parameter `outputs`
-- parameter `links`
-- model`.modules`, model`.files`, model`.namespaces`, model`.symbols`
-- outputs[`PromptKind::IndexOverview`]
-- links`.resolve()`, links`.resolve_module()`
-
-#### Writes To
-
-- the returned `SemanticSectionPtr` (root) and its child nodes
+- `plan.title`
+- `plan.relative_path`
+- `model.uses_modules`
+- `model.modules`
+- `model.files`
+- `model.namespaces`
+- `model.symbols`
+- `config.project_root`
+- `outputs` (map containing prompt outputs)
+- `links` (`LinkResolver`)
 
 #### Usage Patterns
 
-- called during index page generation in the documentation pipeline
-- used to compose the root content of a generated index page
+- Called during index page generation to produce the root section
+- Used as part of the page construction pipeline
 
 ### `clore::generate::build_module_page_root`
 
-Declaration: `generate/render/page.cppm:255`
+Declaration: `src/generate/render/page.cppm:274`
 
-Definition: `generate/render/page.cppm:255`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The function creates a root semantic section for a module page by first constructing a `SemanticSection` with kind `SemanticKind::Module` using the plan’s owner key and title. It immediately appends a summary prompt section derived from `outputs` via `prompt_output_of` for `PromptKind::ModuleSummary`. If the module is located in the `extract::ProjectModel` using `extract::find_module_by_name`, it builds two ordered bullet lists: one for imports and one for “imported by” modules – each item is rendered through `append_module_item` with the current `plan.relative_path` and `links`. When the module has imports, a mermaid diagram is optionally appended using `render_import_diagram_code` wrapped in a `make_section` with `SemanticKind::Section`. The majority of the page content is produced by `append_standard_symbol_sections`, which collects symbols via a predicate-based callback and adds declaration links and symbol documentation links via supplied lambda functions. Following the standard sections, an internal structure prompt section for `PromptKind::ModuleArchitecture` is appended, and a “Related Pages” list is built from `build_related_page_targets`. No external I/O is performed; the returned `SemanticSectionPtr` is a tree structure consumed later by the page rendering pipeline.
-
-#### Side Effects
-
-- allocates memory for the returned `SemanticSectionPtr` and its child nodes via `make_section`, `build_prompt_section`, `build_list_section`, `make_mermaid`, and `append_standard_symbol_sections`
-
-#### Reads From
-
-- `plan` parameter (`const PagePlan&`)
-- `config` parameter (`const config::TaskConfig&`)
-- `model` parameter (`const extract::ProjectModel&`)
-- `outputs` parameter (`const std::unordered_map<std::string, std::string>&`)
-- `analyses` parameter (`const SymbolAnalysisStore&`)
-- `links` parameter (`const LinkResolver&`)
-- `layout` parameter (`const PageDocLayout&`)
-- `plan.owner_keys`
-- `plan.title`
-- `plan.relative_path`
-- `model.modules`
-- `module->imports`
-- `module->name`
-- `PromptKind::ModuleSummary`
-- `PromptKind::ModuleArchitecture`
-
-#### Writes To
-
-- constructed `SemanticSectionPtr` (`root`) and its internally built child nodes
-
-#### Usage Patterns
-
-- called during page generation for module pages
-- part of the page building pipeline alongside `build_file_page_root` and `build_namespace_page_root`
-- invoked with page plan, configuration, project model, analysis outputs, and layout to produce a modular documentation section
-
-### `clore::generate::build_namespace_page_root`
-
-Declaration: `generate/render/page.cppm:165`
-
-Definition: `generate/render/page.cppm:165`
+Definition: `src/generate/render/page.cppm:274`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function constructs the `SemanticSectionPtr` representing the root of a namespace documentation page. It first creates a root section with `SemanticKind::Namespace` and appends a prompt-generated summary section. If the namespace diagram (rendered via `render_namespace_diagram_code`) is non‑empty, it adds a mermaid diagram child. A subnamespaces list is built by scanning the model for direct children of the namespace, sorted and filtered to exclude anonymous namespaces; each resolved link is added via `make_link` with a relative target. The core content is supplied by `append_standard_symbol_sections`, which uses the provided lambdas to collect namespace symbols (via `collect_namespace_symbols`), add implementation page links (via `push_link_paragraph` and `find_implementation_pages`), and attach documentation links (via `add_symbol_doc_links` using `symbol_doc_view_for`). Finally, a “Related Pages” list is appended from `build_related_page_targets`. The function relies on the `plan`’s owner key, title, and relative path, and on the injected `config`, `model`, `analyses`, `links`, and `layout` to produce a fully populated section tree.
+The function constructs the top-level `SemanticSection` for a module documentation page. It begins by creating a root section with `SemanticKind::Module` using the plan's owner key and title. It then appends paragraphs from prompt outputs for the module summary. If the module is present in the project model, it adds bullet lists for imports and imported‑by modules, resolving each entry via `append_module_item` with the plan's relative path and link resolver. An import dependency diagram rendered as Mermaid code is conditionally inserted when the diagram generation produces non‑empty output. The bulk of the symbol documentation is delegated to `append_standard_symbol_sections`, which uses `collect_implementation_symbols` to gather symbols matching an internal predicate, and custom link and doc‑link lambdas to append declaration pages and symbol‑specific documentation. Further prompt sections for internal architecture and a list of related pages (built from `build_related_page_targets`) complete the root node before it is returned.
+
+Key dependencies include the `extract::ProjectModel` for module data, `SymbolAnalysisStore` for symbol analyses, `LinkResolver` for page resolution, and `PageDocLayout` for documentation link formatting. The function relies on utility functions such as `build_prompt_section`, `build_list_section`, `make_section`, `append_module_item`, `render_import_diagram_code`, `append_standard_symbol_sections`, `collect_implementation_symbols`, `find_declaration_page`, `add_symbol_doc_links`, `symbol_doc_view_for`, and `build_related_page_targets`.
 
 #### Side Effects
 
@@ -167,61 +117,33 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `plan` parameters including `plan.owner_keys`, `plan.title`, `plan.relative_path`
-- `config::TaskConfig` access via `config.project_root`
-- `extract::ProjectModel` access via `model.namespaces`
-- `outputs` hash map keyed by `PromptKind::NamespaceSummary`
-- `SymbolAnalysisStore` (used in `append_standard_symbol_sections`)
-- `LinkResolver` for resolving namespace and page links
-- `PageDocLayout` for finding doc indices
-
-#### Usage Patterns
-
-- Called during namespace page generation to produce the root content section
-- Used as a stage in the page building pipeline where the result is later rendered to markdown
-- Typically invoked once per namespace from `generate_pages` or similar orchestration functions
-
-### `clore::generate::build_page_root`
-
-Declaration: `generate/render/page.cppm:546`
-
-Definition: `generate/render/page.cppm:546`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The implementation of `clore::generate::build_page_root` acts as a dispatch hub. It examines `plan.page_type` and delegates to one of four specialized builders: `build_index_page_root`, `build_namespace_page_root`, `build_module_page_root`, or `build_file_page_root`. Each receives a tailored subset of the original parameters (`plan`, `config`, `model`, `outputs`, `analyses`, `links`, `layout`) appropriate to the page kind. If the page type does not match any known case, the function falls back to constructing a generic `SemanticSection` via `make_section` with a default title and depth.
-
-Internal control flow is therefore a simple switch over the `PageType` enum. No further branching or computation occurs within this function; all page‑specific logic is pushed into the individual builder functions, each of which may internally call closure helpers such as `append_module_item`, `append_file_item`, or `select_primary_description_source_page`. Dependency resolution and cross‑linking are handled by the `LinkResolver` and `SymbolAnalysisStore` passed through to the builder.
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- plan`.page_type`
-- plan`.title`
+- plan
 - config
 - model
 - outputs
 - analyses
 - links
 - layout
+- plan`.owner_keys`
+- plan`.title`
+- plan`.relative_path`
+- module->imports
+- model`.modules`
 
 #### Usage Patterns
 
-- Called during page rendering to select the appropriate page builder based on `PageType`
-- Used as a central dispatch point in the page generation pipeline, likely invoked by `render_page_markdown` or similar functions
+- Called during module page generation to build the top-level section.
+- Used within `build_page_root` dispatch for module page types.
 
-### `clore::generate::render_page_bundle`
+### `clore::generate::build_namespace_page_root`
 
-Declaration: `generate/render/page.cppm:565`
+Declaration: `src/generate/render/page.cppm:184`
+
+Definition: `src/generate/render/page.cppm:184`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The implementation of `clore::generate::render_page_bundle` coordinates the end-to-end rendering of a bundle of output pages. It accepts a `PagePlan` that defines the set of pages to produce, a `config::TaskConfig` supplying rendering options, an `extract::ProjectModel` with the project’s extracted data, a `std::unordered_map<std::string, std::string>` of `prompt_outputs` from prior LLM interactions, a `SymbolAnalysisStore` for per‑symbol annotation information, and a `LinkResolver` for resolving cross‑references across the generated documentation.
-
-Internally, the function iterates over the page descriptors in the `PagePlan`. For each page, it invokes a rendering step that uses the `config::TaskConfig` to select templates and formats, the `extract::ProjectModel` to supply content, and the `prompt_outputs`, `SymbolAnalysisStore`, and `LinkResolver` to inject generated text, symbol metadata, and resolved links. The rendered pages are assembled into a bundle, and the function returns a `std::expected` that either holds the completed bundle or propagates an error from any step of the pipeline. Key dependencies include the page‑level rendering logic and the aggregation mechanism that merges the per‑page results.
+`clore::generate::build_namespace_page_root` constructs the root `SemanticSection` for a namespace documentation page. It begins by creating a section with `SemanticKind::Namespace`, using `plan.owner_keys.front()` as the owning entity and `plan.title` for the heading. A prompt‑based “Summary” subsection is added immediately from the precomputed `PromptKind::NamespaceSummary` output. If `render_namespace_diagram_code` returns a non‑empty Mermaid string, a “Diagram” subsection containing the diagram is inserted. A “Subnamespaces” subsection is built as a sorted bullet list, omitting anonymous namespaces, with each entry linked via `links.resolve`. The core symbol listings are delegated to `append_standard_symbol_sections`, which receives lambdas that invoke `collect_namespace_symbols` to gather entities, `find_implementation_pages` to add “Implementation:” links, and `add_symbol_doc_links` for documentation cross‑references. Finally, a “Related Pages” subsection is appended using `build_related_page_targets`. The function depends on several helpers from the `clore::generate` namespace, including `make_section`, `build_prompt_section`, `build_list_section`, `make_link`, and the various symbol‑collection and link‑resolution utilities.
 
 #### Side Effects
 
@@ -229,27 +151,104 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `const PagePlan& plan`
-- `const config::TaskConfig& config`
-- `const extract::ProjectModel& model`
-- `const std::unordered_map<std::string, std::string>& prompt_outputs`
-- `const SymbolAnalysisStore& analyses`
-- `const LinkResolver& links`
+- `plan`
+- `config`
+- `model`
+- `outputs`
+- `analyses`
+- `links`
+- `layout`
+- `plan.owner_keys`
+- `plan.title`
+- `plan.relative_path`
+- `model.namespaces`
+
+#### Writes To
+
+- returns a `SemanticSectionPtr` for the namespace page root
 
 #### Usage Patterns
 
-- core orchestration function for page bundle rendering
-- invoked by higher-level page generation workflows
+- called during namespace page generation
+- used to build the top-level section of a namespace page
 
-### `clore::generate::render_page_bundle`
+### `clore::generate::build_page_root`
 
-Declaration: `generate/render/page.cppm:573`
+Declaration: `src/generate/render/page.cppm:565`
+
+Definition: `src/generate/render/page.cppm:565`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::render_page_bundle` orchestrates the generation of a complete page bundle by iterating over the entries defined in the `PagePlan`. For each page, it evaluates the `TaskConfig` to determine applicable formatting and processing options, then feeds the corresponding `ProjectModel` data together with any precomputed `prompt_outputs` into the rendering pipeline. The `LinkResolver` is used to resolve cross‑references and links both within and across pages, ensuring that the final bundle contains coherent inter‑page navigation. The algorithm proceeds in a two‑phase manner: first, it collects and possibly merges prompt‑generated content with static model data; second, it serializes each page using internal rendering primitives and assembles the results into the expected output type.
+The function `clore::generate::build_page_root` acts as a dispatch hub that selects the appropriate page-specific builder based on the value of `plan.page_type`. Internally, a `switch` statement evaluates the `PageType` enumerator: for `PageType::Index` it delegates to `clore::generate::build_index_page_root`, passing `plan`, `config`, `model`, `outputs`, and `links`; for `PageType::Namespace` it invokes `clore::generate::build_namespace_page_root` with the full set of parameters including `analyses` and `layout`; for `PageType::Module` it calls `clore::generate::build_module_page_root`; and for `PageType::File` it calls `clore::generate::build_file_page_root`. If the page type does not match any known case, the function returns a minimal default section constructed via `make_section` with `SemanticKind::Section`, an empty children list, `plan.title`, heading level 1, and a `false` flag. This centralises the decision logic for constructing the root of a documentation page, isolating each page-type’s build algorithm in its own function and relying on the caller to supply all necessary analysis and configuration dependencies.
 
-Dependencies of this implementation include the `extract::ProjectModel` for structural data, the `config::TaskConfig` for behavioural settings, and the `LinkResolver` for resolving references. The control flow depends on the layout defined by `PagePlan` and may branch on conditional pages or optional prompts. Error propagation is handled via the `std::expected` return type, which allows early termination if any sub‑render step fails, such as an unresolved link or a missing prompt output. No external file I/O occurs within this function; all input is passed as parameters and output is returned in‑memory.
+#### Side Effects
+
+- allocates a `SemanticSectionPtr` via `make_section`
+- calls builder functions that may allocate or modify state
+
+#### Reads From
+
+- `plan`
+- `config`
+- `model`
+- `outputs`
+- `analyses`
+- `links`
+- `layout`
+
+#### Writes To
+
+- allocated `SemanticSectionPtr` object
+
+#### Usage Patterns
+
+- called during page generation to create the root semantic section
+- used as a central point for type-based page root construction
+
+### `clore::generate::render_page_bundle`
+
+Declaration: `src/generate/render/page.cppm:584`
+
+Definition: `src/generate/render/page.cppm:629`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The function orchestrates the creation of a set of generated pages for a given `PagePlan`. It first builds a document layout via `build_page_doc_layout`, then constructs a `MarkdownDocument` whose root is produced by `build_page_root` using the plan, `config`, `model`, `prompt_outputs`, `analyses`, `links`, and the layout. After rendering the document via `render_markdown`, it checks for an empty body and returns an error if so; otherwise it creates frontmatter via `build_frontmatter_page` and assembles the primary `GeneratedPage` with the rendered content and the plan’s title and relative path. If `page_supports_symbol_subpages` returns true, the function iterates over symbol doc groups obtained from the layout using `for_each_symbol_doc_group`, invoking `append_symbol_doc_pages` to append additional pages; a failure in any group causes an early error return. Finally, it returns the collected vector of `GeneratedPage` instances.
+
+#### Side Effects
+
+- Allocates and returns a vector of `GeneratedPage` objects
+- Modifies the local `MarkdownDocument` by assigning its `frontmatter` member
+
+#### Reads From
+
+- const `PagePlan`& plan
+- const `config::TaskConfig`& config
+- const `extract::ProjectModel`& model
+- const `std::unordered_map<std::string, std::string>`& `prompt_outputs`
+- const `SymbolAnalysisStore`& analyses
+- const `LinkResolver`& links
+
+#### Writes To
+
+- The output `std::vector<GeneratedPage>` returned by the function
+- The local `MarkdownDocument` object (via frontmatter assignment)
+
+#### Usage Patterns
+
+- Called from higher-level page generation routines such as `generate_pages` and `generate_pages_async`
+- Used to produce a complete page bundle from a single page plan, including subpages when applicable
+
+### `clore::generate::render_page_bundle`
+
+Declaration: `src/generate/render/page.cppm:592`
+
+Definition: `src/generate/render/page.cppm:592`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The function `clore::generate::render_page_bundle` is a convenience overload that directly forwards its arguments to the more general five‑parameter counterpart, supplying a default‑constructed `SymbolAnalysisStore` as the additional parameter. Internally, the algorithm is a simple delegation: it calls the overload that accepts the `SymbolAnalysisStore`, passing the `plan`, `config`, `model`, `prompt_outputs`, and `links` unchanged. This design centralizes the core page‑bundle generation logic—including building page roots, rendering markdown, and writing outputs—in the single overload that also incorporates symbol analysis, while offering a cleaner interface for callers that do not require that feature.
 
 #### Side Effects
 
@@ -265,19 +264,17 @@ No observable side effects are evident from the extracted code.
 
 #### Usage Patterns
 
-- core rendering function
-- called by page generation orchestrators
-- used to produce final page content
+- Used to generate a page bundle from a plan without symbol analysis
 
 ### `clore::generate::render_page_markdown`
 
-Declaration: `generate/render/page.cppm:602`
+Declaration: `src/generate/render/page.cppm:621`
 
-Definition: `generate/render/page.cppm:602`
+Definition: `src/generate/render/page.cppm:621`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function assembles a markdown document by iterating over a `PagePlan` and combining data from `config::TaskConfig`, `extract::ProjectModel`, `prompt_outputs`, `linkResolver`, and optional `SymbolAnalysisStore`. It delegates page structure to builders like `build_page_root`, `build_frontmatter_page`, `build_module_page_root`, and `build_index_page_root`, and appends content sections via `append_standard_symbol_sections`, `append_module_item`, and `append_file_item`. The algorithm routes to `render_page_bundle` for bundled layouts, uses `write_page` to finalize output, and depends on internal anonymous-namespace helpers (`prompt_output_of_local_page`, `select_primary_description_source_page`) to resolve descriptions and prompt-based text.
+The function constructs a complete Markdown document for a single documentation page by building a structured document tree and then rendering it to a string. It first determines the page type from the provided `plan` (e.g., namespace, module, file, index) and calls an appropriate builder such as `clore::generate::build_namespace_page_root`, `clore::generate::build_module_page_root`, `clore::generate::build_file_page_root`, or `clore::generate::build_index_page_root`. These builders populate a node tree (stored in `root`) with sections for the page title, front matter, headings, symbol descriptions, and optional diagrams (namespace, dependency, import). The function then uses `clore::generate::(anonymous namespace)::append_standard_symbol_sections` to insert per‑symbol sections, relying on a collect‑symbols callback and appending links and documentation links. After constructing the tree, `clore::generate::render_page_bundle` serializes the node hierarchy into the final Markdown text, incorporating layout settings from `config` and any pre‑rendered prompt outputs. The resulting string is returned via `std::expected`, with errors wrapped in a `RenderError` type. Internal control flow branches on the page kind, iterates over symbol lists, and conditionally includes visual diagrams, all while resolving cross‑page references through the `LinkResolver`.
 
 #### Side Effects
 
@@ -285,32 +282,26 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `plan` parameter
-- `config` parameter
-- `model` parameter
-- `prompt_outputs` parameter (map)
-- `links` parameter
-- default-constructed `SymbolAnalysisStore`
-
-#### Writes To
-
-- returned `std::expected<std::string, RenderError>` value
+- `plan`
+- `config`
+- `model`
+- `prompt_outputs`
+- `links`
 
 #### Usage Patterns
 
-- Entry point for page rendering
-- Delegating to full overload with empty analysis store
-- Called from page generation pipelines
+- Called to obtain markdown content for a page before writing it to disk
+- Used as a convenience overload when symbol analysis is not required
 
 ### `clore::generate::render_page_markdown`
 
-Declaration: `generate/render/page.cppm:582`
+Declaration: `src/generate/render/page.cppm:601`
 
-Definition: `generate/render/page.cppm:582`
+Definition: `src/generate/render/page.cppm:601`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function delegates the heavy lifting to `clore::generate::render_page_bundle`, which produces a collection of `GeneratedPage` objects. After that call, `render_page_markdown` performs a linear search through the bundle, identifying the page whose `relative_path` matches the `plan.relative_path` from the input plan. If the bundle construction fails, the error is forwarded directly via `std::unexpected`. If the specific page is not found in the bundle, a `RenderError` is returned indicating the missing path. On success, the matched page’s `content` string is extracted and returned. The control flow is therefore a straightforward pipeline: bundle generation, then lookup, with early exit on failure. The primary dependency is `render_page_bundle`, which itself orchestrates calls to several builders and append helpers for modules, namespaces, files, and index pages.
+The function `clore::generate::render_page_markdown` first delegates the entire rendering process to `clore::generate::render_page_bundle`, which produces a collection of `GeneratedPage` objects representing all output pages for the given `PagePlan`. After the bundle is successfully produced, the function locates the single page whose `relative_path` equals `plan.relative_path` using `std::ranges::find_if`. If the bundle is missing (i.e., `render_page_bundle` returned an error) or the expected page is not found, the function returns a `std::unexpected` `RenderError` with a descriptive message; otherwise it returns the `content` field of the matching page. The implementation thus acts as a thin dispatch layer that isolates the caller from the multi-page bundle logic, relying entirely on the correctness of `render_page_bundle` and the assumption that every plan’s path appears exactly once in the output.
 
 #### Side Effects
 
@@ -318,55 +309,56 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `plan` (the page plan)
-- `config` (task configuration)
-- `model` (project model)
-- `prompt_outputs` (map of prompt outputs)
-- `analyses` (symbol analysis store)
-- `links` (link resolver)
-- the bundle returned by `render_page_bundle`
+- plan (`PagePlan`)
+- config (`config::TaskConfig`)
+- model (`extract::ProjectModel`)
+- `prompt_outputs` (`std::unordered_map<std::string, std::string>`)
+- analyses (`SymbolAnalysisStore`)
+- links (`LinkResolver`)
 
 #### Usage Patterns
 
-- called by higher-level page generation functions
-- used to retrieve markdown for a specific page after a bundle is rendered
+- Called to obtain the final rendered markdown for a specific page plan
+- Used as a high-level entry point for page rendering
 
 ### `clore::generate::write_page`
 
-Declaration: `generate/render/page.cppm:666`
+Declaration: `src/generate/render/page.cppm:685`
 
-Definition: `generate/render/page.cppm:666`
+Definition: `src/generate/render/page.cppm:685`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function begins by constructing an absolute target path from the provided `output_root` and the `relative_path` stored in the page. It validates that the relative path is indeed relative and does not contain any `.` or `..` components, returning an `std::unexpected` with a `RenderError` on violation. The target is normalized using `std::filesystem::path::lexically_normal`. The parent directory of the target is then created recursively via `std::filesystem::create_directories`, with error codes checked and propagated as `RenderError` on failure. Finally, the page content is written to the target file using `clore::support::write_utf8_text_file`, forwarding any write error into the same expected‑error channel. All filesystem operations use `std::error_code` to avoid exceptions, and every failure result is wrapped in a descriptive `RenderError`. The function depends on the `GeneratedPage` type (for `relative_path` and `content`), on `clore::support::write_utf8_text_file`, and on standard filesystem utilities.
+The function `clore::generate::write_page` implements file output for a single generated documentation page. It first validates that the given `page.relative_path` is a relative path without `.` or `..` components, returning an error via `std::unexpected` if the check fails. After validation, it constructs the absolute target filesystem path by combining `output_root` with the relative path and normalising it using `std::filesystem::path::lexically_normal`. It then ensures the parent directory exists by calling `std::filesystem::create_directories`, capturing any error code and returning an error if directory creation fails. Finally, it writes the page content to the target file using `clore::support::write_utf8_text_file`, propagating any write error.
+
+The control flow is linear with early returns on validation failures and directory‑creation failures. The function relies on `std::filesystem` for path manipulation and directory creation, and on `clore::support::write_utf8_text_file` for the actual file write, with `RenderError` used for error reporting. There are no additional side effects or internal sub‑calls beyond those sketched.
 
 #### Side Effects
 
-- Creates parent directories on disk
-- Writes UTF-8 text content to a file
+- creates directories on the filesystem if they do not exist
+- writes a UTF-8 text file to the specified output path
 
 #### Reads From
 
-- `page.relative_path`
-- `page.content`
-- `output_root`
+- `page.relative_path` (string member of `GeneratedPage`)
+- `page.content` (string member of `GeneratedPage`)
+- `output_root` (`string_view` parameter)
 
 #### Writes To
 
-- Filesystem at the constructed target path
+- filesystem directories under `output_root`
+- a file at the resolved path containing `page.content`
 
 #### Usage Patterns
 
-- Called during the page output phase after generation
-- Likely invoked in a loop by `write_pages` or similar batch writer
-- Part of the `clore::generate` module's rendering pipeline
+- called by page generation pipeline to persist rendered pages
+- used as a final step in file-based output generation
 
 ## Internal Structure
 
-The `generate:page` module is responsible for assembling and rendering complete documentation pages from the project model. It decomposes page construction into specialized entry points for different page types: `build_file_page_root`, `build_module_page_root`, `build_namespace_page_root`, `build_index_page_root`, and the generic `build_page_root` that delegates to these. Rendering is handled separately by `render_page_markdown` (for a single page) and `render_page_bundle` (for a collection of related pages), with `write_page` managing final output to disk. The module imports a broad set of dependencies: `config` for generation settings, `extract` for analysis data, `generate:common` for shared link and view types, `generate:markdown` for Markdown node construction, `generate:model` for page plan and bundle definitions, `generate:symbol` for per-symbol documentation layout and grouping, and the `support` module for foundational utilities.
+The `generate:page` module is organized around a set of public entry points that each handle a specific stage of page construction and rendering. The builders (`build_namespace_page_root`, `build_module_page_root`, `build_file_page_root`, `build_index_page_root`, and the generic `build_page_root`) assemble the top‑level structure for each page type, accepting opaque integer references that identity the relevant page plan, analysis store, and configuration. Higher‑level functions (`render_page_markdown`, `render_page_bundle`) transform a fully constructed page root into final Markdown output, while `write_page` serializes the result to a file. An anonymous‑namespace layer (e.g., `append_file_item`, `append_module_item`, `append_standard_symbol_sections`, `build_frontmatter_page`) provides reusable helpers for inserting common sub‑sections such as frontmatter, symbol lists, and cross‑reference links.
 
-Internally, the module is layered with an anonymous namespace that contains helper functions such as `append_module_item`, `append_file_item`, `append_standard_symbol_sections`, `select_primary_description_source_page`, `prompt_output_of_local_page`, and `build_frontmatter_page`. These helpers handle low-level content assembly (e.g., iterating over symbol groups, appending standard sections, selecting the primary description source from a set of prompt outputs). The public API functions orchestrate these helpers, passing handles for the page plan, link resolvers, analysis data, model identifiers, and configuration. The implementation structure follows a builder pattern: each `build_*_page_root` function returns an integer handle to a newly created root node, which is later consumed by the rendering and writing stages. This separation of construction, rendering, and persistence keeps the pipeline modular and testable.
+Internally, the module imports heavily from `generate:model` (for page plans, analysis stores, and link resolvers), `generate:markdown` (for the Markdown node hierarchy), `generate:symbol` (for per‑symbol rendering), and `config` (for generation settings). The use of integer handles throughout the public API allows callers to pass references to state that is maintained by the broader generation pipeline without exposing the concrete C++ types, while the private helpers operate directly on the imported model and markdown types. This layered decomposition keeps page‑type‑specific logic separate from the generic rendering and I/O infrastructure, and the reliance on opaque handles makes the public interface stable across internal refactoring.
 
 ## Related Pages
 

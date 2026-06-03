@@ -1,6 +1,23 @@
+module;
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <ios>
+#include <mutex>
+#include <optional>
+#include <shared_mutex>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 export module extract:model;
 
-import std;
 import support;
 
 export namespace clore::extract {

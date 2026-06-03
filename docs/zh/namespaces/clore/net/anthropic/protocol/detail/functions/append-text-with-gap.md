@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::anthropic::protocol::detail::appendtextwithgap'
-description: '此函数用于将一段文本以协议所需的格式追加到目标字符串中，同时在其前后或内部插入必要的间隔符。调用者应当提供一个可修改的 std::string 对象作为第一个参数，该对象通常代表正在构建的协议消息；第二个参数是一个 std::string_view，表示要追加的文本内容。函数不返回任何值，而是直接修改目标字符串，并且要求调用者确保目标字符串在调用前后保持有效状态。'
+description: '向目标字符串追加给定的文本视图，并在嵌入时自动维持适当的格式间隙（例如换行与缩进），使拼接结果符合 Anthropic 协议对 JSON 结构的布局要求。调用方须提供可变的 std::string 引用作为接收缓冲区，以及一个 std::string_view 作为待附加的文本片段；函数独立处理间隙逻辑，调用方无需关心 JSON 格式化细节。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Namespace clore::net::anthropic::protocol::detail](../index.md)
 
-Declaration: `network/anthropic.cppm:25`
+Declaration: `src/network/anthropic.cppm:34`
 
-Definition: `network/anthropic.cppm:25`
+Definition: `src/network/anthropic.cppm:34`
 
 Implementation: [`Module anthropic`](../../../../../../../modules/anthropic/index.md)
 
@@ -21,12 +21,11 @@ Implementation: [`Module anthropic`](../../../../../../../modules/anthropic/inde
 auto (std::string &, std::string_view) -> void;
 ```
 
-此函数用于将一段文本以协议所需的格式追加到目标字符串中，同时在其前后或内部插入必要的间隔符。调用者应当提供一个可修改的 `std::string` 对象作为第一个参数，该对象通常代表正在构建的协议消息；第二个参数是一个 `std::string_view`，表示要追加的文本内容。函数不返回任何值，而是直接修改目标字符串，并且要求调用者确保目标字符串在调用前后保持有效状态。
+向目标字符串追加给定的文本视图，并在嵌入时自动维持适当的格式间隙（例如换行与缩进），使拼接结果符合 Anthropic 协议对 JSON 结构的布局要求。调用方须提供可变的 `std::string` 引用作为接收缓冲区，以及一个 `std::string_view` 作为待附加的文本片段；函数独立处理间隙逻辑，调用方无需关心 JSON 格式化细节。
 
 ## Usage Patterns
 
-- called by `build_request_json` to assemble request body
-- used for appending text blocks with a separating gap
+- Called by `clore::net::anthropic::protocol::build_request_json` to add text blocks.
 
 ## Called By
 

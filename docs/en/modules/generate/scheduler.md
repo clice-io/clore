@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:scheduler'
-description: 'The generate:scheduler module orchestrates the end‑to‑end execution of the documentation generation pipeline. It owns the central scheduling logic that prepares generation contexts from project models and configuration, manages dependency‑driven work flows for both per‑symbol analyses and full‑page prompts, and drives asynchronous LLM requests. Internally, it maintains a work queue with deferred enqueuing, a dependency tracker to determine when pages become ready to render, and a page renderer that produces final Markdown output. The module also handles caching of prompt responses, failure tracking with retry limits, and coordination of dry‑run page generation.'
+description: 'The generate:scheduler module orchestrates the asynchronous documentation generation pipeline. It manages the scheduling and execution of LLM prompt requests, tracks inter‑page and symbol dependencies, handles caching and retry logic, and coordinates the rendering of final output pages. The public‑facing scope centers on the PageGenerationScheduler class, which owns the work queue, dependency tracker, page renderer, and worker lifecycle, along with supporting types such as DependencyTracker, WorkQueue, PageRenderer, and the various work‑item structs used to drive prompt analysis and page production.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-The `generate:scheduler` module orchestrates the end‑to‑end execution of the documentation generation pipeline. It owns the central scheduling logic that prepares generation contexts from project models and configuration, manages dependency‑driven work flows for both per‑symbol analyses and full‑page prompts, and drives asynchronous LLM requests. Internally, it maintains a work queue with deferred enqueuing, a dependency tracker to determine when pages become ready to render, and a page renderer that produces final Markdown output. The module also handles caching of prompt responses, failure tracking with retry limits, and coordination of dry‑run page generation.
-
-The public interface includes the main `PageGenerationScheduler` class with its `run` entry point and worker task mechanism, factory functions such as `prepare_generation_context` and `build_directory_index_pages`, and helper utilities for prompt caching identity, error construction, and page summary collection. It exposes the complete scheduling, execution, and output lifecycle for the generation pipeline while encapsulating concurrency control, rate limiting, and persistent cache interaction.
+The `generate:scheduler` module orchestrates the asynchronous documentation generation pipeline. It manages the scheduling and execution of LLM prompt requests, tracks inter‑page and symbol dependencies, handles caching and retry logic, and coordinates the rendering of final output pages. The public‑facing scope centers on the `PageGenerationScheduler` class, which owns the work queue, dependency tracker, page renderer, and worker lifecycle, along with supporting types such as `DependencyTracker`, `WorkQueue`, `PageRenderer`, and the various work‑item structs used to drive prompt analysis and page production.
 
 ## Imports
 
@@ -30,7 +28,6 @@ The public interface includes the main `PageGenerationScheduler` class with its 
 - [`http`](../http/index.md)
 - [`network`](../network/index.md)
 - [`protocol`](../protocol/index.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Dependency Diagram
@@ -54,9 +51,7 @@ graph LR
 
 ## Internal Structure
 
-The `generate:scheduler` module orchestrates the documentation generation pipeline by decomposing the workload into three phases: symbol analysis, page prompt completion, and page rendering. It defines internal types such as `PreparedGenerationContext`, `DependencyTracker`, `WorkQueue`, and `PageRenderer` to manage concurrency, track inter-page dependencies, and coordinate asynchronous LLM requests. The central `PageGenerationScheduler` class owns the event loop, work queue, and renderer, and exposes entry points like `run`, `submit_after_symbol_analysis`, and `try_submit_ready_pages` to drive generation step by step.
-
-Internally, the module imports broadly from the generation stack — including `generate:analysis`, `generate:cache`, `generate:diagram`, `generate:markdown`, `generate:page`, `generate:planner`, and `generate:symbol` — as well as from `http`, `network`, and `protocol` for LLM communication. Implementation is confined to a single module partition (`scheduler.cppm`) and uses an anonymous namespace to encapsulate private data structures, helper functions (e.g., `deduplicate_prompt_requests`, `wrap_prompt_output_for_embed`, `extract_summary_from_prompt_output`), and the `WorkerActivity` RAII guard. This layering ensures that scheduling logic remains decoupled from the specifics of prompt construction, caching, and rendering, while still retaining full control over generation ordering and failure handling.
+The `generate:scheduler` module orchestrates the entire documentation generation pipeline. It imports lower‑level generation modules (`generate:analysis`, `generate:cache`, `generate:diagram`, `generate:dryrun`, `generate:evidence`, `generate:markdown`, `generate:model`, `generate:page`, `generate:planner`, `generate:symbol`), alongside `config`, `extract`, `http`, `network`, `protocol`, and `support`. The module is implemented as a single translation unit with internal linkage helpers and a main orchestrator class `PageGenerationScheduler`. Its internal decomposition includes `DependencyTracker` for managing page dependency graphs and readiness, `WorkQueue` with deferred and immediate queues for concurrency‑safe task scheduling, `PageRenderer` for output accumulation and dry‑run support, and several lightweight value types (`PageState`, `PreparedPrompt`, `SymbolAnalysisWork`, `PagePromptWork`, etc.). The scheduler splits work into symbol‑analysis tasks and page‑prompt tasks, tracks progress via counters and caches, enforces retry limits, and coordinates a pool of worker activities that dequeue from the work queue. Free functions in the internal namespace handle context preparation, symbol enumeration, prompt deduplication, directory‑index construction, and evidence packaging. The overall structure is a single‑module design where `PageGenerationScheduler` acts as the top‑level state machine, owning the tracker, work queue, renderer, and analysis state, and exposing a single public `run()` method.
 
 ## Related Pages
 

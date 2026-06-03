@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::extract::cache'
-description: 'The clore::extract::cache namespace provides a caching subsystem for the extraction pipeline, responsible for storing, retrieving, and validating cached results of compilation artifact extraction. It defines core data types such as CacheRecord, CacheError, CacheKeyParts, and DependencySnapshot, along with specialized entries for precompiled modules (CliceCachePCMEntry), precompiled headers (CliceCachePCHEntry), and dependencies (CliceCacheDepEntry). Key functions include build_compile_signature and hash_file for generating deterministic identifiers, build_cache_key and split_cache_key for constructing and decomposing composite cache keys, and paired load/save functions (load_extract_cache, save_extract_cache, load_clice_cache, save_clice_cache) to persist and retrieve extraction results. The namespace also provides capture_dependency_snapshot and dependencies_changed to track file modifications and determine when a cached entry is stale.'
+description: 'The clore::extract::cache namespace provides a persistence and validation layer for the Clore extract phase, enabling reuse of previously computed compilation outputs. It defines core data structures such as CacheRecord, CliceCacheDepEntry, CliceCacheData, CliceCachePCMEntry, CliceCachePCHEntry, CacheKeyParts, and DependencySnapshot to represent cached extraction state, dependency entries, precompiled modules, and key components. These types work together with a family of functions—including build_compile_signature, build_cache_key, hash_file, capture_dependency_snapshot, dependencies_changed, split_cache_key, and the load/save pairs load_extract_cache/save_extract_cache and load_clice_cache/save_clice_cache—to generate deterministic cache keys, compute file hashes, snapshot dependency sets, detect staleness, and serialize entry data. The namespace’s primary architectural responsibility is to avoid redundant extraction work by storing and retrieving valid cached artifacts, thereby accelerating successive build operations while maintaining correctness through change detection.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-The `clore::extract::cache` namespace provides a caching subsystem for the extraction pipeline, responsible for storing, retrieving, and validating cached results of compilation artifact extraction. It defines core data types such as `CacheRecord`, `CacheError`, `CacheKeyParts`, and `DependencySnapshot`, along with specialized entries for precompiled modules (`CliceCachePCMEntry`), precompiled headers (`CliceCachePCHEntry`), and dependencies (`CliceCacheDepEntry`). Key functions include `build_compile_signature` and `hash_file` for generating deterministic identifiers, `build_cache_key` and `split_cache_key` for constructing and decomposing composite cache keys, and paired load/save functions (`load_extract_cache`, `save_extract_cache`, `load_clice_cache`, `save_clice_cache`) to persist and retrieve extraction results. The namespace also provides `capture_dependency_snapshot` and `dependencies_changed` to track file modifications and determine when a cached entry is stale.
-
-Architecturally, the namespace decouples caching logic from the core extraction algorithms, enabling reuse of previously computed results and efficient invalidation based on dependency changes. It acts as a centralized cache manager that normalizes file paths, computes hashes, and ensures thread-safe storage and retrieval, ultimately improving build performance by avoiding redundant work.
+The `clore::extract::cache` namespace provides a persistence and validation layer for the Clore extract phase, enabling reuse of previously computed compilation outputs. It defines core data structures such as `CacheRecord`, `CliceCacheDepEntry`, `CliceCacheData`, `CliceCachePCMEntry`, `CliceCachePCHEntry`, `CacheKeyParts`, and `DependencySnapshot` to represent cached extraction state, dependency entries, precompiled modules, and key components. These types work together with a family of functions—including `build_compile_signature`, `build_cache_key`, `hash_file`, `capture_dependency_snapshot`, `dependencies_changed`, `split_cache_key`, and the load/save pairs `load_extract_cache`/`save_extract_cache` and `load_clice_cache`/`save_clice_cache`—to generate deterministic cache keys, compute file hashes, snapshot dependency sets, detect staleness, and serialize entry data. The namespace’s primary architectural responsibility is to avoid redundant extraction work by storing and retrieving valid cached artifacts, thereby accelerating successive build operations while maintaining correctness through change detection.
 
 ## Diagram
 
@@ -42,77 +40,54 @@ graph TD
 
 ### `clore::extract::cache::CacheError`
 
-Declaration: `extract/cache.cppm:20`
+Declaration: `src/extract/cache.cppm:36`
 
-Definition: `extract/cache.cppm:20`
+Definition: `src/extract/cache.cppm:36`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-The `clore::extract::cache::CacheError` type represents an error that occurred during cache operations within the extraction layer. It is used to propagate and handle failures related to caching mechanisms such as record retrieval or data processing. The struct likely encapsulates an error code or descriptive information to aid in diagnosing cache-related issues.
-
-#### Invariants
-
-- The `message` member stores a human-readable error description.
-- No other fields or invariants are implied by the evidence.
-
-#### Key Members
-
-- `message`
-
-#### Usage Patterns
-
-- Used to represent errors in cache operations.
+`CacheError` is an error type representing failures that occur during cache extraction operations within the `clore::extract::cache` subsystem. It is used to communicate and handle error conditions when the cache layer encounters issues such as missing records, invalid state, or processing failures.
 
 ### `clore::extract::cache::CacheKeyParts`
 
-Declaration: `extract/cache.cppm:24`
+Declaration: `src/extract/cache.cppm:40`
 
-Definition: `extract/cache.cppm:24`
+Definition: `src/extract/cache.cppm:40`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-The `clore::extract::cache::CacheKeyParts` struct represents the decomposed components of a cache key used within the extraction cache system. It isolates the individual fields or segments that together uniquely identify a cached entry, allowing key construction, comparison, or serialization to be performed at a granular level. The struct is typically employed when building or querying cache records such as `clore::extract::cache::CacheRecord` and interacts with dependency and PCM entries like `clore::extract::cache::CliceCacheDepEntry` and `clore::extract::cache::CliceCachePCMEntry`.
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- The struct is a trivial aggregate; all members are default‑initialized.
-- `path` and `compile_signature` together form the complete cache key; no other fields contribute.
-- The `compile_signature` is expected to be a non‑negative integer, but no range constraint is enforced by the type.
+- `path` is expected to be a valid file path
+- `compile_signature` is expected to be a unique identifier for a compilation configuration
 
 #### Key Members
 
-- `path` of type `std::string`
-- `compile_signature` of type `std::uint64_t`
+- `path`
+- `compile_signature`
 
 #### Usage Patterns
 
-- Instances of `CacheKeyParts` are created directly via aggregate initialization.
-- The struct is used as a lookup key in cache maps or hash tables for extracted data.
-- The two members are combined (e.g., by hashing) to produce a single cache key in cache implementations.
+- Used as a key in caching mechanisms
+- Combined to uniquely identify cache entries
 
 ### `clore::extract::cache::CacheRecord`
 
-Declaration: `extract/cache.cppm:36`
+Declaration: `src/extract/cache.cppm:52`
 
-Definition: `extract/cache.cppm:36`
+Definition: `src/extract/cache.cppm:52`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
-
-#### Key Members
-
-- `compile_signature`
-- `source_hash`
-- `ast_deps`
-- `scan`
-- `ast`
 
 ### `clore::extract::cache::CliceCacheData`
 
-Declaration: `extract/cache.cppm:68`
+Declaration: `src/extract/cache.cppm:84`
 
-Definition: `extract/cache.cppm:68`
+Definition: `src/extract/cache.cppm:84`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
@@ -120,52 +95,48 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- All vectors are default-constructible.
-- Members are publicly accessible and directly modifiable.
-- No member functions impose additional constraints.
+- No invariants are enforced beyond the types of the members.
 
 #### Key Members
 
-- paths
-- pch
-- pcm
+- `paths`
+- `pch`
+- `pcm`
 
 #### Usage Patterns
 
-- Constructed as a simple container for cache entries.
-- Likely populated during cache loading and consumed by extraction logic.
-- May be serialized or passed between components in the caching subsystem.
+- Used to hold extracted cache data for PCH and PCM entries along with their paths.
 
 ### `clore::extract::cache::CliceCacheDepEntry`
 
-Declaration: `extract/cache.cppm:46`
+Declaration: `src/extract/cache.cppm:62`
 
-Definition: `extract/cache.cppm:46`
+Definition: `src/extract/cache.cppm:62`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-The struct `clore::extract::cache::CliceCacheDepEntry` represents a single dependency entry within the clice workspace cache. It is part of a set of cache structures designed to be schema‑compatible with the server‑side `clice/src/server/workspace.cpp CacheData`, ensuring that cached dependency information can be reliably exchanged between the extract tool and the server. This entry typically captures metadata for a compiled dependency, such as its location, hash, or state, and is used together with other cache entries like `CliceCachePCMEntry` and `CliceCachePCHEntry` to form a complete `CacheRecord`.
+The struct `clore::extract::cache::CliceCacheDepEntry` represents a single entry in the workspace dependency cache. It is part of the set of cache structures designed to be schema‑compatible with the corresponding `CacheData` type in `clice/src/server/workspace.cpp`. This entry stores the cached information for one file dependency, allowing the extraction phase to reuse previously computed dependency data and avoid redundant processing.
 
 #### Invariants
 
-- Fields are POD types with zero-initialized defaults
-- Struct layout is meant to be compatible with an existing schema
+- Both fields are default-initialized to 0.
+- The struct layout is compatible with an external schema.
 
 #### Key Members
 
-- `path` (`std::uint32_t`)
-- `hash` (`std::uint64_t`)
+- `path`
+- `hash`
 
 #### Usage Patterns
 
-- Used as an entry in the clice workspace cache
-- Stores an association between a path identifier and a content hash
+- Used as an element in cache structures for clice workspace.
+- Likely stored in collections (e.g., vectors) and serialized/deserialized for cache persistence.
 
 ### `clore::extract::cache::CliceCachePCHEntry`
 
-Declaration: `extract/cache.cppm:51`
+Declaration: `src/extract/cache.cppm:67`
 
-Definition: `extract/cache.cppm:51`
+Definition: `src/extract/cache.cppm:67`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
@@ -173,243 +144,213 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- hash is an integral value uniquely identifying the PCH content
-- `source_file` indexes a source file in the associated source file table
-- `build_at` stores a timestamp of when the PCH was built
-- bound likely represents a count or limit for dependency tracking
-- deps contains zero or more `CliceCacheDepEntry` objects that are valid dependencies
+- filename corresponds to a valid PCH file path
+- hash is computed from PCH content
+- `build_at` stores a valid timestamp
 
 #### Key Members
 
+- hash
+- deps
 - filename
 - `source_file`
-- hash
-- bound
 - `build_at`
-- deps
+- bound
 
 #### Usage Patterns
 
-- Used as an element in a cache container for PCH entries
-- Likely compared or hashed via the `hash` field
+- Stored in a cache container keyed by PCH identity
+- Checked for staleness using hash and deps
 - Serialized/deserialized for persistent caching
-- Accessed by cache lookup or insertion routines
 
 ### `clore::extract::cache::CliceCachePCMEntry`
 
-Declaration: `extract/cache.cppm:60`
+Declaration: `src/extract/cache.cppm:76`
 
-Definition: `extract/cache.cppm:60`
+Definition: `src/extract/cache.cppm:76`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-The `CliceCachePCMEntry` struct represents a single cached entry for a precompiled module (PCM) within the Clice extract cache system. It encapsulates metadata and state necessary to track, store, and retrieve cached PCM data, including its associated dependencies and records. This type is used internally by the caching logic, working alongside related types such as `CliceCacheData`, `CacheRecord`, `CliceCacheDepEntry`, and `CliceCachePCHEntry` to manage the lifecycle of PCM cache entries across extraction operations.
+The struct `clore::extract::cache::CliceCachePCMEntry` represents a cache entry for a precompiled module (PCM). It is part of the `clore::extract::cache` subsystem, which stores and retrieves module-related data to avoid redundant extraction or compilation. This type is used alongside other cache entries, such as `CliceCachePCHEntry` and `CliceCacheDepEntry`, to form a complete record of the dependencies and compiled artifacts within the Clice cache.
 
 #### Invariants
 
-- `source_file` and `build_at` are default-initialized to `0`.
-- `deps` may be empty; no size constraints are specified.
+- Default initializers for numeric fields (`source_file`, `build_at`) are zero.
+- String fields (`filename`, `module_name`) are default-constructed as empty strings.
+- The `deps` vector is default-constructed as empty.
 
 #### Key Members
 
-- `filename`
-- `module_name`
-- `source_file`
-- `build_at`
-- `deps`
-
-#### Usage Patterns
-
-- Used as an element in a cache container for `PCMs`.
-- Likely serialized or deserialized for persistence.
-- Iterated over or accessed by other cache management functions.
+- `filename` (`std::string`)
+- `source_file` (`std::uint32_t`)
+- `module_name` (`std::string`)
+- `build_at` (`std::int64_t`)
+- `deps` (`std::vector<CliceCacheDepEntry>`)
 
 ### `clore::extract::cache::DependencySnapshot`
 
-Declaration: `extract/cache.cppm:29`
+Declaration: `src/extract/cache.cppm:45`
 
-Definition: `extract/cache.cppm:29`
+Definition: `src/extract/cache.cppm:45`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
-
-#### Invariants
-
-- `build_at` defaults to `0`
-- No explicit invariants enforced on vector sizes or values
-
-#### Key Members
-
-- `files`
-- `hashes`
-- `mtimes`
-- `build_at`
-
-#### Usage Patterns
-
-- Used to serialize and cache dependency data
-- Captures the state of dependencies at a specific build time
 
 ## Functions
 
 ### `clore::extract::cache::build_cache_key`
 
-Declaration: `extract/cache.cppm:76`
+Declaration: `src/extract/cache.cppm:92`
 
-Definition: `extract/cache.cppm:228`
+Definition: `src/extract/cache.cppm:244`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-`clore::extract::cache::build_cache_key` constructs a cache‑key string from a file‑path or identifier (first argument of type `std::string_view`) and a hash value (second argument of type `std::uint64_t`). The returned `std::string` is a deterministic composite key that uniquely identifies a cached extraction for a given source unit and its compile signature. Callers should supply the same raw identifier and the compile signature (typically obtained from `clore::extract::cache::build_compile_signature`) to produce a key that can later be decomposed with `clore::extract::cache::split_cache_key` or used directly with other cache storage and retrieval functions such as `clore::extract::cache::load_extract_cache` or `clore::extract::cache::save_extract_cache`.
+Constructs a composite cache key from a file path and a compile signature. The caller provides a `std::string_view` identifying a source file and a `std::uint64_t` compile signature obtained from the build environment. The returned `std::string` can be used to store and retrieve cached extraction data for that specific compilation unit, ensuring cache entries are unique per file and build configuration.
 
 #### Usage Patterns
 
-- used to generate a cache key before storing or retrieving extract cache data
-- called from `save_extract_cache` and `load_extract_cache` related flows
+- called to generate a cache lookup key from a file path and its compile signature
+- used prior to storing or retrieving cached extraction data
 
 ### `clore::extract::cache::build_compile_signature`
 
-Declaration: `extract/cache.cppm:74`
+Declaration: `src/extract/cache.cppm:90`
 
-Definition: `extract/cache.cppm:224`
+Definition: `src/extract/cache.cppm:240`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-The function `clore::extract::cache::build_compile_signature` computes a cache signature for a given compilation artifact identified by the supplied reference. It accepts a `const int &` parameter representing the source identity and returns a `std::uint64_t` value suitable as a key component in cache lookups. Callers must ensure the argument corresponds to a valid compilation unit; the function does not modify the argument and provides a deterministic result for identical inputs.
+The function `clore::extract::cache::build_compile_signature` accepts a `const int &` (typically an open file descriptor representing a compilation artefact or source file) and returns a `std::uint64_t` hash value. Its caller-facing responsibility is to produce a deterministic compile‑time signature that can later be used as part of a cache key to detect changes in the compilation inputs. The contract ensures that identical inputs produce the same signature, and different inputs are overwhelmingly likely to produce different signatures. This signature is an essential building block for the cache validity check, often combined with other metadata (e.g., via `build_cache_key`) to form a complete cache entry identifier. Callers should assume the signature is safe to compare for equality but must not rely on its internal representation.
 
 #### Usage Patterns
 
-- Used within the cache system to compute a unique identifier for a compile entry.
+- called to obtain a hash-based signature for a compile entry
+- used internally by cache operations to identify compilation units
 
 ### `clore::extract::cache::capture_dependency_snapshot`
 
-Declaration: `extract/cache.cppm:83`
+Declaration: `src/extract/cache.cppm:99`
 
-Definition: `extract/cache.cppm:282`
+Definition: `src/extract/cache.cppm:298`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-The function `clore::extract::cache::capture_dependency_snapshot` obtains a snapshot of the current dependency state associated with the given integer reference. Callers provide a `const int &` argument that identifies the context or artifact for which dependencies are to be captured. On success, the function returns a `DependencySnapshot` representing the captured dependency graph; on failure, it returns a `CacheError` indicating the reason. This function is the primary mechanism to record dependency information for later invalidation or comparison via `dependencies_changed`.
+The function `clore::extract::cache::capture_dependency_snapshot` accepts a cache entry identifier (`const int &`) and returns a `std::expected<DependencySnapshot, CacheError>`. It is the caller's responsibility to inspect the returned expected value; on success the contained `DependencySnapshot` records the current dependency state for the given entry, ready for comparison via functions like `dependencies_changed`. On failure, a `CacheError` reports why the snapshot could not be taken. This function does not alter the cache—it only captures a consistent view of dependencies for subsequent change‑detection workflows.
 
 #### Usage Patterns
 
-- Used to snapshot file dependencies before cache insertion or validation
-- Called in conjunction with `dependencies_changed` to determine whether cached data is stale
-- Supports cache invalidation logic in the extract pipeline by computing file hashes and modification times
+- capturing current dependency state for cache validation
+- used before checking whether cached extraction data is stale
 
 ### `clore::extract::cache::dependencies_changed`
 
-Declaration: `extract/cache.cppm:86`
+Declaration: `src/extract/cache.cppm:102`
 
-Definition: `extract/cache.cppm:401`
+Definition: `src/extract/cache.cppm:417`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-The function `clore::extract::cache::dependencies_changed` accepts a `DependencySnapshot` and returns `true` if any of the tracked dependencies have been modified since the snapshot was taken. It is the caller’s primary way to determine whether cached extraction results are still valid; a return value of `true` indicates that the snapshot no longer accurately reflects the current state of the filesystem and that a fresh extraction will be required.
+The function `clore::extract::cache::dependencies_changed` accepts a `const DependencySnapshot &` and returns a `bool`. Its responsibility is to determine whether the set of dependencies captured in that snapshot has changed relative to an internally known prior state. It returns `true` if any dependency has changed, and `false` otherwise.
 
-This function examines each dependency in the snapshot, typically using file metadata or content hashes, and returns `true` as soon as a single changed dependency is detected. The caller should treat the return value as a boolean predicate: if the function returns `false`, the snapshot is still consistent and the corresponding cache entry can be reused.
+Callers should supply a valid snapshot obtained through an appropriate capture mechanism. The function provides a simple, caller‑facing query of dependency staleness, enabling cache‑invalidation decisions without exposing the underlying comparison logic.
 
 #### Usage Patterns
 
-- Called during cache validation to determine if a cached extraction is still valid
-- Used in conjunction with `capture_dependency_snapshot` and `load_extract_cache`/`save_extract_cache` to manage cache freshness
-- Employed in places where an up-to-date dependency check is needed before using cached data
+- called to test whether a cached extract is still valid
+- invoked after loading a cached dependency snapshot to detect changes
 
 ### `clore::extract::cache::hash_file`
 
-Declaration: `extract/cache.cppm:81`
+Declaration: `src/extract/cache.cppm:97`
 
-Definition: `extract/cache.cppm:270`
+Definition: `src/extract/cache.cppm:286`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-The `clore::extract::cache::hash_file` function accepts a `std::string_view` identifying a file and returns a `std::expected<std::uint64_t, CacheError>`. On success, it yields a 64‑bit unsigned integer hash value that uniquely represents the file’s contents; on failure, it returns a `CacheError` indicating why the hash could not be computed (for example, if the file cannot be opened or read). Callers can use this hash to detect changes to the file and to construct cache keys or signatures within the caching subsystem.
+The function `hash_file` computes a deterministic hash of the file identified by the given path. It returns a `std::uint64_t` digest on success, or a `CacheError` if the file cannot be read or hashing fails. Callers can use this hash as a compact representation of file content for cache validation or key derivation.
 
 #### Usage Patterns
 
-- hashing source files for cache key generation
-- computing file hashes for change detection in the caching system
+- used to compute a content hash for caching decisions
+- used by cache validation or key building routines
 
 ### `clore::extract::cache::load_clice_cache`
 
-Declaration: `extract/cache.cppm:95`
+Declaration: `src/extract/cache.cppm:111`
 
-Definition: `extract/cache.cppm:670`
+Definition: `src/extract/cache.cppm:686`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-`clore::extract::cache::load_clice_cache` accepts a `std::string_view` identifying a cache entry and attempts to retrieve the corresponding `CliceCacheData`. On success it returns the cache data; on failure it returns a `CacheError` indicating the reason, such as a missing or corrupt cache entry. The caller must supply a valid cache key or path (as used when previously saving via `save_clice_cache`), and should handle the `std::expected` result to distinguish between a successful load and an error condition. This function does not modify the class state and remains exception‑safe with respect to the return type.
+The function `clore::extract::cache::load_clice_cache` accepts a `std::string_view` identifying the cache entry (typically a file path or cache key) and attempts to retrieve the corresponding `CliceCacheData`. On success it returns the cached data; on failure it returns a `CacheError` indicating the reason (e.g., missing cache entry, corrupted data, or permissions issue). Callers should handle both the success and error cases, and may use `save_clice_cache` to populate the cache before calling this function.
 
 #### Usage Patterns
 
-- call to load previously cached clice extraction data
-- used before performing extraction to check for valid cache
-- paired with `save_clice_cache` to persist cache data
+- loading clice cache data from a workspace
+- initializing clice cache from disk before extraction
 
 ### `clore::extract::cache::load_extract_cache`
 
-Declaration: `extract/cache.cppm:88`
+Declaration: `src/extract/cache.cppm:104`
 
-Definition: `extract/cache.cppm:457`
+Definition: `src/extract/cache.cppm:473`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-The function `clore::extract::cache::load_extract_cache` accepts a cache key as a `std::string_view` and returns an `int` indicating the result. It is responsible for retrieving a previously stored extract cache entry associated with the given key. The caller must ensure that a corresponding entry exists (e.g., has been saved via `clore::extract::cache::save_extract_cache`); otherwise, the function’s behavior is undefined. The returned integer represents the loaded cache data, and the caller should interpret it in conjunction with the cache validation functions, such as `clore::extract::cache::dependencies_changed`, to determine whether the cache is still valid.
+Loads the extract cache associated with the provided identifier. The function accepts a `std::string_view` naming the cache entry and returns an `int` that signals the outcome of the load operation.
 
 #### Usage Patterns
 
-- called to initialize or refresh the extract cache before performing extraction
-- used in conjunction with `save_extract_cache` for cache persistence
-- invoked to reuse previously cached extraction results across build sessions
+- called to load existing cache before extraction
+- returns empty map if cache file does not exist
 
 ### `clore::extract::cache::save_clice_cache`
 
-Declaration: `extract/cache.cppm:97`
+Declaration: `src/extract/cache.cppm:113`
 
-Definition: `extract/cache.cppm:710`
+Definition: `src/extract/cache.cppm:726`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-The function `clore::extract::cache::save_clice_cache` attempts to persist the given `CliceCacheData` to the cache storage using the provided cache key, which is typically a `std::string_view` representing a validated key obtained from `clore::extract::cache::build_cache_key` or a similar source. On success, it returns an empty `std::expected<void, CacheError>`; on failure, it returns a `CacheError` describing the serialization or I/O error. Callers must ensure the `CliceCacheData` object is complete and the key is valid, as the function does not validate key format internally.
+The function `clore::extract::cache::save_clice_cache` persists a given `CliceCacheData` object into the cache, associating it with the provided identifier (typically a file path or cache key). On success, it returns `std::expected<void, CacheError>` with an empty value; on failure, it returns a `CacheError` describing the problem (e.g., I/O error, serialization failure). Callers must ensure the identifier is a valid cache location and that the `CliceCacheData` is fully constructed before calling this function. This function is the counterpart to `clore::extract::cache::load_clice_cache`, which retrieves previously saved data.
 
 #### Usage Patterns
 
-- Called after extracting build data to persist the `CliceCacheData` for later reuse
-- Used with `workspace_root` identifying the project root
+- Persists compiled cache data to disk
+- Called after cache computation to save results
+- Used in conjunction with `load_clice_cache` for cache retrieval
 
 ### `clore::extract::cache::save_extract_cache`
 
-Declaration: `extract/cache.cppm:91`
+Declaration: `src/extract/cache.cppm:107`
 
-Definition: `extract/cache.cppm:533`
+Definition: `src/extract/cache.cppm:549`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-The function `clore::extract::cache::save_extract_cache` persists the cached result of an extraction for a given cache key and compile signature. The caller provides a `std::string_view` identifying the extraction source (typically a normalized path) and a `const int &` representing the compilation signature (for example, a hash of compile inputs). On success, the cache is stored so that a subsequent call to `clore::extract::cache::load_extract_cache` with the same key can retrieve it. If the operation fails, a `CacheError` value is returned to indicate the failure reason, such as a storage or permission issue. This function is the counterpart of `load_extract_cache` and is intended to be invoked after a successful extraction to update the cache for reuse.
+Persist the extract cache entry identified by a string key and associated with the given compile signature. The function attempts to write the cache data to the underlying storage; on success it returns `std::expected<void, CacheError>` containing no value, and on failure it returns a `CacheError` describing the cause of the error.
 
 #### Usage Patterns
 
-- Used to persist extract cache data after extraction
-- Called to save a snapshot of cache records to disk for later reloading
+- called after completing extraction to persist cache records
+- used to update the extract cache with new data
+- invoked with workspace root and collected `CacheRecord` map
 
 ### `clore::extract::cache::split_cache_key`
 
-Declaration: `extract/cache.cppm:79`
+Declaration: `src/extract/cache.cppm:95`
 
-Definition: `extract/cache.cppm:238`
+Definition: `src/extract/cache.cppm:254`
 
 Implementation: [`Module extract:cache`](../../../../modules/extract/cache.md)
 
-The function `clore::extract::cache::split_cache_key` accepts a `std::string_view` representing a composite cache key and returns a `std::expected<CacheKeyParts, CacheError>`. On success, the returned `CacheKeyParts` contains the individual components of the key, allowing callers to inspect or use them separately. On failure, a `CacheError` is returned indicating why the key could not be parsed—for example, if the input format is invalid or malformed.
-
-Callers are expected to provide a cache key that was previously produced by `clore::extract::cache::build_cache_key` or a similar source. The function does not modify any state and is purely a decomposition utility. It is safe to call at any point; the result must be checked before using the contained `CacheKeyParts`.
+The function `clore::extract::cache::split_cache_key` accepts a `std::string_view` representing a cache key and returns a `std::expected<CacheKeyParts, CacheError>`. It is the caller’s responsibility to provide a valid cache key, typically one produced by `build_cache_key`. If the supplied key cannot be parsed into its constituent parts—for example, if the format is malformed or the data is corrupt—the function returns a `CacheError` describing the failure. On success, the caller receives a `CacheKeyParts` value containing the decomposed components of the key, enabling access to the original fields used to construct the key.
 
 #### Usage Patterns
 
-- Used to decompose cache keys built by `build_cache_key`
-- Called during cache lookups to extract the path and signature from a composite key
-- Validates cache key format before further processing
+- called to decompose a cache key into path and signature components for cache lookup or verification
 
 ## Related Pages
 

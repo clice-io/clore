@@ -1,5 +1,29 @@
 module;
 
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <functional>
+#include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <ranges>
+#include <set>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include <climits>
+
 #include "llvm/Support/Error.h"
 #include "llvm/Support/xxhash.h"
 #include "clang/AST/ASTConsumer.h"
@@ -16,7 +40,6 @@ module;
 
 export module extract:ast;
 
-import std;
 import :compiler;
 import :model;
 import support;

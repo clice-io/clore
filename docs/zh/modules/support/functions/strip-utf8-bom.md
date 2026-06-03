@@ -1,6 +1,6 @@
 ---
 title: 'clore::support::striputf8bom'
-description: '函数 clore::support::strip_utf8_bom 在接收到一个 std::string_view 后，首先判断其长度是否不小于 UTF-8 BOM 字节序列（即常量 kUtf8Bom，对应 0xEF, 0xBB, 0xBF）的长度。若满足条件，则依次将输入的前三个字节通过 static_cast<unsigned char> 转换为无符号字符，并与 kUtf8Bom 中的对应字节进行相等性比较。仅在三个字节全部匹配时，才调用 text.substr(...) 跳过前三个字节并返回剩余部分的视图；否则直接返回原始 text 视图。该函数不涉及外部依赖，仅依赖同一匿名命名空间内定义的 kUtf8Bom 常量。'
+description: '函数 clore::support::strip_utf8_bom 的算法实现简洁直接：首先检查输入字符串视图 text 的长度是否至少等于 UTF‑8 BOM 序列的长度（由常量 kUtf8Bom 定义），然后逐一比较前三个字节与 BOM 的字节值。若完全匹配，则通过 text.substr(std::size(kUtf8Bom)) 返回去掉前导 BOM 后的子视图；否则直接返回原始 text。内部控制流仅为一个条件分支，无循环或递归。该函数依赖于匿名命名空间中的常量 kUtf8Bom 来获取 BOM 字节序列，并依赖标准库的 std::string_view 及其 substr 成员方法执行视图裁剪。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module support](../index.md)
 
-Declaration: `support/logging.cppm:83`
+Declaration: `src/support/logging.cppm:106`
 
-Definition: `support/logging.cppm:470`
+Definition: `src/support/logging.cppm:493`
 
 Declaration: [`Namespace clore::support`](../../../namespaces/clore/support/index.md)
 
@@ -29,7 +29,7 @@ auto strip_utf8_bom(std::string_view text) -> std::string_view {
 }
 ```
 
-函数 `clore::support::strip_utf8_bom` 在接收到一个 `std::string_view` 后，首先判断其长度是否不小于 UTF-8 BOM 字节序列（即常量 `kUtf8Bom`，对应 `0xEF, 0xBB, 0xBF`）的长度。若满足条件，则依次将输入的前三个字节通过 `static_cast<unsigned char>` 转换为无符号字符，并与 `kUtf8Bom` 中的对应字节进行相等性比较。仅在三个字节全部匹配时，才调用 `text.substr(...)` 跳过前三个字节并返回剩余部分的视图；否则直接返回原始 `text` 视图。该函数不涉及外部依赖，仅依赖同一匿名命名空间内定义的 `kUtf8Bom` 常量。
+函数 `clore::support::strip_utf8_bom` 的算法实现简洁直接：首先检查输入字符串视图 `text` 的长度是否至少等于 UTF‑8 BOM 序列的长度（由常量 `kUtf8Bom` 定义），然后逐一比较前三个字节与 BOM 的字节值。若完全匹配，则通过 `text.substr(std::size(kUtf8Bom))` 返回去掉前导 BOM 后的子视图；否则直接返回原始 `text`。内部控制流仅为一个条件分支，无循环或递归。该函数依赖于匿名命名空间中的常量 `kUtf8Bom` 来获取 BOM 字节序列，并依赖标准库的 `std::string_view` 及其 `substr` 成员方法执行视图裁剪。
 
 ## Side Effects
 
@@ -37,12 +37,12 @@ No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- the parameter `text` of type `std::string_view`
-- the internal constant `kUtf8Bom` (presumably a byte array)
+- `text` parameter
+- `kUtf8Bom` constant
 
 ## Usage Patterns
 
-- used by `clore::support::read_utf8_text_file` to remove a BOM before further text processing
+- Stripping BOM from text loaded by `clore::support::read_utf8_text_file`
 
 ## Called By
 

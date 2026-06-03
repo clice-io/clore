@@ -1,6 +1,6 @@
 ---
 title: 'Module anthropic'
-description: 'clore::net::anthropic 模块是 clore::net 库中专用于与 Anthropic Claude API 交互的核心组件。它通过公开的异步调用函数（如 call_llm_async、call_completion_async 和模板化的 call_structured_async）封装了向 Messages API 发送请求并处理响应的完整流程。该模块负责构建符合 Anthropic 协议的消息结构、工具调用和结构化输出，管理 API 密钥及基础 URL 等环境配置，并将原始 HTTP 响应解析为可用的内部表示。'
+description: 'anthropic 模块封装了与 Anthropic 大语言模型 API 的完整交互逻辑。它位于 clore::net 命名空间，提供三个异步入口函数 call_completion_async、call_llm_async 和 call_structured_async，分别支持通用的文本补全、直接 LLM 调用以及强制结构化输出。模块内部通过 protocol 子命名空间管理请求构建（如 build_request_json、build_messages_url）、响应解析（parse_response、parse_response_text、parse_tool_arguments）以及辅助块构造（make_text_block、make_role_message、make_tool_use_block、make_tool_result_block）；schema 子命名空间提供 response_format 和 function_tool 模板函数，用于将 C++ 类型映射为 Anthropic 可识别的工具与 JSON Schema。此外，detail::Protocol 类整合了环境变量读取（API 密钥、基础 URL、API 版本）、请求头构建、URL 生成以及响应格式化等底层操作，所有异步请求均通过 http 模块发起并由 kota::event_loop 驱动。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-`clore::net::anthropic` 模块是 `clore::net` 库中专用于与 Anthropic Claude API 交互的核心组件。它通过公开的异步调用函数（如 `call_llm_async`、`call_completion_async` 和模板化的 `call_structured_async`）封装了向 Messages API 发送请求并处理响应的完整流程。该模块负责构建符合 Anthropic 协议的消息结构、工具调用和结构化输出，管理 API 密钥及基础 URL 等环境配置，并将原始 HTTP 响应解析为可用的内部表示。
-
-在实现层面，该模块将其职责划分为 `protocol`、`detail` 和 `schema` 等子命名空间。`protocol` 子模块提供了构建请求 URL、生成请求 JSON、解析文本与工具参数等公开辅助函数；`detail` 子模块包含协议实现细节（如 `Protocol` 类、环境变量常量和内部消息构建函数）；`schema` 子模块则负责生成工具和响应格式的 JSON Schema 定义。整体上，模块依赖 `client`、`http`、`provider`、`schema` 和 `support` 等底层基础设施，为上层应用提供简洁的异步 LLM 交互接口。
+`anthropic` 模块封装了与 Anthropic 大语言模型 API 的完整交互逻辑。它位于 `clore::net` 命名空间，提供三个异步入口函数 `call_completion_async`、`call_llm_async` 和 `call_structured_async`，分别支持通用的文本补全、直接 LLM 调用以及强制结构化输出。模块内部通过 `protocol` 子命名空间管理请求构建（如 `build_request_json`、`build_messages_url`）、响应解析（`parse_response`、`parse_response_text`、`parse_tool_arguments`）以及辅助块构造（`make_text_block`、`make_role_message`、`make_tool_use_block`、`make_tool_result_block`）；`schema` 子命名空间提供 `response_format` 和 `function_tool` 模板函数，用于将 C++ 类型映射为 Anthropic 可识别的工具与 JSON Schema。此外，`detail::Protocol` 类整合了环境变量读取（API 密钥、基础 URL、API 版本）、请求头构建、URL 生成以及响应格式化等底层操作，所有异步请求均通过 `http` 模块发起并由 `kota::event_loop` 驱动。
 
 ## Imports
 
@@ -20,7 +18,6 @@ template: doc
 - [`protocol`](../protocol/index.md)
 - [`provider`](../provider/index.md)
 - [`schema`](../schema/index.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Dependency Diagram
@@ -46,45 +43,46 @@ graph LR
 
 ### `clore::net::anthropic::detail::Protocol`
 
-Declaration: `network/anthropic.cppm:654`
+Declaration: `src/network/anthropic.cppm:663`
 
-Definition: `network/anthropic.cppm:654`
+Definition: `src/network/anthropic.cppm:663`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
-`Protocol` 是一个纯静态结构体，作为 Anthropic provider 的协议适配器。所有成员方法均为静态，通过委托至 `clore::net::anthropic::protocol` 命名空间下的底层实现来完成请求构建与响应解析工作。其内部维护一个关键不变式：所有请求的构建依赖于一个由 `read_environment` 从环境变量读取的 `EnvironmentConfig`，其中包含 `api_base` 和 `api_key`；`build_headers` 据此构造包含 `Content-Type`、`x-api-key` 以及 `anthropic-version` 的 HTTP 头部；`build_url` 调用 `build_messages_url` 生成完整的请求 URL。`build_request_json` 与 `parse_response` 分别负责序列化 `CompletionRequest` 和反序列化原始 HTTP 响应。后者的实现中特别处理了空响应体和 HTTP 状态码 >=400 的情况：当响应体为空时直接返回错误；当状态码指示失败时，将状态码与响应摘要（或仅状态码）合并为格式化的 `LLMError`。`capability_probe_key` 通过组合提供者名称、基础 URL 及模型名称生成用于能力探测的键，这依赖于 `EnvironmentConfig` 和 `CompletionRequest` 中的 `model` 字段。整个设计将 Anthropic 特有的协议细节封装在 `detail` 命名空间内，对外暴露统一的 `CompletionRequest`/`CompletionResponse` 接口。
+`clore::net::anthropic::detail::Protocol` 是一个纯静态方法的结构体，本身不持有任何数据，作为 Anthropic 聊天 API 的无状态协议适配器。其所有成员均为静态，核心职责是将高层 `CompletionRequest` 与原始 HTTP 交互分离，并将具体协议细节（如 URL 构建、请求体序列化、响应解析）委托给 `clore::net::anthropic::protocol` 命名空间中的独立函数。关键的不变量是：环境配置必须通过 `read_environment` 从环境变量获取，且 `build_url`、`build_headers`、`build_request_json` 和 `parse_response` 等步骤均依赖该配置；各个方法之间不共享内部状态，仅通过参数传递数据。
+
+重要成员实现中，`parse_response` 在委托给 `protocol::parse_response` 之前，会先检查原始响应的 `body` 是否为空并返回错误；若 HTTP 状态码 >= 400，则将 `protocol::parse_response` 的解析错误或状态码信息包装为统一的 `LLMError`（优先提取响应体中的错误摘要）。`capability_probe_key` 组合了 `provider_name()`、环境中的 `api_base` 和请求中的 `model` 来生成缓存探针键。`build_headers` 硬编码了三个必要头字段：`Content-Type`、`x-api-key` 和 `anthropic-version`，其中版本号取自常量 `kAnthropicVersion`。这种设计使得协议适配层高度内聚，且易于独立测试每个转换步骤。
 
 #### Invariants
 
-- All member functions are static and have no side effects beyond their return values
-- No mutable state is stored in the struct
-- Credentials are obtained exclusively from environment variables specified by `kAnthropicBaseUrlEnv` and `kAnthropicApiKeyEnv`
-- API version is fixed via `kAnthropicVersion`
-- Delegation to `clore::net::anthropic::protocol` functions is consistent for request building and response parsing
+- 所有成员函数都是静态的，不依赖任何实例状态。
+- `parse_response` 在 HTTP 状态码 >= 400 时会生成 `LLMError`，即使主体解析成功。
+- `read_environment` 使用硬编码的环境变量名（来自常量 `kAnthropicBaseUrlEnv` 和 `kAnthropicApiKeyEnv`）。
+- `build_headers` 始终设置 `Content-Type`、`x-api-key` 和 `anthropic-version` 三个标头。
 
 #### Key Members
 
-- `read_environment`
-- `build_url`
-- `build_headers`
 - `build_request_json`
 - `parse_response`
+- `build_headers`
+- `build_url`
+- `read_environment`
 - `provider_name`
 - `capability_probe_key`
 
 #### Usage Patterns
 
-- Used as a protocol policy in generic LLM networking code that expects static methods for each lifecycle step
-- Provides a uniform interface for Anthropic so that higher‑level machinery can be provider‑agnostic
-- Expected to be thread‑safe because it holds no state and all methods are stateless
+- 作为协议适配器，直接调用静态方法来执行完整的 API 请求生命周期。
+- 在高层抽象（如 `clore::net` 中的通用客户端）中通过模板参数传递，以支持不同的 AI 提供者。
+- `capability_probe_key` 用于缓存或探测特定模型的能力，结合提供者名称、API 基地址和模型名。
 
 #### Member Functions
 
 ##### `clore::net::anthropic::detail::Protocol::build_headers`
 
-Declaration: `network/anthropic.cppm:667`
+Declaration: `src/network/anthropic.cppm:676`
 
-Definition: `network/anthropic.cppm:667`
+Definition: `src/network/anthropic.cppm:676`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
@@ -112,9 +110,9 @@ static auto build_headers(const clore::net::detail::EnvironmentConfig& environme
 
 ##### `clore::net::anthropic::detail::Protocol::build_request_json`
 
-Declaration: `network/anthropic.cppm:685`
+Declaration: `src/network/anthropic.cppm:694`
 
-Definition: `network/anthropic.cppm:685`
+Definition: `src/network/anthropic.cppm:694`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
@@ -129,9 +127,9 @@ static auto build_request_json(const CompletionRequest& request)
 
 ##### `clore::net::anthropic::detail::Protocol::build_url`
 
-Declaration: `network/anthropic.cppm:663`
+Declaration: `src/network/anthropic.cppm:672`
 
-Definition: `network/anthropic.cppm:663`
+Definition: `src/network/anthropic.cppm:672`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
@@ -145,9 +143,9 @@ static auto build_url(const clore::net::detail::EnvironmentConfig& environment) 
 
 ##### `clore::net::anthropic::detail::Protocol::capability_probe_key`
 
-Declaration: `network/anthropic.cppm:717`
+Declaration: `src/network/anthropic.cppm:726`
 
-Definition: `network/anthropic.cppm:717`
+Definition: `src/network/anthropic.cppm:726`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
@@ -164,9 +162,9 @@ static auto capability_probe_key(const clore::net::detail::EnvironmentConfig& en
 
 ##### `clore::net::anthropic::detail::Protocol::parse_response`
 
-Declaration: `network/anthropic.cppm:690`
+Declaration: `src/network/anthropic.cppm:699`
 
-Definition: `network/anthropic.cppm:690`
+Definition: `src/network/anthropic.cppm:699`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
@@ -199,9 +197,9 @@ static auto parse_response(const clore::net::detail::RawHttpResponse& raw_respon
 
 ##### `clore::net::anthropic::detail::Protocol::provider_name`
 
-Declaration: `network/anthropic.cppm:713`
+Declaration: `src/network/anthropic.cppm:722`
 
-Definition: `network/anthropic.cppm:713`
+Definition: `src/network/anthropic.cppm:722`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
@@ -215,9 +213,9 @@ static auto provider_name() -> std::string_view {
 
 ##### `clore::net::anthropic::detail::Protocol::read_environment`
 
-Declaration: `network/anthropic.cppm:655`
+Declaration: `src/network/anthropic.cppm:664`
 
-Definition: `network/anthropic.cppm:655`
+Definition: `src/network/anthropic.cppm:664`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
@@ -237,51 +235,55 @@ static auto read_environment()
 
 ### `clore::net::anthropic::detail::kAnthropicApiKeyEnv`
 
-Declaration: `network/anthropic.cppm:651`
+Declaration: `src/network/anthropic.cppm:660`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
-It defines the environment variable name expected to contain the Anthropic API key, used in conjunction with the `environment` variable to retrieve the key at runtime.
+This variable serves as the key for retrieving the Anthropic API key from the process environment (e.g., via `std::getenv`). It is defined in the `detail` namespace and is expected to be read internally when constructing API requests, though no direct read sites are shown in the evidence.
 
 #### Mutation
 
 No mutation is evident from the extracted code.
+
+#### Usage Patterns
+
+- Used as environment variable name to retrieve the Anthropic API key
 
 ### `clore::net::anthropic::detail::kAnthropicBaseUrlEnv`
 
-Declaration: `network/anthropic.cppm:650`
+Declaration: `src/network/anthropic.cppm:659`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
-该常量提供一个字符串字面量，表示一个环境变量键。由于其 `constexpr` 性质，值固定不变，程序可能在运行时通过读取同名环境变量来获取自定义的 API 基 URL。当前证据未展示具体的使用代码路径。
+This variable holds the environment variable name `"ANTHROPIC_BASE_URL"`. The code uses it to look up an optional configuration value from the runtime environment, likely to override a default base URL for the Anthropic API client. It is never reassigned or modified after initialization.
 
 #### Mutation
 
 No mutation is evident from the extracted code.
+
+#### Usage Patterns
+
+- Used as a key to read the `ANTHROPIC_BASE_URL` environment variable at runtime
 
 ### `clore::net::anthropic::detail::kAnthropicVersion`
 
-Declaration: `network/anthropic.cppm:652`
+Declaration: `src/network/anthropic.cppm:661`
 
 Declaration: [`Namespace clore::net::anthropic::detail`](../../namespaces/clore/net/anthropic/detail/index.md)
 
-This variable holds the value `"2023-06-01"` and is intended to be used as the version identifier in HTTP requests to the Anthropic API. It is a read-only constant, typically included in request headers or payloads to specify the API version.
+The variable `clore::net::anthropic::detail::kAnthropicVersion` is declared as `constexpr`, meaning it is immutable and its value is fixed at compile time. The evidence does not show direct reads or mutations, but its type and name indicate it is intended to be used as the version string in Anthropic API requests.
 
 #### Mutation
 
 No mutation is evident from the extracted code.
-
-#### Usage Patterns
-
-- Used as API version identifier in HTTP requests
 
 ### `clore::net::anthropic::protocol::detail::kDefaultMaxTokens`
 
-Declaration: `network/anthropic.cppm:23`
+Declaration: `src/network/anthropic.cppm:32`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-This constant is read by `clore::net::anthropic::protocol::build_request_json` to set a fallback value when no explicit maximum token limit is provided. It participates in request construction logic as a default parameter.
+该常量在构建请求 JSON 的函数 `build_request_json` 中被引用，作为请求中 `max_tokens` 字段的默认值。它是只读的，不参与任何修改操作。
 
 #### Mutation
 
@@ -289,136 +291,144 @@ No mutation is evident from the extracted code.
 
 #### Usage Patterns
 
-- Used as default maximum token value in `build_request_json`
+- 作为 `build_request_json` 函数中 `max_tokens` 的默认值
 
 ## Functions
 
 ### `clore::net::anthropic::call_completion_async`
 
-Declaration: `network/anthropic.cppm:729`
+Declaration: `src/network/anthropic.cppm:738`
 
-Definition: `network/anthropic.cppm:771`
+Definition: `src/network/anthropic.cppm:780`
 
 Declaration: [`Namespace clore::net::anthropic`](../../namespaces/clore/net/anthropic/index.md)
 
-该函数是 `clore::net::call_completion_async` 模板的一个特化实例化，使用 `clore::net::anthropic::detail::Protocol` 作为协议策略参数。内部流程上，它通过协程 `co_await` 等待底层实现完成任务，然后调用 `.or_fail()` 方法将潜在的 `LLMError` 传播给调用者。依赖关系集中在 `detail::Protocol` 上，该协议封装了Anthropic API 的特定于端点的逻辑，包括由 `detail::Protocol::build_request_json`、`detail::Protocol::build_url`、`detail::Protocol::build_headers` 和 `detail::Protocol::parse_response` 等方法实现的请求构建与响应解析。所有与 HTTP 通信及结果协调的复杂部分都由 `clore::net` 命名空间中的通用协程基础设施处理。
+该函数是一个薄包装，它将传入的 `CompletionRequest` 和 `kota::event_loop` 直接转发给 `clore::net::call_completion_async<detail::Protocol>`，并通过 `.or_fail()` 将返回的协程结果转换为 `kota::task<CompletionResponse, LLMError>`。其内部控制流完全由模板函数 `clore::net::call_completion_async` 和协议实现 `detail::Protocol` 驱动，自身不执行任何预处理或后处理。
 
 #### Side Effects
 
-- Initiates an asynchronous network I/O operation to the Anthropic completion endpoint.
+- Moves the `CompletionRequest` argument, transferring ownership of its resources
+- Schedules an asynchronous operation on the provided event loop via the returned task
 
 #### Reads From
 
-- `CompletionRequest request` (by value, reads from the passed object)
-- `kota::event_loop& loop`
+- request parameter
+- loop parameter
+- `detail::Protocol` type
+- `clore::net::call_completion_async` template
 
 #### Usage Patterns
 
-- Used to perform asynchronous completion requests to the Anthropic API
-- Typically awaited by callers in a coroutine context
+- Called as a coroutine to perform an asynchronous completion request to the Anthropic API
+- Used in conjunction with `kota::event_loop` for async execution
+- Serves as a high-level entry point for Anthropic completion interactions
 
 ### `clore::net::anthropic::call_llm_async`
 
-Declaration: `network/anthropic.cppm:739`
+Declaration: `src/network/anthropic.cppm:742`
 
-Definition: `network/anthropic.cppm:789`
+Definition: `src/network/anthropic.cppm:787`
 
 Declaration: [`Namespace clore::net::anthropic`](../../namespaces/clore/net/anthropic/index.md)
 
-该函数是 `clore::net::anthropic` 命名空间中面向 Anthropic API 的高层封装，它通过协程委托给模板化的 `clore::net::call_llm_async<detail::Protocol>`，以 `detail::Protocol` 作为策略类处理协议细节。内部实现中，`call_llm_async` 将 `model`、`system_prompt` 及 `prompt` 原样传递给泛型函数，并将 `loop` 的指针传入以绑定事件循环的异步执行环境。返回的 `kota::task` 通过 `.or_fail()` 将内部错误统一转换为 `LLMError` 异常或错误码形式，从而对外提供一致的接口签名。整个流程不涉及自定义重试或流控逻辑，完全依赖底层 `Protocol` 实现中的构建请求、解析响应以及环境变量读取（如 `kAnthropicApiKeyEnv` 与 `kAnthropicBaseUrlEnv`）等行为。
+该函数是模板 `clore::net::call_llm_async` 的一个特化适配器，将 Anthropic 协议的具体实现绑定到通用调用路径上。实现主体是一个协程，直接委托给 `clore::net::call_llm_async<detail::Protocol>`，并把传入的 `model`、`system_prompt`、`PromptRequest` 对象以及 `kota::event_loop&` 转发给该模板；随后通过 `.or_fail()` 将底层协议返回的错误类型统一包装为 `LLMError`。这一层抽象使得调用者无需了解 `detail::Protocol` 的存在，同时也复用了 `clore::net` 命名空间下针对不同LLM提供商的统一异步接口。
+
+内部流程完全由 `clore::net::call_llm_async` 模板驱动，它会通过 `detail::Protocol` 的元方法（如 `build_request_json`、`build_headers`、`build_url`、`parse_response` 等）构造 HTTP 请求并解析响应。该函数不执行任何额外的数据加工或流控逻辑，仅充当类型转换与协程调度的薄中间层。依赖包括 `detail::Protocol` 中定义的协议常量（如 `kAnthropicApiKeyEnv`、`kAnthropicBaseUrlEnv`、`kAnthropicVersion`）以及 `clore::net::anthropic::protocol` 命名空间中的辅助函数（如 `build_messages_url`、`validate_request`、`format_schema_instruction` 等），这些都在模板的实例化过程中被间接使用。
 
 #### Side Effects
 
-- triggers an HTTP request to the Anthropic API
-- allocates memory for the coroutine frame and the returned task
-- may invoke I/O completion callbacks on the event loop
+- initiates asynchronous network communication with the Anthropic API
+- moves ownership of the `PromptRequest` parameter
+- may schedule work on the referenced `kota::event_loop`
 
 #### Reads From
 
-- the `model` parameter
-- the `system_prompt` parameter
-- the `prompt` parameter
-- the `loop` parameter (`kota::event_loop` reference)
-- the return value of the inner `clore::net::call_llm_async` call
+- `model` (`std::string_view`)
+- `system_prompt` (`std::string_view`)
+- `request` (`PromptRequest`, by rvalue reference)
+- `loop` (`kota::event_loop`&)
+- implementation details of `detail::Protocol`
 
 #### Writes To
 
-- the coroutine promise object (indirectly through `co_return`)
-- the task result storage (through the returned task)
+- the returned `kota::task<std::string, LLMError>`
+- the referenced `kota::event_loop` (indirectly by adding pending work)
 
 #### Usage Patterns
 
-- called by higher-level Anthropic wrappers to interact with the model
-- used when asynchronous LLM completion with a system prompt is needed
+- called to send a prompt to the Anthropic LLM asynchronously within an event-loop-driven application
+- typically awaited by higher-level coroutines
 
 ### `clore::net::anthropic::call_llm_async`
 
-Declaration: `network/anthropic.cppm:733`
+Declaration: `src/network/anthropic.cppm:748`
 
-Definition: `network/anthropic.cppm:778`
+Definition: `src/network/anthropic.cppm:798`
 
 Declaration: [`Namespace clore::net::anthropic`](../../namespaces/clore/net/anthropic/index.md)
 
-该函数是一个协程包装器，其核心算法完全委托给模板函数 `clore::net::call_llm_async`，并以 `clore::net::anthropic::detail::Protocol` 作为策略参数。调用者提供的 `model`、`system_prompt`、`PromptRequest` 以及事件循环指针被原样转发；`kota::task` 返回类型通过 `.or_fail()` 将内部错误转换为协程异常，从而对外暴露统一的 `LLMError` 错误类型。整个实现不包含 Anthropic 专有逻辑，而是依赖模板特化来注入协议细节。
+该函数是一个轻量级协程转发器，其核心逻辑完全委托给模板化函数 `clore::net::call_llm_async`，以 `clore::net::anthropic::detail::Protocol` 作为策略参数。实现体使用 `co_await` 等待异步调用完成，随后链式调用 `or_fail()` 将 `kota::task` 中可能携带的 `LLMError` 转换为预期结果，从而对外表现为一个直接返回 `std::string` 的协程。
 
-内部控制流由 `detail::Protocol` 驱动，该策略类负责从环境变量（如 `clore::net::anthropic::detail::kAnthropicApiKeyEnv` 和 `clore::net::anthropic::detail::kAnthropicBaseUrlEnv`）读取认证凭据与 API 基础 URL，通过 `build_request_json`、`build_url`、`build_headers` 等成员函数构造 HTTP 请求，并在收到响应后调用 `parse_response` 进行 JSON 解析。响应解析会处理 `stop_reason`、`content_value` 以及可选的工具调用输出，并支持通过 `protocol::detail::validate_request` 和 `protocol::detail::format_schema_instruction` 进行结构化输出约束。所有请求构建和响应处理均使用 `int` 类型表示中间 JSON 节点，最终将文本内容提取为 `std::string` 返回。
+内部不涉及任何业务逻辑或协议细节；所有请求构建、认证头设置、JSON 序列化以及响应解析均由 `detail::Protocol` 类型通过其成员方法（如 `build_request_json`、`build_headers`、`parse_response` 等）在模板化调用链中完成。该函数仅负责将 `model`、`system_prompt`、`prompt` 和 `loop` 指针原样传递，并处理潜在的失败路径。
 
 #### Side Effects
 
-- 执行对 Anthropic API 的异步 HTTP 请求
-- 可能触发网络 I/O 和事件循环回调
-- 分配协程帧和相关缓冲区
+- 发起异步网络 I/O
+- 注册事件循环回调
+- 分配内存用于 HTTP 请求构造和响应解析
 
 #### Reads From
 
-- 参数 `model` 字符串
-- 参数 `system_prompt` 字符串
-- 参数 `request` 对象
-- 参数 `loop` 事件循环引用
-- 模板参数 `detail::Protocol` 定义的协议
+- model
+- `system_prompt`
+- prompt
+- `kota::event_loop` &loop
+
+#### Writes To
+
+- 返回的 `kota::task` 内部状态（最终产生响应字符串）
+- 事件循环的 I/O 等待队列（间接注册回调）
 
 #### Usage Patterns
 
-- 作为异步 LLM 调用的入口点
-- 被需要非阻塞大语言模型交互的协程或任务驱动代码调用
-- 常与 `kota::event_loop` 结合使用实现并发
+- 作为高层入口点调用 Anthropic LLM
+- 可能被 `call_structured_async` 等函数包装
 
 ### `clore::net::anthropic::call_structured_async`
 
-Declaration: `network/anthropic.cppm:746`
+Declaration: `src/network/anthropic.cppm:755`
 
-Definition: `network/anthropic.cppm:801`
+Definition: `src/network/anthropic.cppm:810`
 
 Declaration: [`Namespace clore::net::anthropic`](../../namespaces/clore/net/anthropic/index.md)
 
-该函数是一个轻量级协程包装器，它将所有实参直接转发给泛型函数 `clore::net::call_structured_async`，并特化其模板参数为 `detail::Protocol` 和调用方提供的类型 `T`。调用链通过 `co_await` 进入底层实现，并使用 `.or_fail()` 将潜在的 `LLMError` 转换为协程异常。它依赖 `detail::Protocol` 作为协议适配器来构建请求、解析响应，并隐式地从环境变量（如 `kAnthropicApiKeyEnv` 和 `kAnthropicBaseUrlEnv`）中读取认证与端点配置，但自身不执行任何额外的预处理或后处理逻辑。
+此函数是 `clore::net::anthropic` 命名空间中面向用户的类型安全入口，它完全将工作委托给内部的 `clore::net::call_structured_async`，并硬编码 `clore::net::anthropic::detail::Protocol` 作为协议实现。调用时，它会将模型标识符、系统提示和用户提示转发至下层通用请求构造器，同时把用户提供的 `kota::event_loop` 传递给异步任务。最后通过 `.or_fail()` 将底层错误统一转换为 `LLMError` 类型。整个实现没有额外的逻辑或状态修改，仅充当薄薄的适配层，依赖 `clore::net::call_structured_async` 完成核心的 HTTP 请求、响应解析、结构化输出提取等流程。
 
 #### Side Effects
 
-- invokes asynchronous network I/O via delegation to `clore::net::call_structured_async`
+- 执行异步网络请求
 
 #### Reads From
 
-- `model`
+- model
 - `system_prompt`
-- `prompt`
-- `loop`
+- prompt
+- loop
+- T
 
 #### Usage Patterns
 
-- used to make a structured call to the Anthropic API
-- called when a typed response is required instead of raw text
-- integrated into coroutine-based asynchronous workflows
+- 用于发起异步结构化 LLM 调用并获取类型化结果
 
 ### `clore::net::anthropic::protocol::append_tool_outputs`
 
-Declaration: `network/anthropic.cppm:209`
+Declaration: `src/network/anthropic.cppm:218`
 
-Definition: `network/anthropic.cppm:628`
+Definition: `src/network/anthropic.cppm:637`
 
 Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clore/net/anthropic/protocol/index.md)
 
-函数 `clore::net::anthropic::protocol::append_tool_outputs` 的实现将三个参数直接转发给 `clore::net::protocol::append_tool_outputs`。通用函数会遍历 `outputs` 中的每个 `ToolOutput`，调用 `detail::make_tool_result_block` 将其转换为工具结果内容块，然后配合 `detail::make_role_message` 将结果块封装为一条新消息并追加到 `history` 末尾，同时结合 `response` 中的 `stop_reason` 与 `content` 字段来确定消息的角色与位置。该过程依赖 `clore::net::protocol` 命名空间中的通用附加逻辑以及 `make_tool_result_block` 和 `make_role_message` 等底层辅助函数。
+该函数直接转发调用至 `clore::net::protocol::append_tool_outputs`，将接收的 `history`、`response` 和 `outputs` 参数原样传递。内部控制流仅限于简单的委托，不进行任何额外校验、转换或日志记录。其核心依赖是 `clore::net::protocol::append_tool_outputs`，该函数实际执行工具输出追加到对话历史的逻辑。
 
 #### Side Effects
 
@@ -430,26 +440,22 @@ No observable side effects are evident from the extracted code.
 - `response` (const reference to `CompletionResponse`)
 - `outputs` (span of `ToolOutput`)
 
-#### Writes To
-
-- Return value (`std::expected<std::vector<Message>, LLMError>`)
-
 #### Usage Patterns
 
-- Used to incorporate tool call results into the message history
-- Called after parsing a response that contains tool use blocks
+- Callers use this to incorporate tool outputs into a message history after receiving a response from the Anthropic API.
+- Typically invoked after a completion response that requested tool use, to prepare the next request.
 
 ### `clore::net::anthropic::protocol::build_messages_url`
 
-Declaration: `network/anthropic.cppm:201`
+Declaration: `src/network/anthropic.cppm:210`
 
-Definition: `network/anthropic.cppm:224`
+Definition: `src/network/anthropic.cppm:233`
 
 Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clore/net/anthropic/protocol/index.md)
 
 Implementation: [Implementation](functions/build-messages-url.md)
 
-该函数首先将输入的 `api_base` 复制到本地 `url` 字符串中，并通过循环移除尾部可能存在的连续斜杠字符，对基础 URL 进行标准化。接着判断标准化后的 `url` 是否已以 `"/v1"` 结尾：若是，则直接调用 `clore::net::detail::append_url_path` 追加 `"messages"` 路径段；否则追加 `"v1/messages"` 完整路径。整个流程的核心依赖是 `clore::net::detail::append_url_path`，用于安全拼接路径段并处理 `/` 分隔。
+该函数首先复制传入的 `api_base` 字符串，然后通过一个循环移除尾部所有斜杠，完成基本规范化。接着，它检查规范化后的 URL 是否以 `/v1` 结尾；如果是，则直接调用 `clore::net::detail::append_url_path` 拼接路径段 `"messages"`；否则，先拼接 `"v1"` 再拼接 `"messages"`。这种分支处理避免了在已有正确版本前缀的 URL 上冗余添加，同时确保生成统一的 `.../v1/messages` 端点路径。唯一的依赖是 `clore::net::detail::append_url_path`，它负责处理路径分隔符的语义。
 
 #### Side Effects
 
@@ -457,86 +463,87 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- 参数 `api_base`
-
-#### Usage Patterns
-
-- 被 `clore::net::anthropic::detail::Protocol::build_url` 调用
-
-### `clore::net::anthropic::protocol::build_request_json`
-
-Declaration: `network/anthropic.cppm:203`
-
-Definition: `network/anthropic.cppm:235`
-
-Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clore/net/anthropic/protocol/index.md)
-
-该函数首先通过调用 `detail::validate_request` 对传入的 `CompletionRequest` 执行验证，若校验失败则直接返回错误。随后构造一个空的 JSON 对象作为根节点，依次填入 `model` 和 `max_tokens`，并创建一个空的 `messages` 数组。遍历请求中的每条消息时，使用 `std::visit` 按消息类型进行分支处理：对于 `SystemMessage` 类型，通过 `detail::append_text_with_gap` 将内容逐步累加到 `system_text` 字符串中，不生成单独的消息对象；对于 `UserMessage` 和 `AssistantMessage`，分别调用 `detail::make_role_message` 构造角色为 `"user"` 或 `"assistant"` 的 JSON 对象；对于 `AssistantToolCallMessage`，先由 `detail::make_text_block` 和 `detail::make_tool_use_block` 生成多个内容块并组合为数组，再通过 `detail::make_role_message` 封装为角色消息；其余情况（工具结果消息）则利用 `detail::make_tool_result_block` 生成块，同样组合后以 `"user"` 角色包装。这些非系统消息对象在生成后会被逐个推入 `messages` 数组。
-
-若请求携带 `response_format`，则调用 `detail::format_schema_instruction` 生成 schema 指令，并追加到 `system_text` 中。非空的 `system_text` 会被作为 `"system"` 字段插入根对象，随后将 `messages` 数组整体置入。对于非空的工具列表，逐一构造包含 `name`、`description` 和 `input_schema` 的 JSON 对象，组成 `tools` 数组并插入根对象。接着处理 `tool_choice` 字段：根据 `ToolChoiceAuto`、`ToolChoiceRequired`、`ToolChoiceNone` 或具名工具类型，分别设置 `type` 为 `"auto"`、`"any"`、`"none"` 或 `"tool"`（后者还需附加 `name`）；若 `parallel_tool_calls` 显式为 `false`，则额外向 `tool_choice` 对象写入 `disable_parallel_tool_use` 为 `true`。最后通过 `kota::codec::json::to_string` 将构建好的 JSON 根对象序列化为字符串，并作为成功结果返回。
-
-#### Side Effects
-
-- Allocates and populates multiple JSON objects and arrays dynamically
-- Moves ownership of JSON values and strings into the returned `std::expected`
-
-#### Reads From
-
-- `request` parameter (fields `model`, `messages`, `response_format`, `tools`, `tool_choice`, `parallel_tool_calls`)
-- `detail::kDefaultMaxTokens` constant
-- `detail::format_schema_instruction` call
-- `detail::validate_request` call
-- `clore::net::detail::make_empty_object`, `make_empty_array`, `insert_string_field`, `clone_object` helper functions
+- parameter `api_base` (a `std::string_view`)
 
 #### Writes To
 
-- Local variables `root`, `messages`, `system_text`, `serialized`, `blocks`, `object`, `tools`, `tool_choice`, `encoded`
-- Returned string (the serialized JSON)
+- local variable `url` (a `std::string`) modified in place
+- return value (newly allocated `std::string`)
 
 #### Usage Patterns
 
-- Called by higher‑level network code to prepare the Anthropic request body
-- Consumed as the payload for HTTP POST requests to the Anthropic Messages API
+- used by `clore::net::anthropic::detail::Protocol::build_url` to produce the final messages request URL
+- called with various API base `URLs` to generate the appropriate versioned endpoint
+
+### `clore::net::anthropic::protocol::build_request_json`
+
+Declaration: `src/network/anthropic.cppm:212`
+
+Definition: `src/network/anthropic.cppm:244`
+
+Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clore/net/anthropic/protocol/index.md)
+
+`clore::net::anthropic::protocol::build_request_json` 通过顺序组装一个 JSON 对象来实现对 Anthropic Messages API 请求体的构建。首先调用 `detail::validate_request` 校验输入 `request`，失败则返回错误；随后创建根对象 `root` 并插入 `"model"` 和 `"max_tokens"`。核心逻辑遍历 `request.messages`，通过 `std::visit` 按消息类型分发：`SystemMessage` 使用 `detail::append_text_with_gap` 累加到 `system_text`；`UserMessage` 和 `AssistantMessage` 直接委托 `detail::make_role_message` 生成角色消息对象；`AssistantToolCallMessage` 通过 `detail::make_text_block` 和 `detail::make_tool_use_block` 将文本与工具调用分别构建为数组块，再合并为角色消息；`ToolResultMessage` 则使用 `detail::make_tool_result_block` 创建结果块后包装为 `"user"` 角色消息。所有非空消息对象压入 `messages` 数组。之后，若 `request.response_format` 存在，通过 `detail::format_schema_instruction` 生成架构指令并追加到 `system_text`；非空 `system_text` 作为 `"system"` 字段插入 `root`。接着将 `messages` 挂入根对象。工具声明部分：若 `request.tools` 非空，遍历每个工具，构造包含 `"name"`、`"description"` 及克隆自 `tool.parameters` 的 `"input_schema"` 的对象，加入 `"tools"` 数组。工具选择逻辑：当 `request.tool_choice` 存在或 `parallel_tool_calls` 显式为 `false` 时，创建 `"tool_choice"` 对象；根据 `tool_choice` 的具体类型（`ToolChoiceAuto`→`"auto"`，`ToolChoiceRequired`→`"any"`，`ToolChoiceNone`→`"none"`，具名工具→`"tool"` 并附加 `"name"`）设置 `"type"`，若 `parallel_tool_calls` 为 `false` 则额外插入 `"disable_parallel_tool_use": true` 字段。最终使用 `kota::codec::json::to_string` 将 `root` 序列化为 JSON 字符串返回，序列化失败则包装为 `LLMError` 错误。
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- `request.model`
+- `request.messages`
+- `request.response_format`
+- `request.tools`
+- `request.tool_choice`
+- `request.parallel_tool_calls`
+- `detail::kDefaultMaxTokens`
+
+#### Usage Patterns
+
+- building HTTP request body for Anthropic API
+- serializing a `CompletionRequest` to JSON before sending
 
 ### `clore::net::anthropic::protocol::detail::append_text_with_gap`
 
-Declaration: `network/anthropic.cppm:25`
+Declaration: `src/network/anthropic.cppm:34`
 
-Definition: `network/anthropic.cppm:25`
+Definition: `src/network/anthropic.cppm:34`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
 Implementation: [Implementation](functions/append-text-with-gap.md)
 
-该函数实现向目标字符串追加文本，并在存在已有内容时插入一个双换行分隔符。算法首先检查输入 `text` 是否为空，若为空则直接返回；否则判断 `target` 是否非空，若非空则在 `target` 末尾追加 `"\n\n"` 作为间隙，最后将 `text` 内容追加到 `target` 中。整个过程仅依赖标准字符串操作，不涉及外部库或复杂依赖。
+函数 `clore::net::anthropic::protocol::detail::append_text_with_gap` 负责在逐步构建协议消息内容时，将一段新文本追加到目标字符串 `target` 中，并在需要时插入一个空行作为分隔。算法首先检查输入 `text` 是否为空，若为空则立即返回，避免无效操作。若 `text` 非空，则检查 `target` 当前是否非空——只有非空时才会在尾部追加两个换行符 `"\n\n"`，从而在已有内容与新增内容之间形成一个显式的间隙。最后将 `text` 直接追加到 `target` 末尾。整个函数仅依赖标准库的字符串拼接操作，无其它外部依赖，其内部控制流为简单的条件判断与字符串连接。
 
 #### Side Effects
 
-- mutates the `target` string by appending `text` and possibly a separator
+- Appends the content of `text` to the string referenced by `target`, potentially reallocating memory.
 
 #### Reads From
 
-- text parameter
-- target parameter (for emptiness check)
+- `text` (input `string_view`)
+- `target` (string content for checking emptiness)
 
 #### Writes To
 
-- target parameter
+- `target` (modified by appending `text` and optional newlines)
 
 #### Usage Patterns
 
-- called by `build_request_json` to assemble request body
-- used for appending text blocks with a separating gap
+- Called by `clore::net::anthropic::protocol::build_request_json` to add text blocks.
 
 ### `clore::net::anthropic::protocol::detail::format_schema_instruction`
 
-Declaration: `network/anthropic.cppm:176`
+Declaration: `src/network/anthropic.cppm:185`
 
-Definition: `network/anthropic.cppm:176`
+Definition: `src/network/anthropic.cppm:185`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-该函数首先检查 `format.schema` 的可选值状态。若其不存在，直接返回一条固定的默认字符串。若存在，则调用 `json::to_string` 将模式序列化。若序列化失败，函数委托给 `clore::net::detail::unexpected_json_error` 生成并返回 `std::expected` 的错误变体。若成功，则使用 `std::format` 将模式名称 `format.name` 和序列化的 JSON 文本拼接成一条结构化的指令字符串。整个过程不涉及循环或递归，仅依赖 JSON 序列化以及内部错误工厂函数 `clore::net::detail::unexpected_json_error`。
+函数首先检查 `format.schema` 是否为空。如果为空，直接返回一个固定的通用指令字符串，指示模型只返回JSON对象且不包含Markdown围栏。这个捷径避免了不必要的开销。
+
+若模式存在，函数调用 `json::to_string` 尝试将其序列化为JSON字符串。序列化失败时，通过 `clore::net::detail::unexpected_json_error` 构造一个错误结果返回。成功则使用 `std::format` 拼接包含模式名称和序列化模式的指令，要求模型返回匹配该模式的JSON对象。整个流程依赖 `json::to_string` 的序列化能力和 `std::format` 的格式化支持，无其他复杂控制流。
 
 #### Side Effects
 
@@ -546,112 +553,104 @@ No observable side effects are evident from the extracted code.
 
 - `format.schema`
 - `format.name`
+- `json::to_string` reading the schema object
 
 #### Usage Patterns
 
-- called to create the system instruction for a structured response from the model
-- used when constructing a request with a specified response schema
+- Called to generate system instruction text for LLM requests
+- Used in constructing the final prompt when a response schema is specified
+- Provides fallback default instruction when no schema is set
 
 ### `clore::net::anthropic::protocol::detail::make_role_message`
 
-Declaration: `network/anthropic.cppm:154`
+Declaration: `src/network/anthropic.cppm:139`
 
-Definition: `network/anthropic.cppm:154`
+Definition: `src/network/anthropic.cppm:139`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-函数 `clore::net::anthropic::protocol::detail::make_role_message` 构建一个表示角色消息的 JSON 对象。它首先调用 `clore::net::detail::make_empty_object` 分配一个空对象，若失败则提前返回错误。随后使用 `clore::net::detail::insert_string_field` 设置 `"role"` 字段为传入的 `role` 值，同样进行错误检查。最后直接将 `blocks` 数组移动赋值给 `"content"` 字段，完成消息组装并返回该对象。整个过程依赖 `clore::net::detail` 下的两个工具函数进行底层 JSON 构造与错误传播，不涉及复杂的控制流或循环。
+该函数构造一个 JSON 对象表示角色消息。它首先委托 `clore::net::detail::make_empty_object` 创建一个空的对象容器，若失败则立即以对应的 `LLMError` 向上传播错误。随后顺序调用 `clore::net::detail::insert_string_field` 依次设置 `"role"` 和 `"content"` 字段：在设置 `"content"` 之前会通过 `clore::net::detail::normalize_utf8` 对输入文本执行 UTF‑8 规范化。任何一步插入失败都会终止流程并返回错误。整个控制流遵循即时失败模式，确保要么返回一个结构完整的角色消息对象，要么通过 `std::expected` 机制报告失败原因。其依赖完全集中在 `clore::net::detail` 命名空间下的底层 JSON 构建与字符串处理工具上，无其他外部逻辑分支。
 
 #### Side Effects
 
-- Allocates a new `json::Object`
-- Transfers ownership of the blocks `json::Array` into the object
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- role parameter of type `std::string_view`
-- blocks parameter of type `json::Array`
-
-#### Writes To
-
-- Returned `json::Object`
+- `role` (`std::string_view`)
+- `text` (`std::string_view`)
 
 #### Usage Patterns
 
-- Building request messages for the Anthropic API
-- Internal helper for constructing role-based message objects
+- Constructing a user or assistant message for Anthropic API requests
+- Building message objects with role and plain text content
+- Internal call within `clore::net::anthropic::protocol` namespace
 
 ### `clore::net::anthropic::protocol::detail::make_role_message`
 
-Declaration: `network/anthropic.cppm:130`
+Declaration: `src/network/anthropic.cppm:163`
 
-Definition: `network/anthropic.cppm:130`
+Definition: `src/network/anthropic.cppm:163`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-函数首先委托 `clore::net::detail::make_empty_object` 分配一个空的 JSON 对象，若失败则立即返回包装好的 `LLMError`。接着依次通过 `clore::net::detail::insert_string_field` 插入 `"role"` 和 `"content"` 两个字段，每个插入操作后均检查其返回值；字段的值来源分别是入参 `role` 和经 `clore::net::detail::normalize_utf8` 规范化后的 `text`。任意一步遇到失败都会将错误转换成 `std::unexpected` 并提前退出。成功后返回构造完成的 `json::Object`。
+该函数首先调用 `clore::net::detail::make_empty_object` 创建一个空的 JSON 对象，并在失败时返回 `std::unexpected` 包装的错误。随后使用 `clore::net::detail::insert_string_field` 将给定的 `role` 参数写入对象的 `"role"` 字段，若操作失败同样返回错误。最后将 `blocks` 数组直接移入对象的 `"content"` 字段，并返回构造完成的 JSON 对象。
 
-核心控制流是简单的错误传播链，所有依赖集中在 `clore::net::detail` 命名空间下的工具函数上，无循环或分支逻辑。该函数不直接处理业务语义，仅负责安全地组装角色‑消息对所需的底层 JSON 结构。
+内部控制流遵循“先创建后填充”的顺序，每一步的错误均通过 `std::expected` 机制传递。依赖集中在 `clore::net::detail` 命名空间下的两个底层工具函数，它们分别负责分配空对象和向对象中插入字符串字段。
 
 #### Side Effects
 
-- 分配 JSON 对象内存
-- 规范化 UTF-8 字符串可能分配新内存
+- allocates a new `json::Object`
+- moves the blocks array into the object
 
 #### Reads From
 
-- 参数 `role`
-- 参数 `text`
+- parameter `role` of type `std::string_view`
+- parameter `blocks` of type `json::Array`
+- result of `clore::net::detail::make_empty_object`
+- result of `clore::net::detail::insert_string_field`
 
 #### Writes To
 
-- 返回的 `json::Object` 中的 `role` 字段
-- 返回的 `json::Object` 中的 `content` 字段
+- local variable `message` (`json::Object`)
 
 #### Usage Patterns
 
-- 构造简单文本角色消息
-- 被上层消息构建函数调用
+- used to build message objects with a role and content blocks
+- called when constructing user, assistant, or tool result messages
 
 ### `clore::net::anthropic::protocol::detail::make_text_block`
 
-Declaration: `network/anthropic.cppm:35`
+Declaration: `src/network/anthropic.cppm:44`
 
-Definition: `network/anthropic.cppm:35`
+Definition: `src/network/anthropic.cppm:44`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-该函数的实现遵循构建 JSON 对象的模式，使用 `clore::net::detail::make_empty_object` 创建一个初始的空对象，并立即检查其结果；若失败则提前返回 `std::unexpected`。随后通过 `clore::net::detail::insert_string_field` 依次设置 `"type"` 字段（固定为 `"text"`）和 `"text"` 字段。在插入 `"text"` 值之前，调用 `clore::net::detail::normalize_utf8` 对输入的字符串视图进行 UTF-8 规范化，确保输出合法。每次插入操作均检查返回值，任何失败都会以同样的错误传播机制终止并返回。最后返回构建完成的 `json::Object`。
-
-该函数完全依赖 `clore::net::detail` 命名空间中的三个辅助函数，无其他外部依赖，其控制流为简单的线性顺序操作，每一步的错误处理均通过 `std::expected` 的 `.has_value()` 检查实现，构成了清晰的错误级联路径。
+该实现首先通过调用 `clore::net::detail::make_empty_object` 构造一个空的 JSON 对象，若创建失败则直接返回 `std::unexpected` 包装的错误。接着使用 `clore::net::detail::insert_string_field` 向对象中注入 `"type"` 字段，值固定为 `"text"`；任何失败同样导致提前返回。最后，输入文本经过 `clore::net::detail::normalize_utf8` 进行规范化处理（例如保证合法的 UTF‑8 序列），再通过同一插入函数设置 `"text"` 字段。三个步骤依次执行，每一步均依赖 `clore::net::detail` 命名空间下的辅助函数，且都采用同样的错误短路模式：若任一插入或创建操作失败，函数立即终止并向上传递错误，成功时则返回构造完成的 JSON 对象。
 
 #### Side Effects
 
-- allocates a `json::Object`
-- normalizes UTF-8 string (may allocate new memory)
-- returns ownership of the block
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `text`
-
-#### Writes To
-
-- returned `json::Object`
+- `text` parameter (type `std::string_view`)
 
 #### Usage Patterns
 
-- called to create a text block in Anthropic message construction
+- Creates a text block object for inclusion in Anthropic API message requests
+- Called by higher‑level protocol functions that assemble message content
 
 ### `clore::net::anthropic::protocol::detail::make_tool_result_block`
 
-Declaration: `network/anthropic.cppm:98`
+Declaration: `src/network/anthropic.cppm:107`
 
-Definition: `network/anthropic.cppm:98`
+Definition: `src/network/anthropic.cppm:107`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-该实现首先调用 `clore::net::detail::make_empty_object` 创建一个空的 `json::Object`，若失败则直接返回 `std::unexpected`。随后依次插入三个字段：类型标记 `"type"` 固定为 `"tool_result"`，工具调用标识从 `message.tool_call_id` 取出，内容字段则先通过 `clore::net::detail::normalize_utf8` 对 `message.content` 做 UTF-8 规范化再写入。每次插入均依赖 `clore::net::detail::insert_string_field`，并在失败时立即返回错误。控制流是线性的，中间任何步骤出错都会提前终止并携带 `LLMError` 信息，成功则返回填充后的 `json::Object`。
+该函数首先通过 `clore::net::detail::make_empty_object` 创建一个初始的 JSON 对象，如果创建失败则立即返回 `std::unexpected`。随后依次使用 `clore::net::detail::insert_string_field` 向该对象插入三个字段：`"type"` 固定为 `"tool_result"`、`"tool_use_id"` 取自 `message.tool_call_id`、以及 `"content"`，后者会先经由 `clore::net::detail::normalize_utf8` 进行 UTF-8 规范化后再插入。每一步的插入结果都经过检查，一旦失败则返回对应的 `LLMError`。所有内部依赖均依赖于 `clore::net::detail` 命名空间下的底层工具函数，整体控制流为顺序构建并伴随早期错误传播。
 
 #### Side Effects
 
@@ -659,52 +658,58 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- 参数 `message` 的 `tool_call_id` 成员
-- 参数 `message` 的 `content` 成员
+- `message.tool_call_id`
+- `message.content`
+- string literals `"type"`, `"tool_result"`, `"tool_use_id"`, `"content"`
 
 #### Usage Patterns
 
-- 用于构建 Anthropic API 请求中的 `tool_result` 内容块
-- 被上层消息组装函数调用以填充 tool 结果
+- Constructing tool result blocks in Anthropic API requests
+- Used when assembling a conversation turn that includes tool result data
 
 ### `clore::net::anthropic::protocol::detail::make_tool_use_block`
 
-Declaration: `network/anthropic.cppm:58`
+Declaration: `src/network/anthropic.cppm:67`
 
-Definition: `network/anthropic.cppm:58`
+Definition: `src/network/anthropic.cppm:67`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-函数 `clore::net::anthropic::protocol::detail::make_tool_use_block` 接收一个 `const ToolCall& call`，其算法按顺序执行一系列带错误传播的构造步骤。首先验证 `call.arguments` 是否为 `json::Object`，若不是则立即返回 `std::unexpected(LLMError{...})`。接着调用 `clore::net::detail::make_empty_object` 创建空 `json::Object` 块，若失败则提前返回。然后分别使用 `clore::net::detail::insert_string_field` 为块填充固定字段 `type`（值为 `"tool_use"`）、`id`（来自 `call.id`）和 `name`（来自 `call.name`），每个写入操作都返回 `std::expected`，并在出错时终止构造。最后通过 `clore::net::detail::clone_value` 深拷贝 `call.arguments` 并插入到块的 `"input"` 键下。所有中间错误均被捕获并以 `std::unexpected` 形式返回，最终成功时返回完整的 `json::Object`。该函数依赖 `clore::net::detail` 命名空间下的 JSON 工具函数和 `LLMError` 类型，不依赖上层协议解析逻辑。
+该函数首先验证 `call.arguments` 是否为 JSON 对象；若不是，立即返回一个描述性的 `LLMError`。随后依次构造工具使用块：通过 `clore::net::detail::make_empty_object` 创建一个空 JSON 对象 `block`，若失败则向上传播错误；然后利用 `clore::net::detail::insert_string_field` 连续插入 `"type"`、`"id"` 和 `"name"` 字段，分别固定为 `"tool_use"`、`call.id` 和 `call.name`，每次插入均检查返回值，遇错即返回。最后，通过 `clore::net::detail::clone_value` 深拷贝 `call.arguments`，将其移动至 `block` 的 `"input"` 键下，并返回构造完成的块对象。
+
+整个流程严格遵循“先校验后构造”的模式，每个 Json 操作均委托给同命名空间下的底层工具函数，以获得统一的错误处理。依赖的 `llmError` 和 `json::Object` 类型由调用侧提供，保证错误传播路径清晰。
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- 动态分配 `json::Object` 内存
+- 通过 `insert_string_field` 和 `insert` 修改对象内容
+- 移动 `clone_value` 返回的临时对象
 
 #### Reads From
 
-- `call.arguments`
-- `call.id`
-- `call.name`
+- 参数 `call` 的 `id`、`name`、`arguments` 字段
 
 #### Writes To
 
-- the newly created `json::Object` and its fields: `type`, `id`, `name`, `input`
+- 本地变量 `block`（`json::Object`）
+- 返回给调用者的 `std::expected` 包含的 `json::Object`
 
 #### Usage Patterns
 
-- Converting a `ToolCall` into a JSON block for Anthropic request formatting
-- Used alongside `make_tool_result_block` and `make_text_block` in request construction
+- 用于构建 Anthropic API 的 `tool_use` 块
+- 被更高级别的消息构建函数调用
 
 ### `clore::net::anthropic::protocol::detail::parse_json_text`
 
-Declaration: `network/anthropic.cppm:171`
+Declaration: `src/network/anthropic.cppm:180`
 
-Definition: `network/anthropic.cppm:171`
+Definition: `src/network/anthropic.cppm:180`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-该函数将解析逻辑完全委托给 `clore::net::detail::parse_json_object`，传入原始的 JSON 文本 `raw` 以及用于错误上下文的 `context` 字符串。这种设计通过一个薄包装，使得解析行为能够统一由内部基础设施维护，同时保持协议层接口的清晰与稳定。
+`clore::net::anthropic::protocol::detail::parse_json_text` 是一个薄封装，将解析任务完全委托给 `clore::net::detail::parse_json_object`。它接收两个 `std::string_view` 参数：`raw` 和 `context`，后者通常用于在发生错误时提供描述性上下文。函数内部没有额外的逻辑或控制流；其返回值类型 `std::expected<json::Object, LLMError>` 直接由被调用函数产生。
+
+该实现的设计意图在于通过专用的协议细节命名空间提供一个统一的、类型安全的解析入口，同时将 JSON 解析的实现细节隔离在底层的 `clore::net::detail` 模块中。唯一的依赖是 `clore::net::detail::parse_json_object`，它负责处理 JSON 字符串到 `json::Object` 的转换和错误处理。
 
 #### Side Effects
 
@@ -712,23 +717,22 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `raw` parameter
-- `context` parameter
+- `raw` (the raw JSON text as `std::string_view`)
+- `context` (contextual information as `std::string_view`, passed to the underlying parser)
 
 #### Usage Patterns
 
-- parsing raw JSON text with error context
-- used in Anthropic protocol request/response handling
+- Called to parse a JSON object string into a structured `json::Object` within the Anthropic protocol implementation
 
 ### `clore::net::anthropic::protocol::detail::validate_request`
 
-Declaration: `network/anthropic.cppm:193`
+Declaration: `src/network/anthropic.cppm:202`
 
-Definition: `network/anthropic.cppm:193`
+Definition: `src/network/anthropic.cppm:202`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
-该函数将验证工作委托给 `clore::net::detail::validate_completion_request`，并传递两个 `false` 参数以禁用可选的验证特性（例如，可能跳过对工具调用或结构化输出格式的校验）。内部控制流仅包含一次函数调用转发，并直接返回底层函数产生的 `std::expected<void, LLMError>` 结果，因此没有循环或分支逻辑。
+该函数将验证逻辑完全委托给 `clore::net::detail::validate_completion_request`，传入原始请求对象以及两个硬编码的 `false` 布尔值，分别表示禁用工具调用验证和禁用用户消息格式强制检查。因此内部控制流仅为一次直接转发调用，无分支或错误处理。函数依赖 `clore::net::detail` 命名空间中的底层验证实现，后者可能执行诸如消息轮次结构、必需字段存在性等规则检查，并通过返回 `std::expected<void, LLMError>` 来报告验证结果。
 
 #### Side Effects
 
@@ -736,54 +740,53 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- 参数 `request`（类型 `const CompletionRequest&`）及其内部字段
+- `request` parameter of type `const CompletionRequest&`
 
 #### Usage Patterns
 
-- 在发送请求前调用以验证 `CompletionRequest` 的完整性
-- 作为协议层验证的入口点
+- Invoked to check validity of a `CompletionRequest` before further processing
+- Typically called internally before sending a request to the Anthropic API
 
 ### `clore::net::anthropic::protocol::parse_response`
 
-Declaration: `network/anthropic.cppm:205`
+Declaration: `src/network/anthropic.cppm:214`
 
-Definition: `network/anthropic.cppm:460`
+Definition: `src/network/anthropic.cppm:469`
 
 Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clore/net/anthropic/protocol/index.md)
 
-该函数解析 Anthropic API 返回的原始 JSON 响应字符串。首先通过 `detail::parse_json_text` 将输入解析为 JSON 值；若失败则返回转换后的错误。随后检查顶层是否存在 `"error"` 对象，若存在则提取其 `"message"` 字段并包装为 `LLMError`。接着依次提取 `"id"`、`"model"`、`"stop_reason"`（默认 `"end_turn"`）和 `"content"` 数组。若 `"stop_reason"` 为 `"max_tokens"` 则直接返回错误。对 `"content"` 数组中的每个元素按类型分支处理：`"text"` 块根据 `"stop_reason"` 是否为 `"refusal"` 分别拼接至 `refusal` 或 `text` 字段；`"tool_use"` 块则提取 `id`、`name` 和 `input` 对象，将 input 序列化为 JSON 字符串并解析为 `ToolCall` 结构。最后用累积的文本、拒绝文本和工具调用列表构造 `AssistantOutput`，并与 `id`、`model` 及原始 JSON 字符串一起组成 `CompletionResponse` 返回。
+函数 `clore::net::anthropic::protocol::parse_response` 首先调用 `detail::parse_json_text` 解析输入的 JSON 字符串，得到一个 `clore::net::detail::ObjectView` 根视图。若根视图包含 `"error"` 字段，则提取 `error.message` 并返回 `LLMError`；否则依次提取 `"id"`、`"model"`、`"stop_reason"` 以及 `"content"` 数组。对于 `"stop_reason"`，如果缺失或为 `"end_turn"`（默认），不会报错；但若值为 `"max_tokens"`，则直接返回截断错误。接着遍历 `"content"` 数组的每个元素：对类型为 `"text"` 的块，若 `"stop_reason"` 为 `"refusal"` 则将文本追加到 `refusal` 字符串，否则追加到 `text` 字符串；对类型为 `"tool_use"` 的块，提取 `"id"`、`"name"`、`"input"` 对象，并将 `"input"` 序列化为 JSON 字符串后再解析为 `kota::codec::json::Value`，最后构造 `ToolCall` 填入输出的 `tool_calls` 列表。遍历完成后，将 `text`、`refusal` 和 `tool_calls` 组装为 `AssistantOutput`，连同 `"id"`、`"model"` 以及原始 JSON 字符串一起封装为 `CompletionResponse` 返回。
 
-内部依赖集中于 `clore::net::detail` 命名空间下的工具函数（`ObjectView`、`expect_object`、`expect_string`、`expect_array`、`clone_object` 等）以及 `kota::codec::json` 序列化与解析接口。错误处理沿用了 `std::expected` 机制，所有字段缺失或类型不匹配均以 `LLMError` 形式提前退出。该函数不直接发起网络请求，仅对已获得的响应执行结构化解构与校验。
+该函数依赖于 `detail::parse_json_text` 完成初始解析，利用 `clore::net::detail::ObjectView` 和一系列 `expect_*` 辅助函数（如 `expect_string`、`expect_array`、`expect_object`）进行类型安全的字段提取，并依赖 `kota::codec::json` 进行 JSON 序列化与反序列化。内部控制流以链式的字段存在性检查为主，所有失败路径均通过 `std::unexpected` 返回 `LLMError`，错误消息尽可能携带具体字段名称以辅助调试。
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- Allocates heap memory for `std::string` and `std::vector` objects during JSON parsing and result construction
+- Moves ownership of locally constructed `AssistantOutput` and `CompletionResponse` objects into the return value
 
 #### Reads From
 
-- `json_text` parameter
-- parsed JSON object fields (`id`, `model`, `stop_reason`, `content`)
-- `clore::net::detail::ObjectView` and `expect_*` functions
+- `json_text` parameter (input `string_view`)
 
 #### Writes To
 
-- Returned `CompletionResponse`
-- Returned `LLMError` via `std::unexpected`
+- Returned `std::expected<CompletionResponse, LLMError>` object
 
 #### Usage Patterns
 
-- After receiving an Anthropic API response body
-- To convert raw JSON to `CompletionResponse`
+- Used to deserialize Anthropic API HTTP response bodies into structured types
+- Called by higher-level network or request functions to convert raw JSON to `CompletionResponse`
+- Utilized in error handling paths to map API error payloads to `LLMError`
 
 ### `clore::net::anthropic::protocol::parse_response_text`
 
-Declaration: `network/anthropic.cppm:215`
+Declaration: `src/network/anthropic.cppm:224`
 
-Definition: `network/anthropic.cppm:636`
+Definition: `src/network/anthropic.cppm:645`
 
 Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clore/net/anthropic/protocol/index.md)
 
-该函数是一个薄转发层，将调用委托给 `clore::net::protocol::parse_response_text<T>`，并原封不动地传递传入的 `response` 参数。它不执行任何额外的处理或验证；所有实际的解析逻辑、错误处理以及类型转换均由底层的通用协议解析器处理。内部控制流仅为一次函数调用并直接返回其结果。这使得 `clore::net::anthropic::protocol::parse_response_text` 能够复用跨供应商的通用解析基础设施，同时对外暴露与 Anthropic 协议命名空间一致的类型安全接口。
+`clore::net::anthropic::protocol::parse_response_text` 是一个模板函数，接受一个 `CompletionResponse` 参数并返回 `std::expected<T, LLMError>`。其内部实现直接委托给 `clore::net::protocol::parse_response_text<T>`，将入参 `response` 原样传递。该函数自身不包含任何业务逻辑或状态变化，完全依赖于 `clore::net::protocol` 命名空间下的同形函数执行实际的解析工作。控制流唯一的分支是通过 `std::expected` 实现的错误处理，但此处的转发不进行额外的错误检查或变换。因此，该函数实质上是为 `clore::net::anthropic::protocol` 层提供的类型安全适配，使调用方能以 `T` 模板参数指定的类型获取解析结果。
 
 #### Side Effects
 
@@ -791,21 +794,24 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the `response` parameter of type `const CompletionResponse&`
+- `response` 参数（类型 `const CompletionResponse&`）
 
 #### Usage Patterns
 
-- Used to deserialize the text portion of an Anthropic API response into a specific type.
+- 从 Anthropic API 响应中提取结构化文本
+- 作为 `protocol` 模块的通用解析入口
 
 ### `clore::net::anthropic::protocol::parse_tool_arguments`
 
-Declaration: `network/anthropic.cppm:218`
+Declaration: `src/network/anthropic.cppm:227`
 
-Definition: `network/anthropic.cppm:641`
+Definition: `src/network/anthropic.cppm:650`
 
 Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clore/net/anthropic/protocol/index.md)
 
-函数 `clore::net::anthropic::protocol::parse_tool_arguments` 是一个模板函数，其实现直接委托给 `clore::net::protocol::parse_tool_arguments<T>`，将传入的 `ToolCall` 对象和模板类型参数一并转发。该函数没有自身的算法逻辑或内部控制流，仅作为薄封装层，依赖外部命名空间 `clore::net::protocol` 中的同名通用函数来完成实际的参数解析工作。返回类型 `std::expected<T, LLMError>` 完全由底层实现决定。
+`clore::net::anthropic::protocol::parse_tool_arguments` 的实现是一个直接转发调用，它通过模板参数 `T` 将控制权完全移交至 `clore::net::protocol::parse_tool_arguments<T>`，并原样传递 `ToolCall` 参数 `call`。该函数本身不执行任何额外逻辑——不进行输入校验、不处理 JSON 解析，也不实施类型映射——其全部行为等同于通用协议层的同名函数，后者负责将工具调用的原始响应反序列化为用户指定的类型 `T`，并通过 `std::expected<T, LLMError>` 返回结果或错误。  
+
+由于该函数仅依赖 `clore::net::protocol::parse_tool_arguments` 的模板实例化，其内部控制流完全由底层解析算法驱动，包括对 JSON 结构遍历、类型匹配与错误生成等步骤。任何对工具参数解析行为的定制（如增加格式验证或默认值填充）都需在通用层修改，此处仅仅是提供与 Anthropic 协议命名空间一致的符号入口。
 
 #### Side Effects
 
@@ -813,22 +819,22 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `call` parameter of type `ToolCall`
+- 参数 `call`（类型 `const ToolCall&`）
 
 #### Usage Patterns
 
-- Delegates to `clore::net::protocol::parse_tool_arguments`
-- Parses tool arguments into type `T`
+- 从 tool call 中反序列化参数对象
+- 作为解析 tool 调用结果的统一接口
 
 ### `clore::net::anthropic::protocol::text_from_response`
 
-Declaration: `network/anthropic.cppm:207`
+Declaration: `src/network/anthropic.cppm:216`
 
-Definition: `network/anthropic.cppm:623`
+Definition: `src/network/anthropic.cppm:632`
 
 Declaration: [`Namespace clore::net::anthropic::protocol`](../../namespaces/clore/net/anthropic/protocol/index.md)
 
-该函数通过完全转发其 `response` 参数至 `clore::net::protocol::text_from_response` 来实现。该调用将具体协议（Anthropic）的响应类型转换为底层通用协议定义的文本提取流程，后者负责解析 `CompletionResponse` 并从中提取最终的 `std::string` 内容。这个内部委托模式使得 `clore::net::anthropic::protocol` 命名空间能够复用基协议层中的解析逻辑，同时保持自身接口的独立性。
+函数 `clore::net::anthropic::protocol::text_from_response` 的实现是一个薄转发层：它接收 `const CompletionResponse&` 参数并立即将调用委托给 `clore::net::protocol::text_from_response`，传递同一个 `response` 对象。该函数自身不包含任何额外算法或分支；所有提取文本的逻辑、错误处理和解析工作均由底层的 `clore::net::protocol::text_from_response` 完成。依赖关系仅限于 `clore::net::protocol` 命名空间中的该同名函数，以及隐式的 `CompletionResponse` 类型。内部控制流仅包含一次函数调用，无数据转换或状态变更。
 
 #### Side Effects
 
@@ -836,22 +842,24 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `response` parameter of type `const CompletionResponse&`
+- 参数 `response`（类型 `const CompletionResponse&`）
 
 #### Usage Patterns
 
-- Called by higher-level Anthropic protocol code when a completion response is received
-- Used to obtain the textual content of a response for further processing
+- 从 Anthropic 的 `CompletionResponse` 中提取文本
+- 作为 `clore::net::protocol::text_from_response` 的 Anthropic 特定封装
 
 ### `clore::net::anthropic::schema::function_tool`
 
-Declaration: `network/anthropic.cppm:762`
+Declaration: `src/network/anthropic.cppm:771`
 
-Definition: `network/anthropic.cppm:762`
+Definition: `src/network/anthropic.cppm:771`
 
 Declaration: [`Namespace clore::net::anthropic::schema`](../../namespaces/clore/net/anthropic/schema/index.md)
 
-该函数作为对 `clore::net::schema::function_tool<T>` 的简单转发器，其实现仅将参数通过 `std::move` 转发给该底层函数。内部控制流为直接委托，无分支或循环；依赖关系集中于 `clore::net::schema::function_tool<T>` 模板，该模板负责实际生成 `FunctionToolDefinition` 或返回 `LLMError`。
+该函数是 `clore::net::anthropic::schema::function_tool` 的实现，是一个模板函数，接受两个 `std::string` 参数 `name` 和 `description`。其内部控制流非常直接：它通过 `std::move` 转移两个字符串的所有权，然后将调用完全委托给 `clore::net::schema::function_tool<T>`，后者负责生成具体的工具定义。因此，该函数本质上是一个轻量级的适配器，将 Anthropic 命名空间下的工具创建入口映射到通用的模式定义模块中。
+
+由于没有任何额外的错误处理、分支或循环，该函数的控制流是线性且可预测的。其唯一依赖是 `clore::net::schema::function_tool`，它应当基于提供的名称和描述以及模板参数 `T` 来构建 `FunctionToolDefinition`。如果内部调用失败，其返回的 `std::expected<FunctionToolDefinition, LLMError>` 会将错误原样传播给调用方。
 
 #### Side Effects
 
@@ -862,25 +870,22 @@ No observable side effects are evident from the extracted code.
 - name
 - description
 
-#### Writes To
-
-- return value (`std::expected<FunctionToolDefinition, LLMError>`)
-
 #### Usage Patterns
 
-- convenience wrapper for creating tool definitions
-- templated on type T to specify tool schema
-- called with a name and description for the tool
+- Create a `FunctionToolDefinition` for Anthropic API schema
+- Used to define tool call specifications for the Anthropic model
 
 ### `clore::net::anthropic::schema::response_format`
 
-Declaration: `network/anthropic.cppm:757`
+Declaration: `src/network/anthropic.cppm:766`
 
-Definition: `network/anthropic.cppm:757`
+Definition: `src/network/anthropic.cppm:766`
 
 Declaration: [`Namespace clore::net::anthropic::schema`](../../namespaces/clore/net/anthropic/schema/index.md)
 
-函数 `clore::net::anthropic::schema::response_format` 是一个模板函数，其实现完全委托给 `clore::net::schema::response_format<T>()`。它不包含任何额外的算法或控制流，仅充当命名空间 `clore::net::anthropic::schema` 下的转发包装器。依赖关系仅限于 `clore::net::schema::response_format` 模板的泛型实现。
+此函数是模板函数 `clore::net::anthropic::schema::response_format<T>` 的一个简单转发实现。其内部控制流仅包含一条委托调用：将任务直接传递给 `clore::net::schema::response_format<T>()`，并将后者的返回值原样返回。因此，该函数本身不包含任何独立的算法逻辑，而是充当命名空间 `clore::net::anthropic::schema` 与 `clore::net::schema` 之间的桥梁，通过类型参数 `T` 复用通用的模式定义。
+
+该实现的主要依赖是 `clore::net::schema::response_format<T>`，它提供了实际的模式构造逻辑。函数返回值类型为 `std::expected<ResponseFormat, LLMError>`，这意味着调用链中的任何错误都会通过此预期类型向上传播，而不会由当前函数处理。其他局部变量或复杂控制流在此函数中均不存在。
 
 #### Side Effects
 
@@ -888,13 +893,14 @@ No observable side effects are evident from the extracted code.
 
 #### Usage Patterns
 
-- 在 Anthropic 命名空间下获取响应格式配置
+- 用于获取特定类型 `T` 的响应格式，例如在构建 Anthropic 请求时配置输出格式。
+- 作为 `clore::net::anthropic::schema` 命名空间下的便捷包装，隐藏底层 schema 实现细节。
 
 ## Internal Structure
 
-该模块是 `clore::net` 网络中针对 Anthropic API 的实现，整体分为三层。顶层 `clore::net::anthropic` 暴露 `call_llm_async`、`call_completion_async` 和 `call_structured_async` 等异步接口，这些函数构建请求并驱动与底层网络的交互。协议层 `clore::net::anthropic::protocol` 及其子命名空间 `detail` 封装了 Anthropic Messages API 的消息构造、请求验证、响应解析和工具调用序列化，包括 `parse_response`、`text_from_response` 等函数。内部实现层 `clore::net::anthropic::detail` 包含 `Protocol` 结构体，该结构体读取环境变量（如 `ANTHROPIC_API_KEY`、`ANTHROPIC_BASE_URL`）、组装 HTTP 头、构建 URL 和 JSON 载荷，并解析回调结果。此外，`clore::net::anthropic::schema` 提供 JSON Schema 生成工具（如 `response_format` 和 `function_tool` 模板），用于结构化输出和工具定义。
+该模块位于 `clore::net::anthropic` 命名空间，是实现 LLM 网络交互的高层抽象。它公开三个模板异步入口函数（`call_completion_async`、`call_llm_async`、`call_structured_async`），分别对应通用完成、直接 LLM 调用和结构化输出。内部依赖 `client`、`http`、`protocol`、`provider`、`schema` 和 `support` 模块：`http` 处理网络请求生命周期，`protocol` 提供请求/响应类型和解析逻辑，`schema` 负责 JSON Schema 映射，`provider` 管理凭据与端点构建，`support` 提供通用工具与日志。
 
-模块依赖 `std`、`support` 以及 `clore::net` 内部的 `client`、`http`、`protocol`、`provider`、`schema` 模块。其中 `http` 负责底层网络请求和速率限制，`protocol` 提供通用的消息与响应数据结构，`provider` 负责验证和序列化，`schema` 提供类型到 JSON Schema 的编译期映射。这种分层使得 Anthropic 特定的交互逻辑与通用的网络、协议和模式生成基础设施解耦，每个子命名空间承担清晰的职责，便于维护和扩展。
+模块内部采用清晰的分层结构：顶层 `<protocol::detail>` 命名空间封装了协议构建辅助函数（如 `make_text_block`、`make_role_message`、`make_tool_use_block` 等）和校验函数（`validate_request`），`detail::Protocol` 结构体则集中管理端点 URL 构建、请求头生成、JSON 负载组装及响应解析。`schema` 子命名空间提供 `response_format` 与 `function_tool` 模板，将 C++ 类型映射为 Anthropic 兼容的 JSON Schema。这一分解使得类型映射、协议流程与网络 I/O 职责清晰分离，便于扩展和维护。
 
 ## Related Pages
 

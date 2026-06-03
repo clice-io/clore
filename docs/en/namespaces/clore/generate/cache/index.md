@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::generate::cache'
-description: 'The clore::generate::cache namespace provides a caching subsystem for generated responses, enabling the storage and retrieval of prompt–response pairs to avoid redundant computation. Its core functions include load_cache_index (and its asynchronous counterpart load_cache_index_async) for reading the persistent index, find_cached_response for looking up previously stored results, save_cache_entry (and save_cache_entry_async) for persisting new entries, and make_prompt_response_cache_key for constructing deterministic keys from prompts, responses, and configuration parameters. Supporting utilities such as normalize_text_for_hashing canonicalize text inputs to ensure consistent key derivation. Notable declarations include the CacheIndex struct, which represents the in-memory state of the cache, and the CacheError struct for reporting I/O or validation failures. Architecturally, this namespace acts as a transparent caching layer between generation requests and the underlying storage, using a key-based index to avoid recomputation while supporting both synchronous and asynchronous workflows.'
+description: 'The clore::generate::cache namespace provides a caching subsystem for the generation module, responsible for storing, retrieving, and indexing responses to avoid redundant recomputation. It defines key data structures such as CacheIndex, which holds the in-memory mapping of cache keys to stored responses, and CacheError, an error type for reporting failures during cache operations. Core synchronous functions include save_cache_entry to persist a cache entry, load_cache_index to read the index from disk, and find_cached_response to perform a non‑owning lookup in an already loaded index. Asynchronous variants (save_cache_entry_async, load_cache_index_async) allow non‑blocking file I/O via kota::event_loop. Two utility functions support robust key generation: make_prompt_response_cache_key constructs a deterministic cache key from a prompt, response, and version discriminator, while normalize_text_for_hashing canonicalizes text (e.g., prompts) to ensure semantically equivalent inputs produce identical keys. The namespace’s architectural role is to encapsulate all cache logic, providing both synchronous and asynchronous interfaces that higher‑level generation code can use to accelerate repeated queries while maintaining consistent key derivation and error handling.'
 layout: doc
 template: doc
 ---
@@ -9,15 +9,15 @@ template: doc
 
 ## Summary
 
-The `clore::generate::cache` namespace provides a caching subsystem for generated responses, enabling the storage and retrieval of prompt–response pairs to avoid redundant computation. Its core functions include `load_cache_index` (and its asynchronous counterpart `load_cache_index_async`) for reading the persistent index, `find_cached_response` for looking up previously stored results, `save_cache_entry` (and `save_cache_entry_async`) for persisting new entries, and `make_prompt_response_cache_key` for constructing deterministic keys from prompts, responses, and configuration parameters. Supporting utilities such as `normalize_text_for_hashing` canonicalize text inputs to ensure consistent key derivation. Notable declarations include the `CacheIndex` struct, which represents the in-memory state of the cache, and the `CacheError` struct for reporting I/O or validation failures. Architecturally, this namespace acts as a transparent caching layer between generation requests and the underlying storage, using a key-based index to avoid recomputation while supporting both synchronous and asynchronous workflows.
+The `clore::generate::cache` namespace provides a caching subsystem for the generation module, responsible for storing, retrieving, and indexing responses to avoid redundant recomputation. It defines key data structures such as `CacheIndex`, which holds the in-memory mapping of cache keys to stored responses, and `CacheError`, an error type for reporting failures during cache operations. Core synchronous functions include `save_cache_entry` to persist a cache entry, `load_cache_index` to read the index from disk, and `find_cached_response` to perform a non‑owning lookup in an already loaded index. Asynchronous variants (`save_cache_entry_async`, `load_cache_index_async`) allow non‑blocking file I/O via `kota::event_loop`. Two utility functions support robust key generation: `make_prompt_response_cache_key` constructs a deterministic cache key from a prompt, response, and version discriminator, while `normalize_text_for_hashing` canonicalizes text (e.g., prompts) to ensure semantically equivalent inputs produce identical keys. The namespace’s architectural role is to encapsulate all cache logic, providing both synchronous and asynchronous interfaces that higher‑level generation code can use to accelerate repeated queries while maintaining consistent key derivation and error handling.
 
 ## Types
 
 ### `clore::generate::cache::CacheError`
 
-Declaration: `generate/cache.cppm:16`
+Declaration: `src/generate/cache.cppm:35`
 
-Definition: `generate/cache.cppm:16`
+Definition: `src/generate/cache.cppm:35`
 
 Implementation: [`Module generate:cache`](../../../../modules/generate/cache.md)
 
@@ -25,21 +25,21 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- No invariants beyond those of `std::string`.
+- The `message` member can be any string, including an empty string.
 
 #### Key Members
 
-- message
+- `message`
 
 #### Usage Patterns
 
-- Defined as a simple error type for caching operations.
+- Used to store an error description string; likely returned from functions to indicate failure.
 
 ### `clore::generate::cache::CacheIndex`
 
-Declaration: `generate/cache.cppm:20`
+Declaration: `src/generate/cache.cppm:39`
 
-Definition: `generate/cache.cppm:20`
+Definition: `src/generate/cache.cppm:39`
 
 Implementation: [`Module generate:cache`](../../../../modules/generate/cache.md)
 
@@ -47,133 +47,124 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Keys in `entries` are unique by definition of `std::unordered_map`
+- The `entries` map is an unordered mapping from string keys to string values
+- No invariants beyond those of `std::unordered_map` are guaranteed by this struct
 
 #### Key Members
 
-- `entries`
+- entries
 
 #### Usage Patterns
 
-- Instantiated and populated with key-value pairs representing cached index data
-- Accessed directly via its public member to insert, look up, or iterate over cache entries
-- Likely used as a building block within a larger cache manager or cache file representation
+- Used by the cache system to store and retrieve string-based index entries
+- Likely manipulated via direct access to the `entries` member
 
 ## Functions
 
 ### `clore::generate::cache::find_cached_response`
 
-Declaration: `generate/cache.cppm:35`
+Declaration: `src/generate/cache.cppm:54`
 
-Definition: `generate/cache.cppm:347`
+Definition: `src/generate/cache.cppm:366`
 
 Implementation: [`Module generate:cache`](../../../../modules/generate/cache.md)
 
-The caller uses `clore::generate::cache::find_cached_response` to retrieve a previously stored response from the cache index. The function accepts a constant reference to a `CacheIndex` (obtained from `clore::generate::cache::load_cache_index`) and a `std::string_view` key that presumably matches the key used when saving the entry (for example, a value returned by `clore::generate::cache::make_prompt_response_cache_key`). If a matching entry is found, the function returns a `std::optional<std::string_view>` containing the cached response; otherwise, the optional is empty. No assumptions are made about the lifetime of the pointed-to data beyond the validity of the underlying cache storage that the `CacheIndex` represents.
+The function `clore::generate::cache::find_cached_response` accepts a `const CacheIndex &` and a `std::string_view` representing a cache key. It searches the provided cache index for a matching entry and, if found, returns the associated cached response as an `std::optional<std::string_view>`. If no entry matches the given key, the function returns `std::nullopt`. This lookup is non‑owning and does not perform I/O, making it suitable for read‑only cache queries within the caller's control flow.
 
 #### Usage Patterns
 
-- checking for an existing cached response before generating a new one
-- lookup by cache key in a `CacheIndex`
+- Check if a response is cached before generating a new one
+- Used internally by higher-level cache query functions
 
 ### `clore::generate::cache::load_cache_index`
 
-Declaration: `generate/cache.cppm:29`
+Declaration: `src/generate/cache.cppm:48`
 
-Definition: `generate/cache.cppm:252`
+Definition: `src/generate/cache.cppm:271`
 
 Implementation: [`Module generate:cache`](../../../../modules/generate/cache.md)
 
-The function `clore::generate::cache::load_cache_index` attempts to load and deserialize the complete cache index from the given file path. On success, it returns a `CacheIndex` representing the current state of the cache; on failure, it returns a `CacheError` that describes why the load could not complete (e.g., file not found, malformed data, or I/O error). Calling code should check the returned `std::expected` to determine success before using the index.
+The function `clore::generate::cache::load_cache_index` is the synchronous interface for loading a cache index from persistent storage. The caller provides a `std::string_view` identifying the cache index to load; the function returns a `std::expected<CacheIndex, CacheError>`. On success, the returned `CacheIndex` contains the full cached state, ready for lookups via `find_cached_response`. On failure, the `CacheError` indicates why loading failed (e.g., missing data, corrupt format). This operation blocks the calling thread — use `load_cache_index_async` for asynchronous behavior. The identifier should match the one previously used when saving entries.
 
 #### Usage Patterns
 
-- cache index initialization on application startup
-- reloading cache index from disk
-- building a lookup structure for quickly retrieving cached responses by key
+- Initialize cache state at startup
+- Load existing cache entries from disk
 
 ### `clore::generate::cache::load_cache_index_async`
 
-Declaration: `generate/cache.cppm:38`
+Declaration: `src/generate/cache.cppm:57`
 
-Definition: `generate/cache.cppm:356`
+Definition: `src/generate/cache.cppm:375`
 
 Implementation: [`Module generate:cache`](../../../../modules/generate/cache.md)
 
-The function `clore::generate::cache::load_cache_index_async` initiates an asynchronous load of the cache index from a persistent store identified by the given file path, using the provided `kota::event_loop &` for scheduling and completion. It returns an `int` handle that can be used to track or cancel the operation; the caller should ensure the event loop remains alive until the operation finishes. This function is the asynchronous counterpart to `clore::generate::cache::load_cache_index`, which performs the same loading synchronously and returns a `std::expected<CacheIndex, CacheError>`.
+Initiates an asynchronous load of the cache index from the specified file path using the provided `kota::event_loop`. The function returns an `int` that serves as an operation handle or status identifier for the ongoing asynchronous load. The caller must ensure that the event loop remains active and is properly driven while the operation is in flight, and that the given `std::string` path refers to a valid cache index file. Completion, success, or failure of the asynchronous operation is communicated through the event loop's mechanisms, and the returned integer can be used to correlate this load request with its eventual outcome. This function is the non‑blocking counterpart of `clore::generate::cache::load_cache_index`.
 
 #### Usage Patterns
 
-- asynchronous cache index loading before response caching
-- non‑blocking initialization in event‑loop driven applications
-- part of the cache layer that integrates with `save_cache_entry_async`
+- called to asynchronously retrieve the cache index before performing cache queries or updates
 
 ### `clore::generate::cache::make_prompt_response_cache_key`
 
-Declaration: `generate/cache.cppm:24`
+Declaration: `src/generate/cache.cppm:43`
 
-Definition: `generate/cache.cppm:219`
+Definition: `src/generate/cache.cppm:238`
 
 Implementation: [`Module generate:cache`](../../../../modules/generate/cache.md)
 
-`make_prompt_response_cache_key` constructs a deterministic cache key string for a given prompt, response, and integer parameter (often representing a generation variant or configuration version). Callers use this key to uniquely identify cached prompt-response pairs, enabling consistent lookups in `find_cached_response` and storage in `save_cache_entry`. The function may fail with a `CacheError` if the inputs cannot be processed (for example, if internal normalization via `normalize_text_for_hashing` fails), and it returns a `std::expected<std::string, CacheError>` to communicate success or error without exceptions.
+The caller provides a prompt, a response, and an integer parameter (likely a version or configuration discriminator). The function returns a `std::expected<std::string, CacheError>` containing a deterministic cache key string on success, or a `CacheError` on failure (for example, if text normalization fails internally). The resulting key is suitable for use with other cache operations such as `save_cache_entry` or `find_cached_response`.
 
 #### Usage Patterns
 
-- Used before `clore::generate::cache::find_cached_response` to generate key for lookup
-- Used before `clore::generate::cache::save_cache_entry` to generate key for storing
-- Employed by asynchronous cache operations such as `save_cache_entry_async` when constructing keys
+- called during cache key generation for prompt-response pairs
+- used by `find_cached_response` and related cache functions
 
 ### `clore::generate::cache::normalize_text_for_hashing`
 
-Declaration: `generate/cache.cppm:192`
+Declaration: `src/generate/cache.cppm:211`
 
-Definition: `generate/cache.cppm:192`
+Definition: `src/generate/cache.cppm:211`
 
 Implementation: [`Module generate:cache`](../../../../modules/generate/cache.md)
 
 Declaration: [Declaration](functions/normalize-text-for-hashing.md)
 
-The function `clore::generate::cache::normalize_text_for_hashing` accepts a `std::string_view` and returns a `std::string`. Its responsibility is to transform an arbitrary text input into a canonical, deterministic form suitable for use as input to a hashing or key‑derivation step. Callers rely on this normalization to ensure that semantically equivalent texts produce the same normalized output, regardless of superficial formatting differences (such as extra whitespace, casing, or control characters).
-
-This function is a low‑level utility invoked during cache‑key construction. It is used internally by `clore::generate::cache::make_prompt_response_cache_key` to produce a stable hash key for prompt–response pairs. The contract guarantees that the returned string is a well‑defined, repeatable representation of the original text; the caller must not assume any particular transform (e.g., lower‑casing, trimming) beyond the general property that identical inputs always yield identical outputs.
+`clore::generate::cache::normalize_text_for_hashing` accepts a `std::string_view` representing text such as a prompt or system prompt, and returns a `std::string` that has been normalized to a canonical form. This normalized form is intended to be used as input for hashing when constructing cache keys, ensuring that semantically equivalent text yields the same hash regardless of inconsequential variations like whitespace or formatting. Callers rely on this function to produce a consistent representation of textual inputs before combining them into a cache key in `make_prompt_response_cache_key`.
 
 #### Usage Patterns
 
-- Used by `make_prompt_response_cache_key` to normalize text before forming a cache key
+- Called by `make_prompt_response_cache_key` to normalize prompt and response texts before generating the cache key
 
 ### `clore::generate::cache::save_cache_entry`
 
-Declaration: `generate/cache.cppm:31`
+Declaration: `src/generate/cache.cppm:50`
 
-Definition: `generate/cache.cppm:303`
+Definition: `src/generate/cache.cppm:322`
 
 Implementation: [`Module generate:cache`](../../../../modules/generate/cache.md)
 
-`clore::generate::cache::save_cache_entry` attempts to store a cache entry formed from three caller-provided string views. The function accepts inputs that likely represent a cache key, a prompt, and a response, or similar grouping, and writes the entry to the underlying cache storage.
-
-On success the function returns `std::expected<void, CacheError>` containing a `void` value. On failure it returns a `CacheError` describing the reason, such as an I/O fault or an invalid argument. The caller must ensure that all arguments outlive the call and that the cache system has been properly initialized.
+The function `clore::generate::cache::save_cache_entry` persists a cache entry identified by three `std::string_view` parameters. It returns `std::expected<void, CacheError>`; on success the entry is durably stored, and on failure a `CacheError` is reported. Callers must ensure the provided strings are valid and non‑empty; no further guarantees about thread safety or asynchronous behavior are provided by this synchronous interface.
 
 #### Usage Patterns
 
-- persist a generated response in the cache after completion of a generation request
-- synchronous alternative to `save_cache_entry_async` for environments where async is not desired
+- used to persist a cache entry for later retrieval via `load_cache_index` and `find_cached_response`
+- wrapped by `save_cache_entry_async` for asynchronous execution
 
 ### `clore::generate::cache::save_cache_entry_async`
 
-Declaration: `generate/cache.cppm:41`
+Declaration: `src/generate/cache.cppm:60`
 
-Definition: `generate/cache.cppm:376`
+Definition: `src/generate/cache.cppm:395`
 
 Implementation: [`Module generate:cache`](../../../../modules/generate/cache.md)
 
-The function `clore::generate::cache::save_cache_entry_async` initiates an asynchronous save of a cache entry identified by a triple of strings: a key-like prompt identifier, a model identifier, and the response value. It takes a `kota::event_loop &` to schedule the background operation and returns an `int` representing a handle or operation identifier that can later be used to check completion or retrieve the result. The caller is responsible for providing the three string arguments and a running event loop; the function returns immediately and the actual persistent store write proceeds asynchronously on the given loop. No synchronous validation or error reporting is performed at call time; the returned integer is the only handle to the outstanding operation.
+The function `clore::generate::cache::save_cache_entry_async` accepts three `std::string` arguments representing the cache entry data and a `kota::event_loop &` under which the asynchronous operation executes. It returns an `int` that identifies or indicates the result of the asynchronous save attempt. Callers must supply owning string values and a live event loop; the function does not block the calling thread. The returned integer serves as a token or status for the started operation, consistent with the module’s async cache utility pattern.
 
 #### Usage Patterns
 
-- Used to asynchronously persist a generated response into a cache indexed by key and workspace
-- Called when a cache miss occurs and a new response must be stored without blocking the caller
-- Part of the `clore::generate::cache` module's asynchronous API
+- asynchronous caching of prompt-response
+- offloading blocking cache save to event loop
 
 ## Related Pages
 

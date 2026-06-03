@@ -1,5 +1,22 @@
 module;
 
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <system_error>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/xxhash.h"
@@ -13,7 +30,6 @@ module;
 
 export module extract:compiler;
 
-import std;
 import support;
 
 export namespace clore::extract {

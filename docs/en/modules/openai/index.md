@@ -1,6 +1,6 @@
 ---
 title: 'Module openai'
-description: 'The openai module implements the OpenAI-specific protocol within the clore::net framework. It owns the public async API functions call_completion_async, call_llm_async, and call_structured_async, each of which initiates an asynchronous request to an OpenAI-compatible endpoint and returns an integer handle for tracking or cancellation. The module also comprises internal protocol detail helpers for building request JSON, serializing messages, tool definitions, tool choices, and response formats, as well as parsing response content, tool calls, and validating requests. These helpers reside in the clore::net::openai::protocol::detail namespace and are not intended for direct use by application code.'
+description: 'The openai module implements the OpenAI-specific protocol for interacting with the API, handling request construction, response parsing, and tool-call serialization within the clore::net::openai namespace. It owns the public asynchronous entry points call_completion_async, call_llm_async, and call_structured_async, which accept prompts, model identifiers, and a kota::event_loop to drive non-blocking operations, returning integer request handles. The module also provides internal details such as the Protocol class (with methods for building URLs, headers, and request JSON, as well as parsing responses and probing capabilities) and a set of serialization and validation functions under clore::net::openai::protocol::detail. It depends on the client, http, protocol, provider, schema, and support modules to integrate HTTP networking, protocol data types, provider utilities, schema generation, and foundational helpers.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-The `openai` module implements the `OpenAI`-specific protocol within the `clore::net` framework. It owns the public async API functions `call_completion_async`, `call_llm_async`, and `call_structured_async`, each of which initiates an asynchronous request to an `OpenAI`-compatible endpoint and returns an integer handle for tracking or cancellation. The module also comprises internal protocol detail helpers for building request JSON, serializing messages, tool definitions, tool choices, and response formats, as well as parsing response content, tool calls, and validating requests. These helpers reside in the `clore::net::openai::protocol::detail` namespace and are not intended for direct use by application code.
-
-The public implementation scope further includes the `clore::net::openai::detail::Protocol` struct with methods such as `build_url`, `build_headers`, `build_request_json`, `parse_response`, `read_environment`, `provider_name`, and `capability_probe_key`. These methods encapsulate the provider-specific networking and authentication logic, reading environment variables for API keys and base `URLs`, and constructing the appropriate HTTP requests and response parsers for `OpenAI`. The module depends on the `client`, `http`, `protocol`, `provider`, `schema`, `std`, and `support` modules, leveraging their generic abstractions while supplying the `OpenAI`-specific serialization and validation logic.
+The `openai` module implements the `OpenAI`-specific protocol for interacting with the API, handling request construction, response parsing, and tool-call serialization within the `clore::net::openai` namespace. It owns the public asynchronous entry points `call_completion_async`, `call_llm_async`, and `call_structured_async`, which accept prompts, model identifiers, and a `kota::event_loop` to drive non-blocking operations, returning integer request handles. The module also provides internal details such as the `Protocol` class (with methods for building `URLs`, headers, and request JSON, as well as parsing responses and probing capabilities) and a set of serialization and validation functions under `clore::net::openai::protocol::detail`. It depends on the `client`, `http`, `protocol`, `provider`, `schema`, and `support` modules to integrate HTTP networking, protocol data types, provider utilities, schema generation, and foundational helpers.
 
 ## Imports
 
@@ -20,7 +18,6 @@ The public implementation scope further includes the `clore::net::openai::detail
 - [`protocol`](../protocol/index.md)
 - [`provider`](../provider/index.md)
 - [`schema`](../schema/index.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Dependency Diagram
@@ -46,20 +43,22 @@ graph LR
 
 ### `clore::net::openai::detail::Protocol`
 
-Declaration: `network/openai.cppm:692`
+Declaration: `src/network/openai.cppm:702`
 
-Definition: `network/openai.cppm:692`
+Definition: `src/network/openai.cppm:702`
 
 Declaration: [`Namespace clore::net::openai::detail`](../../namespaces/clore/net/openai/detail/index.md)
 
-The struct `clore::net::openai::detail::Protocol` is a purely static policy class that encapsulates the `OpenAI`-specific wire protocol for LLM completions. No instances are created; every member function is `static`. Its internal structure consists of a set of stateless functions that each handle one facet of protocol interaction: `read_environment` reads credentials from environment variables (`OPENAI_BASE_URL`, `OPENAI_API_KEY`), `build_url` appends the standard `chat/completions` path to the base URL, `build_headers` sets the `Content-Type` and `Authorization` (Bearer) headers, and `build_request_json` delegates to a generic builder. The `parse_response` member enforces an invariant: a non-empty body with an HTTP status below 400; if the body is empty or the status is >= 400, it returns an `std::unexpected` with a descriptive `LLMError`. The `capability_probe_key` member composes a probe key from `provider_name`, the API base, and the model, enabling the framework to distinguish capabilities across different endpoints. Together, these members form a cohesive protocol adapter with no shared mutable state.
+The struct `clore::net::openai::detail::Protocol` is a concrete protocol implementation providing static member functions for the `OpenAI` chat completions API. It enforces a stateless, functional interface with no mutable state. All public methods return `std::expected` or plain types, propagating errors via `LLMError`. The environment configuration is obtained by `read_environment` using hard‑coded environment variable names `OPENAI_BASE_URL` and `OPENAI_API_KEY`. The invariant is that every call re‑reads credentials; no caching is performed.
+
+Notable internal decisions include the explicit validation in `parse_response`, which checks for empty response bodies and HTTP status codes >= 400, returning a descriptive `LLMError` with an excerpt of the error body. The `build_url` method appends the fixed path `"chat/completions"` to the base URL. The `build_headers` method hard‑codes a `Content-Type` header for JSON and an `Authorization` header using the Bearer scheme, formatting the API key from the environment config. The request/response JSON construction is delegated to common protocol functions (`clore::net::protocol::build_request_json` and `clore::net::protocol::parse_response`). The `capability_probe_key` method builds a deterministic string using `provider_name` (which returns `"LLM"`), the API base URL, and the requested model.
 
 #### Invariants
 
-- All member functions are `static`; there is no instance state.
-- Environment configuration is derived solely from environment variables at call time.
-- HTTP request construction assumes a JSON-based chat completions endpoint.
-- Response parsing delegates error handling for empty bodies and HTTP error codes.
+- Static methods only, no state
+- No mutable state
+- Requires environment variables set for credential retrieval
+- Relies on external protocol functions for request/response serialization
 
 #### Key Members
 
@@ -73,17 +72,16 @@ The struct `clore::net::openai::detail::Protocol` is a purely static policy clas
 
 #### Usage Patterns
 
-- Used as a concrete policy in higher-level code that dispatches to provider-specific networking logic.
-- `build_url`, `build_headers`, `build_request_json`, and `parse_response` are called in sequence to perform a chat completion request.
-- `provider_name` and `capability_probe_key` are used to cache or distinguish capabilities per model and base URL.
+- Used as a template parameter or policy in generic network code within the `clore::net::openai` namespace
+- Called to construct API requests and parse responses for `OpenAI`-compatible endpoints
 
 #### Member Functions
 
 ##### `clore::net::openai::detail::Protocol::build_headers`
 
-Declaration: `network/openai.cppm:705`
+Declaration: `src/network/openai.cppm:715`
 
-Definition: `network/openai.cppm:705`
+Definition: `src/network/openai.cppm:715`
 
 Declaration: [`Namespace clore::net::openai::detail`](../../namespaces/clore/net/openai/detail/index.md)
 
@@ -107,9 +105,9 @@ static auto build_headers(const clore::net::detail::EnvironmentConfig& environme
 
 ##### `clore::net::openai::detail::Protocol::build_request_json`
 
-Declaration: `network/openai.cppm:719`
+Declaration: `src/network/openai.cppm:729`
 
-Definition: `network/openai.cppm:719`
+Definition: `src/network/openai.cppm:729`
 
 Declaration: [`Namespace clore::net::openai::detail`](../../namespaces/clore/net/openai/detail/index.md)
 
@@ -124,9 +122,9 @@ static auto build_request_json(const CompletionRequest& request)
 
 ##### `clore::net::openai::detail::Protocol::build_url`
 
-Declaration: `network/openai.cppm:701`
+Declaration: `src/network/openai.cppm:711`
 
-Definition: `network/openai.cppm:701`
+Definition: `src/network/openai.cppm:711`
 
 Declaration: [`Namespace clore::net::openai::detail`](../../namespaces/clore/net/openai/detail/index.md)
 
@@ -140,9 +138,9 @@ static auto build_url(const clore::net::detail::EnvironmentConfig& environment) 
 
 ##### `clore::net::openai::detail::Protocol::capability_probe_key`
 
-Declaration: `network/openai.cppm:743`
+Declaration: `src/network/openai.cppm:753`
 
-Definition: `network/openai.cppm:743`
+Definition: `src/network/openai.cppm:753`
 
 Declaration: [`Namespace clore::net::openai::detail`](../../namespaces/clore/net/openai/detail/index.md)
 
@@ -159,9 +157,9 @@ static auto capability_probe_key(const clore::net::detail::EnvironmentConfig& en
 
 ##### `clore::net::openai::detail::Protocol::parse_response`
 
-Declaration: `network/openai.cppm:724`
+Declaration: `src/network/openai.cppm:734`
 
-Definition: `network/openai.cppm:724`
+Definition: `src/network/openai.cppm:734`
 
 Declaration: [`Namespace clore::net::openai::detail`](../../namespaces/clore/net/openai/detail/index.md)
 
@@ -186,9 +184,9 @@ static auto parse_response(const clore::net::detail::RawHttpResponse& raw_respon
 
 ##### `clore::net::openai::detail::Protocol::provider_name`
 
-Declaration: `network/openai.cppm:739`
+Declaration: `src/network/openai.cppm:749`
 
-Definition: `network/openai.cppm:739`
+Definition: `src/network/openai.cppm:749`
 
 Declaration: [`Namespace clore::net::openai::detail`](../../namespaces/clore/net/openai/detail/index.md)
 
@@ -202,9 +200,9 @@ static auto provider_name() -> std::string_view {
 
 ##### `clore::net::openai::detail::Protocol::read_environment`
 
-Declaration: `network/openai.cppm:693`
+Declaration: `src/network/openai.cppm:703`
 
-Definition: `network/openai.cppm:693`
+Definition: `src/network/openai.cppm:703`
 
 Declaration: [`Namespace clore::net::openai::detail`](../../namespaces/clore/net/openai/detail/index.md)
 
@@ -224,133 +222,135 @@ static auto read_environment()
 
 ### `clore::net::openai::call_completion_async`
 
-Declaration: `network/openai.cppm:755`
+Declaration: `src/network/openai.cppm:765`
 
-Definition: `network/openai.cppm:782`
+Definition: `src/network/openai.cppm:792`
 
 Declaration: [`Namespace clore::net::openai`](../../namespaces/clore/net/openai/index.md)
 
-The function first constructs a generic completion call by forwarding the request and event loop to `clore::net::call_completion_async<detail::Protocol>`. This template specialisation handles provider‑specific wiring: it relies on the `detail::Protocol` struct to implement `build_url`, `build_headers`, `build_request_json`, and `parse_response`. During execution the protocol reads the environment (via `read_environment`), validates the request (using `protocol::detail::validate_request`), and assembles the JSON payload through helper functions like `serialize_message`, `serialize_tool_choice`, and `serialize_response_format`. After the HTTP call completes, `parse_response` extracts the top‑level structure, iterates over choices, and for each choice dispatches to `parse_content_parts` and `parse_tool_calls` to reconstruct the final `CompletionResponse`. Any error is captured and returned via `.or_fail()`, ensuring the coroutine meets its expected task signature.
+The implementation of `clore::net::openai::call_completion_async` is a thin wrapper that immediately forwards to the generic template `clore::net::call_completion_async<detail::Protocol>`, passing the `CompletionRequest` and the `kota::event_loop`. The generic function uses `detail::Protocol` which provides a family of protocol-specific methods (`build_url`, `build_headers`, `build_request_json`, and `parse_response`) to construct the HTTP request, send it asynchronously on the given event loop, and parse the JSON response. Within the request‑building phase, helpers from `clore::net::openai::protocol::detail` are employed for tasks such as validation via `validate_request`, serialization of tool definitions and tool choices via `serialize_tool_definition` and `serialize_tool_choice`, and building the messages array. On the response side, the same protocol layer deserializes the JSON payload, extracting choices, tool calls, content parts, and any error information, then returns the result as a `kota::task<CompletionResponse, LLMError>` after calling `or_fail()` to handle error propagation.
 
 #### Side Effects
 
-- Initiates an asynchronous HTTP request to an `OpenAI` completion endpoint
-- Schedules and manages asynchronous work via the provided `kota::event_loop`
+- Initiates an asynchronous HTTP request to the `OpenAI` completion API via the generic `clore::net::call_completion_async`
+- Schedules coroutine continuation on the provided `kota::event_loop`
+- Potentially performs network I/O and error handling via `.or_fail()`
 
 #### Reads From
 
-- `CompletionRequest` parameter (moved into callee)
-- `kota::event_loop&` parameter (for scheduling and I/O context)
-- `detail::Protocol` template parameter (type-level configuration)
+- `CompletionRequest request` (moved into underlying call)
+- `kota::event_loop& loop` (reference used for scheduling)
+- `detail::Protocol` type used for template specialization
 
 #### Usage Patterns
 
-- Used to asynchronously request a text completion from an `OpenAI` model
-- Called when integrating with an event loop for concurrent or non-blocking LLM inference
+- Used to asynchronously obtain a `CompletionResponse` for `OpenAI` completions
+- Called with a constructed `CompletionRequest` and an event loop
+- Part of a family of async `OpenAI` call functions (`call_structured_async`, `call_llm_async`)
 
 ### `clore::net::openai::call_llm_async`
 
-Declaration: `network/openai.cppm:759`
+Declaration: `src/network/openai.cppm:769`
 
-Definition: `network/openai.cppm:789`
+Definition: `src/network/openai.cppm:799`
 
 Declaration: [`Namespace clore::net::openai`](../../namespaces/clore/net/openai/index.md)
 
-This function is a thin coroutine adapter that delegates the `OpenAI` LLM call to the generic `clore::net::call_llm_async` template, parameterized with `clore::net::openai::detail::Protocol`. The internal control flow consists of a single `co_await` on the returned task, followed by `.or_fail()` to unwrap the result or propagate the error. All substantive logic—model routing, request construction, response parsing, and protocol-specific handling—resides in the template function and its associated helper types, such as `clore::net::openai::detail::Protocol` methods (`build_request_json`, `build_headers`, `build_url`, `parse_response`, `read_environment`, `provider_name`, `capability_probe_key`) and the supporting functions in `clore::net::openai::protocol` and `clore::net::openai::protocol::detail`. The key dependency is the generic `clore::net::call_llm_async` template, which this function instantiates with the `OpenAI` protocol layer.
+The implementation forwards directly to the generic `clore::net::call_llm_async` template, parameterized with `clore::net::openai::detail::Protocol`. After the underlying coroutine completes, the result is unwrapped by calling `or_fail()`, which transforms the expected `kota::expected` into a `kota::task<std::string, LLMError>` that will throw on error. All input arguments—`model`, `system_prompt`, `request`, and a pointer to the caller’s `kota::event_loop`—are passed through unchanged.
+
+Internally, the function never inspects the request body or constructs HTTP messages; these responsibilities are delegated entirely to the `detail::Protocol` class and the generic networking layer. The only dependency beyond the standard library is the `kota` coroutine framework, used both for the async return type and for the event loop that drives completion. This thin wrapper ensures that all `OpenAI`-specific protocol details (URL building, header construction, JSON serialization/deserialization) remain encapsulated in `detail::Protocol` and its helper namespaces.
 
 #### Side Effects
 
-- moves the request argument via `std::move`
-- performs network I/O
+- Moves the `PromptRequest` argument, leaving it in a valid but unspecified state.
+- Allocates a coroutine frame for the `co_await` expression.
+- The returned `task` will perform network I/O and allocate resources when awaited.
+
+#### Reads From
+
+- `model`
+- `system_prompt`
+- `request` (moved from)
+- `loop` (reference to obtain pointer)
+
+#### Writes To
+
+- `request` (moved-from state)
+- Coroutine frame (implicit allocation)
+
+#### Usage Patterns
+
+- Used to asynchronously call an LLM from within an event-loop-based async context.
+- Typically awaited to obtain the model's text response.
+
+### `clore::net::openai::call_llm_async`
+
+Declaration: `src/network/openai.cppm:775`
+
+Definition: `src/network/openai.cppm:810`
+
+Declaration: [`Namespace clore::net::openai`](../../namespaces/clore/net/openai/index.md)
+
+The function is a thin convenience wrapper that delegates entirely to the generic `clore::net::call_llm_async` template, specialized with `clore::net::openai::detail::Protocol`. It passes the provided `model`, `system_prompt`, `prompt`, and a pointer to the `kota::event_loop` to that generic implementation, which handles all protocol‑specific logic including JSON request construction, HTTP interaction, and response parsing. The result is immediately converted into a `kota::task<std::string, LLMError>` via `.or_fail()`, which either yields the response string on success or propagates an `LLMError` on failure. No additional transformation or control flow occurs at this level; the function simply exposes a streamlined, protocol‑specific entry point for the caller.
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
 - model
 - `system_prompt`
-- request
+- prompt
 - loop
+- result of `clore::net::call_llm_async<detail::Protocol>`
 
 #### Usage Patterns
 
-- called with model identifier, system prompt, prompt request, and event loop
-- returns a task that resolves to a string or `LLMError`
+- Entry point for asynchronous LLM calls with default protocol
+- Part of overloaded set including `call_structured_async` and `call_completion_async`
 
-### `clore::net::openai::call_llm_async`
+### `clore::net::openai::call_structured_async`
 
-Declaration: `network/openai.cppm:765`
+Declaration: `src/network/openai.cppm:782`
 
-Definition: `network/openai.cppm:800`
+Definition: `src/network/openai.cppm:822`
 
 Declaration: [`Namespace clore::net::openai`](../../namespaces/clore/net/openai/index.md)
 
-The function `clore::net::openai::call_llm_async` is a thin wrapper that delegates to `clore::net::call_llm_async<detail::Protocol>`. Its implementation consists solely of a `co_return co_await` expression that invokes the generic template with the same four arguments (`model`, `system_prompt`, `prompt`, and a pointer to `loop`) and then calls `.or_fail()` to turn the result into the expected coroutine type. The actual algorithm and control flow reside in the parametric function; `detail::Protocol` provides the concrete network and serialization logic, including `build_url`, `build_request_json`, `build_headers`, `parse_response`, `read_environment`, and `capability_probe_key` methods. Dependencies include the `kota::event_loop` for asynchronous execution, `kota::task` for the coroutine return type, and `LLMError` for error reporting.
+The function `clore::net::openai::call_structured_async` is a thin coroutine wrapper that delegates all work to the generic `clore::net::call_structured_async` instantiated with the `OpenAI` protocol adapter `clore::net::openai::detail::Protocol` and the template parameter `T`. It passes the `model`, `system_prompt`, `prompt`, and a pointer to the `loop` directly to that generic function, then awaits the returned task and unwraps the result via `.or_fail()`. The implementation contains no additional algorithmic logic or control flow beyond this delegation; its role is purely to specialize the generic structured‑calling machinery for the `OpenAI` provider. Dependencies are limited to the protocol adapter and the generic asynchronous call infrastructure.
 
 #### Side Effects
 
-- Performs asynchronous network I/O to call the LLM
-- Schedules work on the provided `kota::event_loop`
-- May allocate coroutine frame and other async task resources
+- Performs network I/O via underlying `call_structured_async` implementation
+- Allocates coroutine frame for async execution
 
 #### Reads From
 
 - `model` parameter
 - `system_prompt` parameter
 - `prompt` parameter
-- `loop` parameter (event loop state)
+- `loop` parameter
 
 #### Writes To
 
-- Returns a `kota::task` that eventually writes the LLM response string to the caller
-- May modify internal state of the event loop
+- Returns a `kota::task<T, LLMError>` that eventually contains the result
 
 #### Usage Patterns
 
-- Asynchronously invoke an LLM model with a system prompt and user prompt
-- Integrate with `kota::event_loop` for non-blocking operation
-- Wrap lower-level LLM call with error handling via `.or_fail()`
-
-### `clore::net::openai::call_structured_async`
-
-Declaration: `network/openai.cppm:772`
-
-Definition: `network/openai.cppm:812`
-
-Declaration: [`Namespace clore::net::openai`](../../namespaces/clore/net/openai/index.md)
-
-The function `clore::net::openai::call_structured_async` is a thin template wrapper that delegates to `clore::net::call_structured_async`, passing the protocol type `clore::net::openai::detail::Protocol` along with the `model`, `system_prompt`, `prompt`, and a pointer to the `kota::event_loop`. Internally, the generic implementation constructs a JSON request by calling `clore::net::openai::detail::Protocol::build_request_json`, which uses helper functions such as `clore::net::openai::protocol::detail::serialize_response_format` to embed the requested JSON schema as a structured output format and `clore::net::openai::protocol::detail::serialize_tool_definition` to define a single tool that enforces the schema. The HTTP request is sent asynchronously via `call_llm_async`, and the raw response is parsed by the protocol's `parse_response` method. The parser inspects the `choices` array, extracts `message` content and potential tool calls, validates the finish reason, and returns the parsed structured arguments as the requested type `T`. The `.or_fail()` call at the end propagates any `LLMError` that occurs during the process.
-
-#### Side Effects
-
-- initiates an asynchronous HTTP request to the `OpenAI` API
-- creates a coroutine state that may dynamically allocate memory
-- interacts with the provided event loop for scheduling completion callbacks
-
-#### Reads From
-
-- `model`: `std::string_view`
-- `system_prompt`: `std::string_view`
-- `prompt`: `std::string_view`
-- `loop`: `kota::event_loop&`
-
-#### Writes To
-
-- the return value of type `kota::task<T, LLMError>` representing a future result
-- the coroutine's internal promise object (as part of the task lifecycle)
-
-#### Usage Patterns
-
-- used to request structured output from an `OpenAI` model asynchronously
-- called by higher-level functions when a typed response is required from the language model
+- Used in async contexts requiring structured output from an LLM
+- Called with a concrete `T` type for type-safe parsing
+- Wraps the more general `clore::net::call_structured_async` for `OpenAI`-specific protocol
 
 ### `clore::net::openai::protocol::detail::parse_content_parts`
 
-Declaration: `network/openai.cppm:288`
+Declaration: `src/network/openai.cppm:298`
 
-Definition: `network/openai.cppm:288`
+Definition: `src/network/openai.cppm:298`
 
 Declaration: [`Namespace clore::net::openai::protocol::detail`](../../namespaces/clore/net/openai/protocol/detail/index.md)
 
-The function `clore::net::openai::protocol::detail::parse_content_parts` iterates over the given `json::Array` of content parts, extracting `text` and `refusal` content into an `AssistantOutput` result. For each value, it expects a JSON object, reads the `type` field (defaulting to `"text"`), and dispatches accordingly: a `"refusal"` part appends its `refusal` string and sets a flag; a `"text"` or `"output_text"` part expects a `text` field that is either a direct string or an object containing a `value` string, appending the text and setting a flag; any other type is silently skipped. After the loop, the function populates `output.text` or `output.refusal` only if the corresponding flag was set. The function depends on `clore::net::detail::expect_object` and `clore::net::detail::expect_string` for structured validation and error reporting, and returns `std::expected<AssistantOutput, LLMError>` to propagate descriptive errors when a required field is missing or malformed.
+The function iterates over each element of the input `json::Array` and processes it as a content part. For every element it first validates it as a JSON object using `clore::net::detail::expect_object`, returning an error on failure. It then reads the `"type"` field and dispatches accordingly: if the type is `"refusal"`, it extracts the `"refusal"` string field and appends it to a local accumulator, setting a `saw_refusal` flag. For types `"text"` or `"output_text"`, it attempts to extract the `"text"` field; if the text value is a string it is appended directly, otherwise the field must be an object containing a `"value"` string. Any unrecognised type is silently skipped. After processing all parts, the accumulated text and refusal are moved into the `AssistantOutput` result only if their respective `saw_*` flags are `true`. The entire function relies on the `clore::net::detail` validation utilities (`expect_object` and `expect_string`) for structured error propagation and returns `std::expected` to distinguish a successful parse from an `LLMError`.
 
 #### Side Effects
 
@@ -358,25 +358,26 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `const json::Array& parts` parameter
-- JSON object fields via `part->get("type")`, `part->get("refusal")`, `part->get("text")`, `text_object->get("value")`
-- Helper functions `clore::net::detail::expect_object` and `clore::net::detail::expect_string`
+- `parts` parameter (JSON array)
+- `clore::net::detail::expect_object` and `expect_string` helpers
+- JSON object fields: `type`, `refusal`, `text`, `value`
 
 #### Usage Patterns
 
-- Called to deserialize the content field from an `OpenAI` chat completion response
-- Used in protocol layer to convert JSON content array into structured `AssistantOutput`
-- Part of the `clore::net::openai::protocol::detail` parsing pipeline
+- Used internally to convert API response content parts
+- Called when processing assistant messages
 
 ### `clore::net::openai::protocol::detail::parse_tool_calls`
 
-Declaration: `network/openai.cppm:369`
+Declaration: `src/network/openai.cppm:379`
 
-Definition: `network/openai.cppm:369`
+Definition: `src/network/openai.cppm:379`
 
 Declaration: [`Namespace clore::net::openai::protocol::detail`](../../namespaces/clore/net/openai/protocol/detail/index.md)
 
-The function iterates over each element of the input `json::Array`, expecting each to be a JSON object. It extracts and validates the `id`, `type`, and `function` sub-object sequentially, using `clore::net::detail::expect_object` and `clore::net::detail::expect_string` for both existence and type checks. Duplicate `id` values are detected via an internal `std::unordered_set<std::string>`, and any repetition causes an early failure. The `type` field must equal the literal `"function"`; otherwise, an error is returned. From the `function` object, both `name` and `arguments` are extracted as strings, and the `arguments` string is further parsed into a `json::Value` using `json::parse`. Each successfully validated tool call is accumulated into a `std::vector<ToolCall>`. The function returns the complete vector on success, or an `LLMError` on the first encountered validation or parsing failure.
+The function iterates over each element of the input JSON array, treating each as a tool call object. For each element it validates the required top-level fields `id`, `type`, and `function` using `clore::net::detail::expect_object` and `expect_string` helpers. After extracting the `id` as a string, it checks for duplicates by attempting insertion into a local `std::unordered_set<std::string> ids`; a duplicate triggers an immediate error return. The `type` field must equal `"function"`; any other value is rejected. The nested `function` object must contain `name` (a string) and `arguments` (a JSON string). The arguments string is parsed into a `json::Value` via `json::parse`; a parse failure also produces an error. On success, each validated call is emplaced into a `std::vector<ToolCall>` that is returned upon completion.
+
+The function relies entirely on the external validation utilities from `clore::net::detail` and the `json` parsing library. Control flow is strictly sequential with early returns on any missing or malformed field. No retry or fallback logic exists; the first error aborts the entire parse. The `ids` set enforces uniqueness of tool call identifiers, and the final `arguments` value is stored both as its original JSON string and as the parsed `json::Value` for downstream use.
 
 #### Side Effects
 
@@ -384,151 +385,146 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the `calls` parameter (a `const json::Array &`)
-- JSON object fields `id`, `type`, `function`, `function.name`, `function.arguments` within each array element
+- `calls` parameter (`const json::Array &`)
+- nested JSON properties via `call->get()` and `function->get()`
+
+#### Writes To
+
+- local `parsed_calls` vector (returned as result)
 
 #### Usage Patterns
 
-- parse tool calls from a chat completion response
-- extract and validate tool call objects from a raw JSON array
-- convert JSON tool call representation to structured `ToolCall` instances
+- called to convert raw tool call JSON from API responses into structured data
 
 ### `clore::net::openai::protocol::detail::serialize_message`
 
-Declaration: `network/openai.cppm:27`
+Declaration: `src/network/openai.cppm:37`
 
-Definition: `network/openai.cppm:27`
+Definition: `src/network/openai.cppm:37`
 
 Declaration: [`Namespace clore::net::openai::protocol::detail`](../../namespaces/clore/net/openai/protocol/detail/index.md)
 
-The function `clore::net::openai::protocol::detail::serialize_message` converts a single `Message` variant into a JSON object and appends it to the provided output `json::Array`. It begins by creating a new empty JSON object via `clore::net::detail::make_empty_object`. The core logic dispatches on the concrete message type using `std::visit`. For `SystemMessage`, `UserMessage`, and `AssistantMessage`, it inserts a `"role"` string and normalizes the message content with `clore::net::detail::normalize_utf8` before inserting it as the `"content"` field via `clore::net::detail::insert_string_field`. The `AssistantToolCallMessage` case optionally writes the `content` field if present, then iterates over its tool calls to build a nested structure: each tool call adds an `id` and `type` (`"function"`) to a call object, plus a `function` sub‑object containing `name` and `arguments` (normalized from `tool_call.arguments_json`). All these call objects are collected into a `"tool_calls"` array. The `ToolResultMessage` case inserts `"role"`, `"tool_call_id"`, and normalized `"content"`. Every JSON operation uses error‑returning helpers; any failure propagates as `std::unexpected` immediately. On success, the completed object is moved into the output array with `out.push_back`. The function depends on the `Message` variant types, the `clore::net::detail` namespace for JSON creation and string insertion, and the `LLMError` type for error reporting.
+The function `clore::net::openai::protocol::detail::serialize_message` transforms a `Message` variant into a JSON object and appends it to a provided output `json::Array`. It begins by constructing an empty JSON object via `clore::net::detail::make_empty_object`; if allocation fails, the error is immediately returned as an unexpected result. The core of the algorithm is a `std::visit` call on the message, where a generic lambda uses `if constexpr` to dispatch on each concrete message type—`SystemMessage`, `UserMessage`, `AssistantMessage`, `AssistantToolCallMessage`, and `ToolResultMessage`. For all types except `ToolResultMessage`, the visitor sets a `"role"` field (one of `"system"`, `"user"`, or `"assistant"`) and inserts the message’s content using `clore::net::detail::normalize_utf8` followed by `clore::net::detail::insert_string_field`. The `AssistantToolCallMessage` branch handles the optional `content` and also iterates over its `tool_calls` container: for each tool call it creates a nested object with `"id"`, `"type": "function"`, and a `"function"` sub‑object containing `"name"` and `"arguments"` (the arguments are also normalized). The `ToolResultMessage` branch adds `"tool_call_id"` and its own content. After visitation succeeds, the fully populated object is moved into the output array via `push_back`. All intermediate operations propagate errors through the `std::expected` monad, and any failure short‑circuits the entire function.
 
 #### Side Effects
 
-- Modifies output array `out` by appending a JSON object
-- Allocates memory for JSON objects and strings via helper functions
-- Moves temporary objects into the output array
-- Calls `clore::net::detail::normalize_utf8` which may allocate new strings
-- Calls `clore::net::detail::insert_string_field` which may modify the JSON object
+- Modifies the output JSON array `out` by appending a new JSON object
+- Allocates memory internally for JSON objects and arrays via `clore::net::detail::make_empty_object` and `clore::net::detail::make_empty_array`
+- Potentially modifies error state through `std::expected` propagation
 
 #### Reads From
 
-- The `message` parameter of type `const Message&`
-- Accesses fields: `.content`, `.tool_calls`, `.tool_call_id`, `.id`, `.name`, `.arguments_json`, `.has_value()`
+- `out` (input-output parameter, read only for appending)
+- `message` parameter and its fields (`content`, `tool_call_id`, `tool_calls`, `id`, `name`, `arguments_json`)
 
 #### Writes To
 
-- Output parameter `out` of type `json::Array&`
-- Temporary JSON objects and arrays that are moved into `out`
+- Output JSON array `out` (modified by appending)
+- Local JSON objects and arrays created for serialization
 
 #### Usage Patterns
 
-- Used to convert a single message into JSON for inclusion in an `OpenAI` API request payload
-- Called during serialization of a conversation history to a JSON array of messages
+- Called when building the JSON payload for `OpenAI` chat completion requests
+- Used within serialization routines for different message types
 
 ### `clore::net::openai::protocol::detail::serialize_response_format`
 
-Declaration: `network/openai.cppm:209`
+Declaration: `src/network/openai.cppm:219`
 
-Definition: `network/openai.cppm:209`
+Definition: `src/network/openai.cppm:219`
 
 Declaration: [`Namespace clore::net::openai::protocol::detail`](../../namespaces/clore/net/openai/protocol/detail/index.md)
 
-The function `clore::net::openai::protocol::detail::serialize_response_format` serializes a `ResponseFormat` object into a provided `json::Object` `root` under the key `"response_format"`. It begins by creating two empty JSON objects via helper `clore::net::detail::make_empty_object`: one for the top-level response format object and one for its optional schema. If either allocation fails, the error is propagated. The core branch depends on whether `format.schema` contains a value. If it does not, the format type is set to `"json_object"`. If a schema is present, the type becomes `"json_schema"`, and the function populates the schema object with the `"name"` (via `clore::net::detail::insert_string_field`), the `"strict"` flag from `format.strict`, and a deep copy of the schema itself using `clore::net::detail::clone_object`. This schema object is then embedded into the response format object under `"json_schema"`. Finally, the completed object is inserted into `root`. Every insertion or helper call that may fail returns a `std::expected` – any failure causes an immediate early return with the corresponding `LLMError`, making the entire serialization a sequence of guarded steps with no retry logic.
+The function constructs a JSON response format object and inserts it into the provided `root` object. It first creates an empty `object` and, if a schema is present, an auxiliary `schema_object`. When `format.schema` is absent, the function sets the `type` field to `"json_object"`; otherwise, it sets `type` to `"json_schema"` and populates the schema sub‑object. The sub‑object is built by inserting `name` (via `clore::net::detail::insert_string_field`), `strict` from `format.strict`, and a cloned copy of `format.schema` (obtained through `clore::net::detail::clone_object`). The assembled `schema_object` is then placed under the key `"json_schema"` inside the main `object`. Finally, the completed `object` is stored in `root` under the key `"response_format"`. Every intermediate JSON creation or insertion failure is propagated as an error, and the function returns `std::expected<void, LLMError>`.
 
 #### Side Effects
 
-- mutates the `root` JSON object by inserting the `response_format` key
-- allocates and mutates temporary JSON objects via insert and move operations
+- Allocates two temporary JSON objects via `make_empty_object`
+- Clones a JSON schema object via `clone_object`
+- Modifies the root JSON object by inserting a new key-value pair
 
 #### Reads From
 
-- the `format` parameter (fields `schema`, `name`, `strict`)
-- the dereferenced `format.schema` for cloning
+- `format` parameter (its members schema, name, strict)
+- `root` parameter (insertion may read existing keys?)
 
 #### Writes To
 
-- the `root` JSON object (key `response_format`)
-- temporary JSON objects created within the function
+- `root` parameter (inserts `response_format` object)
 
 #### Usage Patterns
 
-- called during construction of an `OpenAI` chat completion request containing a response format
-- invoked within the protocol serialization pipeline for request building
+- Called when constructing a request body for `OpenAI` API calls
+- Part of serialization pipeline for protocol parameters
 
 ### `clore::net::openai::protocol::detail::serialize_tool_choice`
 
-Declaration: `network/openai.cppm:167`
+Declaration: `src/network/openai.cppm:177`
 
-Definition: `network/openai.cppm:167`
+Definition: `src/network/openai.cppm:177`
 
 Declaration: [`Namespace clore::net::openai::protocol::detail`](../../namespaces/clore/net/openai/protocol/detail/index.md)
 
-The function employs `std::visit` on the `ToolChoice` variant to dispatch based on the concrete tool‑choice type. Inside the visitor, compile‑time type inspection via `if constexpr` branches for the three predefined modes: `ToolChoiceAuto`, `ToolChoiceRequired`, and `ToolChoiceNone` each cause a simple string insertion (`"auto"`, `"required"`, `"none"`) into the root JSON object under the key `"tool_choice"`. The fallback case handles a forced tool choice by constructing a nested JSON object: it first creates an empty object using `clore::net::detail::make_empty_object` (which can produce an error), sets its `"type"` to `"function"`, then uses `clore::net::detail::insert_string_field` to add the function’s `"name"` from the variant’s `name` member. The resulting function object is moved into the outer `"function"` field, and the whole structure is inserted as the `"tool_choice"` value. Every step that may fail propagates the error via `std::expected<void, LLMError>`, returning an error immediately if any intermediate operation fails.
+The function uses `std::visit` to dispatch on the `ToolChoice` variant, handling each alternative. For the three predefined choices (`ToolChoiceAuto`, `ToolChoiceRequired`, `ToolChoiceNone`), it directly inserts a string literal ("auto", "required", or "none") into the JSON object under the key `"tool_choice"`. For the forced tool choice (the remaining branch), it first calls `clore::net::detail::make_empty_object` to allocate both an outer object and an inner function object; if either allocation fails, the error is propagated via `std::unexpected`. It then sets the outer object's `"type"` to `"function"` and, using `clore::net::detail::insert_string_field`, places the tool’s name into the inner object under the key `"name"`. The inner object is moved into the outer object under `"function"`, and the outer object replaces `"tool_choice"` in `root`. Any intermediate failure returns an `LLMError` embedded in the `std::expected` result.
 
 #### Side Effects
 
-- Mutates the `root` JSON object by inserting the `"tool_choice"` key with a string or object value.
-- Allocates temporary JSON objects via `clore::net::detail::make_empty_object` and moves them into `root`.
-- May produce an error (side effect of propagating failures) via `std::unexpected`.
+- Modifies the `json::Object& root` by inserting fields (`tool_choice` with string or nested object).
+- Allocates temporary `json::Object` instances via `make_empty_object` (likely heap allocation).
 
 #### Reads From
 
-- Parameter `choice` (a `ToolChoice` variant)
-- Field `current.name` (string view) from the forced tool choice case
+- Parameter `const ToolChoice& choice` (variant value and potentially `current.name`).
 
 #### Writes To
 
-- The `root` JSON object (via `insert`)
-- Temporary `object` and `function_object` JSON objects (subsequently moved into `root`)
+- Reference parameter `json::Object& root` (mutated via `insert` calls).
+- Temporary `json::Object` objects created by `make_empty_object` (moved into `root`).
 
 #### Usage Patterns
 
-- Used during serialization of `OpenAI` chat completion requests to encode the `tool_choice` field.
-- Called by higher-level serialization functions that build the JSON payload.
+- Called during serialization of an `OpenAI` chat completion request to set the `tool_choice` field.
+- Part of `detail` namespace serialization utilities for protocol handling.
 
 ### `clore::net::openai::protocol::detail::serialize_tool_definition`
 
-Declaration: `network/openai.cppm:248`
+Declaration: `src/network/openai.cppm:258`
 
-Definition: `network/openai.cppm:248`
+Definition: `src/network/openai.cppm:258`
 
 Declaration: [`Namespace clore::net::openai::protocol::detail`](../../namespaces/clore/net/openai/protocol/detail/index.md)
 
-The function builds a JSON representation of a single tool definition by first creating a top-level JSON object via `clore::net::detail::make_empty_object`. It sets the `"type"` key to the literal `"function"`, then constructs a nested function object. Inside the function object it inserts the `"name"` and `"description"` string fields using `clore::net::detail::insert_string_field`, and clones the `tool.parameters` object via `clore::net::detail::clone_object` before inserting it. The `strict` boolean is set directly. Each JSON mutation is guarded by error‑propagation via the `std::expected` monad: if any sub‑operation fails, the function immediately returns `std::unexpected` with the propagated `LLMError`. On success, the completed tool object is appended to the output `tools` array. The implementation depends solely on the internal JSON utility functions and the `FunctionToolDefinition` structure, with no external service calls.
+The function constructs a single tool definition in JSON format and appends it to the provided `tools` array. It begins by creating two empty JSON objects via `clore::net::detail::make_empty_object`: one for the top-level tool (`object`) and one for the embedded function descriptor (`function_object`). If either allocation fails, the function returns `std::unexpected` with the propagated error. It then inserts the string `"function"` as the `"type"` field into `object`. Next, it serializes the tool’s `name` and `description` into `function_object` using `clore::net::detail::insert_string_field`, checking each result and returning early on failure. The `parameters` field is populated by cloning the tool’s parameter schema via `clore::net::detail::clone_object`, and the `strict` boolean is inserted directly. After assembling the `function_object`, it is moved into `object` under the `"function"` key. Finally, the completed `object` is moved into `tools` via `push_back`. The entire process is governed by `std::expected` error propagation, relying on helper functions from the `clore::net::detail` namespace for low-level JSON operations.
 
 #### Side Effects
 
-- modifies the `tools` array by appending a new tool definition object
-- allocates and writes temporary JSON objects via `make_empty_object` and `clone_object`
+- Appends a new JSON object to the `tools` output array
+- Allocates memory for JSON objects
+- Clones the `tool.parameters` object
 
 #### Reads From
 
-- `tool.name`
-- `tool.description`
-- `tool.parameters`
-- `tool.strict`
-- `tools` reference (array to append to)
+- `tool` parameter: `name`, `description`, `parameters`, `strict`
+- Error messages from `clore::net::detail::make_empty_object`, `insert_string_field`, and `clone_object`
 
 #### Writes To
 
-- `tools` (the `json::Array` passed by reference) – appended object
-- local `object` and `function_object` (constructed and then moved into `tools`)
+- `tools` array (by pushing a new element)
 
 #### Usage Patterns
 
-- called during serialization of a list of tool definitions in an `OpenAI` API request
-- used by functions that construct the request body before sending to the API
+- Called when constructing the JSON payload for an `OpenAI` chat request that includes tool definitions
+- Used in serialization pipelines for `OpenAI` protocol
 
 ### `clore::net::openai::protocol::detail::validate_request`
 
-Declaration: `network/openai.cppm:23`
+Declaration: `src/network/openai.cppm:33`
 
-Definition: `network/openai.cppm:23`
+Definition: `src/network/openai.cppm:33`
 
 Declaration: [`Namespace clore::net::openai::protocol::detail`](../../namespaces/clore/net/openai/protocol/detail/index.md)
 
-The function `clore::net::openai::protocol::detail::validate_request` is implemented as a thin delegation wrapper around `clore::net::detail::validate_completion_request`. It forwards the `request` parameter and passes two boolean literals `true` and `true`, which enable both structural and semantic validation checks. This design centralizes the core validation logic in a shared helper, ensuring that the `OpenAI` protocol layer applies the same strict constraint enforcement (e.g., required fields, value ranges, and allowed combinations) as other protocol implementations. The function returns a `std::expected<void, LLMError>`, propagating any validation failure from the common validation routine without introducing additional logic or branching.
+The function `clore::net::openai::protocol::detail::validate_request` is a thin wrapper that delegates all validation logic to `clore::net::detail::validate_completion_request`. It passes the incoming `CompletionRequest` along with two fixed boolean arguments that likely enable structural and semantic checks specific to `OpenAI` protocol requests. The control flow is a single delegation call, ensuring that request validation follows the same centralised path used elsewhere in the codebase, while keeping the `OpenAI`‑specific entry point distinct.
 
 #### Side Effects
 
@@ -536,58 +532,54 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `request` parameter (const `CompletionRequest`&)
+- const `CompletionRequest`& request
 
 #### Usage Patterns
 
-- Called to validate a completion request before using it in a protocol operation
+- called to validate a completion request before further processing in the `OpenAI` protocol layer
 
 ### `clore::net::protocol::build_request_json`
 
-Declaration: `network/openai.cppm:457`
+Declaration: `src/network/openai.cppm:467`
 
-Definition: `network/openai.cppm:465`
+Definition: `src/network/openai.cppm:475`
 
 Declaration: [`Namespace clore::net::protocol`](../../namespaces/clore/net/protocol/index.md)
 
-The function begins by delegating validation to `openai::protocol::detail::validate_request`, returning an error immediately if the request is invalid. It then constructs a JSON root object and an empty messages array using `clore::net::detail::make_empty_object` and `make_empty_array`. The `model` field is inserted directly. Each message in `request.messages` is serialized into the array via `openai::protocol::detail::serialize_message`. Optional request components are conditionally appended: `response_format` via `serialize_response_format`, `tools` via `serialize_tool_definition` for each tool, and `tool_choice` via `serialize_tool_choice`. A `parallel_tool_calls` boolean, if present, is inserted directly. Finally, the root object is serialized to a JSON string using `kota::codec::json::to_string`, and the string is returned. All serialization steps propagate errors back through `std::expected`.
+The function first invokes `openai::protocol::detail::validate_request` on the input `CompletionRequest`; if validation fails, it immediately returns the resulting error.  A root JSON object and a messages array are then created via `clore::net::detail::make_empty_object` and `clore::net::detail::make_empty_array`, with early return on allocation failure.  The request’s `model` is inserted into the root, and each message in `request.messages` is serialized into the array using `openai::protocol::detail::serialize_message`.  After inserting the messages array, the function conditionally serializes `request.response_format` via `serialize_response_format`, any tools via `serialize_tool_definition`, and the `tool_choice` via `serialize_tool_choice`; each serialization step checks for success and propagates errors.  A `parallel_tool_calls` boolean, if present, is inserted directly.  Finally, the assembled JSON object is encoded to a string with `kota::codec::json::to_string`; a failure there produces an `LLMError` indicating serialization failure.  The resulting string is returned on success.  The algorithm relies throughout on a chain of detail‑level serializers and allocation helpers, all returning `std::expected` to propagate errors without exceptions.
 
 #### Side Effects
 
-- Allocates and populates JSON objects and arrays
-- Serializes a composite JSON structure to a string
-- Moves ownership of intermediate JSON containers
+- allocates memory for the returned JSON string
 
 #### Reads From
 
-- `request` parameter and its fields (`model`, `messages`, `response_format`, `tools`, `tool_choice`, `parallel_tool_calls`)
-- `openai::protocol::detail::validate_request`
-- `openai::protocol::detail::serialize_message`
-- `openai::protocol::detail::serialize_response_format`
-- `openai::protocol::detail::serialize_tool_definition`
-- `openai::protocol::detail::serialize_tool_choice`
+- `CompletionRequest` parameter 'request'
+- request`.model`
+- request`.messages`
+- request`.response_format`
+- request`.tools`
+- request`.tool_choice`
+- request`.parallel_tool_calls`
 
 #### Writes To
 
-- Local variables `validation`, `root`, `messages`, `tools`, `response_format`, `tool_choice`, `encoded`
-- Returned `std::string` (or error state in `LLMError`)
+- returned `std::string` containing JSON
 
 #### Usage Patterns
 
-- Serializing a `CompletionRequest` into a JSON string for network transmission
-- Building the request payload for an `OpenAI` API call
+- called by higher-level networking functions to build request payloads
+- used in the `OpenAI` protocol implementation to convert request objects to JSON strings
 
 ### `clore::net::protocol::parse_response`
 
-Declaration: `network/openai.cppm:459`
+Declaration: `src/network/openai.cppm:469`
 
-Definition: `network/openai.cppm:532`
+Definition: `src/network/openai.cppm:542`
 
 Declaration: [`Namespace clore::net::protocol`](../../namespaces/clore/net/protocol/index.md)
 
-The function begins by parsing the input `json_text` into a `json::Object` via `kota::codec::json::parse`. If parsing fails, it immediately returns an `LLMError`. It then checks for an `"error"` key in the root object; if present, it extracts the `"error.message"` string and returns an error. Next, it retrieves the required top-level fields `"id"`, `"model"`, and `"choices"`, using `clore::net::detail` helper functions to validate and extract each value. If any required field is missing or malformed, the function returns an error.
-
-The first element of the `"choices"` array is examined. Its `"finish_reason"` is checked: values `"length"` and `"content_filter"` cause early errors, while `"stop"` and `"tool_calls"` are accepted; any other value is rejected. The function then processes the `"message"` object inside the choice: it looks for `"refusal"`, `"content"` (which may be a string or an array of content parts, or null), and `"tool_calls"`. Content parts are parsed via `openai::protocol::detail::parse_content_parts`, and tool calls via `openai::protocol::detail::parse_tool_calls`. After extraction, consistency checks are performed—for example, `"tool_calls"` with `finish_reason == "stop"` or an empty tool calls array with `finish_reason == "tool_calls"` both produce errors. Finally, the function assembles a `CompletionResponse` containing the extracted `id`, `model`, `AssistantOutput` (with text, refusal, and tool calls), and the raw JSON string, returning it on success.
+The function `clore::net::protocol::parse_response` parses a raw JSON string from an LLM API into a `CompletionResponse`. Internally, it first validates the JSON structure using `kota::codec::json::parse` and checks for top‑level errors. It then extracts the mandatory fields `id`, `model`, and the `choices` array, taking the first choice. The algorithm validates the `finish_reason` string against known values (e.g., `"stop"`, `"tool_calls"`) and returns an error for truncated or filtered responses. From the first choice’s `message` object, it conditionally extracts `refusal`, `content` (which may be a plain string, a content‑parts array parsed via `openai::protocol::detail::parse_content_parts`, or null), and `tool_calls` (parsed via `openai::protocol::detail::parse_tool_calls`). Consistency checks ensure that `finish_reason` matches the presence of tool calls and that at least one of `text`, `refusal`, or `tool_calls` is present. The function relies on helper utilities from `clore::net::detail` for type‑safe JSON access (`expect_object`, `expect_string`, `expect_array`) and delegates content and tool‑call parsing to the `openai::protocol::detail` namespace.
 
 #### Side Effects
 
@@ -596,19 +588,17 @@ No observable side effects are evident from the extracted code.
 #### Reads From
 
 - `json_text` parameter
-- parsed `kota::codec::json::Object` from `kota::codec::json::parse`
 
 #### Usage Patterns
 
-- parsing an LLM API JSON response
-- extracting a `CompletionResponse` from raw response text
-- validating response structure and error conditions
+- Parse a JSON response from an LLM API into a structured result
+- Used after receiving the HTTP response body of a chat completion request
 
 ## Internal Structure
 
-The `openai` module is decomposed into three layers: a `protocol::detail` namespace containing low-level serialization and parsing helpers (e.g., `serialize_message`, `serialize_tool_choice`, `parse_content_parts`, `validate_request`); a `detail` namespace that provides the `Protocol` struct – a concrete adapter implementing the provider‑specific interface (with methods like `build_request_json`, `parse_response`, `read_environment`); and a set of public async entry points (`call_completion_async`, `call_llm_async`, `call_structured_async`) that orchestrate requests using the `Protocol` adapter and a `kota::event_loop`.
+The `openai` module is decomposed into three layers: the public namespace `clore::net::openai`, an internal `detail` namespace, and the protocol‑specific `clore::net::openai::protocol` namespace (with its own `detail` sublayer). The public layer exports asynchronous entry points (`call_llm_async`, `call_completion_async`, `call_structured_async`) that accept `kota::event_loop` references and delegate to internal helpers. The `detail` layer provides the `Protocol` struct, which encapsulates environment configuration, URL/header/request‑body construction, and response parsing. The `protocol` layer owns request validation, JSON serialization of messages, tool definitions, response formats, and tool‑choice values, as well as deserialization of content parts and tool calls from the API response.
 
-The module imports `client`, `http`, `protocol`, `provider`, `schema`, `support`, and `std`. The `client` and `http` modules supply the asynchronous execution framework and raw HTTP networking; `protocol` provides the abstract request/response types; `provider` and `schema` handle authentication, URL construction, and JSON schema generation; `support` delivers foundational utilities. Internally, the `Protocol` struct translates between the generic `protocol` types and `OpenAI`‑specific JSON wire format by delegating to the `protocol::detail` functions, while the top‑level async functions bind the lifecycle and error handling.
+The module imports the `client`, `http`, `protocol`, `provider`, `schema`, and `support` modules, relying on them for HTTP transport, shared LLM request/response types, credential management, JSON schema generation, and utility functions. Internally, the protocol‑specific serializers and parsers are implemented as free functions in `clore::net::openai::protocol::detail`, while the `detail::Protocol` class orchestrates request lifecycle steps. This separation keeps the public API thin and the protocol logic isolated from the async dispatching layer.
 
 ## Related Pages
 

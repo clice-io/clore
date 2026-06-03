@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::ensurecachekey'
-description: 'The function clore::extract::ensure_cache_key modifies a given CompileEntry to guarantee that a valid cache key is present on the object. Its primary responsibility is to prepare the entry for use in caching mechanisms—most notably by clore::extract::query_toolchain_cached—so that subsequent cache lookups operate on a consistent, comparable key.'
+description: 'The function clore::extract::ensure_cache_key accepts a CompileEntry & and ensures that the entry has a valid internal cache key computed. After the call, the entry is guaranteed to be in a state where its cached representation is ready for use with the compilation database’s caching mechanism. This function is intended to be called before any caching operation that depends on a stable, deduplicated key derived from the entry’s tool arguments. The operation is idempotent: invoking it multiple times on the same entry produces the same effect and does not invalidate prior results.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Namespace clore::extract](../index.md)
 
-Declaration: `extract/compiler.cppm:60`
+Declaration: `src/extract/compiler.cppm:76`
 
-Definition: `extract/compiler.cppm:225`
+Definition: `src/extract/compiler.cppm:241`
 
 Implementation: [`Module extract:compiler`](../../../../modules/extract/compiler.md)
 
@@ -21,13 +21,11 @@ Implementation: [`Module extract:compiler`](../../../../modules/extract/compiler
 auto (CompileEntry &) -> void;
 ```
 
-The function `clore::extract::ensure_cache_key` modifies a given `CompileEntry` to guarantee that a valid cache key is present on the object. Its primary responsibility is to prepare the entry for use in caching mechanisms—most notably by `clore::extract::query_toolchain_cached`—so that subsequent cache lookups operate on a consistent, comparable key.
-
-Callers that intend to perform cacheable operations on a `CompileEntry` should invoke this function beforehand. The contract is that after the call, the `CompileEntry` contains a key derived from its properties (for example, from the compiler, flags, or source file); the function is designed to be idempotent in the sense that it either sets the key if absent or ensures the existing key remains valid. The specific derivation logic is encapsulated in `clore::extract::ensure_cache_key_impl`, but direct callers need only rely on the postcondition that a cache key is established.
+The function `clore::extract::ensure_cache_key` accepts a `CompileEntry &` and ensures that the entry has a valid internal cache key computed. After the call, the entry is guaranteed to be in a state where its cached representation is ready for use with the compilation database’s caching mechanism. This function is intended to be called before any caching operation that depends on a stable, deduplicated key derived from the entry’s tool arguments. The operation is idempotent: invoking it multiple times on the same entry produces the same effect and does not invalidate prior results.
 
 ## Usage Patterns
 
-- Called by `query_toolchain_cached` to prepare a cache key before toolchain lookup
+- Called by `query_toolchain_cached` to ensure a cache key is set for a compile entry before use.
 
 ## Calls
 

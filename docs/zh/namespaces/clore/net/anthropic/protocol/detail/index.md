@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::anthropic::protocol::detail'
-description: 'clore::net::anthropic::protocol::detail 命名空间封装了与 Anthropic 协议消息构造和解析相关的内部实现细节。它提供了一系列底层辅助函数，例如 make_text_block、parse_json_text、make_role_message、make_tool_use_block、make_tool_result_block、append_text_with_gap、format_schema_instruction 和 validate_request，这些函数通常通过不透明的整数句柄来操作消息块，并返回状态码或句柄值。此外，命名空间还包含一个 constexpr 常量 kDefaultMaxTokens（值为 2048），用作请求中令牌数的默认上限。'
+description: 'clore::net::anthropic::protocol::detail 是协议实现的内部命名空间，专注于提供构建和验证 Anthropic API 请求所需的底层辅助函数与常量。它封装了文本块、角色消息、工具使用块和工具结果块的构造（如 make_text_block、make_role_message、make_tool_use_block、make_tool_result_block），以及格式化指令、JSON 解析、请求校验和文本拼接等工具（如 format_schema_instruction、parse_json_text、validate_request、append_text_with_gap）。这些函数通常返回整型标识符用于内部引用，并依赖 kDefaultMaxTokens（2048）作为默认令牌上限。作为协议层的胶水代码，它将原始协议细节抽象为可组合的积木块，使上层代码无需直接处理 JSON 格式或协议语义，从而保持请求组装过程的一致性和可维护性。'
 layout: doc
 template: doc
 ---
@@ -9,165 +9,162 @@ template: doc
 
 ## Summary
 
-`clore::net::anthropic::protocol::detail` 命名空间封装了与 Anthropic 协议消息构造和解析相关的内部实现细节。它提供了一系列底层辅助函数，例如 `make_text_block`、`parse_json_text`、`make_role_message`、`make_tool_use_block`、`make_tool_result_block`、`append_text_with_gap`、`format_schema_instruction` 和 `validate_request`，这些函数通常通过不透明的整数句柄来操作消息块，并返回状态码或句柄值。此外，命名空间还包含一个 `constexpr` 常量 `kDefaultMaxTokens`（值为 2048），用作请求中令牌数的默认上限。
-
-在架构上，该命名空间充当实现细节层，为协议中更高级别的序列化、消息组合和请求验证提供原子操作。调用者负责确保传入参数的合法性（如角色字符串的规范性、JSON 格式的正确性、句柄的有效性），并通过返回的整数值判断操作是否成功。这些函数不公开具体实现，外部模块不应直接依赖，而是通过协议提供的公共接口间接使用。
+`clore::net::anthropic::protocol::detail` 是协议实现的内部命名空间，专注于提供构建和验证 Anthropic API 请求所需的底层辅助函数与常量。它封装了文本块、角色消息、工具使用块和工具结果块的构造（如 `make_text_block`、`make_role_message`、`make_tool_use_block`、`make_tool_result_block`），以及格式化指令、JSON 解析、请求校验和文本拼接等工具（如 `format_schema_instruction`、`parse_json_text`、`validate_request`、`append_text_with_gap`）。这些函数通常返回整型标识符用于内部引用，并依赖 `kDefaultMaxTokens`（2048）作为默认令牌上限。作为协议层的胶水代码，它将原始协议细节抽象为可组合的积木块，使上层代码无需直接处理 JSON 格式或协议语义，从而保持请求组装过程的一致性和可维护性。
 
 ## Variables
 
 ### `clore::net::anthropic::protocol::detail::kDefaultMaxTokens`
 
-Declaration: `network/anthropic.cppm:23`
+Declaration: `src/network/anthropic.cppm:32`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-`clore::net::anthropic::protocol::detail::kDefaultMaxTokens` is a `constexpr std::uint32_t` constant initialized to `2048`, providing a default maximum token count for Anthropic protocol requests.
+常量 `kDefaultMaxTokens` 是命名空间 `clore::net::anthropic::protocol::detail` 中定义的 `constexpr std::uint32_t` 类型常量，其值为 `2048`，用作默认最大令牌数。
 
 #### Usage Patterns
 
-- Used as default maximum token value in `build_request_json`
+- 作为 `build_request_json` 函数中 `max_tokens` 的默认值
 
 ## Functions
 
 ### `clore::net::anthropic::protocol::detail::append_text_with_gap`
 
-Declaration: `network/anthropic.cppm:25`
+Declaration: `src/network/anthropic.cppm:34`
 
-Definition: `network/anthropic.cppm:25`
+Definition: `src/network/anthropic.cppm:34`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
 Declaration: [Declaration](functions/append-text-with-gap.md)
 
-此函数用于将一段文本以协议所需的格式追加到目标字符串中，同时在其前后或内部插入必要的间隔符。调用者应当提供一个可修改的 `std::string` 对象作为第一个参数，该对象通常代表正在构建的协议消息；第二个参数是一个 `std::string_view`，表示要追加的文本内容。函数不返回任何值，而是直接修改目标字符串，并且要求调用者确保目标字符串在调用前后保持有效状态。
+向目标字符串追加给定的文本视图，并在嵌入时自动维持适当的格式间隙（例如换行与缩进），使拼接结果符合 Anthropic 协议对 JSON 结构的布局要求。调用方须提供可变的 `std::string` 引用作为接收缓冲区，以及一个 `std::string_view` 作为待附加的文本片段；函数独立处理间隙逻辑，调用方无需关心 JSON 格式化细节。
 
 #### Usage Patterns
 
-- called by `build_request_json` to assemble request body
-- used for appending text blocks with a separating gap
+- Called by `clore::net::anthropic::protocol::build_request_json` to add text blocks.
 
 ### `clore::net::anthropic::protocol::detail::format_schema_instruction`
 
-Declaration: `network/anthropic.cppm:176`
+Declaration: `src/network/anthropic.cppm:185`
 
-Definition: `network/anthropic.cppm:176`
+Definition: `src/network/anthropic.cppm:185`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-`clore::net::anthropic::protocol::detail::format_schema_instruction` 接受一个 `const int&` 参数，并返回一个 `int`。该函数用于格式化模式指令（schema instruction），其具体行为由传入的整数参数决定。返回的整数表示格式化操作的状态或结果。调用者负责传入有效的引用，并根据返回值判断是否需要进一步处理。
+`format_schema_instruction` 接受一个架构指令标识符（通过 `const int &` 传入），并返回一个格式化的指令表示（以 `int` 形式返回）。调用者应保证提供的标识符在内部映射表中有效；返回的整数值可直接用于构造后续的协议块，例如 `make_tool_use_block` 或 `make_tool_result_block`。该函数是底层格式化步骤，不直接校验语义一致性——此类校验应由 `validate_request` 在其他地方执行。
 
 #### Usage Patterns
 
-- called to create the system instruction for a structured response from the model
-- used when constructing a request with a specified response schema
+- Called to generate system instruction text for LLM requests
+- Used in constructing the final prompt when a response schema is specified
+- Provides fallback default instruction when no schema is set
 
 ### `clore::net::anthropic::protocol::detail::make_role_message`
 
-Declaration: `network/anthropic.cppm:154`
+Declaration: `src/network/anthropic.cppm:139`
 
-Definition: `network/anthropic.cppm:154`
+Definition: `src/network/anthropic.cppm:139`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-该函数根据提供的 `role` 字符串和消息内容构造一条角色消息，并返回该消息的整数标识符。调用者负责传入有效的角色值（如 `"user"`、`"assistant"`）以及对应的内容——可以是 `json::Array` 形式的多块内容，也可以是纯文本的 `std::string_view`。返回的标识符可用于后续引用或组合请求。该函数假定传入的内容已经符合 Anthropic 协议的消息结构，不执行内部的校验或格式化。
+`clore::net::anthropic::protocol::detail::make_role_message` 是一个重载函数，用于构造一条带有指定角色和内容的消息。该函数返回一个整型标识符，调用方应妥善保存该标识符并在后续操作中引用对应消息。第一个重载接受两个 `std::string_view` 参数：第一个表示消息角色（如 “user” 或 “assistant”），第二个表示文本内容。第二个重载接受一个 `std::string_view` 角色和一个 `json::Array` 作为内容块集合，适用于需要包含多个内容片段（如文本块、工具使用块等）的消息。调用方应保证角色值符合 Anthropic 协议的有效取值范围，且内容参数在语义上合法（例如文本内容不为空，或数组中的每个元素均为协议允许的内容块）。
 
 #### Usage Patterns
 
-- Building request messages for the Anthropic API
-- Internal helper for constructing role-based message objects
+- Constructing a user or assistant message for Anthropic API requests
+- Building message objects with role and plain text content
+- Internal call within `clore::net::anthropic::protocol` namespace
 
 ### `clore::net::anthropic::protocol::detail::make_role_message`
 
-Declaration: `network/anthropic.cppm:130`
+Declaration: `src/network/anthropic.cppm:163`
 
-Definition: `network/anthropic.cppm:130`
+Definition: `src/network/anthropic.cppm:163`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-`clore::net::anthropic::protocol::detail::make_role_message` 根据指定的角色和内容构造一条角色消息，用于 Anthropic 协议的请求构建。调用者需提供角色字符串（例如 `"user"` 或 `"assistant"`）和内容：内容可以是纯文本（`std::string_view`），也可以是 `json::Array` 形式的结构化数据。该函数返回一个整数标识符，代表所创建的消息，该标识符可用于后续协议构造（例如添加到消息序列中）。调用者负责确保角色和内容符合协议约定，且标识符的有效性在调用方上下文中维持。
+构造一个角色化消息，该消息将给定的角色标识（如 `"user"` 或 `"assistant"`）与内容关联起来。重载形式分别接收一个 `json::Array`（用于多块内容）或一个 `std::string_view`（作为单个文本块）。返回一个整型值，表示所创建消息的标识符或状态码；调用方应对此返回值进行检查以确认操作结果。此函数是协议层内部的构造器，调用方不应假设其具体的内存管理或生命周期行为。
 
 #### Usage Patterns
 
-- 构造简单文本角色消息
-- 被上层消息构建函数调用
+- used to build message objects with a role and content blocks
+- called when constructing user, assistant, or tool result messages
 
 ### `clore::net::anthropic::protocol::detail::make_text_block`
 
-Declaration: `network/anthropic.cppm:35`
+Declaration: `src/network/anthropic.cppm:44`
 
-Definition: `network/anthropic.cppm:35`
+Definition: `src/network/anthropic.cppm:44`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-`clore::net::anthropic::protocol::detail::make_text_block` 将给定的字符串视图内容封装为一个文本块，并返回一个整数句柄。调用者必须确保传入的 `std::string_view` 在函数调用期间保持有效；函数不会延长字符串的生命周期。返回的整数值是对所创建文本块的不透明标识，不应被调用者直接解释或修改，而应传递给需要引用该文本块的后续操作（例如构造消息或请求）。
+函数 `clore::net::anthropic::protocol::detail::make_text_block` 接受一个代表纯文本内容的 `std::string_view`，并返回一个整型值，该值表示所构造的文本块的标识符或句柄。它用于将文本片段转换为协议定义的块结构，以便在后续的 `role_message` 或 `tool_result_block` 等组合函数中使用。
 
-该函数的契约不保证对同一内容重复调用返回相同的整数值，也不承诺返回值一定非零或具有特定数值意义。调用者不应假设返回值与任何外部资源或状态直接对应。如果创建失败，返回值可能为零或表示错误的特殊值，具体行为由内部实现决定。
+调用者需保证传入的字符串视图在函数调用期间仍然有效；该函数不承担所有权或延长字符串生命周期的责任。此函数位于 `detail` 命名空间，属于协议实现的内部辅助，不应由外部代码直接使用。返回的整型值仅可用于同一协议构建流程中的其他函数，不具有跨流程的持久性。
 
 #### Usage Patterns
 
-- called to create a text block in Anthropic message construction
+- Creates a text block object for inclusion in Anthropic API message requests
+- Called by higher‑level protocol functions that assemble message content
 
 ### `clore::net::anthropic::protocol::detail::make_tool_result_block`
 
-Declaration: `network/anthropic.cppm:98`
+Declaration: `src/network/anthropic.cppm:107`
 
-Definition: `network/anthropic.cppm:98`
+Definition: `src/network/anthropic.cppm:107`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-该函数构造一个表示工具结果的内容块，用于组装 Anthropic 协议消息。调用者提供对整数类型的常量引用（参数类型 `const int &`），该整数通常携带工具调用的标识符或结果索引。函数返回一个 `int` 值，表示操作结果或新块的句柄，调用者应据此确认块是否成功创建。该函数属于协议内部实现，不应被外部模块直接依赖，但在构建包含工具结果的消息流中可能被间接使用。
+`clore::net::anthropic::protocol::detail::make_tool_result_block` 负责将给定的工具结果标识符（以 `const int &` 形式提供）转换为一个协议层面的工具结果块。该函数是为构建 Anthropic API 请求而设计的内部辅助函数，调用者需要确保传入的标识符有效且与后续的 `make_tool_use_block` 等函数的用法一致。返回的整数代表新创建的工具结果块的内部索引，可用于在请求组合中引用该块。调用者不应直接依赖返回值的具体含义，而应仅将其作为后续协议装配步骤的输入。
 
 #### Usage Patterns
 
-- 用于构建 Anthropic API 请求中的 `tool_result` 内容块
-- 被上层消息组装函数调用以填充 tool 结果
+- Constructing tool result blocks in Anthropic API requests
+- Used when assembling a conversation turn that includes tool result data
 
 ### `clore::net::anthropic::protocol::detail::make_tool_use_block`
 
-Declaration: `network/anthropic.cppm:58`
+Declaration: `src/network/anthropic.cppm:67`
 
-Definition: `network/anthropic.cppm:58`
+Definition: `src/network/anthropic.cppm:67`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-`clore::net::anthropic::protocol::detail::make_tool_use_block` 基于调用者提供的工具标识符构造一个工具使用块。调用者必须传入一个对整数的常量引用，该整数指示期望的工具调用；函数返回一个代表所构建块的整数标识符。该函数不接收输入内容或配置，调用者负责确保传入的标识符有效并与可用的工具声明对应。返回的整数可供后续协议序列化或由其他细节层函数使用。
+函数 `clore::net::anthropic::protocol::detail::make_tool_use_block` 负责构建一个表示工具使用（tool use）块的协议元素，并返回其标识符。调用者必须提供一个 `const int &` 类型的参数，该参数通常代表与工具调用相关的配置索引或描述符。返回的 `int` 值可用于后续协议组装步骤，例如将此块嵌入消息结构，或检查操作结果的状态。此函数是 `clore::net::anthropic::protocol::detail` 命名空间中一系列块构建辅助函数（如 `make_tool_result_block`）的一部分，共同用于合成符合 Anthropic 协议要求的工具交互消息。
 
 #### Usage Patterns
 
-- Converting a `ToolCall` into a JSON block for Anthropic request formatting
-- Used alongside `make_tool_result_block` and `make_text_block` in request construction
+- 用于构建 Anthropic API 的 `tool_use` 块
+- 被更高级别的消息构建函数调用
 
 ### `clore::net::anthropic::protocol::detail::parse_json_text`
 
-Declaration: `network/anthropic.cppm:171`
+Declaration: `src/network/anthropic.cppm:180`
 
-Definition: `network/anthropic.cppm:171`
+Definition: `src/network/anthropic.cppm:180`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-`clore::net::anthropic::protocol::detail::parse_json_text` 解析一个 JSON 文本，并返回一个表示解析结果的整数。该函数是 `clore::net::anthropic::protocol` 内部协议细节处理的一部分，供同命名空间下的其他函数（如 `make_text_block`、`append_text_with_gap` 等）在构建或处理消息块时调用。
-
-调用者应提供两个 `std::string_view` 参数，通常第一个为待解析的 JSON 字符串，第二个为附加上下文（如标识符或类型指示）。返回的 `int` 值指示解析操作的状态，例如成功、失败或特定错误码。函数假定输入 JSON 符合预期格式，未定义行为可能发生在无效输入上。
+`clore::net::anthropic::protocol::detail::parse_json_text` 接受两个 `std::string_view` 参数，并返回一个 `int`。该函数负责解析由这两个字符串视图所标识或构成的 JSON 文本，并将解析结果以整数值的形式返回给调用方。调用方应确保提供的两个字符串视图共同描述了一份合法的 JSON 内容，具体的解析语义和返回值含义由调用的上下文约定。
 
 #### Usage Patterns
 
-- parsing raw JSON text with error context
-- used in Anthropic protocol request/response handling
+- Called to parse a JSON object string into a structured `json::Object` within the Anthropic protocol implementation
 
 ### `clore::net::anthropic::protocol::detail::validate_request`
 
-Declaration: `network/anthropic.cppm:193`
+Declaration: `src/network/anthropic.cppm:202`
 
-Definition: `network/anthropic.cppm:193`
+Definition: `src/network/anthropic.cppm:202`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-函数 `clore::net::anthropic::protocol::detail::validate_request` 验证传入的请求参数，并返回一个表示验证结果的状态码。调用者应传入一个 `const int &` 类型的请求标识符或参数；函数根据内部规则判断其有效性，返回的整数值指示验证通过或失败（非零值可能代表具体错误）。该函数不修改传入参数，且未定义未验证的输入行为。
+函数 `clore::net::anthropic::protocol::detail::validate_request` 接受一个 `const int &` 类型的请求标识符并返回一个 `int` 状态码。调用者应提供有效的请求标识符，函数将执行协议层面的请求校验，返回值指示请求是否满足预期约束（通常为 0 表示成功，非零表示特定错误）。该函数是 `clore::net::anthropic::protocol::detail` 名称空间中协议处理的底层工具，不应对其做实现假设。
 
 #### Usage Patterns
 
-- 在发送请求前调用以验证 `CompletionRequest` 的完整性
-- 作为协议层验证的入口点
+- Invoked to check validity of a `CompletionRequest` before further processing
+- Typically called internally before sending a request to the Anthropic API
 
 ## Related Pages
 

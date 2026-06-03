@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:markdown'
-description: 'The module generate:markdown provides the core data structures and functions for constructing and rendering Markdown documentation from internal semantic representations. It defines a hierarchy of node types (e.g., TextFragment, CodeFragment, CodeFence, BlockQuote, BulletList, SemanticSection) and a MarkdownDocument container with optional Frontmatter. Public functions allow creating individual Markdown elements (make_text, make_code, make_link, etc.) and assembling them into a complete document, as well as rendering the final output. The module encapsulates the logic for formatting inline code, blockquotes, sections with semantic kinds, and other Markdown-specific constructs, decoupling the generation pipeline from the output format.'
+description: 'The generate:markdown module provides the core infrastructure for constructing and rendering structured Markdown documents within the documentation generation pipeline. It defines a hierarchy of node types, including MarkdownDocument, MarkdownNode, and semantic containers such as SemanticSection, Paragraph, CodeFence, BulletList, BlockQuote, and inline fragment types (TextFragment, CodeFragment, LinkFragment). Public factory functions (make_text, make_code, make_link, make_paragraph, make_code_fence, make_blockquote, make_raw_markdown, make_mermaid, make_section) allow callers to assemble complete document models, while the render_markdown function serializes those models into valid Markdown text. The module also handles code span detection and preservation through code_spanned_fragments and code_spanned_markdown, ensuring that inline code in source text is faithfully reproduced or transformed into proper Markdown code spans. Overall, this module owns the public‑facing representation and rendering of generated Markdown content.'
 layout: doc
 template: doc
 ---
@@ -9,11 +9,7 @@ template: doc
 
 ## Summary
 
-The module `generate:markdown` provides the core data structures and functions for constructing and rendering Markdown documentation from internal semantic representations. It defines a hierarchy of node types (e.g., `TextFragment`, `CodeFragment`, `CodeFence`, `BlockQuote`, `BulletList`, `SemanticSection`) and a `MarkdownDocument` container with optional Frontmatter. Public functions allow creating individual Markdown elements (`make_text`, `make_code`, `make_link`, etc.) and assembling them into a complete document, as well as rendering the final output. The module encapsulates the logic for formatting inline code, blockquotes, sections with semantic kinds, and other Markdown-specific constructs, decoupling the generation pipeline from the output format.
-
-## Imports
-
-- `std`
+The `generate:markdown` module provides the core infrastructure for constructing and rendering structured Markdown documents within the documentation generation pipeline. It defines a hierarchy of node types, including `MarkdownDocument`, `MarkdownNode`, and semantic containers such as `SemanticSection`, `Paragraph`, `CodeFence`, `BulletList`, `BlockQuote`, and inline fragment types (`TextFragment`, `CodeFragment`, `LinkFragment`). Public factory functions (`make_text`, `make_code`, `make_link`, `make_paragraph`, `make_code_fence`, `make_blockquote`, `make_raw_markdown`, `make_mermaid`, `make_section`) allow callers to assemble complete document models, while the `render_markdown` function serializes those models into valid Markdown text. The module also handles code span detection and preservation through `code_spanned_fragments` and `code_spanned_markdown`, ensuring that inline code in source text is faithfully reproduced or transformed into proper Markdown code spans. Overall, this module owns the public‑facing representation and rendering of generated Markdown content.
 
 ## Imported By
 
@@ -27,87 +23,109 @@ The module `generate:markdown` provides the core data structures and functions f
 
 ### `clore::generate::BlockQuote`
 
-Declaration: `generate/markdown.cppm:62`
+Declaration: `src/generate/markdown.cppm:73`
 
-Definition: `generate/markdown.cppm:62`
+Definition: `src/generate/markdown.cppm:73`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::BlockQuote` stores its content in a single data member `fragments`, which is a `std::vector<InlineFragment>`. This vector holds the inline‑level markup elements that constitute the quote’s interior. The implementation imposes no invariants beyond those inherent to `std::vector`: the container may be empty, and the iteration order of `fragments` defines the sequential arrangement of the rendered inline content. No custom constructors, assignment `operator`s, or member functions are defined; `BlockQuote` is a plain aggregate that relies on default member initialization and compiler‑generated special member functions.
+The internal structure of `clore::generate::BlockQuote` consists solely of a single member: `fragments`, which is a `std::vector` of `InlineFragment` objects. This vector holds the ordered sequence of inline elements that constitute the content of a block‑quote node in the generated Markdown document. The type is an aggregate, with no user‑defined constructors, destructors, or assignment `operator`s; all members are initialized via default member initializers where applicable, and the vector is default‑constructed to an empty state.
 
-#### Invariants
-
-- The `fragments` vector holds the sequence of inline elements within the block quote.
-- An empty `fragments` vector represents an empty block quote.
+The implementation implicitly relies on the invariants of `std::vector` and `InlineFragment`. There are no custom invariants enforced by the struct itself; the `fragments` vector may be empty, representing an empty block quote, or contain any number of `InlineFragment` elements. The struct’s triviality means that copy, move, and comparison operations are compiler‑generated and simply forward to the corresponding operations of the contained vector. No special member implementations are provided, so correctness depends entirely on the correct manipulation of `fragments` by external code.
 
 #### Key Members
 
-- `fragments`
+- fragments
 
 #### Usage Patterns
 
-- Constructed with a list of `InlineFragment` objects to define the quote content.
-- Iterated over or accessed during markdown output generation to render the block quote.
+- Used by markdown generation code to structure block quotes
+- May be populated with inline fragments representing styled text or inline elements
 
 ### `clore::generate::BulletList`
 
-Declaration: `generate/markdown.cppm:49`
+Declaration: `src/generate/markdown.cppm:60`
 
-Definition: `generate/markdown.cppm:49`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The struct `clore::generate::BulletList` is a simple aggregate that holds a single data member: a `std::vector<ListItem>` named `items`. Its implementation relies entirely on the standard vector container, meaning the internal invariant is that the vector manages a contiguous sequence of `ListItem` objects. No additional member functions are defined; the struct is used as a plain data carrier whose `items` vector is populated externally. The `items` member provides the only storage for the bullet list entries, and any invariants (such as non-emptiness or ordering) must be enforced by the code that constructs or modifies the struct.
-
-### `clore::generate::CodeFence`
-
-Declaration: `generate/markdown.cppm:53`
-
-Definition: `generate/markdown.cppm:53`
+Definition: `src/generate/markdown.cppm:60`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The `clore::generate::CodeFence` struct serves as a plain data aggregate that bundles a code snippet with an optional language identifier. It contains two `std::string` members: `language` holds the programming language label (e.g., “cpp” or “python”), and `code` stores the actual source text. The struct has no constructors, member functions, or invariants beyond the default guarantees of its embedded strings; all fields are publicly accessible and can be set or read directly. Its primary role is to represent a complete code block for output generation, where the `language` string may be empty to indicate no syntax highlighting. No additional implementation details—such as validation, formatting, or ownership logic—are introduced, making `CodeFence` a minimal, transparent value type.
-
-### `clore::generate::CodeFragment`
-
-Declaration: `generate/markdown.cppm:29`
-
-Definition: `generate/markdown.cppm:29`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The struct `clore::generate::CodeFragment` is a straightforward data-holder consisting of a single public data member `code` of type `std::string`. It serves solely to store the textual content of a generated code fragment. No explicit constructors, destructors, or member functions are defined; the class relies entirely on compiler‑generated default operations for construction, assignment, and destruction. The only invariant is that the `code` member contains a valid `std::string` (which may be empty). The struct performs no validation, transformation, or ownership management on its content, making it a lightweight, pass‑through wrapper whose intended use is to bundle generated text for further composition or emission in the pipeline.
+The implementation of `clore::generate::BulletList` is a trivial aggregate consisting solely of a single data member: a `std::vector<ListItem>` named `items`. No invariants beyond those guaranteed by the vector itself are enforced; the struct serves as a homogeneous container for a sequence of list items. There are no custom constructors, assignment `operator`s, or member functions, so the type relies entirely on default compiler-generated special members and the standard library’s container semantics. This simplicity makes `BulletList` a transparent value type that can be directly manipulated, moved, and passed as part of larger generation structures.
 
 #### Invariants
 
-- The `code` member is a valid `std::string` object.
-- No constraints on the content or length of the string are enforced.
+- Items are stored in sequence as they appear in the vector
+- The vector may be empty, representing an empty bullet list
 
 #### Key Members
 
-- `code` of type `std::string` stores the code fragment content.
+- `items`: `std::vector<ListItem>` containing the list entries
 
 #### Usage Patterns
 
-- Instantiated directly with a string literal or variable containing code.
-- Collected into larger objects or sequences for later assembly into complete generated output.
+- Populated with `ListItem` objects and passed to rendering functions for markdown output
+- Likely constructed by builders or parsers during document generation
 
-### `clore::generate::Frontmatter`
+### `clore::generate::CodeFence`
 
-Declaration: `generate/markdown.cppm:18`
+Declaration: `src/generate/markdown.cppm:64`
 
-Definition: `generate/markdown.cppm:18`
+Definition: `src/generate/markdown.cppm:64`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The `clore::generate::Frontmatter` struct serves as a plain data container for YAML frontmatter metadata. Its four string members–`title`, `description`, `layout`, and `page_template`–are intended to capture the document title, a short description, the layout name, and the template name, respectively. `layout` and `page_template` are default-initialised to `"doc"`, ensuring a consistent fallback when no explicit layout or template is provided. No invariants, methods, or custom constructors exist beyond the compiler‑generated defaults; the struct is a simple aggregate that relies on the caller to populate or overwrite fields as needed.
+The implementation of `clore::generate::CodeFence` is a simple data aggregate that stores the content and metadata of a Markdown code fence. It consists of two `std::string` fields: `language` indicates the language identifier (e.g., `"cpp"` or `"python"`) and `code` holds the raw code block text. There are no invariants enforced beyond those of the contained strings; either field may be empty, and the struct itself imposes no validity constraints. The type serves exclusively as a lightweight transfer object, used to carry generated code along with its language tag from generation stages to output formatting. No member functions or constructors beyond the implicitly defined defaults are present, so instantiation and field assignment rely on aggregate initialization.
 
 #### Invariants
 
-- `layout` defaults to `"doc"`
-- `page_template` defaults to `"doc"`
-- all members are `std::string`
+- Both `language` and `code` are arbitrary `std::string` objects; no content restrictions are enforced.
+- The struct has no user-declared constructors, destructors, or assignment `operator`s, so it is an aggregate type.
+
+#### Key Members
+
+- `language`: the language identifier for the code fence (e.g., "cpp", "python").
+- `code`: the actual source code content enclosed in the fence.
+
+#### Usage Patterns
+
+- Direct initialization and member assignment are used to set `language` and `code`.
+- Other code accesses the members to read the stored values, likely for serialization into markdown text.
+
+### `clore::generate::CodeFragment`
+
+Declaration: `src/generate/markdown.cppm:40`
+
+Definition: `src/generate/markdown.cppm:40`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The struct `clore::generate::CodeFragment` is a thin aggregate wrapper around a single `std::string` member named `code`. Its purpose is to hold a piece of generated source code text; the struct itself imposes no invariants beyond those already guaranteed by `std::string`. The class is trivially copyable and movable, relying on the compiler‑generated default constructor, copy/move constructors, and copy/move assignment `operator`s. No custom constructors, destructors, or member functions are provided, so the type behaves as a simple value container that can be initialized with any string via aggregate initialization or direct assignment. The only invariant maintained by the struct is that `code` contains a valid UTF‑8 sequence (as required by the underlying `std::string`).
+
+#### Invariants
+
+- No invariants beyond those of `std::string`.
+
+#### Key Members
+
+- `code`
+
+#### Usage Patterns
+
+- Used as a data carrier for code fragments.
+
+### `clore::generate::Frontmatter`
+
+Declaration: `src/generate/markdown.cppm:29`
+
+Definition: `src/generate/markdown.cppm:29`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The `clore::generate::Frontmatter` struct is a plain aggregate data container that holds the metadata fields for a Markdown document's frontmatter. Its four `std::string` members—`title`, `description`, `layout`, and `page_template`—are direct copies of the corresponding frontmatter keys. The invariant is that `layout` and `page_template` default to the value `"doc"`, which ensures a sensible fallback if not explicitly overridden. There are no custom constructors, assignment `operator`s, or validation logic; the struct relies on aggregate initialization and member-wise defaults. The default member initializers for `layout` and `page_template` are the only “implementation” beyond trivial field storage, making the type a straightforward passive record.
+
+#### Invariants
+
+- No enforced invariants; all members are freely assignable strings.
 
 #### Key Members
 
@@ -118,72 +136,87 @@ The `clore::generate::Frontmatter` struct serves as a plain data container for Y
 
 #### Usage Patterns
 
-- Populated with frontmatter data before generating markdown pages
-- Consumed by functions that produce YAML header blocks in documentation output
+- No usage patterns observed in the provided evidence.
+
+### `clore::generate::InlineFragment`
+
+Declaration: `src/generate/markdown.cppm:50`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The type alias `clore::generate::InlineFragment` is a `std::variant` over `TextFragment`, `CodeFragment`, and `LinkFragment`. This variant provides a type-safe sum type for representing inline elements within a generated document, where each alternative corresponds to a distinct markdown inline construct — plain text, inline code, or a hyperlink. The variant's structure ensures that exactly one fragment type is active at any time, and it is typically used in conjunction with `std::visit` or a similar visitation pattern to dispatch operations such as rendering or serialization based on the active alternative.
+
+As an alias, `InlineFragment` does not introduce any new member implementations; all functionality is inherited from `std::variant`. The key invariant is that the variant is always in a valid state holding exactly one of the three fragment types. This design centralizes the handling of inline content and avoids the need for raw unions or manual type discrimination elsewhere in the generation pipeline.
+
+#### Invariants
+
+- Only one alternative is active at a time
+
+#### Key Members
+
+- `std::variant`
+- `TextFragment`
+- `CodeFragment`
+- `LinkFragment`
+
+#### Usage Patterns
+
+- Used to store and process inline elements in Markdown generation
 
 ### `clore::generate::LinkFragment`
 
-Declaration: `generate/markdown.cppm:33`
+Declaration: `src/generate/markdown.cppm:44`
 
-Definition: `generate/markdown.cppm:33`
+Definition: `src/generate/markdown.cppm:44`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::LinkFragment` is a plain aggregate holding three public fields: `label`, `target`, and `code_style`. The `label` stores the display text of the link, `target` stores the destination URL, and `code_style` is a boolean defaulting to `false` that controls whether the label should be rendered in monospaced code formatting. No invariants are enforced beyond the default member initializer; the struct is intended as a lightweight value type used internally during Markdown generation, allowing callers to specify link content without exposing construction or validation logic.
+The struct `clore::generate::LinkFragment` is an aggregate data type that bundles the three components of a generated link fragment. Its internal structure consists of two `std::string` members, `label` and `target`, and a `bool` member `code_style` default‑initialized to `false`. As a plain aggregate it has no user‑defined constructors, assignment `operator`s, or destructors; all member initialization follows the default‑initializer for `code_style` and value‑initialization for the two strings. The only invariant is that `code_style` is always `false` unless explicitly set to `true`; the strings may be empty, and no validation or post‑condition is enforced on `label` or `target`. Because the struct has no member functions beyond the implicitly generated ones, its important “implementation” is the trivial aggregate layout that permits direct member access and aggregate initialization.
 
 #### Invariants
 
-- `code_style` defaults to `false`
-- No invariants enforced; all members are mutable public strings and bool
+- No explicit invariants are documented; the struct is a plain aggregate.
+- `code_style` defaults to `false`.
+- All members are public and can be directly accessed.
 
 #### Key Members
 
-- `label`
-- `target`
-- `code_style`
+- `label` - the display text of the link fragment
+- `target` - the URL target of the link fragment
+- `code_style` - whether the label should be rendered as inline code
 
 #### Usage Patterns
 
-- No explicit usage is described in the evidence; the struct likely serves as input to markdown generation functions where a link fragment with optional code styling is needed.
+- Not specified in evidence; the struct is only defined in the provided snippet.
 
 ### `clore::generate::ListItem`
 
-Declaration: `generate/markdown.cppm:45`
+Declaration: `src/generate/markdown.cppm:56`
 
-Definition: `generate/markdown.cppm:45`
+Definition: `src/generate/markdown.cppm:56`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::ListItem` is a simple aggregate that contains a single public member: a `std::vector<InlineFragment>` named `fragments`. This vector is the only data member, and the struct imposes no additional invariants beyond those inherited from `std::vector`; it is typically expected to be non‑empty when representing a meaningful list item, but the type itself enforces no such constraint. No custom constructors, assignment `operator`s, or member functions are provided, so the struct relies entirely on compiler‑generated defaults, making it a lightweight container for the list item’s inline content.
-
-#### Invariants
-
-- The `fragments` vector may be empty or non-empty; no constraint is imposed.
-- `ListItem` is a simple aggregate with no special constructors or invariants beyond those of its member types.
+The struct `clore::generate::ListItem` aggregates a flat sequence of `InlineFragment` objects stored in the single member `fragments`. The internal structure is a direct container; no additional metadata or linking is maintained. The primary invariant is that the order of elements in `fragments` reflects the linear inline content of the list item, with each fragment representing a contiguous piece of formatted text (e.g., plain, emphasized, or linked). The struct has no custom constructors, destructors, or member functions; all lifecycle and modification rely on `std::vector` operations. There is no invariant requiring a non-empty `fragments`; an empty vector denotes an empty list item. The simplicity of the design supports efficient construction by directly populating the vector during Markdown generation, avoiding additional abstraction layers.
 
 #### Key Members
 
-- `fragments` – stores the list item's content as a vector of inline fragments
-
-#### Usage Patterns
-
-- Defined in the `clore::generate` module for markdown generation.
-- Likely used as part of a larger list structure (e.g., `ListBlock` or similar) but no evidence of such usage is provided.
+- fragments
 
 ### `clore::generate::MarkdownDocument`
 
-Declaration: `generate/markdown.cppm:94`
+Declaration: `src/generate/markdown.cppm:105`
 
-Definition: `generate/markdown.cppm:94`
+Definition: `src/generate/markdown.cppm:105`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::MarkdownDocument` aggregates the entire content of a generated markdown document into two fields. The `frontmatter` member is a `std::optional<Frontmatter>`, capturing optional YAML-style metadata that appears at the top of the document; when it has a value, that metadata logically precedes all body content. The `children` member is a `std::vector<MarkdownNode>` that holds the sequence of content nodes forming the document body. There are no explicitly enforced invariants beyond those inherent to the container types: the order of elements in `children` reflects the rendering order, and `frontmatter`, if present, must be a well-formed `Frontmatter` object. Because `MarkdownDocument` is a plain aggregate with no custom constructors, assignment `operator`s, or member functions, its internal state is directly exposed for construction and manipulation.
+The struct `clore::generate::MarkdownDocument` serves as a flat container for the generated Markdown content. It holds two data members: an `std::optional<Frontmatter> frontmatter` for an optional YAML front‑matter block, and an `std::vector<MarkdownNode> children` which stores the ordered sequence of top‑level document nodes. The struct has no custom constructors, destructors, or member functions; all invariants are maintained by the default semantics of its members. The `children` vector is expected to contain at least one node in a well‑formed document, but the struct itself does not enforce this—correctness is ensured by the generating algorithm that builds the `MarkdownDocument` instance.
 
 #### Invariants
 
-- The `frontmatter` may be absent (`std::nullopt`).
-- The `children` vector may be empty, and its elements are stored in document order.
+- `frontmatter` may be `std::nullopt`
+- `children` may be empty
 
 #### Key Members
 
@@ -192,129 +225,124 @@ The struct `clore::generate::MarkdownDocument` aggregates the entire content of 
 
 #### Usage Patterns
 
-- Other code populates the fields and then traverses or serializes the structure.
+- Used to represent the result of generating a Markdown document
+- Can be constructed with or without frontmatter
 
 ### `clore::generate::MarkdownNode`
 
-Declaration: `generate/markdown.cppm:73`
+Declaration: `src/generate/markdown.cppm:84`
 
-Definition: `generate/markdown.cppm:73`
+Definition: `src/generate/markdown.cppm:84`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::MarkdownNode` is a thin wrapper around a `std::variant` that serves as a tagged union for markdown content. The single data member `value` holds one of seven alternatives: `Paragraph`, `BulletList`, `CodeFence`, `MermaidDiagram`, `BlockQuote`, `RawMarkdown`, or `SemanticSectionPtr`. The key invariant is that exactly one of these types is active at any time, enforced by `std::variant`’s type‑safe discrimination. No custom constructors, assignment `operator`s, or destructors are defined, so the struct relies entirely on the default compiler‑generated special member functions, providing trivial copy, move, and value semantics for the variant. The implementation is minimal: the entire internal structure is just the variant field, and correct usage depends on compile‑time access via `std::visit` or explicit index‑based retrieval.
+The internal structure of `clore::generate::MarkdownNode` consists of a single data member, `value`, which is a `std::variant` over six concrete Markdown block types—`Paragraph`, `BulletList`, `CodeFence`, `MermaidDiagram`, `BlockQuote`, `RawMarkdown`—and a `SemanticSectionPtr`. This variant serves as a discriminated union: at any moment exactly one alternative is active, and the kind of node is determined by the variant’s index or through `std::visit`. The struct itself is a simple aggregate with compiler‑generated special member functions, so its object representation is that of the underlying variant. No additional invariants are enforced beyond those provided by the variant itself (no variant is valueless by exception unless an assignment throws). The member `value` is the sole state‑holder, making node construction and assignment a direct operation on the variant.
+
+#### Invariants
+
+- The `value` variant always holds exactly one of the listed types.
+- The node does not enforce any additional structural constraints beyond the variant's type safety.
+
+#### Key Members
+
+- `value` of type `std::variant<...>`
+
+#### Usage Patterns
+
+- Used as a building block in a Markdown document model.
+- Likely traversed or visited to generate output Markdown text.
+- Can be combined with `SemanticSectionPtr` for hierarchical document structure.
 
 ### `clore::generate::MermaidDiagram`
 
-Declaration: `generate/markdown.cppm:58`
+Declaration: `src/generate/markdown.cppm:69`
 
-Definition: `generate/markdown.cppm:58`
+Definition: `src/generate/markdown.cppm:69`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::MermaidDiagram` is a simple aggregate type defined in the `clore::generate` namespace. It contains a single public data member `code` of type `std::string` that stores the textual representation of a Mermaid diagram. The absence of user‑defined constructors, destructors, or assignment `operator`s means the compiler synthesizes default implementations, making the struct a plain data container. The invariant is that `code` holds a valid Mermaid diagram source, subject to the usual string invariants. This structure is designed for lightweight transfer of diagram text within the generation pipeline.
+The struct `clore::generate::MermaidDiagram` is a trivial aggregate consisting solely of a single public `std::string` member `code`. Its design purpose is to encapsulate the raw textual representation of a Mermaid diagram that has been generated. As an aggregate, it has no user‑defined constructors, destructors, or member functions, and the only invariant is that `code` may be any string value; the struct itself does not validate the syntax or structure of the diagram source. The simplicity of the implementation makes it a lightweight output container, easily movable or copyable, and directly usable in other contexts that expect a Mermaid diagram string.
 
 #### Invariants
 
-- The `code` member is a free-form string; no validity of Mermaid syntax is enforced.
+- The `code` string contains the Mermaid diagram source.
 
 #### Key Members
 
-- `code` of type `std::string`
+- `code` (`std::string`) – the Mermaid diagram source code.
 
 #### Usage Patterns
 
-- Instances are created with a diagram string and passed to functions that generate output.
-- Acts as a straightforward value type for representing Mermaid diagram content.
+- Other code creates instances of `MermaidDiagram` and assigns to the `code` member, or uses it to pass diagram data between components.
 
 ### `clore::generate::Paragraph`
 
-Declaration: `generate/markdown.cppm:41`
+Declaration: `src/generate/markdown.cppm:52`
 
-Definition: `generate/markdown.cppm:41`
+Definition: `src/generate/markdown.cppm:52`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The `Paragraph` struct is a simple aggregate type that holds a single public member, `fragments`, which is a `std::vector<InlineFragment>`. This vector serves as the sole internal storage, maintaining an ordered sequence of inline fragments that together constitute the paragraph’s content. No additional invariants are enforced beyond those inherent to the vector; the fragments are stored contiguously in insertion order, and the struct provides no custom constructors, destructors, or member functions. As a result, `Paragraph` acts as a lightweight, value-semantic wrapper around its underlying fragment list.
-
-#### Invariants
-
-- The fragments are stored in a `std::vector` in the order they were added.
-- The vector may be empty, indicating an empty paragraph.
-- Each element in the vector is an `InlineFragment`.
-
-#### Key Members
-
-- `fragments` — the vector of inline fragments composing the paragraph.
-
-#### Usage Patterns
-
-- Constructed with a list of `InlineFragment` objects to form a paragraph.
-- Iterated over to render or process the paragraph content.
-- Likely part of a larger markup or document generation system where paragraphs are assembled from inline elements.
+The struct `clore::generate::Paragraph` is implemented as a trivial aggregate containing a single member, `fragments`, of type `std::vector<InlineFragment>`. This vector holds the ordered sequence of inline‑level elements that constitute the paragraph’s content. No invariants are enforced beyond those of the underlying vector: elements appear in linear order, and the paragraph is considered empty when the vector is empty. The struct relies on default member‑wise initialization and compiler‑generated copy/move semantics, with no custom constructors, assignment `operator`s, or other member functions.
 
 ### `clore::generate::RawMarkdown`
 
-Declaration: `generate/markdown.cppm:66`
+Declaration: `src/generate/markdown.cppm:77`
 
-Definition: `generate/markdown.cppm:66`
+Definition: `src/generate/markdown.cppm:77`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::RawMarkdown` is a simple wrapper struct containing a single `std::string` member `markdown`. Its primary purpose is to provide type-level distinction for a raw markdown string, separating it from plain text or other string types within the generation pipeline. The struct imposes no invariants beyond those of `std::string` itself; the `markdown` member may be any valid string, including empty. No constructors, assignment `operator`s, or member functions are defined, so the class relies on default compiler-generated implementations. This minimal design ensures that `RawMarkdown` acts solely as a typed container, enforcing semantic clarity without adding runtime overhead.
+`clore::generate::RawMarkdown` is a simple value type that holds the generated Markdown output as a `std::string` in its only data member `markdown`. There are no explicit invariants beyond the normal validity of the underlying string; an empty string is permitted and represents no output. The type provides no special member implementations aside from the compiler-generated defaults, making it a lightweight wrapper intended to convey the result of the Markdown generation process.
 
 #### Invariants
 
-- The `markdown` string may be empty or contain any valid Markdown text.
-- No validation is performed on the content of `markdown`.
+- The `markdown` string can be any valid UTF-8 or ASCII content.
 
 #### Key Members
 
-- `markdown`: the `std::string` holding the Markdown content.
+- `markdown`: the raw markdown string
 
 #### Usage Patterns
 
-- Used as an input or output type in functions that handle Markdown generation.
-- Constructed directly from a string literal or variable.
-- The member `markdown` is accessed directly for reading or writing.
+- Used as a wrapper to pass or store raw markdown content.
 
 ### `clore::generate::SemanticKind`
 
-Declaration: `generate/markdown.cppm:7`
+Declaration: `src/generate/markdown.cppm:18`
 
-Definition: `generate/markdown.cppm:7`
+Definition: `src/generate/markdown.cppm:18`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The enum `clore::generate::SemanticKind` is defined with an underlying type of `std::uint8_t` to provide a compact, ordered classification of semantic declaration categories during documentation generation. The enumerators — `Index`, `Namespace`, `Module`, `Type`, `Function`, `Variable`, `File`, `Section` — are arranged in a logical hierarchy that mirrors a typical documentation page structure, from broad index and grouping elements down to concrete definitions. This ordering is an internal invariant that supports consistent sorting and grouping of generated content, while the small underlying type ensures minimal storage overhead when `SemanticKind` values are stored in arrays or associative containers.
+The enum `clore::generate::SemanticKind` is implemented as a scoped enumeration with an underlying type of `std::uint8_t` to ensure compact storage, particularly when used in look‑up tables or as keys in generated code. Each enumerator corresponds to a distinct semantic category (e.g., `Type`, `Function`, `Namespace`) and the values are implicitly assigned in declaration order starting from zero. This sequential, zero‑based layout forms an invariant that allows the enumerators to be used directly as array indices or in switch‑based dispatch without requiring explicit integer mappings. The ordering of the enumerators—`Index`, `Namespace`, `Module`, `Type`, `Function`, `Variable`, `File`, `Section`—reflects a natural progression from broad structural scopes (namespace, module) to more concrete elements (type, function, variable) and finally to file‑ and section‑level markers, which aids in consistent iteration and categorization during code generation.
 
 #### Invariants
 
-- Each enumerator corresponds to a unique semantic category.
-- The underlying type is `std::uint8_t`.
-- All possible values of `SemanticKind` are explicitly listed as enumerators.
+- Each enumerator value is unique and non-overlapping.
+- The enum is used as a discriminator for documentation generation logic.
 
 #### Key Members
 
-- `clore::generate::SemanticKind::Type`
-- `clore::generate::SemanticKind::Index`
-- `clore::generate::SemanticKind::Function`
-- `clore::generate::SemanticKind::File`
-- `clore::generate::SemanticKind::Module`
-- `clore::generate::SemanticKind::Namespace`
-- `clore::generate::SemanticKind::Variable`
-- `clore::generate::SemanticKind::Section`
+- `Index`
+- `Namespace`
+- `Module`
+- `Type`
+- `Function`
+- `Variable`
+- `File`
+- `Section`
 
 #### Usage Patterns
 
-- Used to categorize documentation symbols in the `clore::generate` module.
-- Likely used as a discriminator in a variant or as a tag in a switch statement.
+- Used in tag dispatch or `switch` statements to select documentation generation behavior.
+- Passed as a parameter to functions in the `clore::generate` module.
 
 #### Member Variables
 
 ##### `clore::generate::SemanticKind::File`
 
-Declaration: `generate/markdown.cppm:14`
+Declaration: `src/generate/markdown.cppm:25`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -326,7 +354,7 @@ File
 
 ##### `clore::generate::SemanticKind::Function`
 
-Declaration: `generate/markdown.cppm:12`
+Declaration: `src/generate/markdown.cppm:23`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -338,7 +366,7 @@ Function
 
 ##### `clore::generate::SemanticKind::Index`
 
-Declaration: `generate/markdown.cppm:8`
+Declaration: `src/generate/markdown.cppm:19`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -350,7 +378,7 @@ Index
 
 ##### `clore::generate::SemanticKind::Module`
 
-Declaration: `generate/markdown.cppm:10`
+Declaration: `src/generate/markdown.cppm:21`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -362,7 +390,7 @@ Module
 
 ##### `clore::generate::SemanticKind::Namespace`
 
-Declaration: `generate/markdown.cppm:9`
+Declaration: `src/generate/markdown.cppm:20`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -374,7 +402,7 @@ Namespace
 
 ##### `clore::generate::SemanticKind::Section`
 
-Declaration: `generate/markdown.cppm:15`
+Declaration: `src/generate/markdown.cppm:26`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -386,7 +414,7 @@ Section
 
 ##### `clore::generate::SemanticKind::Type`
 
-Declaration: `generate/markdown.cppm:11`
+Declaration: `src/generate/markdown.cppm:22`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -398,7 +426,7 @@ Type
 
 ##### `clore::generate::SemanticKind::Variable`
 
-Declaration: `generate/markdown.cppm:13`
+Declaration: `src/generate/markdown.cppm:24`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -410,75 +438,86 @@ Variable
 
 ### `clore::generate::SemanticSection`
 
-Declaration: `generate/markdown.cppm:70`
+Declaration: `src/generate/markdown.cppm:81`
 
-Definition: `generate/markdown.cppm:84`
+Definition: `src/generate/markdown.cppm:95`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct aggregates the parameters needed to render a markdown section within a generated document. All fields have well‑defined defaults: `kind` defaults to `SemanticKind::Section`, `level` to `2`, `omit_if_empty` to `true`, and `code_style_heading` to `false`. The `subject_key` holds a lookup key for the documented entity, `heading` provides the section title text, and `children` stores the sequence of `MarkdownNode` elements that form the section’s content. The `omit_if_empty` flag controls whether the section is emitted when `children` is empty; this prevents spurious headers from appearing in the output. No special invariants or dynamic checks are required—the struct serves purely as a data carrier whose fields are set during the generation pipeline before being consumed by markdown serialization logic.
+`clore::generate::SemanticSection` serves as an internal data container that models one logical section within generated documentation. Its fields capture the section’s hierarchic level (default `2`), a semantic kind tag, an optional subject key for cross‑reference resolution, a heading string, and a flag `code_style_heading` that requests monospaced rendering. The boolean `omit_if_empty` (default `true`) controls whether the section is emitted when its `children` vector is empty, allowing structural placeholders to be suppressed during output. The `children` vector holds the actual `MarkdownNode` content, and together with `level` it defines the section’s depth in the final document tree.
+
+The struct’s invariants are minimal: `level` should be at least 1 to align with markdown heading semantics, and `kind` must be a valid `SemanticKind` enumerator. `subject_key` may be empty when no topic is associated. No explicit construction logic is provided beyond default member initializers, so consumers are responsible for populating fields consistently. The section’s role is purely that of a passive data record, read by downstream generation passes to produce the final markdown output.
 
 #### Invariants
 
-- Default `level` is 2
-- Default `omit_if_empty` is true
-- Default `code_style_heading` is false
-- `children` vector may be empty
-- Default `kind` is `SemanticKind::Section`
+- All fields have default values that serve as sensible starting points.
+- The `children` vector is initially empty unless populated.
 
 #### Key Members
 
-- `kind`
-- `heading`
-- `level`
-- `children`
-- `omit_if_empty`
-- `subject_key`
-- `code_style_heading`
+- `kind` – discriminates the semantic role of the section.
+- `heading` – the section's headline text.
+- `children` – nested child nodes for hierarchical structure.
+- `level` – the heading level (e.g., `<h2>` for 2).
+- `omit_if_empty` – controls whether an empty section is dropped.
+- `code_style_heading` – indicates if the heading should be rendered as code.
 
 #### Usage Patterns
 
-- Used to represent sections in markdown generation
-- Likely aggregated into a hierarchy via the `children` vector
-- Defaults allow trivial creation of simple sections without explicit configuration
+- Created as a simple value type and populated with field-assignment syntax.
+- Passed to markdown generation routines that iterate `children` and use `kind`, `heading`, `level`, etc., to emit formatted output.
+- Used in conjunction with `MarkdownNode` to build document trees.
+
+### `clore::generate::SemanticSectionPtr`
+
+Declaration: `src/generate/markdown.cppm:82`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The type alias `clore::generate::SemanticSectionPtr` is defined as `std::unique_ptr<SemanticSection>`, establishing exclusive ownership and automatic lifetime management for `SemanticSection` objects within the `generate` module. This alias ensures that a `SemanticSectionPtr` cannot be copied—only moved—which enforces a single owner at any point and prevents accidental double-deletion. Internally, the alias relies on the default deleter of `std::unique_ptr`; no custom deleter or additional state is provided. The primary invariance introduced by this alias is the transfer of ownership via move semantics: functions or containers that accept or store `SemanticSectionPtr` values assume responsibility for the pointed-to object's lifetime. There is no invariant that the pointer is never null; null `SemanticSectionPtr` values are valid and may represent an absent or optional section.
+
+#### Invariants
+
+- Exclusive ownership of a single `SemanticSection` object
+- Can be null if uninitialized or moved from
+
+#### Key Members
+
+- Underlying `std::unique_ptr` interface (e.g., `get`, `reset`, `operator*`, `operator->`)
+
+#### Usage Patterns
+
+- Used to manage the lifetime of `SemanticSection` objects
+- Passed by value to transfer ownership
+- Stored in containers or as class members
 
 ### `clore::generate::TextFragment`
 
-Declaration: `generate/markdown.cppm:25`
+Declaration: `src/generate/markdown.cppm:36`
 
-Definition: `generate/markdown.cppm:25`
+Definition: `src/generate/markdown.cppm:36`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::TextFragment` is a simple data carrier that holds a single `std::string` member `text`. Its internal structure imposes no additional invariants beyond those inherent to `std::string`; the class is trivially copyable and movable. As a pure aggregate, it relies on default memberwise construction and assignment, serving solely to encapsulate a textual segment for use within the generation infrastructure. No special member implementations are required, and the type is intended to be passed and stored by value.
-
-#### Invariants
-
-- The `text` member is a valid `std::string` object.
-- The struct has no user-defined constructors, destructors, or assignment `operator`s.
-- All members are public and directly accessible.
+The struct `clore::generate::TextFragment` holds a single data member, `text`, of type `std::string`. Its internal structure is trivial, consisting only of this string; no invariants are enforced beyond those inherent to `std::string`. The implementation is minimal and relies entirely on the default lifecycle and assignment semantics of `std::string` — the fragment does not introduce any additional constraints, validation, or derived state. As a result, constructing, copying, moving, or destroying a `TextFragment` amounts to the corresponding operations on its `text` member.
 
 #### Key Members
 
-- `text`
-
-#### Usage Patterns
-
-- Instances are created as aggregate initializers or default-constructed.
-- Other code populates the `text` member and reads it to obtain the textual content.
-- Serves as a building block within the generation system for passing string data.
+- text
 
 ## Functions
 
 ### `clore::generate::code_spanned_fragments`
 
-Declaration: `generate/markdown.cppm:124`
+Declaration: `src/generate/markdown.cppm:135`
 
-Definition: `generate/markdown.cppm:693`
+Definition: `src/generate/markdown.cppm:704`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function delegates to the internal helper `append_code_spanned_fragments`, which populates a `std::vector<InlineFragment>` by scanning the input text for code‑aware inline elements. The helper iterates character‑by‑character, identifying backtick‑delimited code spans via `read_backtick_span` and fenced code blocks through `is_fence_line`. It also recognizes identifier boundaries using `is_identifier_start` and `is_identifier_continue` to conditionally render identifiers in code style. When a code span or fence is detected, the corresponding raw text is appended as a `CodeFragment`; otherwise, text is grouped into `TextFragment` objects via `append_text_fragment`. The helper further handles link spans (`read_link_span`), `operator` tokens (`read_operator_token`), and call/angle suffixes, ensuring that code style runs are correctly isolated and padded. Finally, the public function returns the completed vector of `InlineFragment` instances.
+Implementation: [Implementation](functions/code-spanned-fragments.md)
+
+The function `clore::generate::code_spanned_fragments` is a thin wrapper that constructs a `std::vector<InlineFragment>` and passes the input string to the internal helper `append_code_spanned_fragments`. This helper, defined in an anonymous namespace, performs the actual line‑by‑line scanning and splitting of the markdown text into code‑spanned fragments by identifying backtick‑delimited spans, inline code candidates, and other syntactic patterns. By separating the allocation from the parsing logic, `code_spanned_fragments` provides a clean public interface while the core algorithm remains reusable across different call sites.
 
 #### Side Effects
 
@@ -486,23 +525,25 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- text parameter
+- input parameter `text` of type `std::string_view`
+
+#### Writes To
+
+- returns a newly allocated `std::vector<InlineFragment>`
 
 #### Usage Patterns
 
-- Parse markdown text into inline fragments based on code spans
+- Used by `clore::generate::(anonymous namespace)::append_rendered_text` to break up text into fragments for rendering
 
 ### `clore::generate::code_spanned_markdown`
 
-Declaration: `generate/markdown.cppm:126`
+Declaration: `src/generate/markdown.cppm:137`
 
-Definition: `generate/markdown.cppm:699`
+Definition: `src/generate/markdown.cppm:710`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function iterates over the input `markdown` line by line, maintaining a `in_fence` flag toggled by `is_fence_line`. Inside a fenced block, lines are appended verbatim; outside, the line is passed to `append_code_spanned_line`, which performs code‑span rewriting (e.g., transforming inline code fragments into styled spans). The loop continues until the last line (when no trailing newline exists), building the result in the pre‑reserved `rendered` string.
-
-Dependencies include the free functions `is_fence_line` and `append_code_spanned_line`, both in the `clore::generate::(anonymous namespace)`. The function uses `std::string_view` for the input and `std::string` for the output, with no other external state.
+The function iterates line‑by‑line through the input markdown, maintaining an `in_fence` flag that is toggled whenever the helper `is_fence_line` identifies a fenced code block boundary. Inside a fence, each line is appended unchanged to the output; outside a fence, each line is processed by `append_code_spanned_line`, which marks up code‑like spans (such as identifiers and `operator`s) with the target formatting. The algorithm preserves original line breaks and stops when no further characters remain. Its sole dependencies are the two namespace‑internal helpers `is_fence_line` and `append_code_spanned_line`.
 
 #### Side Effects
 
@@ -510,28 +551,21 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `markdown` parameter
-
-#### Usage Patterns
-
-- used in generation pipeline to format documentation markdown
-- called when rendering page content with code span handling
+- the input `markdown` parameter
 
 ### `clore::generate::make_blockquote`
 
-Declaration: `generate/markdown.cppm:113`
+Declaration: `src/generate/markdown.cppm:124`
 
-Definition: `generate/markdown.cppm:169`
+Definition: `src/generate/markdown.cppm:180`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function constructs a `MarkdownNode` representing a block quote by creating a `BlockQuote` object that contains a single `TextFragment`. It delegates the text content to `make_text`, which converts the provided `std::string` into a `TextFragment` suitable for inline rendering. The resulting `BlockQuote` is then wrapped in a `MarkdownNode` via its `value` field.
-
-No further control flow is required; the implementation is a direct compositional expression. The dependency on `make_text` ensures consistent text handling (e.g., escaping or fragment construction), while the `BlockQuote` struct provides the structural container for the quoted content.
+The function `clore::generate::make_blockquote` constructs a `MarkdownNode` representing a blockquote. It takes a `std::string` parameter `text` and, in a single expression, moves that string into a call to `make_text` to produce an `InlineFragment`. That fragment is then directly placed into the `fragments` member of a newly created `BlockQuote` struct, which is in turn stored as the `value` of the returned `MarkdownNode`. The implementation relies solely on the `make_text` helper to transform the plain input into the required inline fragment representation; there is no additional parsing or conditional logic.
 
 #### Side Effects
 
-- allocates a `MarkdownNode` object
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
@@ -539,17 +573,20 @@ No further control flow is required; the implementation is a direct compositiona
 
 #### Usage Patterns
 
-- Used to create a blockquote Markdown element
+- Building blockquote elements for documentation.
+- Creating markdown nodes for text quotations.
 
 ### `clore::generate::make_code`
 
-Declaration: `generate/markdown.cppm:101`
+Declaration: `src/generate/markdown.cppm:112`
 
-Definition: `generate/markdown.cppm:136`
+Definition: `src/generate/markdown.cppm:147`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-Creates a `CodeFragment` by moving the given `code` string into the `.code` member and returning the resulting `InlineFragment`. This is a direct construction with no branching or iteration. The sole dependency is the `CodeFragment` struct, which must be complete at this call site.
+Implementation: [Implementation](functions/make-code.md)
+
+The function `clore::generate::make_code` constructs and returns an `InlineFragment` representing a code span. Its implementation directly creates a `CodeFragment` by moving the input `code` string into the `CodeFragment::code` member, then returns that value as the polymorphic `InlineFragment` type. No additional parsing, validation, or transformation is performed; the algorithm is a straightforward constructor call. Dependencies are limited to the `CodeFragment` struct (defined in the same module) and the type alias `InlineFragment`, which is a `std::variant` over several fragment types. This function is invoked during the inline-level code span detection phase when the parser encounters backtick-enclosed code in the Markdown input, providing the foundational representation for code spans that later get rendered by `render_inline`.
 
 #### Side Effects
 
@@ -557,26 +594,27 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- Parameter `code` of type `std::string`
+- parameter `code` (via move)
 
 #### Writes To
 
-- Constructs a `CodeFragment` object (returned by value)
+- returned `InlineFragment` (constructed `CodeFragment`)
 
 #### Usage Patterns
 
-- Used to create inline code fragments for markdown pages
-- Called by other generation functions to produce code snippets
+- creating inline code fragments in `append_existing_code_span`
+- creating inline code fragments in `append_code_aware_text`
+- wrapping a string into a code span fragment
 
 ### `clore::generate::make_code_fence`
 
-Declaration: `generate/markdown.cppm:109`
+Declaration: `src/generate/markdown.cppm:120`
 
-Definition: `generate/markdown.cppm:156`
+Definition: `src/generate/markdown.cppm:167`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::make_code_fence` constructs a `MarkdownNode` representing a fenced code block. It takes two `std::string` parameters, `language` and `code`, and initializes a `CodeFence` struct with both strings moved into the respective fields (`.language` and `.code`). The resulting `CodeFence` is then placed as the `.value` of a `MarkdownNode` using aggregate initialization. The function relies on the `MarkdownNode` variant being able to hold a `CodeFence` instance, and it performs no additional validation or transformation; its sole algorithmic step is the construction of the `CodeFence` and the wrapping `MarkdownNode`. The use of `std::move` ensures efficient transfer of string ownership, avoiding copies.
+The implementation of `clore::generate::make_code_fence` is a straightforward factory function. It constructs a `CodeFence` instance by moving the `language` and `code` arguments into the corresponding fields of the struct, then returns that `CodeFence` object wrapped as the `value` of a newly created `MarkdownNode`. No branching, iteration, or external helper calls occur; the entire operation reduces to a single struct initialization and a return statement.
 
 #### Side Effects
 
@@ -589,23 +627,22 @@ No observable side effects are evident from the extracted code.
 
 #### Writes To
 
-- returned `MarkdownNode` object
+- returned `MarkdownNode`
 
 #### Usage Patterns
 
-- building code fence nodes for Markdown generation
-- used in page rendering functions like `render_page_markdown`
-- paired with other `MarkdownNode` factories such as `make_blockquote` or `make_mermaid`
+- building markdown code blocks
+- generating fenced code regions for documentation output
 
 ### `clore::generate::make_link`
 
-Declaration: `generate/markdown.cppm:103`
+Declaration: `src/generate/markdown.cppm:114`
 
-Definition: `generate/markdown.cppm:140`
+Definition: `src/generate/markdown.cppm:151`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::make_link` constructs a `LinkFragment` value by moving the provided `label` and `target` strings into the corresponding fields and storing the `code_style` flag. No further processing, branching, or external function calls are involved; the implementation is a direct aggregate initialization. It depends only on the `LinkFragment` struct definition and the types of its three parameters.
+The function `clore::generate::make_link` is a factory that constructs an `InlineFragment` representing a hyperlink. Internally, it directly initializes a `LinkFragment` by moving the `label` and `target` string parameters into the corresponding fields, and stores the boolean `code_style` flag. No validation, transformation, or conditional branching occurs—the implementation is a single aggregate initialization. The function depends only on the `LinkFragment` struct and its public fields `label`, `target`, and `code_style`; it is typically used as a building block for higher-level markdown generation routines that assemble paragraph or list fragments.
 
 #### Side Effects
 
@@ -617,24 +654,19 @@ No observable side effects are evident from the extracted code.
 - `target` parameter
 - `code_style` parameter
 
-#### Writes To
-
-- returned `InlineFragment`
-
 #### Usage Patterns
 
-- Create link fragments for Markdown rendering
-- Used to generate hyperlinks in documentation pages
+- Used to create inline link fragments for markdown rendering
 
 ### `clore::generate::make_mermaid`
 
-Declaration: `generate/markdown.cppm:111`
+Declaration: `src/generate/markdown.cppm:122`
 
-Definition: `generate/markdown.cppm:165`
+Definition: `src/generate/markdown.cppm:176`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::make_mermaid` is a factory that constructs a `MarkdownNode` representing a Mermaid diagram. It accepts a `std::string` parameter `code` and moves it into the `code` member of a newly created `MermaidDiagram` struct, then wraps that struct in a `MarkdownNode` via aggregate initialization. There is no branching or looping; the sole dependency is the `MermaidDiagram` type, which stores the raw diagram source, and the `MarkdownNode` variant that holds it. The returned node can later be rendered by the `render_markdown` machinery.
+The function `clore::generate::make_mermaid` constructs a `MarkdownNode` representing a Mermaid diagram. Internally, it moves the provided `code` string into a `MermaidDiagram` struct (filling its `code` field) and then returns a `MarkdownNode` that holds that struct as its value. No further processing or validation is performed; the function serves as a simple factory that packages the raw diagram source into the `MarkdownNode` variant type used elsewhere in the generator pipeline.
 
 #### Side Effects
 
@@ -642,7 +674,60 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `code`
+- `std::string` code parameter
+
+#### Writes To
+
+- returned `MarkdownNode` containing `MermaidDiagram`
+
+#### Usage Patterns
+
+- creating Mermaid diagram nodes for markdown generation
+
+### `clore::generate::make_paragraph`
+
+Declaration: `src/generate/markdown.cppm:116`
+
+Definition: `src/generate/markdown.cppm:159`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The function `clore::generate::make_paragraph` constructs a `MarkdownNode` containing a single `Paragraph` whose `fragments` vector holds exactly one `InlineFragment`. This fragment is produced by calling `clore::generate::make_text` on the input string after moving it. The implementation is a direct return of the aggregate-initialized `MarkdownNode`, relying solely on `make_text` to convert the raw text into an inline fragment. No branching, iteration, or additional preprocessing occurs; the entire text is treated as a single paragraph with no internal structure.
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- the `text` parameter
+
+#### Writes To
+
+- the returned `MarkdownNode` object
+
+#### Usage Patterns
+
+- creating paragraph nodes from plain text
+- building markdown paragraph content
+
+### `clore::generate::make_raw_markdown`
+
+Declaration: `src/generate/markdown.cppm:118`
+
+Definition: `src/generate/markdown.cppm:163`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The function `clore::generate::make_raw_markdown` serves as a factory that wraps an arbitrary markdown string into a `MarkdownNode`. It constructs a `RawMarkdown` object by moving the input `std::string` into its `markdown` field, then returns a `MarkdownNode` that holds that `RawMarkdown`. The implementation involves no parsing or transformation; it is purely a type‑wrapping step. The dependency is limited to the `MarkdownNode` and `RawMarkdown` types, which are defined in the same module. This function is used when a caller already has verbatim markdown content that should be stored as‑is for later rendering (e.g., via `render_markdown`), bypassing any additional structural analysis.
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- parameter `markdown`
 
 #### Writes To
 
@@ -650,98 +735,43 @@ No observable side effects are evident from the extracted code.
 
 #### Usage Patterns
 
-- Wrapping Mermaid diagram code for inclusion in generated Markdown documents
-
-### `clore::generate::make_paragraph`
-
-Declaration: `generate/markdown.cppm:105`
-
-Definition: `generate/markdown.cppm:148`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The implementation of `clore::generate::make_paragraph` is a direct factory function. It accepts a `std::string` `text`, invokes `make_text` to produce a `TextFragment`, then wraps that fragment inside a `Paragraph` and finally a `MarkdownNode`. No additional processing, validation, or control flow occurs; the function serves as a thin convenience wrapper that composes the lower-level `make_text` with the `Paragraph` and `MarkdownNode` data structures.
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- the `text` parameter (moved from)
-
-#### Usage Patterns
-
-- used to create paragraph nodes when building markdown page content
-- likely called by higher-level page generators like `render_page_markdown` or `build_page_root`
-
-### `clore::generate::make_raw_markdown`
-
-Declaration: `generate/markdown.cppm:107`
-
-Definition: `generate/markdown.cppm:152`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The implementation of `clore::generate::make_raw_markdown` is straightforward: it accepts a `std::string` parameter `markdown`, moves it into a `RawMarkdown` struct's `markdown` field, and wraps that struct in a `MarkdownNode` via aggregate initialization. No further processing, validation, or transformation occurs. The function serves as a direct passthrough, converting an arbitrary Markdown string into a `MarkdownNode` that can later be rendered verbatim without any structural interpretation by the generation pipeline.
-
-Dependencies are limited to the `RawMarkdown` type (which holds the raw text) and the `MarkdownNode` variant type. The function has no conditional logic, loops, or external calls; its entire control flow is a single return statement. This makes it the simplest node‑construction helper in the `clore::generate` API, intended for embedding pre‑formatted or non‑semantic Markdown content.
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- `markdown` parameter (moved into the node)
-
-#### Usage Patterns
-
-- Called by generation functions to create a `MarkdownNode` holding raw markdown text.
-- Used when the markdown content does not require further structure like paragraphs or code blocks.
+- creating a markdown node from raw string
+- as a building block for more complex markdown generation
 
 ### `clore::generate::make_section`
 
-Declaration: `generate/markdown.cppm:115`
+Declaration: `src/generate/markdown.cppm:126`
 
-Definition: `generate/markdown.cppm:173`
+Definition: `src/generate/markdown.cppm:184`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::make_section` is a factory that constructs a `SemanticSectionPtr` (a `std::unique_ptr<SemanticSection>`) by aggregate-initializing a `SemanticSection` with the supplied arguments. Each parameter is directly assigned to the corresponding field of the struct: `kind`, `subject_key`, `heading`, `level`, `omit_if_empty`, `code_style_heading`, and an empty `children` vector. The string parameters `subject_key` and `heading` are moved to avoid unnecessary copies. No additional validation, transformation, or conditional logic is performed; the function simply forwards the input to the newly allocated object and returns it.
+The implementation of `clore::generate::make_section` is a straightforward factory function. It constructs a `SemanticSection` object using a designated initializer list, directly assigning each parameter—`kind`, `subject_key`, `heading`, `level`, `omit_if_empty`, and `code_style_heading`—to its corresponding field. The `children` field is initialized as an empty vector. The function then wraps the constructed object in a `SemanticSectionPtr` via `std::make_unique` and returns it. There is no branching, iteration, or delegation to helper routines; the entire operation is a single allocation and memberwise copy or move of the provided arguments. The primary dependency is the `SemanticSection` struct definition, specifically its field layout, and the `SemanticSectionPtr` type alias.
 
 #### Side Effects
 
-- Allocates a `SemanticSection` object on the heap
-- Transfers ownership of the allocated object via returned `std::unique_ptr`
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `kind`
-- `subject_key`
-- `heading`
-- `level`
-- `omit_if_empty`
-- `code_style_heading`
-
-#### Writes To
-
-- Heap memory for a `SemanticSection` object
+- parameters `kind`, `subject_key`, `heading`, `level`, `omit_if_empty`, `code_style_heading`
 
 #### Usage Patterns
 
-- Used to construct a `SemanticSection` for semantic analysis output
-- Commonly called by page building functions to create structured sections
+- called to create section nodes for documentation page building
+- used within page rendering logic to encapsulate semantic content
 
 ### `clore::generate::make_text`
 
-Declaration: `generate/markdown.cppm:99`
+Declaration: `src/generate/markdown.cppm:110`
 
-Definition: `generate/markdown.cppm:132`
+Definition: `src/generate/markdown.cppm:143`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::make_text` is a factory that constructs an `InlineFragment` from a plain `std::string`. Its implementation is trivial: it moves the input `text` into a `TextFragment` struct and returns it as an `InlineFragment` (likely a variant or base class). No algorithmic logic or branching is involved; the sole purpose is to wrap a raw string into the inline fragment system so it can be composed with other fragments such as code spans or links. The function depends only on the `TextFragment` and `InlineFragment` types, and it serves as a leaf node builder in the fragment hierarchy.
+Implementation: [Implementation](functions/make-text.md)
+
+The function `clore::generate::make_text` serves as a factory that wraps a plain string into the `InlineFragment` variant by constructing a `TextFragment` directly. It accepts a `std::string`, moves it into the `TextFragment::text` field, and returns the resulting `InlineFragment` object. The implementation is a single-expression return, with no branching, iteration, or conditional logic; it relies solely on the definitions of `TextFragment` and the `InlineFragment` type alias. No other functions or external dependencies are involved.
 
 #### Side Effects
 
@@ -749,49 +779,44 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `text` of type `std::string`
-
-#### Usage Patterns
-
-- Called to wrap a plain string into a markdown text node.
-- Used in constructing markdown document content from strings.
-
-### `clore::generate::render_markdown`
-
-Declaration: `generate/markdown.cppm:122`
-
-Definition: `generate/markdown.cppm:730`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The function begins by checking whether `document.frontmatter` contains a value. If present, it writes a YAML front matter block: it appends `"---\n"`, then a `title:` line using `yaml_quote` on `fm.title`, a `description:` line using `yaml_quote` on `fm.description`, a `layout:` line with `fm.layout`, a `template:` line with `fm.page_template`, and finally a closing `"---\n\n"`. After the front matter, it iterates over each child in `document.children`, calls `render_node` on that child, and appends the returned string to `rendered`. The final concatenated string is returned. The overall flow is linear: conditional front matter generation followed by a loop over document children, relying on `yaml_quote` for safe quoting and on `render_node` to convert each `MarkdownNode` into its text representation.
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- `document.frontmatter` (optional `Frontmatter`)
-- `document.frontmatter->title`
-- `document.frontmatter->description`
-- `document.frontmatter->layout`
-- `document.frontmatter->page_template`
-- `document.children` (iterable of `MarkdownNode`)
-- `render_node(child)` for each child
+- `text` parameter (moved from)
 
 #### Writes To
 
-- the returned `std::string` (constructed and returned)
+- returned `InlineFragment` containing a `TextFragment`
 
 #### Usage Patterns
 
-- called to produce the final Markdown output for a document
-- used by page rendering or file writing functions
+- used to embed plain text in inline fragments
+- called by `make_paragraph`, `make_blockquote`, and `append_text_fragment`
+
+### `clore::generate::render_markdown`
+
+Declaration: `src/generate/markdown.cppm:133`
+
+Definition: `src/generate/markdown.cppm:741`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The function `clore::generate::render_markdown` builds a Markdown string by first handling an optional `Frontmatter` block: it writes the YAML delimiters and the fields `title`, `description`, `layout`, and `page_template`, using the helper `yaml_quote` to safely quote string values. After the frontmatter, it iterates over each `MarkdownNode` in `document.children` and passes it to the internal function `render_node`, which recurses through the node’s content to produce the final text. The overall control flow is a sequential transformation of the structured `MarkdownDocument` into a flat string, relying on a set of anonymous‑namespace helpers for inline rendering, code‑span detection, section handling, and node‑specific output.
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- document`.frontmatter`
+- document`.children`
+
+#### Usage Patterns
+
+- Used to convert a `MarkdownDocument` into a string for writing to a file
+- Called during page generation to produce Markdown output
 
 ## Internal Structure
 
-The module `generate:markdown` is a self-contained Markdown generation library implemented as a single C++20 module. It imports only the standard library and is decomposed into two layers: a public API and a set of internal helper functions. The public API provides factory functions (e.g., `make_paragraph`, `make_code_fence`, `make_section`, `make_blockquote`) that construct a document tree composed of struct types such as `MarkdownDocument`, `MarkdownNode`, `SemanticSection`, `Paragraph`, `CodeFence`, and fragment types (`TextFragment`, `LinkFragment`, `CodeFragment`). The central rendering entry point is `render_markdown`, which walks the tree and produces final Markdown text.
+The `generate:markdown` module is decomposed into three internal layers: a set of value-type data structures representing document components (`MarkdownDocument`, `MarkdownNode`, `SemanticSection`, `InlineFragment` variants, and block-level containers such as `Paragraph`, `CodeFence`, `BulletList`, `BlockQuote`); a collection of factory functions (`make_text`, `make_code`, `make_link`, `make_paragraph`, `make_code_fence`, `make_mermaid`, `make_blockquote`, `make_section`) that construct these types; and a rendering layer (`render_markdown`, `render_node`, `render_section`, `render_inline`) that walks the composed tree and produces a Markdown string. The module imports only standard library types (e.g., `std::string`, `std::vector`, `std::variant`, `std::unique_ptr`) and a minimal internal `Frontmatter` structure, keeping dependencies narrow.
 
-Internally, the module relies on an anonymous namespace containing numerous helper functions that implement text scanning, inline parsing, code‑span detection, blockquote line prefixing, and whitespace normalization. These helpers operate on integer indices and pointers derived from a character buffer, forming a tightly coupled pipeline that transforms raw source data into the structured document representation. The separation between public constructors and private rendering logic keeps the module’s interface clean while allowing complex text manipulation to be hidden from callers.
+Beneath these layers, the implementation structure includes a set of private helper functions that handle low-level Markdown scanning and transformation. Utilities such as `code_spanned_fragments`, `read_backtick_span`, `read_link_span`, `read_code_candidate`, and `append_code_aware_text` operate directly on raw string views to decompose inline content into code spans, links, and plain text. These helpers are used by both the factory functions and the rendering layer, ensuring that code-span preservation and link detection are handled consistently. The overall architecture follows a clear separation of concerns: data types define the document model, factory functions provide a builder API, rendering functions serialize the model, and the low-level string helpers manage text-level parsing without depending on the higher document abstractions.
 

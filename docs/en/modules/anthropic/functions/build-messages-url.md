@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::anthropic::protocol::buildmessagesurl'
-description: 'clore::net::anthropic::protocol::build_messages_url normalises the provided api_base string by stripping trailing forward slashes, then determines the correct path to append for the Anthropic messages endpoint. If the cleaned base already ends with "/v1", it appends the literal "messages" via clore::net::detail::append_url_path; otherwise it appends "v1/messages". This logic ensures the resulting URL always points to the standard Anthropic messages API path regardless of whether the caller supplies a base URL that includes the version segment. The function depends solely on clore::net::detail::append_url_path (a generic path‑appending utility) and performs no network or I/O operations itself.'
+description: 'The function first copies the input api_base into a local std::string and then strips any trailing forward slashes by repeatedly calling pop_back() as long as the string is non‑empty and ends with ''/''. After normalisation, it checks whether the resulting URL ends with the literal path "/v1" using ends_with. If it does, it delegates to clore::net::detail::append_url_path, appending only "messages" to the base. Otherwise it appends the full path "v1/messages" via the same helper. This ensures that the caller‑supplied base URL is correctly normalised before the Anthropic Messages API endpoint path is appended, avoiding duplicate "v1" segments when the base already includes the API version.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module anthropic](../index.md)
 
-Declaration: `network/anthropic.cppm:201`
+Declaration: `src/network/anthropic.cppm:210`
 
-Definition: `network/anthropic.cppm:224`
+Definition: `src/network/anthropic.cppm:233`
 
 Declaration: [`Namespace clore::net::anthropic::protocol`](../../../namespaces/clore/net/anthropic/protocol/index.md)
 
@@ -30,7 +30,7 @@ auto build_messages_url(std::string_view api_base) -> std::string {
 }
 ```
 
-`clore::net::anthropic::protocol::build_messages_url` normalises the provided `api_base` string by stripping trailing forward slashes, then determines the correct path to append for the Anthropic messages endpoint. If the cleaned base already ends with `"/v1"`, it appends the literal `"messages"` via `clore::net::detail::append_url_path`; otherwise it appends `"v1/messages"`. This logic ensures the resulting URL always points to the standard Anthropic `messages` API path regardless of whether the caller supplies a base URL that includes the version segment. The function depends solely on `clore::net::detail::append_url_path` (a generic path‑appending utility) and performs no network or I/O operations itself.
+The function first copies the input `api_base` into a local `std::string` and then strips any trailing forward slashes by repeatedly calling `pop_back()` as long as the string is non‑empty and ends with `'/'`. After normalisation, it checks whether the resulting URL ends with the literal path `"/v1"` using `ends_with`. If it does, it delegates to `clore::net::detail::append_url_path`, appending only `"messages"` to the base. Otherwise it appends the full path `"v1/messages"` via the same helper. This ensures that the caller‑supplied base URL is correctly normalised before the Anthropic Messages API endpoint path is appended, avoiding duplicate `"v1"` segments when the base already includes the API version.
 
 ## Side Effects
 
@@ -38,11 +38,11 @@ No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- parameter `api_base`
+- param `api_base`
 
 ## Usage Patterns
 
-- called by `clore::net::anthropic::detail::Protocol::build_url` to produce the messages endpoint URL
+- called by `Protocol::build_url` to generate the final URL endpoint
 
 ## Called By
 

@@ -1,6 +1,6 @@
 ---
 title: 'Module client'
-description: 'client 模块是 clore::net 库中负责网络客户端逻辑的核心组件。它封装了与语言模型 API 异步交互的完整流程，包括请求的构建、发送、结果收集与解析，并提供了状态变量存储原始响应、解析结果、请求参数、工具标记等运行时数据。公开接口以一组模板函数（call_completion_async、call_llm_async、call_structured_async）为主，它们将底层协议抽象为模板参数，统一管理事件循环调度，并返回整数句柄用于跟踪异步操作。模块内部通过 detail::select_event_loop 等辅助机制确保事件循环的正确绑定，并依赖 http、protocol、schema 和 support 等模块完成网络传输、消息结构定义、JSON 模式生成及通用工具支持，构成了一个可扩展的异步调用框架。'
+description: '该模块是面向 LLM 网络通信的高层抽象，主要负责发起异步 LLM 调用并管理请求/响应的完整生命周期。它公开了三个模板函数作为主要入口：call_completion_async、call_llm_async 和 call_structured_async，分别对应不同类型的异步交互（通用完成、直接 LLM 调用、结构化输出）。调用者通过模板参数指定协议，并传入标识符、模型、提示、事件循环等参数；函数返回整数表示提交状态或句柄。模块内部依赖 http 模块执行网络请求，并利用 protocol、schema 和 support 模块处理协议适配、数据格式化和日志/工具支持。'
 layout: doc
 template: doc
 ---
@@ -9,14 +9,15 @@ template: doc
 
 ## Summary
 
-`client` 模块是 `clore::net` 库中负责网络客户端逻辑的核心组件。它封装了与语言模型 API 异步交互的完整流程，包括请求的构建、发送、结果收集与解析，并提供了状态变量存储原始响应、解析结果、请求参数、工具标记等运行时数据。公开接口以一组模板函数（`call_completion_async`、`call_llm_async`、`call_structured_async`）为主，它们将底层协议抽象为模板参数，统一管理事件循环调度，并返回整数句柄用于跟踪异步操作。模块内部通过 `detail::select_event_loop` 等辅助机制确保事件循环的正确绑定，并依赖 `http`、`protocol`、`schema` 和 `support` 等模块完成网络传输、消息结构定义、JSON 模式生成及通用工具支持，构成了一个可扩展的异步调用框架。
+该模块是面向 LLM 网络通信的高层抽象，主要负责发起异步 LLM 调用并管理请求/响应的完整生命周期。它公开了三个模板函数作为主要入口：`call_completion_async`、`call_llm_async` 和 `call_structured_async`，分别对应不同类型的异步交互（通用完成、直接 LLM 调用、结构化输出）。调用者通过模板参数指定协议，并传入标识符、模型、提示、事件循环等参数；函数返回整数表示提交状态或句柄。模块内部依赖 `http` 模块执行网络请求，并利用 `protocol`、`schema` 和 `support` 模块处理协议适配、数据格式化和日志/工具支持。
+
+模块同时公开了多个中间变量（如 `request_json`、`raw_response`、`sanitized`、`parsed` 等），这些变量反映了请求构造、能力探测、响应解析等阶段的状态，为上层调试或扩展提供了可见性。此外，`detail` 子命名空间内的 `select_event_loop` 函数为异步操作提供了统一的事件循环选择逻辑，确保调用方可以灵活传入 `nullptr` 或显式循环实例。
 
 ## Imports
 
 - [`http`](../http/index.md)
 - [`protocol`](../protocol/index.md)
 - [`schema`](../schema/index.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Imported By
@@ -43,137 +44,159 @@ graph LR
 
 ### `clore::net::call_completion_async`
 
-Declaration: `network/client.cppm:16`
+Declaration: `src/network/client.cppm:24`
 
-Definition: `network/client.cppm:57`
+Definition: `src/network/client.cppm:65`
 
 Declaration: [`Namespace clore::net`](../../namespaces/clore/net/index.md)
 
-函数 `clore::net::call_completion_async` 实现了一个带重试和自适应能力探测的异步请求循环。算法在最多四次迭代中工作：每次迭代通过 `Protocol::read_environment` 获取环境配置，然后使用 `get_probed_capabilities` 检索当前能力缓存，并调用 `sanitize_request_for_capabilities` 根据缓存能力调整请求。若初始请求包含工具但清理后工具为空（`tools_stripped` 为真），则会在成功获取响应后直接失败。对于每一次迭代，函数通过 `detail::select_event_loop` 确定活动事件循环，并异步调用 `perform_http_request_async` 发送 HTTP 请求。如果收到 4xx 状态码，则检查响应体是否为特征拒绝错误（`is_feature_rejection_error`），若匹配则解析被拒绝的特征（`parse_rejected_feature_from_error`），并相应更新能力缓存中的标志（如 `supports_json_schema`、`supports_tool_choice` 等），然后使用调整后的请求（`sanitized`）继续下一次循环。若状态码非拒绝错误或解析失败，则立即以错误终止。成功收到 2xx 响应后，调用 `Protocol::parse_response` 解析返回数据；如果工具被剥离且请求原本需要工具，则返回工具不支持错误；否则返回解析结果。如果所有重试均耗尽，函数最终返回能力探测耗尽错误。整个流程依赖 `clore::net::detail::select_event_loop` 进行事件循环选择，并利用 `kota::task` 实现协程异步控制。
+`clore::net::call_completion_async` 是一个模板函数，其核心算法围绕**能力探测与自动降级重试**展开。函数在最多 4 次迭代的循环内工作：每次迭代首先通过 `Protocol::read_environment` 读取运行时环境，然后利用 `get_probed_capabilities` 获取缓存的服务端能力（由 `Protocol::capability_probe_key` 生成键），再调用 `sanitize_request_for_capabilities` 根据当前能力裁剪请求（例如移除不支持的工具或格式）。接着构造请求 JSON，通过 `clore::net::detail::perform_http_request_async` 执行异步 HTTP 调用，并检查响应状态码。若收到 4xx 且错误体指示某特性被拒绝（如 `response_format`、`tool_choice`、`parallel_tool_calls` 或 `tools`），则更新对应能力标志（使用 `std::memory_order_relaxed`）并重新使用已裁剪的请求进行下一轮重试；若连续重试达 3 次仍未成功，或非拒绝类错误，则直接失败。成功响应会经由 `Protocol::parse_response` 解析返回。工具被剥离但原始请求需要工具时，函数会提前失败。所有异步操作均依赖于 `kota::event_loop`，并通过 `clore::net::detail::select_event_loop` 来解析实际的事件循环对象。
 
 #### Side Effects
 
-- 发送 HTTP POST 请求到 LLM 提供商的 API
-- 通过 `get_probed_capabilities` 返回的引用修改全局能力缓存中的 `supports_json_schema`、`supports_tool_choice`、`supports_parallel_tool_calls`、`supports_tools` 等布尔字段
-- 调用 `logging::warn` 记录特性拒绝和重试信息
+- Performs HTTP requests via `perform_http_request_async`
+- Atomically updates probed capability flags in `ProbedCapabilities`
+- Logs warnings via `logging::warn`
+- Fails the coroutine with `LLMError`
+- Reads environment variables via `Protocol::read_environment`
 
 #### Reads From
 
-- 参数 `request` 的 `tools` 字段及完整内容
-- 参数 `loop`（通过 `detail::select_event_loop` 获取事件循环引用）
-- `Protocol::read_environment()` 返回的环境变量
-- `get_probed_capabilities` 返回的全局能力缓存对象
-- HTTP 响应中的 `raw_response.body` 和 `raw_response.http_status`
+- `request` parameter
+- `loop` parameter
+- `Protocol::read_environment()` result
+- `get_probed_capabilities()` return value
+- `Protocol::build_url()` and `Protocol::build_headers()`
+- HTTP response body
 
 #### Writes To
 
-- 全局能力缓存（`ProbedCapabilities` 对象）中的 `supports_json_schema`、`supports_tool_choice`、`supports_parallel_tool_calls`、`supports_tools` 字段
-- 日志输出（通过 `logging::warn`）
+- Probed capabilities atomics: `supports_json_schema`, `supports_tool_choice`, `supports_parallel_tool_calls`, `supports_tools`
+- Logging output
+- Network I/O
+- Returned `CompletionResponse` via `co_return`
 
 #### Usage Patterns
 
-- 用于构建 LLM 完成请求的异步接口
-- 支持能力探测和自动降级功能
-- 内部被 `call_llm_async` 或类似函数调用（作为底层实现）
+- Used by higher-level completion functions to handle feature probing transparently
+- Called with an event loop to schedule async work
 
 ### `clore::net::call_llm_async`
 
-Declaration: `network/client.cppm:20`
+Declaration: `src/network/client.cppm:35`
 
-Definition: `network/client.cppm:138`
+Definition: `src/network/client.cppm:165`
 
 Declaration: [`Namespace clore::net`](../../namespaces/clore/net/index.md)
 
-该函数首先通过 `detail::select_event_loop(loop)` 获取或创建事件循环引用 `active_loop`。然后构造一个封装了 `call_completion_async<Protocol>` 调用的 lambda，并将该 lambda 与 `model`、`system_prompt`、`request` 以及 `active_loop` 一同传递给 `detail::request_text_once_async`。`request_text_once_async` 执行实际的异步请求逻辑，返回一个可取消的 `kota::task`。函数在该任务上调用 `.catch_cancel()` 以处理取消事件，再通过 `detail::unwrap_caught_result` 将结果包装为 `clore::net::LLMError` 形式的错误。最终 `co_await` 整个链条并返回结果字符串或错误。所有异步操作均调度在 `active_loop` 上。
+函数 `clore::net::call_llm_async` 的实现首先通过 `detail::select_event_loop` 将可选的 `loop` 解析为有效的 `kota::event_loop` 引用 `active_loop`。接着它委托给 `detail::request_text_once_async`，传入一个内部 lambda 以及 `model`、`system_prompt`、一个 `PromptRequest` 对象和 `active_loop`。该 lambda 接收 `clore::net::CompletionRequest` 和请求所在的事件循环引用，并调用模板化的 `call_completion_async<Protocol>` 执行实际的完成请求。`PromptRequest` 的结构中，`prompt` 被转化为 `std::string`，`response_format` 设为 `std::nullopt`，`output_contract` 指定为 `PromptOutputContract::Markdown`。最终通过 `.or_fail()` 将协程的结果类型转换为 `std::string` 或 `LLMError` 并返回。
+
+内部控制流完全围绕协程展开：`co_await` 等待 `request_text_once_async` 完成，该函数内部会处理重试、错误处理等逻辑（未在此处体现）。核心依赖包括 `detail::select_event_loop` 用于获取活动事件循环，以及 `call_completion_async` 作为底层 LLM 完成调用的入口，后者需要由调用者通过 `Protocol` 模板参数特化。整个过程不涉及显式的 JSON 解析或结构提取，只请求纯文本的 Markdown 格式响应。
 
 #### Side Effects
 
-- Performs an asynchronous network request to an LLM API
-- May produce side effects in the event loop via coroutine suspension
-- Handles cancellation and error conversion
+- performs asynchronous network I/O to call the LLM API
+- may trigger rate limiting and capability probing
+- interacts with internal completion request system
 
 #### Reads From
 
-- Parameter `model`
-- Parameter `system_prompt`
-- Parameter `request` (a `PromptRequest`)
-- Parameter `loop` (a `kota::event_loop*`)
-- Internal call to `detail::select_event_loop(loop)`
-- Internal call to `detail::request_text_once_async` and `call_completion_async<Protocol>`
+- parameters: `model`, `system_prompt`, `prompt`, `loop`
+- global state: rate limiters
+- global state: probed capabilities via `get_probed_capabilities`
+
+#### Writes To
+
+- updates internal rate limiting state
+- may update probed capabilities cache
+- sends network requests and receives responses (I/O)
 
 #### Usage Patterns
 
-- Used to asynchronously call an LLM for a text completion
-- Often paired with an event loop for coroutine execution
-- Provides error handling through `LLMError` and cancellation support
+- used to asynchronously generate text from an LLM
+- called with a model identifier, system prompt, and user prompt
+- used within event-loop-driven applications
 
 ### `clore::net::call_llm_async`
 
-Declaration: `network/client.cppm:27`
+Declaration: `src/network/client.cppm:28`
 
-Definition: `network/client.cppm:157`
+Definition: `src/network/client.cppm:146`
 
 Declaration: [`Namespace clore::net`](../../namespaces/clore/net/index.md)
 
-该函数通过调用 `detail::select_event_loop` 解析外部的 `kota::event_loop*` 参数，以确定活跃的事件循环引用 `active_loop`。随后，它构造一个 `clore::net::PromptRequest`，其中包含原始 `prompt`、空的响应格式（`std::nullopt`）以及 `clore::net::PromptOutputContract::Markdown` 输出约定，然后将此请求与 `model` 和 `system_prompt` 一并传递给 `detail::request_text_once_async`。这个底层辅助函数接收一个可调用对象，该对象在内部为每次请求调用模板函数 `call_completion_async<Protocol>`，将构造的 `CompletionRequest` 和事件循环引用传递给它。最终，通过 `.or_fail()` 将协程结果展平为 `kota::task<std::string, clore::net::LLMError>` 并返回。整个过程完全异步，依赖 `detail::select_event_loop` 来确保事件循环的正确绑定，而实际的网络交互则交由 `call_completion_async` 完成。
+`clore::net::call_llm_async` 的实现首先通过调用 `detail::select_event_loop` 确定活跃的事件循环引用（无论传入的指针是否为空），然后委托给 `detail::request_text_once_async`，后者接受一个回调 lambda 以及 `model`、`system_prompt` 和 `request`。该 lambda 内部调用 `call_completion_async<Protocol>` 将序列化的文本请求提交到指定的事件循环。整个协程链被包裹在 `detail::unwrap_caught_result` 中，它会将取消异常转换为 `LLMError`（附带消息 "LLM request cancelled"）。最终返回一个带有结果字符串或错误状态的 `kota::task`。
+
+核心控制流是异步的：协程等待 `request_text_once_async` 完成，后者内部等待 `call_completion_async` 发起的网络操作。错误和取消都在 `unwrap_caught_result` 层统一处理，而 `select_event_loop` 则保证了事件循环的可用性——若传入 `nullptr` 则回退到全局默认循环。整个函数依赖 `detail` 命名空间中的内部辅助函数和 `kota::event_loop` 的异步机制。
+
+#### Side Effects
+
+- 执行异步网络 I/O 操作以调用 LLM 服务
+- 可能触发内部的速率限制检查与状态更新（基于 `clore::net::detail` 相关组件）
+- 通过协程返回结果字符串，修改调用方的执行流
 
 #### Reads From
 
-- 参数 `model`
-- 参数 `system_prompt`
-- 参数 `prompt`
-- 参数 `loop`
-- 事件循环状态（通过 `detail::select_event_loop`）
+- 参数 `model`（`std::string_view`）
+- 参数 `system_prompt`（`std::string_view`）
+- 参数 `request`（`clore::net::PromptRequest`）
+- 参数 `loop`（`kota::event_loop*`）
+- 通过 `detail::select_event_loop` 读取全局或传入的事件循环状态
+
+#### Writes To
+
+- 输出协程结果（`std::string`）
+- 可能写入速率限制相关状态（间接通过 `detail::request_text_once_async` 的内部实现）
 
 #### Usage Patterns
 
-- 通过事件循环异步发起LLM文本生成请求
-- 与 `clore::net::call_structured_async` 配合使用处理结构化输出
-- 在协程中 `co_await` 等待结果
+- 作为网络层公共接口，用于发起需要异步等待的 LLM 调用
+- 通常被更上层的封装函数或业务逻辑直接 `co_await` 使用
+- 配合错误处理、取消捕获等协程机制
+- 重载版本接受 `int` 类型的请求，但证据中提供的实现使用 `PromptRequest`
 
 ### `clore::net::call_structured_async`
 
-Declaration: `network/client.cppm:34`
+Declaration: `src/network/client.cppm:42`
 
-Definition: `network/client.cppm:178`
+Definition: `src/network/client.cppm:186`
 
 Declaration: [`Namespace clore::net`](../../namespaces/clore/net/index.md)
 
-该函数首先通过 `clore::net::schema::response_format<T>()` 尝试获取结构化输出所需的 JSON schema；若获取失败则立即通过 `kota::fail` 终止协程。接着构造一个 `clore::net::CompletionRequest`，其中填充了 `model`、`system_prompt` 和 `prompt`，并将 `response_format` 设为刚获取的 schema，同时清空 `tools` 和 `tool_choice`。随后调用 `clore::net::call_completion_async<Protocol>` 发起实际的 LLM 调用（该调用会依据 `Protocol` 选择具体的网络后端），并在返回结果上调用 `.or_fail()` 以将错误转换为协程异常。得到原始响应后，使用 `clore::net::protocol::parse_response_text<T>` 将响应体中的文本解析为目标类型 `T`；同样地，若解析失败则通过 `kota::fail` 终止。最后 `co_return` 解析成功的值。整个流程将 schema 获取、请求构造、网络调用与结构化反序列化串联为单一的协程调用，依赖 `clore::net::call_completion_async` 完成核心 I/O 和协议处理。
+实现首先通过 `clore::net::schema::response_format<T>()` 推导目标类型 `T` 的期望 JSON 模式，若生成失败则使用 `kota::fail` 提前终止协程。随后构造一个 `clore::net::CompletionRequest`，将传入的 `model`、`system_prompt` 和 `prompt` 分别填入 `model` 字段及 `messages` 数组中的 `SystemMessage` 与 `UserMessage`，并将上一步获得的格式赋值给 `response_format`，同时将 `tools`、`tool_choice` 和 `parallel_tool_calls` 置为空或 `nullopt`。接着将该请求连同 `loop` 委托给模板函数 `clore::net::call_completion_async<Protocol>` 执行，并通过 `.or_fail()` 获得原始响应。最后调用 `clore::net::protocol::parse_response_text<T>(response)` 将响应文本解析为类型 `T`，若解析失败则同样通过 `kota::fail` 终止，否则返回解析结果。该函数依赖 `clore::net::schema::response_format`、`clore::net::call_completion_async` 和 `clore::net::protocol::parse_response_text` 三个核心组件，并使用 `kota::task` 与 `kota::fail` 实现异步错误传播。
 
 #### Side Effects
 
-- performs asynchronous network I/O via `call_completion_async`
-- allocates memory for `CompletionRequest` strings
-- potentially triggers side effects in the network layer (e.g., rate limiting, logging)
+- Initiates an asynchronous network request to an LLM provider via `call_completion_async`
+- May access and update internal rate‑limiting or capability‑probing state indirectly through callees
 
 #### Reads From
 
-- reads `model`, `system_prompt`, `prompt` parameters
-- reads response format from `clore::net::schema::response_format<T>()`
-- reads response data from network via `call_completion_async`
-
-#### Writes To
-
-- writes result to the returned `kota::task`
-- allocates and writes to `CompletionRequest` objects
+- `model` parameter (`std::string_view`)
+- `system_prompt` parameter (`std::string_view`)
+- `prompt` parameter (`std::string_view`)
+- `loop` parameter (`kota::event_loop` *)
+- `clore::net::schema::response_format<T>()` (depends on type `T`)
 
 #### Usage Patterns
 
-- used to call an LLM expecting a structured output of type `T`
-- called with a specific protocol and type template arguments
+- Calling an LLM with a structured output schema enforced by `response_format`
+- Chaining `call_completion_async` followed by response parsing to obtain a typed result
+- Using `kota::task` coroutine to await the external I/O operation
 
 ### `clore::net::detail::select_event_loop`
 
-Declaration: `network/client.cppm:45`
+Declaration: `src/network/client.cppm:53`
 
-Definition: `network/client.cppm:45`
+Definition: `src/network/client.cppm:53`
 
 Declaration: [`Namespace clore::net::detail`](../../namespaces/clore/net/detail/index.md)
 
 Implementation: [Implementation](functions/select-event-loop.md)
 
-该函数的行为基于一个简单的三元分支：如果传入的 `loop` 指针非空，则直接解引用并返回该 `kota::event_loop` 对象；否则，调用静态方法 `kota::event_loop::current()` 获取当前线程的活动事件循环引用。其内部依赖 `kota::event_loop` 的 `current()` 实现，该实现必须返回一个有效的事件循环——若当前线程无关联的活跃循环，行为未定义。此函数是 `clore::net::detail` 命名空间下的一个简化的返回引用工具，用于在其他异步调用函数（如 `call_llm_async`）中统一获取事件循环实例，避免重复执行空指针检查或默认回退逻辑。
+`clore::net::detail::select_event_loop` 的实现遵循一个简单的分支策略。它首先检查 `loop` 参数是否为非空指针；若不为空，则立即返回通过解引用该指针获得的 `kota::event_loop` 引用。否则，它将依赖项委托给静态成员函数 `kota::event_loop::current()`，该函数按约定返回一个与调用线程关联的事件循环引用。如果当前线程上没有已注册的事件循环，此回退路径的行为是未定义的。
+
+该函数的核心控制流仅有两条路径，没有循环或递归。其正确性依赖于调用方要么提供一个有效的 `loop` 指针，要么确保 `kota::event_loop::current()` 在当前线程上下文中有可返回的合法对象。它没有额外的错误检查或日志记录，因此性能开销极低。
 
 #### Side Effects
 
@@ -181,19 +204,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `loop` 参数
-- `kota::event_loop::current()` 返回的当前线程事件循环状态
+- parameter `loop` (pointer to `kota::event_loop`)
+- current event loop via `kota::event_loop::current()`
 
 #### Usage Patterns
 
-- 用于将可选的 `event_loop*` 解析为确定的引用
-- 被 `call_completion_async`、`call_llm_async` 等高层函数调用以获取事件循环
+- callers like `clore::net::call_llm_async` and `clore::net::call_completion_async` pass an optional `kota::event_loop*` to obtain a guaranteed valid reference for async operations
 
 ## Internal Structure
 
-客户端模块是 `clore::net` 库的网络调用入口，以三个模板函数 `call_completion_async`、`call_llm_async` 和 `call_structured_async` 暴露异步 LLM 交互能力。每个函数均通过模板参数 `Protocol` 支持多种协议实现，并依赖可选的 `kota::event_loop*` 参数来绑定事件循环；内部通过 `detail::select_event_loop` 决策实际使用的事件循环，确保调用方总能获得有效引用。模块内部将请求参数（模型标识、提示、系统提示、请求负载等）与响应暂存变量（原始响应、解析结果、拒绝标志等）集中在函数体作用域内，未引入公开类或复杂状态机，保持扁平的函数式分解。
-
-模块导入 `http` 用于底层网络通信，`protocol` 提供消息结构与请求/响应对象，`schema` 处理输出格式与工具定义，`support` 提供文本处理与缓存键等基础设施，`std` 提供标准库类型。整体结构清晰：外部模板函数负责参数收集与异步发起，`detail` 空间承担事件循环选择等内部决策；所有协议具体实现由模板实例化注入，不直接耦合于该模块。
+模块 `client` 作为 LLM 调用的公共入口，将异步网络请求、协议交互、结构化输出与事件循环管理组织为清晰的层次。它通过 `http`、`protocol`、`schema` 和 `support` 模块的导入，实现了请求构建、能力探测、响应解析以及 JSON Schema 映射的解耦。内部通过 `detail::select_event_loop` 统一处理事件循环的生命周期，公共模板 `call_completion_async`、`call_llm_async` 和 `call_structured_async` 分别对应完成式、通用 LLM 调用和结构化输出场景，它们接受 `Protocol` 与可选的 `kota::event_loop` 指针，返回整数句柄以支持异步监控。模块内部变量（如 `active_loop`、`request`、`model`、`system_prompt`）和公共变量（如 `request_json`、`raw_response`、`sanitized`、`parsed`）明确了请求构造到响应处理的完整内部流程，体现了 “调用 → 构建 → 发送 → 解析” 的实现架构。
 
 ## Related Pages
 

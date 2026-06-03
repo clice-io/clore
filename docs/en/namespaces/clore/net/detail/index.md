@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::detail'
-description: 'The clore::net::detail namespace contains the internal implementation details for the network layer, primarily focused on HTTPS communication with LLM endpoints. It provides low‑level building blocks such as JSON parsing and validation utilities (e.g., expect_array, expect_object, parse_json_value), view‑type wrappers for safe JSON traversal (ArrayView, ObjectView), and functions for constructing and serializing request payloads (serialize_value_to_string, insert_string_field). Asynchronous HTTP operations are managed through perform_http_request_async and request_text_once_async, while concurrency is controlled via shared semaphores (g_llm_semaphore) and mutexes (g_llm_semaphore_mutex). The namespace also defines environment‑reading helpers (read_environment, read_required_env), credential handling (CredentialEnv, read_credentials), and a set of compile‑time constants for timeouts, keep‑alive intervals, and cache durations. Together, these components form a reusable infrastructure that supports the higher‑level clore::net API, isolating complexity and ensuring consistent error handling and configuration across HTTP‑based LLM interactions.'
+description: 'The clore::net::detail namespace contains the internal implementation layer for the networking subsystem, providing low‑level HTTP operations, JSON parsing and validation utilities, environment‑based configuration, and rate‑limiting infrastructure for LLM requests. Key declarations include functions for synchronous and asynchronous HTTP requests (perform_http_request, perform_http_request_async), JSON type‑checking helpers (expect_string, expect_object, expect_array), cloning and serialization routines (clone_object, clone_value, serialize_tool_arguments), environment readers (read_environment, read_required_env, read_credentials), and constants for connection timeouts and TCP keep‑alive intervals. The namespace also defines helper types such as ArrayView and ObjectView for traversing JSON data, RawHttpResponse for structuring HTTP responses, and global synchronization primitives (g_llm_semaphore, g_llm_semaphore_mutex) that control concurrent access to LLM endpoints. Architecturally, this namespace serves as the opaque engine behind the public clore::net API, isolating platform‑specific networking details, JSON manipulation, and credential management from higher‑level callers.'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-The `clore::net::detail` namespace contains the internal implementation details for the network layer, primarily focused on HTTPS communication with LLM endpoints. It provides low‑level building blocks such as JSON parsing and validation utilities (e.g., `expect_array`, `expect_object`, `parse_json_value`), view‑type wrappers for safe JSON traversal (`ArrayView`, `ObjectView`), and functions for constructing and serializing request payloads (`serialize_value_to_string`, `insert_string_field`). Asynchronous HTTP operations are managed through `perform_http_request_async` and `request_text_once_async`, while concurrency is controlled via shared semaphores (`g_llm_semaphore`) and mutexes (`g_llm_semaphore_mutex`). The namespace also defines environment‑reading helpers (`read_environment`, `read_required_env`), credential handling (`CredentialEnv`, `read_credentials`), and a set of compile‑time constants for timeouts, keep‑alive intervals, and cache durations. Together, these components form a reusable infrastructure that supports the higher‑level `clore::net` API, isolating complexity and ensuring consistent error handling and configuration across HTTP‑based LLM interactions.
+The `clore::net::detail` namespace contains the internal implementation layer for the networking subsystem, providing low‑level HTTP operations, JSON parsing and validation utilities, environment‑based configuration, and rate‑limiting infrastructure for LLM requests. Key declarations include functions for synchronous and asynchronous HTTP requests (`perform_http_request`, `perform_http_request_async`), JSON type‑checking helpers (`expect_string`, `expect_object`, `expect_array`), cloning and serialization routines (`clone_object`, `clone_value`, `serialize_tool_arguments`), environment readers (`read_environment`, `read_required_env`, `read_credentials`), and constants for connection timeouts and TCP keep‑alive intervals. The namespace also defines helper types such as `ArrayView` and `ObjectView` for traversing JSON data, `RawHttpResponse` for structuring HTTP responses, and global synchronization primitives (`g_llm_semaphore`, `g_llm_semaphore_mutex`) that control concurrent access to LLM endpoints. Architecturally, this namespace serves as the opaque engine behind the public `clore::net` API, isolating platform‑specific networking details, JSON manipulation, and credential management from higher‑level callers.
 
 ## Diagram
 
@@ -34,21 +34,38 @@ graph TD
 
 ### `clore::net::detail::ArrayView`
 
-Declaration: `network/protocol.cppm:178`
+Declaration: `src/network/protocol.cppm:190`
 
-Definition: `network/protocol.cppm:178`
+Definition: `src/network/protocol.cppm:190`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
+#### Invariants
+
+- The `value` pointer must remain valid for the lifetime of the view.
+- All member functions assume `value` is non-null and point to a valid `Array`.
+
+#### Key Members
+
+- `value` pointer
+- `begin` / `end` for iteration
+- `operator[]` for indexed access
+- `operator*` and `operator->` for direct array access
+
+#### Usage Patterns
+
+- Used to pass read-only references to JSON arrays without copying.
+- Frequently employed in network protocol handling where constant array data is accessed.
+
 #### Member Functions
 
 ##### `clore::net::detail::ArrayView::begin`
 
-Declaration: `network/protocol.cppm:189`
+Declaration: `src/network/protocol.cppm:201`
 
-Definition: `network/protocol.cppm:189`
+Definition: `src/network/protocol.cppm:201`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -60,9 +77,9 @@ const_iterator () const noexcept;
 
 ##### `clore::net::detail::ArrayView::empty`
 
-Declaration: `network/protocol.cppm:181`
+Declaration: `src/network/protocol.cppm:193`
 
-Definition: `network/protocol.cppm:181`
+Definition: `src/network/protocol.cppm:193`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -74,9 +91,9 @@ auto () const noexcept -> bool;
 
 ##### `clore::net::detail::ArrayView::end`
 
-Declaration: `network/protocol.cppm:193`
+Declaration: `src/network/protocol.cppm:205`
 
-Definition: `network/protocol.cppm:193`
+Definition: `src/network/protocol.cppm:205`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -88,9 +105,9 @@ const_iterator () const noexcept;
 
 ##### `clore::net::detail::ArrayView::operator*`
 
-Declaration: `network/protocol.cppm:205`
+Declaration: `src/network/protocol.cppm:217`
 
-Definition: `network/protocol.cppm:205`
+Definition: `src/network/protocol.cppm:217`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -102,9 +119,9 @@ auto () const noexcept -> const kota::codec::json::Array &;
 
 ##### `clore::net::detail::ArrayView::operator->`
 
-Declaration: `network/protocol.cppm:201`
+Declaration: `src/network/protocol.cppm:213`
 
-Definition: `network/protocol.cppm:201`
+Definition: `src/network/protocol.cppm:213`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -116,9 +133,9 @@ auto () const noexcept -> const kota::codec::json::Array *;
 
 ##### `clore::net::detail::ArrayView::operator[]`
 
-Declaration: `network/protocol.cppm:197`
+Declaration: `src/network/protocol.cppm:209`
 
-Definition: `network/protocol.cppm:197`
+Definition: `src/network/protocol.cppm:209`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -130,9 +147,9 @@ auto (std::size_t) const -> const kota::codec::json::Value &;
 
 ##### `clore::net::detail::ArrayView::size`
 
-Declaration: `network/protocol.cppm:185`
+Declaration: `src/network/protocol.cppm:197`
 
-Definition: `network/protocol.cppm:185`
+Definition: `src/network/protocol.cppm:197`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -144,9 +161,9 @@ auto () const noexcept -> std::size_t;
 
 ### `clore::net::detail::CredentialEnv`
 
-Declaration: `network/provider.cppm:14`
+Declaration: `src/network/provider.cppm:21`
 
-Definition: `network/provider.cppm:14`
+Definition: `src/network/provider.cppm:21`
 
 Implementation: [`Module provider`](../../../../modules/provider/index.md)
 
@@ -154,22 +171,25 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Members are valid `std::string_view` objects; no further guarantees are provided
+- No explicit invariants; both fields are accessible and modifiable.
+- No requirement that the string views point to valid environment variables.
 
 #### Key Members
 
-- `base_url_env`: environment variable name for the base URL
-- `api_key_env`: environment variable name for the API key
+- `base_url_env` – holds the name of the environment variable for the base URL.
+- `api_key_env` – holds the name of the environment variable for the API key.
 
 #### Usage Patterns
 
-- No usage patterns are explicitly documented in the evidence
+- Used to pass environment variable names to credential lookup functions.
+- Likely consumed internally within the networking layer to read credentials from the environment.
+- Stored as a simple value object; may be copied or passed by reference.
 
 ### `clore::net::detail::EnvironmentConfig`
 
-Declaration: `network/http.cppm:37`
+Declaration: `src/network/http.cppm:51`
 
-Definition: `network/http.cppm:37`
+Definition: `src/network/http.cppm:51`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
@@ -177,8 +197,7 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Both members are always of type `std::string`
-- No guarantee of non-empty or valid content
+- No invariants enforced; callers must ensure `api_base` is a valid URL and `api_key` is non-empty if required.
 
 #### Key Members
 
@@ -187,14 +206,13 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Constructed with environment-specific values before initializing higher-level network objects
-- Passed by value or const reference to setup HTTP clients or service wrappers
+- Passed to constructors or initialization functions of network-related classes.
 
 ### `clore::net::detail::ObjectView`
 
-Declaration: `network/protocol.cppm:156`
+Declaration: `src/network/protocol.cppm:168`
 
-Definition: `network/protocol.cppm:156`
+Definition: `src/network/protocol.cppm:168`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -202,30 +220,32 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- The `value` pointer may be null by default.
-- When `value` is non‑null, the pointed‑to object must outlive the view.
-- No lifetime management is performed by the view.
+- `value` may be `nullptr` if default-constructed or not properly initialized
+- `begin()` and `end()` assume `value` is non-null (undefined behavior otherwise)
+- `get` performs a lookup in the underlying object; result is empty if key not found
 
 #### Key Members
 
-- `value` – pointer to the underlying JSON object.
-- `get(std::string_view)` – retrieves an optional cursor for a given key.
-- `begin()` / `end()` – iterator access to the object’s key‑value pairs.
-- `operator->()` / `operator*()` – dereference to the underlying object.
+- `value`
+- `get`
+- `begin`
+- `end`
+- `operator->`
+- `operator*`
 
 #### Usage Patterns
 
-- Returned from functions that provide read‑only access to a JSON object without transferring ownership.
-- Used in protocol‑level parsing to read structured message fields.
-- Often passed by value or const reference to functions that need a temporary, non‑owning handle.
+- Callers iterate over key-value pairs using range-based for loops via `begin`/`end`
+- Callers retrieve a specific value by key with `get`, handling the optional return
+- Used as a parameter or return type in `clore::net::detail` to avoid copying JSON objects
 
 #### Member Functions
 
 ##### `clore::net::detail::ObjectView::begin`
 
-Declaration: `network/protocol.cppm:161`
+Declaration: `src/network/protocol.cppm:173`
 
-Definition: `network/protocol.cppm:161`
+Definition: `src/network/protocol.cppm:173`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -237,9 +257,9 @@ const_iterator () const noexcept;
 
 ##### `clore::net::detail::ObjectView::end`
 
-Declaration: `network/protocol.cppm:165`
+Declaration: `src/network/protocol.cppm:177`
 
-Definition: `network/protocol.cppm:165`
+Definition: `src/network/protocol.cppm:177`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -251,9 +271,9 @@ const_iterator () const noexcept;
 
 ##### `clore::net::detail::ObjectView::get`
 
-Declaration: `network/protocol.cppm:159`
+Declaration: `src/network/protocol.cppm:171`
 
-Definition: `network/protocol.cppm:280`
+Definition: `src/network/protocol.cppm:292`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -265,9 +285,9 @@ auto (std::string_view) const -> std::optional<json::Cursor>;
 
 ##### `clore::net::detail::ObjectView::operator*`
 
-Declaration: `network/protocol.cppm:173`
+Declaration: `src/network/protocol.cppm:185`
 
-Definition: `network/protocol.cppm:173`
+Definition: `src/network/protocol.cppm:185`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -279,9 +299,9 @@ auto () const noexcept -> const kota::codec::json::Object &;
 
 ##### `clore::net::detail::ObjectView::operator->`
 
-Declaration: `network/protocol.cppm:169`
+Declaration: `src/network/protocol.cppm:181`
 
-Definition: `network/protocol.cppm:169`
+Definition: `src/network/protocol.cppm:181`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -293,9 +313,9 @@ auto () const noexcept -> const kota::codec::json::Object *;
 
 ### `clore::net::detail::RawHttpResponse`
 
-Declaration: `network/http.cppm:42`
+Declaration: `src/network/http.cppm:56`
 
-Definition: `network/http.cppm:42`
+Definition: `src/network/http.cppm:56`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
@@ -303,723 +323,717 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `http_status` may be zero or any valid HTTP status code
-- `body` may be empty or contain response content
+- `http_status` defaults to 0, which may represent an uninitialized or error state
+- `body` is an empty string by default
 
 #### Key Members
 
-- `http_status`
-- `body`
+- `http_status` (the HTTP status code)
+- `body` (the response body)
 
 #### Usage Patterns
 
-- Used as a return type or intermediate data holder for HTTP responses
-- Likely populated by HTTP parsing or networking code
+- Used as a return type for functions that fetch raw HTTP responses
+- Consumed by code within the `clore::net` namespace
 
 ## Variables
 
 ### `clore::net::detail::g_llm_request_counter`
 
-Declaration: `network/http.cppm:97`
+Declaration: `src/network/http.cppm:111`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-A global atomic counter of type `std::atomic<std::uint64_t>` initialized to `0`, used to uniquely identify LLM network requests.
+An atomic counter for tracking LLM requests, declared as `std::atomic<std::uint64_t>` in namespace `clore::net::detail`.
 
 #### Usage Patterns
 
-- read to produce a unique request number
-- used in HTTP request lifecycle of `perform_http_request_async`
+- read to assign request number
 
 ### `clore::net::detail::g_llm_semaphore`
 
-Declaration: `network/http.cppm:48`
+Declaration: `src/network/http.cppm:62`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-The variable `clore::net::detail::g_llm_semaphore` is an `extern std::shared_ptr<kota::semaphore>` declared at `network/http.cppm:48`. It serves as a rate-limiting semaphore to control concurrency of LLM requests within the networking layer.
+`clore::net::detail::g_llm_semaphore` is a global `std::shared_ptr<kota::semaphore>` declared as `extern` in `src/network/http.cppm:62`. It serves as a rate-limiting semaphore for LLM requests within the networking layer.
 
 #### Usage Patterns
 
-- referenced in rate‑limiting setup and teardown functions
-- used to enforce a maximum concurrency of LLM requests
+- rate limiting LLM requests
+- semaphore acquire/release via guard
+- synchronized with mutex
 
 ### `clore::net::detail::g_llm_semaphore_mutex`
 
-Declaration: `network/http.cppm:47`
+Declaration: `src/network/http.cppm:61`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-`clore::net::detail::g_llm_semaphore_mutex` is an `extern std::mutex` variable declared in the `clore::net::detail` namespace. It provides mutual exclusion for operations involving the LLM rate-limiting semaphore.
+`clore::net::detail::g_llm_semaphore_mutex` is a global `std::mutex` declared at `src/network/http.cppm:61` used to synchronize access to the LLM rate-limiting semaphore.
 
 #### Usage Patterns
 
-- locked/unlocked in `clore::net::initialize_llm_rate_limit`
-- locked/unlocked in `clore::net::detail::(anonymous namespace)::current_llm_semaphore`
-- locked/unlocked in `clore::net::shutdown_llm_rate_limit`
+- locked and unlocked to protect access to `g_llm_semaphore`
 
 ### `clore::net::detail::kConnMaxAgeSec`
 
-Declaration: `network/http.cppm:102`
+Declaration: `src/network/http.cppm:116`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-`clore::net::detail::kConnMaxAgeSec` is a compile-time constant of type `long` with value 300, declared in the `clore::net::detail` namespace.
+Constant defining the maximum age of a connection in seconds, set to 300 (5 minutes).
 
 #### Usage Patterns
 
-- Read by `clore::net::detail::configure_request` to set connection max age
+- used in `configure_request` to set connection lifetime
 
 ### `clore::net::detail::kDnsCacheTimeoutSec`
 
-Declaration: `network/http.cppm:101`
+Declaration: `src/network/http.cppm:115`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-The constant `clore::net::detail::kDnsCacheTimeoutSec` is declared as `constexpr long` with a value of 300 in the file `network/http.cppm`. It is a compile-time constant representing the DNS cache timeout in seconds.
+A compile-time constant of type `long` set to `300`, representing the DNS cache timeout duration in seconds. Declared in the `clore::net::detail` namespace within `src/network/http.cppm`.
 
 #### Usage Patterns
 
-- Used in `clore::net::detail::configure_request` to set DNS cache timeout
+- referenced in `clore::net::detail::configure_request`
 
 ### `clore::net::detail::kHttpConnectTimeoutMs`
 
-Declaration: `network/http.cppm:99`
+Declaration: `src/network/http.cppm:113`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-`clore::net::detail::kHttpConnectTimeoutMs` is a `constexpr long` constant defined at `network/http.cppm:99` with a value of `5'000`. It represents the default connection timeout duration in milliseconds for HTTP requests within the networking layer.
+Variable `clore::net::detail::kHttpConnectTimeoutMs` is a `constexpr long` constant defined at `src/network/http.cppm:113` with an initial value of 5'000 milliseconds.
 
 #### Usage Patterns
 
-- passed to `configure_request` to set connection timeout
+- passed as timeout argument in `configure_request`
 
 ### `clore::net::detail::kHttpRequestTimeout`
 
-Declaration: `network/http.cppm:100`
+Declaration: `src/network/http.cppm:114`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-A constant defining the timeout duration for HTTP requests as 120 seconds (`std::chrono::milliseconds(120'000)`), declared `constexpr` and publicly accessible in the `clore::net::detail` namespace.
+`kHttpRequestTimeout` is a `constexpr` variable of type `std::chrono::milliseconds` initialized to 120,000 milliseconds (2 minutes). It is defined in the `clore::net::detail` namespace and represents the default timeout duration for HTTP requests.
 
 #### Usage Patterns
 
-- Referenced as a constant timeout value in HTTP request logic (inferred from name and module context).
+- Read as the default timeout for HTTP requests
+- Used in network request configuration
 
 ### `clore::net::detail::kTcpKeepIdleSec`
 
-Declaration: `network/http.cppm:103`
+Declaration: `src/network/http.cppm:117`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-The variable `clore::net::detail::kTcpKeepIdleSec` is a compile-time constant of type `long` initialized to `60`, declared at `network/http.cppm:103`. It represents the idle time in seconds before the system starts sending TCP keep-alive probes.
+`clore::net::detail::kTcpKeepIdleSec` is a compile-time constant of type `long` with value `60`, defined at `src/network/http.cppm:117`.
 
 #### Usage Patterns
 
-- reads in `clore::net::detail::configure_request` to set socket keep-alive idle timeout
+- Referenced as `kTcpKeepIdleSec` in `configure_request` to set TCP keep-alive idle seconds.
 
 ### `clore::net::detail::kTcpKeepIntvlSec`
 
-Declaration: `network/http.cppm:104`
+Declaration: `src/network/http.cppm:118`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-`clore::net::detail::kTcpKeepIntvlSec` is a `constexpr long` constant declared at `network/http.cppm:104` with a value of `10`. It resides in the `clore::net::detail` namespace and provides a default TCP keepalive interval in seconds.
+`clore::net::detail::kTcpKeepIntvlSec` is a `constexpr long` constant defined with value `10`. It is declared in the `src/network/http.cppm` module at line 118.
 
 #### Usage Patterns
 
-- consumed as a constant in `clore::net::detail::configure_request` to set the TCP keepalive interval
+- used as a timeout parameter in `clore::net::detail::configure_request`
 
 ## Functions
 
 ### `clore::net::detail::append_url_path`
 
-Declaration: `network/provider.cppm:21`
+Declaration: `src/network/provider.cppm:28`
 
-Definition: `network/provider.cppm:43`
+Definition: `src/network/provider.cppm:50`
 
 Implementation: [`Module provider`](../../../../modules/provider/index.md)
 
-The function `clore::net::detail::append_url_path` takes two `std::string_view` arguments that represent URL path segments and returns a `std::string` containing the combined path. It is responsible for correctly concatenating the provided path parts, typically ensuring exactly one slash separator between them regardless of trailing or leading slashes in the individual inputs. The caller must supply the two segments in order from base to appended portion; the returned string is the complete, normalized URL path suitable for use in constructing HTTP requests.
+The function `clore::net::detail::append_url_path` accepts two `std::string_view` arguments — typically a base URL and a relative path — and returns a `std::string` that represents the combined URL. Its caller-facing contract is to handle the insertion of a separator (usually a slash) between the two parts when necessary, ensuring a syntactically correct URL is produced. The caller supplies the raw path segment without worrying about trailing or leading slashes; the function normalizes the result. This utility is intended for internal use within the network detail layer when constructing HTTP request `URLs`.
 
 #### Usage Patterns
 
-- constructing a full URL by combining a base URL and a relative path
-- ensuring a single slash separator between URL components
+- URL path concatenation
+- joining base URL with relative path
+- normalizing URL segments
 
 ### `clore::net::detail::clone_array`
 
-Declaration: `network/protocol.cppm:268`
+Declaration: `src/network/protocol.cppm:280`
 
-Definition: `network/protocol.cppm:442`
+Definition: `src/network/protocol.cppm:454`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::detail::clone_array` accepts an `ArrayView` and a `std::string_view` context identifier. It performs a deep copy of the array structure represented by the `ArrayView`, returning an `int` status code. The function expects the `ArrayView` to reference a valid, non‑empty JSON array; upon successful cloning, it returns a success status. If the input cannot be cloned—for instance, if the underlying array is malformed or the operation fails for any reason—it returns an error status. The caller must supply a meaningful `std::string_view` label, typically used for diagnostic messages in case of failure. This function does not modify the original array and is safe to call from concurrent code provided the `ArrayView` points to immutable data.
+The function `clore::net::detail::clone_array` creates a deep copy of the array referenced by the given `ArrayView`. The `std::string_view` parameter provides a human‑readable context (such as the source location or field name) for any error messages that may arise during the cloning process. It returns an `int` indicating success (zero) or a non‑zero error code if the operation fails, for example when the input `ArrayView` is invalid or memory allocation fails. Callers must ensure that the `ArrayView` refers to a valid JSON array and that the provided context string remains valid for the duration of the call.
 
 #### Usage Patterns
 
-- Used to clone JSON array data structures
-- Likely called during deep‑copy operations on parsed JSON objects
+- Create a deep copy of a JSON array for independent use
+- Duplicate an array when ownership transfer is needed
 
 ### `clore::net::detail::clone_object`
 
-Declaration: `network/protocol.cppm:265`
+Declaration: `src/network/protocol.cppm:277`
 
-Definition: `network/protocol.cppm:451`
+Definition: `src/network/protocol.cppm:463`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::detail::clone_object` creates an independent copy of a JSON object from either an `ObjectView` or a direct reference to a `kota::codec::json::Object`. The caller provides the source object and a `std::string_view` context string that identifies the cloning operation for error reporting. The function returns an integer code indicating success (typically zero) or failure. This utility is intended for internal use when a duplicate of the object structure is needed, such as when serializing tool arguments or preparing response data, and assumes the input object is well-formed.
+The function `clore::net::detail::clone_object` creates an independent, deep copy of a JSON object, providing the caller with a snapshot of the object’s current state. It accepts either an `ObjectView` or a `const json::Object &` to specify the source object, along with a `std::string_view` that typically serves as a context label (for example, a field name or diagnostic tag). The function returns an `int` value that indicates the outcome of the cloning operation.
+
+From the caller’s perspective, this function is used when a durable, isolated copy of a JSON object is needed—for example, to preserve a value before mutation, to transfer ownership across boundaries, or to attach a meaningful label to the cloned data for debugging or error reporting. The caller must supply a valid source object and a non-empty context string; the contract guarantees that the returned copy does not share any mutable state with the original object. A successful call returns a non‑negative integer; a negative return value signals an error, and the context string can be used to identify the source of the failure in subsequent diagnostic messages.
 
 #### Usage Patterns
 
-- Copying a JSON object view for further processing
-- Cloning an object when deep copy is required in protocol serialization or validation
+- creating independent copies of JSON objects from views
 
 ### `clore::net::detail::clone_object`
 
-Declaration: `network/protocol.cppm:262`
+Declaration: `src/network/protocol.cppm:274`
 
-Definition: `network/protocol.cppm:446`
+Definition: `src/network/protocol.cppm:458`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::detail::clone_object` accepts an `ObjectView` (a view over a JSON object) and a `std::string_view` providing caller context—typically the name of the source operation or location for error reporting. It creates an independent copy of the object and returns an `int` status code: zero indicates success, a non‑zero value indicates a failure (for example, when the view is invalid or memory allocation fails). The caller is responsible for passing a valid `ObjectView` and may use the returned status to detect and handle errors, using the context string to enrich diagnostic messages if needed.
+The function `clore::net::detail::clone_object` accepts an `ObjectView` representing a JSON object and a `std::string_view` diagnostic context. It performs a deep copy of the object and returns an integer result indicating success or failure. The caller is responsible for ensuring the `ObjectView` is valid; the `int` return value allows the caller to check for errors, with zero typically meaning success. The context string is used only for error reporting and does not affect the cloning logic.
 
 #### Usage Patterns
 
-- deep copy of a JSON object
-- cloning before mutation
-- preserving original in serialization pipelines
+- Called from `clone_value` when the encountered value is an object.
+- Used to obtain a mutable copy of an immutable object view.
 
 ### `clore::net::detail::clone_value`
 
-Declaration: `network/protocol.cppm:271`
+Declaration: `src/network/protocol.cppm:283`
 
-Definition: `network/protocol.cppm:455`
+Definition: `src/network/protocol.cppm:467`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-Creates a deep copy of the provided `const json::Value &` value. The operation recursively clones all nested objects and arrays, yielding an independent copy that does not share ownership with the original.
-
-Returns an `int` indicating success (zero) or failure (non-zero). The `std::string_view` argument serves as a context label for error reporting, typically the calling location. The caller should check the return value to verify the clone succeeded.
+The function `clore::net::detail::clone_value` creates a copy of the provided `json::Value`. The caller supplies a context string (`std::string_view`) that is used for diagnostic messages in the event of a failure. The return value is an `int` that indicates success or failure; a non‑zero value signals an error. This function serves as a basic building block for duplicating JSON values within the network layer’s utility set, allowing callers to obtain an independent copy while preserving error‑reporting context.
 
 #### Usage Patterns
 
-- Creates an independent copy of a JSON value
-- Used when a deep, mutable clone of a JSON value is required
+- Cloning a JSON value for local mutation without affecting the original
+- Defensive copying before validation or transformation
+- Used in JSON processing pipelines to preserve the input
 
 ### `clore::net::detail::configure_request`
 
-Declaration: `network/http.cppm:150`
+Declaration: `src/network/http.cppm:164`
 
-Definition: `network/http.cppm:150`
+Definition: `src/network/http.cppm:164`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-The function `clore::net::detail::configure_request` is a utility that modifies a given `kota::http::request` object to apply the configuration specified by its caller. The caller provides an `int` and a `std::string` as additional parameters (representing a numeric setting and a string value, such as a token count or a model identifier), and the function updates the request object accordingly, thereby ensuring the request is correctly set up for subsequent operations. The caller is responsible for supplying a valid reference to a request and the appropriate configuration values; the function performs the configuration and returns `void`.
+Configures a provided `kota::http::request` object with the given integer and string parameters, modifying it in place to prepare it for subsequent HTTP operations. The caller must supply a valid mutable reference to the request; the function does not return a value, assuming successful configuration within the intended usage context.
 
 #### Usage Patterns
 
-- Called during HTTP request preparation to apply standard configuration before sending the request
-- Used in the HTTP client flow to centralize setup of headers, body, and performance-related options
+- Called when preparing an HTTP request before transmission
+- Used to uniformly apply headers and `cURL` options to a request
 
 ### `clore::net::detail::excerpt_for_error`
 
-Declaration: `network/protocol.cppm:223`
+Declaration: `src/network/protocol.cppm:235`
 
-Definition: `network/protocol.cppm:316`
+Definition: `src/network/protocol.cppm:328`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::detail::excerpt_for_error` accepts a `std::string_view` and returns a `std::string`. Its responsibility is to produce a short, human-readable excerpt of the input string suitable for embedding in error messages or diagnostic output.  
-
-The caller provides the full text (typically a JSON payload or network response). The returned string is a reduced representation—often truncated or focused on a relevant segment—so that error logs remain concise while still conveying the problematic content. No transformation of the input is guaranteed beyond condensation; the exact truncation strategy is implementation-defined.
+`clore::net::detail::excerpt_for_error` takes a `std::string_view` and returns a `std::string` containing a short, human‑readable excerpt of the original text. The caller should use this function when constructing error messages that need to include a portion of an untrusted or potentially large string. The returned excerpt is guaranteed to be of limited length, making it safe to embed in logs, exception messages, or diagnostic output without risking excessively long output. The function does not throw; it always produces a valid, truncated representation of the input.
 
 #### Usage Patterns
 
-- Creating a safe excerpt of a response body for inclusion in error messages
+- used to produce a short excerpt of an error response body for display or logging
 
 ### `clore::net::detail::expect_array`
 
-Declaration: `network/protocol.cppm:250`
+Declaration: `src/network/protocol.cppm:262`
 
-Definition: `network/protocol.cppm:406`
+Definition: `src/network/protocol.cppm:418`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The `clore::net::detail::expect_array` function validates that a given JSON value represents an array. It accepts either a `const json::Value &` or a `json::Cursor` as the first argument, and a `std::string_view` context string (typically the name of the field or the operation being validated). If the value is a JSON array, the function returns an integer indicating success (exact value is unspecified but non‑error). Otherwise, it returns an error code, using the context string to describe the location of the mismatch in any diagnostics. Callers must supply a valid JSON value and a non‑empty context string; the function does not modify the input.
+Checks that the given `json::Value` is a JSON array, returning a status code (typically zero on success, non‑zero on failure). The `std::string_view` argument provides a descriptive context (e.g., the name of the expected field) for any error messages generated by the call. This function is used as a building block in higher‑level JSON parsing and validation, allowing the caller to assert that a value has the expected array type before further processing.
 
 #### Usage Patterns
 
-- Checking if a JSON value is an array
-- Validating JSON type and returning an `ArrayView`
-- Error reporting with a descriptive context string
+- Used in JSON parsing helpers to extract arrays from parsed values
+- Called by higher-level validation functions when an array is expected
 
 ### `clore::net::detail::expect_array`
 
-Declaration: `network/protocol.cppm:253`
+Declaration: `src/network/protocol.cppm:265`
 
-Definition: `network/protocol.cppm:415`
+Definition: `src/network/protocol.cppm:427`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::detail::expect_array` validates that the provided JSON entity represents an array. It accepts either a `json::Cursor` or a `const json::Value &` together with a `std::string_view` that serves as a contextual description for error reporting. The caller must supply a valid JSON reference; the function returns an `int` indicating success or failure (presumably zero for success and a non‑zero error code otherwise). If the value is not a JSON array, the function generates an appropriate error using the supplied context string. This function is intended as a building block for safely extracting array data from parsed JSON during network protocol handling.
+`clore::net::detail::expect_array` expects the current JSON value (provided as either a `json::Cursor` or a `const json::Value &`) to be a JSON array. If the value is not an array, the function fails with an error; the caller can rely on the return value being zero on success and non-zero on failure. The second argument, a `std::string_view`, serves as a human‑readable context identifier, typically the name of the field or logical location in the JSON structure, and is used to produce meaningful diagnostic messages when validation fails. This function is part of a family of JSON type‑checking utilities and is invoked during deserialization and response validation to enforce the expected structural contract.
 
 #### Usage Patterns
 
-- Converting a JSON cursor to an `ArrayView` for array traversal
-- Validating that a JSON value is an array before further processing
-- Used in conjunction with `clone_array` and other array operations
+- validating JSON array in context
+- extracting `ArrayView` from cursor
+- error reporting for non-array values
 
 ### `clore::net::detail::expect_object`
 
-Declaration: `network/protocol.cppm:244`
+Declaration: `src/network/protocol.cppm:256`
 
-Definition: `network/protocol.cppm:388`
+Definition: `src/network/protocol.cppm:400`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::detail::expect_object` validates that the provided JSON node is a JSON object. It accepts either a `const json::Value &` or a `json::Cursor` along with a `std::string_view` context string that identifies the source location or purpose for error reporting. If the value is not an object, the function produces an appropriate error (typically by returning a non‑zero `int` status or invoking the module’s error‑handling mechanism). This function is intended for internal validation within the networking layer, ensuring that a JSON element has the expected type before further processing.
+The function `clore::net::detail::expect_object` validates that a given JSON value is a JSON object. It accepts either a `const json::Value &` or a `json::Cursor` along with a `std::string_view` context label (typically used for error reporting). The caller provides the value to inspect and a descriptive label; the function returns an `int` indicating success or failure according to the module’s convention. If the value is not a JSON object, the function is expected to report an error using the provided label, making it suitable for use in JSON schema validation or parsing routines where an object type is required.
 
 #### Usage Patterns
 
-- validating JSON object type
-- converting JSON value to `ObjectView`
-- reporting error for non-object values
+- Used to validate and extract an object view from a JSON value
+- Called in parsing or validation contexts where a JSON object is expected
 
 ### `clore::net::detail::expect_object`
 
-Declaration: `network/protocol.cppm:247`
+Declaration: `src/network/protocol.cppm:259`
 
-Definition: `network/protocol.cppm:397`
+Definition: `src/network/protocol.cppm:409`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::detail::expect_object` validates that the JSON value currently pointed to by the given `json::Cursor` is a JSON object. It returns an integer that indicates success or failure; a non‑zero result signals an error. The `std::string_view` parameter provides contextual information (such as a field name or location) for constructing diagnostic messages when the validation fails. Callers must supply a valid `json::Cursor`; the function does not advance the cursor.
+Expects that the JSON value referenced by the provided cursor is a JSON object. It takes a `json::Cursor` and a `std::string_view` context label, which is typically used to identify the field or location in error messages. If the cursor does not point to an object, a non-zero error code is returned; otherwise zero is returned. The caller must provide a valid cursor before calling; the cursor is not modified by this function.
 
 #### Usage Patterns
 
-- validating that a JSON cursor is an object before further processing
-- obtaining an `ObjectView` from a cursor
+- validate that a JSON cursor points to an object
+- convert a JSON cursor to an `ObjectView` for structured access
+- used in JSON parsing and validation pipelines
 
 ### `clore::net::detail::expect_string`
 
-Declaration: `network/protocol.cppm:259`
+Declaration: `src/network/protocol.cppm:271`
 
-Definition: `network/protocol.cppm:433`
+Definition: `src/network/protocol.cppm:445`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::detail::expect_string` validates that a JSON value is of string type. It accepts either a `json::Cursor` or a `const json::Value &` representing the value to inspect, along with a `std::string_view` that provides contextual information for error messages (such as a field name or location in the JSON structure). The caller should interpret the returned integer as indicating success (typically zero) or a specific error condition if the value is not a string. This utility enforces expected JSON schema during network protocol handling, allowing callers to assert a required string property before further processing.
+The function `clore::net::detail::expect_string` validates that the JSON element at the given position is a string. Two overloads are provided: one accepts a `json::Cursor` (for traversing a JSON tree from a specific point), and the other accepts a `const json::Value &` directly. The second argument is a `std::string_view` that typically names the field or location being validated, used to generate meaningful error messages if validation fails. The function returns an integer status code; the caller should interpret zero as success and a non‑zero value as a specific error condition (commonly an `LLMError` code or an indicator that the JSON structure does not match expectations). This function is used by higher‑level JSON schema validation routines to enforce that expected fields are present and of the correct type.
 
 #### Usage Patterns
 
-- Extract a required string field from a JSON cursor
-- Generate descriptive error when value is not a string
+- Extracting a required string from a JSON value in parsing routines
+- Validating that a JSON value is a string before further processing
+- Providing context-aware error messages when validation fails
 
 ### `clore::net::detail::expect_string`
 
-Declaration: `network/protocol.cppm:256`
+Declaration: `src/network/protocol.cppm:268`
 
-Definition: `network/protocol.cppm:424`
+Definition: `src/network/protocol.cppm:436`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The caller supplies a `const json::Value &` and a `std::string_view` context label. `expect_string` verifies that the JSON value is a string; if the value is not of string type, it returns a non‑zero error code and may produce diagnostic output that includes the context label. On success it returns zero. This function is used internally to validate that a parsed JSON element matches the expected string type before further processing.
+The function `clore::net::detail::expect_string` asserts that the given JSON node is a string value. It is used during protocol message validation to enforce that a required field contains a string rather than another JSON type. The caller must provide a `std::string_view` context string for error reporting. The function returns an integer status indicating whether the expectation is satisfied (typically zero for success, non-zero for a mismatch). There are two overloads: one accepting a `const json::Value &` and another accepting a `json::Cursor`, both with the same contract.
 
 #### Usage Patterns
 
-- validate that a JSON value is a string
-- extract string content from a JSON node
-- produce informative error messages for non-string JSON values
+- Extract string from parsed JSON
+- Validate JSON field type
 
 ### `clore::net::detail::infer_output_contract`
 
-Declaration: `network/protocol.cppm:631`
+Declaration: `src/network/protocol.cppm:643`
 
-Definition: `network/protocol.cppm:648`
+Definition: `src/network/protocol.cppm:660`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-Given a `PromptRequest`, this function infers the appropriate output contract that the model’s response should adhere to. The result is an integer representing the inferred contract type, which callers can subsequently use to validate the response structure against the expected output format.
-
-The function is intended for internal use within the networking layer to determine, from the request configuration, what constraints—such as JSON object or array expectations—the model’s output must satisfy. The returned integer value can be consumed by validation functions like `validate_prompt_output` to ensure the model’s reply meets the inferred contract.
+The function `clore::net::detail::infer_output_contract` accepts a `PromptRequest` and returns an `int` that identifies the output contract variant expected for that request. Callers use this result to decide how the network layer should validate or interpret the prompt’s response, without needing to know the internal mapping between request properties and contract types.
 
 #### Usage Patterns
 
-- called to validate or infer the output contract before serializing a prompt
-- used in request processing to ensure a consistent `PromptOutputContract`
-- invoked during `PromptRequest` validation pipelines
+- Infer output contract before processing a `PromptRequest`
+- Validate consistency between `output_contract` and `response_format`
 
 ### `clore::net::detail::insert_string_field`
 
-Declaration: `network/protocol.cppm:215`
+Declaration: `src/network/protocol.cppm:227`
 
-Definition: `network/protocol.cppm:303`
+Definition: `src/network/protocol.cppm:315`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::detail::insert_string_field` inserts a string field into a given `json::Object`. It accepts the target object by reference, followed by three `std::string_view` arguments: the field key, the field value, and a context string that is typically used for error reporting. The function returns an `int`—a zero value indicates success, while a non‑zero value signals an error, often carrying a diagnostic that references the provided context. The caller is responsible for ensuring the object is mutable and that the key and value are valid. This operation modifies the object in‑place and may fail silently or forcefully depending on the internal invariants of the JSON library. It is intended for internal use within the network layer to reliably populate JSON objects before serialization or transmission.
+The function `clore::net::detail::insert_string_field` inserts a string value into a provided `json::Object` under a given field name. It accepts a reference to the target `json::Object`, a `std::string_view` naming the field, a `std::string_view` for the value to insert, and a `std::string_view` that identifies the calling context (typically used for error messages). The function returns an `int` that indicates success or failure, with a value of `0` meaning success and any non‑zero value representing an error code. The caller is responsible for ensuring the object remains valid for the duration of the call and that the field name and value are not empty unless explicitly intended; the context string must not be empty if error reporting is desired.
 
 #### Usage Patterns
 
-- Building JSON objects for LLM requests or responses
-- Inserting string values into structured data
+- used to set string fields in JSON objects during request construction
+- called by higher-level serialization functions
 
 ### `clore::net::detail::make_empty_array`
 
-Declaration: `network/protocol.cppm:231`
+Declaration: `src/network/protocol.cppm:243`
 
-Definition: `network/protocol.cppm:348`
+Definition: `src/network/protocol.cppm:360`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::detail::make_empty_array` constructs a new, empty JSON array value. It accepts a `std::string_view` context parameter that is used to annotate error messages if the operation fails. The function returns an `int` status code: zero indicates success, while a non-zero value signals an error that can be examined for details. This utility is intended for use when a placeholder or default array is required in network protocol construction, particularly within error-handling or template-filling scenarios.
+Constructs an empty JSON array and returns an integer status code. A return value of zero indicates success; a non-zero value signals an error. The `std::string_view` parameter supplies a contextual name or label used for diagnostic messages when the operation fails.
 
 #### Usage Patterns
 
-- Creating an empty JSON array for constructing API request bodies
-- Providing a default array value in data structures
-- Building placeholder arrays in validation or serialization routines
+- Create an empty JSON array in a given context
+- Handle JSON parse errors with context
+- Used where an empty array is needed with error reporting
 
 ### `clore::net::detail::make_empty_object`
 
-Declaration: `network/protocol.cppm:228`
+Declaration: `src/network/protocol.cppm:240`
 
-Definition: `network/protocol.cppm:340`
+Definition: `src/network/protocol.cppm:352`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::detail::make_empty_object` constructs a new empty JSON object and returns an `int` status code. The caller provides a `std::string_view` label that may be used for error reporting. A zero return indicates successful creation; a non‑zero value signals failure. This function is intended for internal use within the network layer and should not be called directly by user code.
+The function `clore::net::detail::make_empty_object` constructs a new, empty JSON object and communicates the result through an integer return value. The caller supplies a `std::string_view` argument, typically a field name or context string that may be used for error reporting or diagnostic labels. A return value of zero indicates successful creation; any non‑zero value represents an error condition according to the module’s internal error convention. This function is part of the internal detail layer and is not intended for direct use outside of the `clore::net` implementation.
 
 #### Usage Patterns
 
-- Used to obtain an empty JSON object for initialization or default values
-- Typically called when no JSON object is provided but a placeholder is needed
+- Creating a base empty object for incremental construction
+- Serving as a default or placeholder JSON object
 
 ### `clore::net::detail::normalize_utf8`
 
-Declaration: `network/protocol.cppm:213`
+Declaration: `src/network/protocol.cppm:225`
 
-Definition: `network/protocol.cppm:293`
+Definition: `src/network/protocol.cppm:305`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::detail::normalize_utf8` accepts a UTF-8 encoded string view as its first argument and a context label as its second argument. It returns a `std::string` that is the normalized form of the input, ensuring the result is valid and consistent UTF-8. The context label is used for diagnostic reporting in case of encoding errors, following the same contract as other validation functions in the `detail` namespace. The caller is responsible for providing a well-formed UTF-8 input; the function guarantees a stable, normalized output suitable for further processing.
+Normalizes a UTF-8 encoded string to a canonical form suitable for reliable processing within the networking layer. The first argument is the source string to be normalized; the second argument acts as a context or configuration label that determines normalization rules (e.g., replacement of ill‑formed sequences, removal of a BOM). Returns a new `std::string` containing the normalized result, which is guaranteed to contain only valid UTF-8 code points and is safe for use with other detail functions such as `append_url_path` or JSON parsing.
 
 #### Usage Patterns
 
-- Sanitizing LLM output or user input before JSON serialization
-- Ensuring UTF-8 validity for strings in network protocol handling
+- Used before JSON serialization to ensure UTF-8 validity of LLM responses or inputs
 
 ### `clore::net::detail::parse_json_object`
 
-Declaration: `network/provider.cppm:27`
+Declaration: `src/network/provider.cppm:34`
 
-Definition: `network/provider.cppm:148`
+Definition: `src/network/provider.cppm:155`
 
 Implementation: [`Module provider`](../../../../modules/provider/index.md)
 
-The function `clore::net::detail::parse_json_object` parses a JSON object from a string. It accepts two `std::string_view` arguments: the first is the JSON text to parse, and the second is a label or context used for diagnostic messages in case of failure. The function returns an `int` that indicates success or error, following the project’s convention for error codes. Callers must provide valid, well-formed JSON; if the parsed value is not an object, the function will report an error. It is intended for internal use within the networking layer, where parsing structured JSON arguments is required.
+`clore::net::detail::parse_json_object` is a function that takes two `std::string_view` arguments and returns an `int`. It is responsible for parsing a JSON object from the first input string and communicating the outcome via the return value—typically a success indicator or an error code. The second parameter provides contextual information (such as a label or source location) used in error reporting. Callers must supply a well-formed JSON object representation as the first argument; the function does not modify the input. The contract guarantees that any parsing failure is signalled through the return value rather than exceptions, and the returned integer can be compared against expected success constants or handled through error‑checking routines in the caller.
 
 #### Usage Patterns
 
-- parsing JSON objects from raw string input
-- deserializing with error context for diagnostics
-- used as a utility in higher-level parsing or validation functions
+- Parsing JSON object from raw HTTP response
+- Validating JSON structure with context for error reporting
 
 ### `clore::net::detail::parse_json_value`
 
-Declaration: `network/protocol.cppm:238`
+Declaration: `src/network/protocol.cppm:247`
 
-Definition: `network/protocol.cppm:368`
+Definition: `src/network/protocol.cppm:369`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The template function `clore::net::detail::parse_json_value` is responsible for parsing and validating a given JSON value, converting or interpreting it as an instance of the template parameter type `T`. It takes two arguments: a `json::Value` to be parsed and a `std::string_view` that serves as a context label (typically the name of the field or the location of the value) used for generating descriptive error messages on failure. The function returns an integer status code: zero indicates successful parsing, while a non-zero value signals an error condition that prevented interpretation as the expected type `T`.
+The function template `clore::net::detail::parse_json_value<T>` parses a JSON value from the provided input and converts it into the target type `T`. The first argument is either a `std::string_view` containing the JSON text or a `const json::Value &` to be parsed from an already‑parsed value. The second `std::string_view` supplies a descriptive context label used in error messages to indicate where the parsing occurred.
 
-Callers must supply a valid JSON value and a meaningful context string to aid diagnostics. The function does not modify the input value and is intended to be invoked from other parsing or validation routines within the `detail` namespace. By providing the expected type via the template parameter, the caller defines the interpretation contract; if the JSON value cannot be matched to that type, the function will report the failure with the provided context.
+The caller is responsible for supplying valid JSON input and a meaningful context string. The return value is an `int` result: zero indicates success, and a non‑zero value represents a specific error code. The function is part of the internal utility layer for network protocol handling and is not intended for direct use outside of the `clore::net::detail` namespace.
 
 #### Usage Patterns
 
-- Used when a `json::Value` is already available and needs to be parsed into a specific type `T`
-- Called by code that has a parsed JSON tree and requires a deserialized result with error handling
+- parse JSON into expected type
+- handle JSON parsing errors with context
 
 ### `clore::net::detail::parse_json_value`
 
-Declaration: `network/protocol.cppm:235`
+Declaration: `src/network/protocol.cppm:250`
 
-Definition: `network/protocol.cppm:357`
+Definition: `src/network/protocol.cppm:380`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-Parses a JSON value from the provided string view. The function `clore::net::detail::parse_json_value` interprets the first `std::string_view` as a JSON document and attempts to parse it into a value of the template parameter type `T`. The second `std::string_view` acts as a context label for error messages, aiding in diagnosing parsing failures. Returns an integer status code; a zero value typically indicates successful parsing, while a non-zero value signals an error. This function is intended for internal use within the networking layer.
+`clore::net::detail::parse_json_value` is a function template that interprets a JSON value as an instance of the template type `T`. It returns an `int` status code, typically zero on success and a non‑zero value on failure. The second argument is a `std::string_view` that supplies human‑readable context for any error messages generated during parsing. Callers are responsible for passing a well‑formed `json::Value` and a descriptive label that identifies the origin of the data. The function does not modify the input value; it extracts or validates the representation of `T` from the JSON structure and communicates the outcome through the return code.
 
 #### Usage Patterns
 
-- used to safely parse JSON strings into domain types with descriptive error messages
-- called with raw response body and a context label for error reporting
+- Converting a `json::Value` to a string then parsing it into a given type
+- Error handling during JSON serialization
+- Delegating to string-based parsing
 
 ### `clore::net::detail::perform_http_request`
 
-Declaration: `network/http.cppm:53`
+Declaration: `src/network/http.cppm:67`
 
-Definition: `network/http.cppm:167`
+Definition: `src/network/http.cppm:181`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-The function `clore::net::detail::perform_http_request` carries out a synchronous HTTP request using the provided parameters. The caller supplies a target identifier as a `const std::string &`, an `int` value (likely a timeout or port), and a `std::string_view` (typically a request body or additional context). It returns a `std::expected<RawHttpResponse, LLMError>`: on success the expected value contains the raw HTTP response; on failure it holds an `LLMError` describing the error. The caller is responsible for supplying valid inputs in accordance with the intended protocol and for handling the possible error case.
+The function `clore::net::detail::perform_http_request` performs a synchronous HTTP request and returns the result as a `std::expected<RawHttpResponse, LLMError>`. The caller provides a URL as a `const std::string &`, an `int` (likely a port or a timeout value), and a `std::string_view` that carries the request body or additional parameters. On success, the function yields a `RawHttpResponse`; on failure, it returns an `LLMError` describing the reason. The caller is responsible for ensuring that the supplied arguments are valid and that any required environment or credentials have been configured before invocation.
 
 #### Usage Patterns
 
-- Wraps asynchronous HTTP request into synchronous call
-- Used when a blocking HTTP request is needed
+- Used to perform a synchronous HTTP request where the caller does not want to manage an event loop
+- Likely called by higher-level synchronous wrappers or in contexts where async is not required
+- Serves as a bridge between async internals and synchronous interfaces
 
 ### `clore::net::detail::perform_http_request_async`
 
-Declaration: `network/http.cppm:58`
+Declaration: `src/network/http.cppm:72`
 
-Definition: `network/http.cppm:195`
+Definition: `src/network/http.cppm:209`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-The `clore::net::detail::perform_http_request_async` function initiates an asynchronous HTTP request to the specified endpoint. The caller provides a `std::string` containing the target URL, an `int` designating the port, a `std::string` with the request body, and a reference to an `async::event_loop` that will process the request’s completion. The return value is an `int` indicating success (typically zero) or a non‑zero error code on failure. The caller must ensure that the referenced `async::event_loop` remains alive for the duration of the asynchronous operation; the request is not guaranteed to complete before the function returns.
+The caller provides a host name (`std::string`), a port number (`int`), a request path (`std::string`), and a reference to an `async::event_loop`. The function `clore::net::detail::perform_http_request_async` initiates an asynchronous HTTP request to the specified endpoint and returns an integer status code representing success or failure. The contract requires that the event loop is active and capable of processing the request. This function is intended for internal use within the `clore::net::detail` networking layer and should not be called directly by external code.
 
 #### Usage Patterns
 
-- called within an asynchronous coroutine context using `co_await`
-- used to send LLM HTTP requests with concurrency limiting via semaphore
-- paired with an `async::event_loop` for non-blocking I/O
-- handles cancellation and error propagation for robust callers
+- Called to perform an LLM HTTP request with concurrency control
+- Used in async workflows expecting a task with `RawHttpResponse`
+- Usually invoked from other coroutines that handle the response or error
 
 ### `clore::net::detail::read_credentials`
 
-Declaration: `network/provider.cppm:19`
+Declaration: `src/network/provider.cppm:26`
 
-Definition: `network/provider.cppm:39`
+Definition: `src/network/provider.cppm:46`
 
 Implementation: [`Module provider`](../../../../modules/provider/index.md)
 
-The function `clore::net::detail::read_credentials` accepts a `CredentialEnv` object and returns an `int` result. It is responsible for extracting authentication credentials from the provided environment configuration. The caller must supply a correctly populated `CredentialEnv` instance; the function interprets its contents to determine the required credential values. A return value of zero typically indicates success, while a non-zero value signals an error condition—the caller should check the result and handle failures appropriately.
+The function `clore::net::detail::read_credentials` reads credential information from the provided `CredentialEnv` and returns an `int` indicating the result of the operation. Callers supply a `CredentialEnv` object that encapsulates the environment from which credentials should be extracted. The return value signals success or the nature of any failure, forming the contract via which callers can determine whether credentials were obtained correctly.
 
 #### Usage Patterns
 
-- Obtaining configuration from environment variables for network requests
-- Retrieving base URL and API key to build a complete environment configuration
+- Called to obtain environment-based configuration for network operations
 
 ### `clore::net::detail::read_environment`
 
-Declaration: `network/http.cppm:50`
+Declaration: `src/network/http.cppm:64`
 
-Definition: `network/http.cppm:132`
+Definition: `src/network/http.cppm:146`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-The function `clore::net::detail::read_environment` reads and parses environment configuration for a network operation. It accepts two `std::string_view` arguments, which conventionally identify the names or paths of environment variables or configuration sources to be consulted. On success, it returns a `std::expected<EnvironmentConfig, LLMError>` containing the fully resolved configuration; on failure, it returns an `LLMError` describing the reason for failure (e.g., missing variable, parse error, or invalid format). Callers must supply meaningful identifiers and are responsible for handling the returned expected value.
+The function `clore::net::detail::read_environment` accepts two `std::string_view` arguments and returns a `std::expected<EnvironmentConfig, LLMError>`. It is responsible for reading the caller-specified environment configuration, combining the two input strings (for example, as key prefixes or names for environment variables) to locate and parse the relevant settings. The return type indicates that successful invocation yields an `EnvironmentConfig` value, while failure is communicated via an `LLMError` with a description of what went wrong.
+
+Callers must provide both string parameters; the contract does not guarantee that the strings refer to existing or valid environment entries, so the caller should always handle the error case. No side effects other than reading environment state are implied.
 
 #### Usage Patterns
 
-- reading API configuration from environment variables at startup
-- initializing an `EnvironmentConfig` from two named environment variables
+- obtain API base URL and API key from environment variables
 
 ### `clore::net::detail::read_required_env`
 
-Declaration: `network/http.cppm:123`
+Declaration: `src/network/http.cppm:137`
 
-Definition: `network/http.cppm:123`
+Definition: `src/network/http.cppm:137`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-The function `clore::net::detail::read_required_env` accepts a `std::string_view` representing the name of an environment variable and returns a `std::expected<std::string, LLMError>`. It is the caller’s responsibility to ensure that the named variable is defined in the process environment; if the variable is missing or cannot be read, the function returns an unexpected `LLMError` indicating the failure. On success, the returned string holds the raw value of the environment variable.
+The function `clore::net::detail::read_required_env` accepts a `std::string_view` representing the name of an environment variable. It attempts to read that variable from the process environment and, if present, returns the value as a `std::string` wrapped in a `std::expected` success result. If the environment variable is not set, the function returns an `LLMError` indicating a missing required configuration. The caller is responsible for providing a valid, non‑empty variable name; the function ensures that the necessary runtime setting is available before any dependent network or API operation proceeds.
 
 #### Usage Patterns
 
-- required configuration variable retrieval
-- validate existence and non-emptiness of an environment variable
+- Used to retrieve mandatory environment variables for configuration
+- Called by `read_environment` and other setup functions to obtain required settings
 
 ### `clore::net::detail::request_text_once_async`
 
-Declaration: `network/protocol.cppm:638`
+Declaration: `src/network/protocol.cppm:650`
 
-Definition: `network/protocol.cppm:680`
+Definition: `src/network/protocol.cppm:692`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The template function `clore::net::detail::request_text_once_async` initiates an asynchronous HTTP request to an LLM endpoint, expecting a plain-text response. It accepts a `CompletionRequester` callable that will be invoked with the result when the operation completes, two `std::string_view` parameters (typically the URL path and request body or context), a `PromptRequest` describing the input prompt, and a reference to a `kota::event_loop` on which the asynchronous work is scheduled. The function returns an integer identifier (such as a request ID or error code) that can be used to correlate the ongoing operation. The caller retains ownership of all parameters and must ensure the provided event loop is active for the duration of the request; the completion requester will be called from the event loop’s context once a response is received or an error occurs.
+The function `clore::net::detail::request_text_once_async` initiates an asynchronous text-completion request.  The caller provides a `CompletionRequester` (the type is deduced from the template parameter), two `std::string_view` arguments (typically a URL path and a payload or identifier), a `PromptRequest` describing the prompt parameters, and a `kota::event_loop &` on which the operation will proceed.  The function returns an `int` that acts as a handle for the pending operation, which the caller can use to track or cancel it later.  The exact semantics of the returned value and the error handling contract are defined by the internal protocol layer.
 
 #### Usage Patterns
 
-- Used to perform an asynchronous text completion request with automatic output contract inference and validation
+- called to asynchronously obtain validated LLM text
+- used in the request pipeline for LLM interactions
+- typically invoked with a lambda wrapping `perform_http_request_async`
 
 ### `clore::net::detail::run_task_sync`
 
-Declaration: `network/protocol.cppm:226`
+Declaration: `src/network/protocol.cppm:238`
 
-Definition: `network/protocol.cppm:322`
+Definition: `src/network/protocol.cppm:334`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::detail::run_task_sync` is a template parameterized by `T` and `make_task:auto`. It accepts a callable (the task factory) via a forwarding reference and executes the resulting task synchronously, returning an `int` status code. The caller must supply a task that can be run to completion in the calling thread; the function blocks until the task finishes. This utility is used internally to wrap asynchronous operations into a synchronous calling convention, ensuring a predictable, single-threaded execution flow.
+The function template `clore::net::detail::run_task_sync` accepts a task object (forwarded via universal reference) and executes it synchronously. It returns an `int` code indicating the outcome of the task execution. The caller is responsible for providing a task that conforms to the required interface, as defined by the template parameters `typename T` and `class make_task:auto`. This function serves as a synchronous wrapper around potentially asynchronous operations within the `clore::net::detail` layer.
 
 #### Usage Patterns
 
-- Wrapping an asynchronous task for synchronous execution in a blocking manner
-- Running a task on a short-lived event loop for testing or simple call sites
-- Converting a `make_task` pattern into a synchronous interface
+- used to run an asynchronous task synchronously within a caller's scope
+- wraps an async operation that returns `std::expected<T, LLMError>`
 
 ### `clore::net::detail::select_event_loop`
 
-Declaration: `network/client.cppm:45`
+Declaration: `src/network/client.cppm:53`
 
-Definition: `network/client.cppm:45`
+Definition: `src/network/client.cppm:53`
 
 Implementation: [`Module client`](../../../../modules/client/index.md)
 
 Declaration: [Declaration](functions/select-event-loop.md)
 
-The function `clore::net::detail::select_event_loop` accepts a pointer to a `kota::event_loop` and returns a reference to a `kota::event_loop`. Its responsibility is to resolve an event loop for use in asynchronous operations: if the provided pointer is non‑null, the function returns a reference to that same loop; if the pointer is null, it selects and returns a default or fallback event loop. The caller can rely on the returned reference being valid for the duration of the asynchronous operation. No other pre‑conditions are imposed beyond providing a pointer that, when not null, points to a valid `kota::event_loop`.
+The function `clore::net::detail::select_event_loop` accepts an optional pointer to a `kota::event_loop` and returns a reference to a valid `kota::event_loop`. When the pointer is non-null, it returns the referenced loop; when null, it returns a default event loop suitable for the calling context. This function is used by higher-level async operations to ensure they always operate on a live event loop without requiring callers to provide one explicitly.
 
 #### Usage Patterns
 
-- Resolves an optional event loop pointer into a guaranteed-valid reference for downstream async operations
-- Allows callers to pass `nullptr` to request the current thread's event loop
+- used by `clore::net::call_llm_async` to resolve an event loop reference
+- used by `clore::net::call_completion_async` to resolve an event loop reference
+- provides fallback to current loop when caller passes null
 
 ### `clore::net::detail::serialize_tool_arguments`
 
-Declaration: `network/provider.cppm:30`
+Declaration: `src/network/provider.cppm:37`
 
-Definition: `network/provider.cppm:158`
+Definition: `src/network/provider.cppm:165`
 
 Implementation: [`Module provider`](../../../../modules/provider/index.md)
 
-The function `clore::net::detail::serialize_tool_arguments` serializes a JSON representation of tool arguments into a string format suitable for inclusion in a request payload. It accepts a `json::Value` containing the arguments and a `std::string_view` that serves as a diagnostic label for error reporting. The caller is responsible for providing a valid JSON value that structurally matches the expected tool argument schema. The function returns an `int` result indicating success or failure; a non‑zero value signals an error that occurred during serialization, and the caller should handle it appropriately.
+`clore::net::detail::serialize_tool_arguments` accepts a `json::Value` representing the tool’s arguments and a `std::string_view` identifying the tool. It serializes the provided arguments into a format suitable for inclusion in a request. The caller is responsible for supplying a valid JSON value and a non‑empty tool identifier. The function returns an integral status code that signals success or an error condition.
 
 #### Usage Patterns
 
-- normalizing tool arguments JSON representation
-- validating tool arguments by round-trip encoding/decoding
+- tool argument serialization before HTTP request
+- normalization of JSON value
 
 ### `clore::net::detail::serialize_value_to_string`
 
-Declaration: `network/protocol.cppm:241`
+Declaration: `src/network/protocol.cppm:253`
 
-Definition: `network/protocol.cppm:378`
+Definition: `src/network/protocol.cppm:390`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The function `clore::net::detail::serialize_value_to_string` serializes a given `json::Value` into its string representation, returning an integer status code: zero on success, or a non‑zero error code on failure. The caller must supply a `std::string_view` context label that is used solely for generating meaningful diagnostic messages in case of an error; it does not affect the serialization logic. The serialized string is written to an internal buffer (not directly returned), and the caller is expected to check the return value to determine whether the operation succeeded.
+`clore::net::detail::serialize_value_to_string` accepts a `json::Value` reference and a `std::string_view` (typically an error‑context label) and returns an `int` indicating success or failure. It is the caller’s responsibility to provide a valid value and a meaningful context string; the function handles conversion of the value to its textual JSON form. The integer return allows the caller to propagate or handle serialization errors without exceptions.
 
 #### Usage Patterns
 
-- serializing a JSON value to a string with contextual error handling
-- used internally whenever a JSON value must be converted to a string for further processing or reporting
+- Serialize JSON for network transmission or error reporting
 
 ### `clore::net::detail::to_llm_unexpected`
 
-Declaration: `network/protocol.cppm:221`
+Declaration: `src/network/protocol.cppm:233`
 
-Definition: `network/protocol.cppm:312`
+Definition: `src/network/protocol.cppm:324`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The template function `to_llm_unexpected` adapts a typed `Status` value and a descriptive `std::string_view` message into an integer error code for the LLM subsystem. The `Status` argument represents a specific outcome (typically an unexpected result from an expected‑or‑unexpected idiom), while the string provides human‑readable context for logging or diagnostics. The return value is an integer identifier that callers can use to signal or record an unexpected condition in a uniform, integer‑based error channel.
+The template function `clore::net::detail::to_llm_unexpected` converts a caller-supplied status value and a human-readable message into an integer representing an unexpected LLM error. Its primary responsibility is to normalize disparate error reporting from lower-level operations into a uniform error code for the LLM subsystem. The caller passes a `Status` object and a `std::string_view` description; the function returns an `int` that conveys the unexpected condition in a form suitable for propagation through the library’s error-handling machinery.
 
 #### Usage Patterns
 
-- Converting a domain-specific error and a descriptive context into an `LLMError` embedded in a `std::unexpected` for use with `std::expected` return types
+- Used to return an unexpected `LLMError` from functions returning `std::expected<T, LLMError>`
+- Called in error paths of other detail functions like `perform_http_request`, `read_environment`, etc.
 
 ### `clore::net::detail::unexpected_json_error`
 
-Declaration: `network/protocol.cppm:210`
+Declaration: `src/network/protocol.cppm:222`
 
-Definition: `network/protocol.cppm:288`
+Definition: `src/network/protocol.cppm:300`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-This function logs or reports an unexpected JSON error encountered during validation or parsing. The caller provides a human-readable *context* as a `std::string_view` and the specific `const json::error &` that was produced by the JSON library. It returns an `int` that represents a non‑zero error code (or zero on success, if applicable). Callers should treat this as a failure path when a JSON value does not match the expected schema or format, and the error cannot be handled locally.
+The function `clore::net::detail::unexpected_json_error` accepts a `std::string_view` providing contextual information about the location or purpose of the error, and a `const json::error &` describing the JSON‑related failure. It returns an `int` that indicates the resulting error status or error code, typically to be propagated up the call stack. Callers use this function when a JSON operation fails in a context that demands a structured, reportable error – the returned value serves as the error outcome for the surrounding operation.
 
 #### Usage Patterns
 
-- Wrapping a JSON error into an `LLMError` unexpected result
-- Creating an error response for JSON parsing or validation failures
+- used to convert JSON parsing errors into `std::unexpected<LLMError>` for error propagation
+- likely called from other JSON-handling functions like `parse_json_value`, `expect_string`, etc.
 
 ### `clore::net::detail::unwrap_caught_result`
 
-Declaration: `network/http.cppm:64`
+Declaration: `src/network/http.cppm:78`
 
-Definition: `network/http.cppm:64`
+Definition: `src/network/http.cppm:78`
 
 Implementation: [`Module http`](../../../../modules/http/index.md)
 
-The function template `clore::net::detail::unwrap_caught_result` is a utility for converting a result object that has already been caught (e.g., from an exception or error handling path) into a plain integer error code. It accepts a result value of type `R` and a `std::string_view` providing contextual information (such as a description of the operation that failed). The caller is expected to have obtained an `R` that may represent either a successful outcome or an error condition; `unwrap_caught_result` extracts the contained value or, if the result indicates failure, returns an appropriate nonzero integer code that can be propagated upward. The exact mapping from failure state to error code is determined by the type `R` and the context string, but the function always returns an `int` suitable for further checking or forwarding in a control flow that uses integer error codes.
+`clore::net::detail::unwrap_caught_result` is a template function that extracts a value of type `R` from a caught exception or error state, returning an `int` status code. It accepts an arbitrary result object (`R`) and a `std::string_view` context message, and is designed to be used in error‑handling chains where an operation may have failed. The caller provides the caught result and a human‑readable description; the function either recovers a normal path (returning a success indicator) or transforms the error into a non‑zero `int` that signals failure to the upper layers. This function is internal to the network detail module and its precise contract depends on the underlying error‑handling convention (e.g., it might return `0` on success and an error code otherwise).
 
 #### Usage Patterns
 
-- Used in asynchronous result handling to unwrap a `R` type that may indicate cancellation or error into a `kota::task`.
-- Typically called at the end of an async operation to convert a caught result from `perform_http_request_async` or similar into a task result.
+- Propagate cancellation or error from a cancellable async result
+- Used internally in async HTTP request functions like `perform_http_request_async`
 
 ### `clore::net::detail::validate_completion_request`
 
-Declaration: `network/provider.cppm:23`
+Declaration: `src/network/provider.cppm:30`
 
-Definition: `network/provider.cppm:61`
+Definition: `src/network/provider.cppm:68`
 
 Implementation: [`Module provider`](../../../../modules/provider/index.md)
 
-The function `clore::net::detail::validate_completion_request` checks whether a completion request meets required constraints. The caller supplies a `const int &` representing the request configuration, a `bool` and another `bool` that likely control validation options or the expected contract. The return value is an `int` code that indicates the validation outcome; a zero or positive value typically signals success, while a negative value may represent a specific validation failure. Callers should treat the returned integer as a status that determines whether the request can proceed to the next stage of the completion pipeline.
+The function `clore::net::detail::validate_completion_request` performs validation of a completion request’s parameters, ensuring that the supplied arguments satisfy the preconditions required before the request can be processed. It accepts a reference to an integer identifier, along with two boolean flags that likely control request behaviour (for example, whether the request is asynchronous or streaming). The return value is an integer status code, with a non‑zero result indicating a validation error; the caller should check this code and treat the request as invalid if it is non‑zero.
 
 #### Usage Patterns
 
-- Called before processing a completion request to ensure validity
-- Used with optional schema validation flags to conditionally validate response format and tool schemas
+- validation before making a completion API call
+- used to ensure request integrity and consistency
 
 ### `clore::net::detail::validate_prompt_output`
 
-Declaration: `network/protocol.cppm:634`
+Declaration: `src/network/protocol.cppm:646`
 
-Definition: `network/protocol.cppm:666`
+Definition: `src/network/protocol.cppm:678`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::detail::validate_prompt_output` validates a prompt output, provided as a `std::string_view`, against the expected behavior defined by a `PromptOutputContract`. It returns an `int` representing the validation result, typically zero on success or a non‑zero error code on failure. This function is a caller‑facing check that ensures the output from a prompt adheres to the contract before further processing.
+A caller provides a `std::string_view` representing the prompt output to validate, along with a `PromptOutputContract` that specifies the expected structure or constraints. The function returns an `int` indicating whether the output conforms to the contract; a non‑zero value typically signals a validation failure. This check is performed during the processing of a prompt response to ensure the generated output meets the required format before further handling.
 
 #### Usage Patterns
 
-- used to check that a prompt response matches the expected format
-- called after receiving a prompt output to validate against the contract
-- returns an error if the contract is not set to `Json` or `Markdown`
+- Called to verify that LLM output matches the expected format before further processing
 
 ### `clore::net::detail::validate_response_format`
 
-Declaration: `network/schema.cppm:527`
+Declaration: `src/network/schema.cppm:537`
 
-Definition: `network/schema.cppm:535`
+Definition: `src/network/schema.cppm:545`
 
 Implementation: [`Module schema`](../../../../modules/schema/index.md)
 
-The function `clore::net::detail::validate_response_format` verifies that a provided response meets the expected format requirements. The caller supplies a reference to an integer representing the response (e.g., a status code or a parsed value). The function returns an integer indicating success or failure – zero typically denotes a valid format. This validation is a precondition for subsequent processing of the response.
+`clore::net::detail::validate_response_format` checks whether the response designated by the given integer meets the expected structural and semantic contract. The caller supplies a reference to an integer that identifies or indicates the response to inspect. The function returns an integer representing the outcome of the validation. A successful validation is indicated by a return value that the caller can treat as truthy or zero depending on convention, while a failure signals that the response does not conform to the required format and should not be processed further.
+
+This function is part of the internal validation layer; it is invoked after a response has been received to ensure it adheres to the interface contract before any data extraction or deserialization occurs. The caller must handle both success and failure outcomes appropriately, typically by aborting or logging when the validation fails.
 
 #### Usage Patterns
 
-- Called during completion request processing to validate the `response_format` part of a request.
-- Used in conjunction with `validate_completion_request` to ensure the response format specification is correct.
+- Validates response format before constructing a request
+- Called during request validation
 
 ### `clore::net::detail::validate_tool_definition`
 
-Declaration: `network/schema.cppm:529`
+Declaration: `src/network/schema.cppm:539`
 
-Definition: `network/schema.cppm:545`
+Definition: `src/network/schema.cppm:555`
 
 Implementation: [`Module schema`](../../../../modules/schema/index.md)
 
-The function `clore::net::detail::validate_tool_definition` validates a tool definition identified by the provided `const int &` reference, returning an `int` that signals success (typically zero) or an error code on failure. It is an internal utility within the validation infrastructure, called by higher‑level routines such as `clore::net::detail::validate_completion_request` or `clore::net::detail::validate_response_format` to ensure that a tool specification meets expected structural and semantic constraints before further processing. Callers should treat the returned value as a status indicator and handle non‑zero results as validation failures.
+The function `clore::net::detail::validate_tool_definition` validates a tool definition against internal schema and consistency rules. It accepts a reference to an integer that identifies the tool definition, and returns an integer status code where zero indicates success and a non-zero value indicates a specific validation failure. Callers should invoke this function before using a tool definition in downstream operations to ensure it meets the required contract.
 
 #### Usage Patterns
 
-- Validating tool definitions before registration or use
-- Ensuring required fields are present in `FunctionToolDefinition`
+- Called before using a tool definition in LLM requests
+- Used to ensure tool definitions meet validity constraints
 
 ## Related Pages
 

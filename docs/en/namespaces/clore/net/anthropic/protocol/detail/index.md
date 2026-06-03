@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::anthropic::protocol::detail'
-description: 'The clore::net::anthropic::protocol::detail namespace provides low‑level, internal utilities for constructing and validating Anthropic protocol messages. It exposes functions such as make_text_block, make_role_message, make_tool_use_block, make_tool_result_block, parse_json_text, format_schema_instruction, append_text_with_gap, and validate_request, which operate on opaque integer handles or status codes. A constant kDefaultMaxTokens is also defined here. These components are used exclusively within the protocol implementation layer to assemble structured content, enforce request correctness, and manage text formatting; they are not intended for direct use by external callers.'
+description: 'The clore::net::anthropic::protocol::detail namespace encapsulates the internal, low‑level helpers that support construction and validation of Anthropic API request payloads. It provides functions for creating content blocks (make_text_block, make_tool_use_block, make_tool_result_block), assembling messages with a specific role (make_role_message), parsing JSON content (parse_json_text), formatting schema instructions (format_schema_instruction), and validating requests (validate_request). A constant kDefaultMaxTokens (set to 2048) is also defined here.'
 layout: doc
 template: doc
 ---
@@ -9,160 +9,162 @@ template: doc
 
 ## Summary
 
-The `clore::net::anthropic::protocol::detail` namespace provides low‑level, internal utilities for constructing and validating Anthropic protocol messages. It exposes functions such as `make_text_block`, `make_role_message`, `make_tool_use_block`, `make_tool_result_block`, `parse_json_text`, `format_schema_instruction`, `append_text_with_gap`, and `validate_request`, which operate on opaque integer handles or status codes. A constant `kDefaultMaxTokens` is also defined here. These components are used exclusively within the protocol implementation layer to assemble structured content, enforce request correctness, and manage text formatting; they are not intended for direct use by external callers.
+The `clore::net::anthropic::protocol::detail` namespace encapsulates the internal, low‑level helpers that support construction and validation of Anthropic API request payloads. It provides functions for creating content blocks (`make_text_block`, `make_tool_use_block`, `make_tool_result_block`), assembling messages with a specific role (`make_role_message`), parsing JSON content (`parse_json_text`), formatting schema instructions (`format_schema_instruction`), and validating requests (`validate_request`). A constant `kDefaultMaxTokens` (set to 2048) is also defined here.
+
+Architecturally, this namespace sits beneath the public‑facing protocol layer, insulating higher‑level code from the details of block construction, JSON handling, and structural validation. By exposing only opaque integer handles and simple status codes, it decouples the protocol’s internal representation from its consumers, allowing the implementation to evolve without affecting callers. The functions and variables listed work together to transform raw input parameters (strings, arrays, or tool identifiers) into the structured elements required by the Anthropic messaging format.
 
 ## Variables
 
 ### `clore::net::anthropic::protocol::detail::kDefaultMaxTokens`
 
-Declaration: `network/anthropic.cppm:23`
+Declaration: `src/network/anthropic.cppm:32`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-`clore::net::anthropic::protocol::detail::kDefaultMaxTokens` is a `constexpr std::uint32_t` declared at line 23 of `network/anthropic.cppm`. It holds the default maximum token count for Anthropic API requests.
+A compile-time constant of type `std::uint32_t` set to `2048`, representing the default maximum number of tokens for Anthropic API requests.
 
 #### Usage Patterns
 
-- Referenced in `build_request_json` function as default value for `max_tokens`
+- default parameter value in request building
 
 ## Functions
 
 ### `clore::net::anthropic::protocol::detail::append_text_with_gap`
 
-Declaration: `network/anthropic.cppm:25`
+Declaration: `src/network/anthropic.cppm:34`
 
-Definition: `network/anthropic.cppm:25`
+Definition: `src/network/anthropic.cppm:34`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
 Declaration: [Declaration](functions/append-text-with-gap.md)
 
-This function appends the content of a `std::string_view` to a `std::string`, inserting a separator or “gap” as required by the protocol’s text‑block formatting rules. It is designed for internally composing multi‑segment text content (for example, within a message or content block) where a structural break must be placed between adjacent pieces of text. The caller supplies the target string as the first argument, which is mutated in place, and the incoming text as the second argument.
+Appends a text segment, provided as a `std::string_view`, to the given `std::string`, ensuring a gap (typically a newline) is inserted between any existing content and the newly appended text. By managing this separation, the function helps structure the output string so that logically distinct textual parts remain visually separated, which is useful when constructing multi‑line message bodies or JSON content. Callers supply the destination string and the text to append; after the call, the destination string contains the original content, a gap, and the appended text.
 
 #### Usage Patterns
 
-- Used by `build_request_json` to accumulate JSON text blocks with gap separation.
+- called by `build_request_json` to concatenate text segments with separation
 
 ### `clore::net::anthropic::protocol::detail::format_schema_instruction`
 
-Declaration: `network/anthropic.cppm:176`
+Declaration: `src/network/anthropic.cppm:185`
 
-Definition: `network/anthropic.cppm:176`
+Definition: `src/network/anthropic.cppm:185`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-This function is part of the internal protocol formatting utilities and is responsible for converting a schema reference into a numeric instruction. It accepts a schema identifier as a `const int &` parameter and returns an `int` that represents the formatted instruction, which is subsequently used by other functions in the `clore::net::anthropic::protocol::detail` namespace to construct protocol messages. The caller must supply a valid schema identifier; the returned value is expected to be a positive instruction code or length.
+The function `clore::net::anthropic::protocol::detail::format_schema_instruction` accepts a `const int &` representing a schema descriptor and returns an `int`. It is responsible for transforming the provided schema into a formatted instruction that conforms to the Anthropic protocol. The caller supplies a schema reference, and the function provides an integer result that can be used in subsequent protocol message construction, such as for tool use blocks or other structured requests.
 
 #### Usage Patterns
 
-- Called to format the JSON schema instruction for LLM prompts
-- Used in constructing conversation messages with tool-use or structured output
+- Used to generate the schema instruction part of a system prompt for Anthropic API requests
 
 ### `clore::net::anthropic::protocol::detail::make_role_message`
 
-Declaration: `network/anthropic.cppm:154`
+Declaration: `src/network/anthropic.cppm:139`
 
-Definition: `network/anthropic.cppm:154`
+Definition: `src/network/anthropic.cppm:139`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-Constructs a protocol message object representing a single role‑scoped turn in a conversation. The caller provides a role label (e.g. `"user"` or `"assistant"`) as a `std::string_view` and an array of content blocks as a `json::Array`. The function returns an opaque integer handle suitable for use with other functions in the `detail` namespace, such as `make_tool_use_block` or `validate_request`.
-
-The caller is responsible for ensuring the role string is one of the values recognised by the Anthropic protocol and that the content array contains only valid block types (text, tool use, tool result, etc.). The returned handle is valid only within the current request‑building context; no ownership transfer or lifetime extension is implied beyond the immediate construction operation.
+Constructs a message with a specified role and text content for the Anthropic protocol request. Callers supply the role (e.g., `"user"` or `"assistant"`) and the text body as string views. The function returns an integer indicating success (typically zero) or a non‑zero error code on failure. It is intended for internal use within the protocol detail layer and assumes valid, non‑empty inputs.
 
 #### Usage Patterns
 
-- Constructing a message object for Anthropic API requests
-- Associating a role string with a list of content blocks
+- Constructing user or assistant messages from plain text
+- Part of message building pipeline in Anthropic protocol
 
 ### `clore::net::anthropic::protocol::detail::make_role_message`
 
-Declaration: `network/anthropic.cppm:130`
+Declaration: `src/network/anthropic.cppm:163`
 
-Definition: `network/anthropic.cppm:130`
+Definition: `src/network/anthropic.cppm:163`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-The function `clore::net::anthropic::protocol::detail::make_role_message` constructs a role message object used in the Anthropic API protocol. It accepts a role (as a `std::string_view`) and either a plain text content (also a `std::string_view`) or a structured content array (a `json::Array`), and returns an opaque integer handle. The caller is responsible for supplying a valid role string (e.g. `"user"` or `"assistant"`) and appropriately formatted content; the returned handle can be passed to other detail‑level protocol functions. No ownership or lifetime management of the handle is required by the caller—it is valid only within the current protocol assembly context.
+Constructs a protocol message with the specified role and content. The function accepts a role string (such as `"user"` or `"assistant"`) and either a `json::Array` of content blocks or a plain `std::string_view` text. It returns an opaque integer handle representing the newly created message object within the protocol's internal representation. The caller is responsible for providing a valid role identifier and ensuring that the content is well-formed according to the Anthropic message format; the function does not perform schema validation.
 
 #### Usage Patterns
 
-- Used to generate a JSON role-content message pair for Anthropic protocol, typically as part of building a request payload.
+- Creating complete message objects for Anthropic API requests
+- Combining a role with content blocks for dialogue messages
 
 ### `clore::net::anthropic::protocol::detail::make_text_block`
 
-Declaration: `network/anthropic.cppm:35`
+Declaration: `src/network/anthropic.cppm:44`
 
-Definition: `network/anthropic.cppm:35`
+Definition: `src/network/anthropic.cppm:44`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-The function `clore::net::anthropic::protocol::detail::make_text_block` accepts a `std::string_view` representing the text content and returns an `int` that serves as a handle or identifier for the constructed text block. The caller provides the raw text, and the function creates the corresponding protocol-level block object, returning a value that can be used with other `detail` functions (e.g., `make_role_message`) that accept such identifiers. The exact interpretation of the returned `int` is not specified, but it uniquely identifies the block for subsequent protocol operations.
+The caller invokes `clore::net::anthropic::protocol::detail::make_text_block` to construct a text content block for use in the Claude API request protocol. It accepts a single `std::string_view` parameter containing the textual content and returns an `int` that acts as an opaque handle to the created block.
+
+The caller is responsible for providing a valid string view whose lifetime extends until the returned handle is consumed. The function does not take ownership of the string data; the caller must ensure the referenced content remains valid for the duration of its use. The returned `int` should be passed to other protocol utility functions, such as `make_role_message`, to assemble the full message structure.
 
 #### Usage Patterns
 
-- creating text blocks for Anthropic API requests
-- building message content parts in the protocol layer
+- used to construct content blocks for Anthropic API requests
+- called by higher-level message-building functions
 
 ### `clore::net::anthropic::protocol::detail::make_tool_result_block`
 
-Declaration: `network/anthropic.cppm:98`
+Declaration: `src/network/anthropic.cppm:107`
 
-Definition: `network/anthropic.cppm:98`
+Definition: `src/network/anthropic.cppm:107`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-This function constructs a tool result content block for inclusion in a message’s content array. The caller supplies a reference to an identifier that links the result to a prior tool use; the function returns a representation of that block suitable for serialization in the Anthropic protocol format. It is one of several `detail`‑level utilities that together compose structured content within a request’s message body.
+This function constructs a tool result block within the Anthropic protocol, accepting a constant reference to an integer (presumably identifying a tool call or result index) and returning an integer representing the created block. It is intended for internal use by the protocol layer and is part of the building blocks for assembling structured tool‑related content in request or response messages.
 
 #### Usage Patterns
 
-- called to create `tool_result` blocks for Anthropic assistant responses
-- used in higher-level message construction functions
+- Called to build a tool result block for Anthropic API requests
+- Used in higher-level protocol message construction
 
 ### `clore::net::anthropic::protocol::detail::make_tool_use_block`
 
-Declaration: `network/anthropic.cppm:58`
+Declaration: `src/network/anthropic.cppm:67`
 
-Definition: `network/anthropic.cppm:58`
+Definition: `src/network/anthropic.cppm:67`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-The function `clore::net::anthropic::protocol::detail::make_tool_use_block` is an internal utility that constructs a tool use block for the Anthropic protocol. The caller provides a `const int &` identifier, which designates the tool call to be represented, and the function returns an `int` — either a handle to the created block or a status code indicating success or failure. This function is part of the detail namespace and is intended for use only within the protocol implementation layer, not by external callers.
+This function constructs a tool-use content block from the provided tool call data. It accepts a reference to an integer representing the tool call and returns an integer that can be used to reference the resulting block. This function is intended for use in building Anthropic protocol messages; callers must supply a valid tool call identifier and should not rely on the integer value beyond the immediate construction context.
 
 #### Usage Patterns
 
-- used when constructing Anthropic API requests that include tool use blocks
-- called by higher-level functions building message content or request bodies
+- Called to produce a JSON `tool_use` block from a parsed or provided `ToolCall`
+- Used when constructing Anthropic API request messages
 
 ### `clore::net::anthropic::protocol::detail::parse_json_text`
 
-Declaration: `network/anthropic.cppm:171`
+Declaration: `src/network/anthropic.cppm:180`
 
-Definition: `network/anthropic.cppm:171`
+Definition: `src/network/anthropic.cppm:180`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-The function `clore::net::anthropic::protocol::detail::parse_json_text` parses the JSON content provided via its first `std::string_view` parameter, using the second `std::string_view` parameter as an auxiliary argument (for example, a key or a parse context). It returns an `int` that represents the outcome of the parse: a value of `0` typically indicates success, while a non‑zero value signals an error condition. This function is part of the internal detail layer for building Anthropic protocol messages and should be called only by other protocol construction utilities; callers must treat all non‑zero return values as failures and avoid relying on the exact numeric mapping.
+This function parses a JSON text and returns an integer identifier. It is part of the protocol detail layer, used to interpret JSON input for the Anthropic API. The caller supplies two `std::string_view` arguments: the first is the JSON content to parse, and the second may provide additional context (such as a schema or key). The return value is an integer that can be used to reference the parsed construct in subsequent operations. The function assumes valid JSON input and does not handle malformed data gracefully.
 
 #### Usage Patterns
 
-- parsing JSON objects from raw text strings
-- delegating to the core JSON parser `clore::net::detail::parse_json_object`
-- used in Anthropic protocol message construction or response processing
+- Delegates JSON parsing to `clore::net::detail::parse_json_object`
+- Used by protocol layer to parse LLM responses or request bodies
 
 ### `clore::net::anthropic::protocol::detail::validate_request`
 
-Declaration: `network/anthropic.cppm:193`
+Declaration: `src/network/anthropic.cppm:202`
 
-Definition: `network/anthropic.cppm:193`
+Definition: `src/network/anthropic.cppm:202`
 
 Implementation: [`Module anthropic`](../../../../../../modules/anthropic/index.md)
 
-The function `clore::net::anthropic::protocol::detail::validate_request` is an internal helper that performs validation of an Anthropic protocol request. The caller must supply a const reference to the request object (identified by an `int` handle or similar), and the function returns an `int` that signals the outcome of validation: a zero value typically indicates the request is valid, while a non-zero value denotes a specific error condition. The exact error semantics are defined by the implementation, but the contract guarantees that the request is not modified and that validation is based solely on the request’s current content.
+The function `clore::net::anthropic::protocol::detail::validate_request` validates a given request and returns an integer status. The caller provides a reference to an integer representing the request to validate. The returned integer signals the validation outcome, typically zero for a valid request and a non‑zero error code otherwise.
 
 #### Usage Patterns
 
-- Called to validate a completion request before submitting to the API.
+- called before sending a completion request to ensure validity
+- used in request preparation pipeline
 
 ## Related Pages
 

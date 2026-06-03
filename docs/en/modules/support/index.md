@@ -1,6 +1,6 @@
 ---
 title: 'Module support'
-description: 'The support module provides a collection of foundational utilities and infrastructure that underpin text processing, logging, and caching within the broader system. Its core responsibility is to offer robust, cross‑platform primitives for handling UTF‑8 encoded data, normalizing paths and line endings, constructing deterministic cache keys, and managing transparent string lookup for unordered containers. The module also houses the central logging framework, including configurable log levels, typed log proxies for compile‑time severity dispatch, and helper functions for reporting cache hit rates.'
+description: 'The support module provides a collection of foundational utility functions and types for string handling, caching, and logging within the codebase. It includes transparent hash and equality functors for heterogeneous lookup, UTF‑8 text file I/O, string normalization (paths, line endings, BOM removal), and cache key construction and parsing. The module also defines the logging infrastructure through clore::logging, exposing log‑level proxies (trace, debug, info, warn, err) and a log function that dispatches messages to configured sinks. Additional helpers cover topological graph ordering, extraction of plain text paragraphs from Markdown, and console UTF‑8 enablement.'
 layout: doc
 template: doc
 ---
@@ -9,13 +9,7 @@ template: doc
 
 ## Summary
 
-The `support` module provides a collection of foundational utilities and infrastructure that underpin text processing, logging, and caching within the broader system. Its core responsibility is to offer robust, cross‑platform primitives for handling UTF‑8 encoded data, normalizing paths and line endings, constructing deterministic cache keys, and managing transparent string lookup for unordered containers. The module also houses the central logging framework, including configurable log levels, typed log proxies for compile‑time severity dispatch, and helper functions for reporting cache hit rates.
-
-The public‑facing implementation encompasses a set of well‑defined functions and types. In the `clore::support` namespace, it exposes transparent hash and equality functors (`TransparentStringHash`, `TransparentStringEqual`), data structures for cache key decomposition (`CacheKeyParts`), and a suite of UTF‑8 utilities for reading, writing, truncating, and validating text files. Path normalization (`normalize_path_string`), line ending normalization, BOM stripping, and canonical log level resolution are also part of this scope. The `clore::logging` namespace contributes a global log level (`g_log_level`), a generic logging function (`log`), a direct‑to‑stderr sink (`stderr_logger`), and constexpr `LogProxy` instances for each severity level (`trace`, `debug`, `info`, `warn`, `err`), which serve as the primary entry points for emitting log messages throughout the application.
-
-## Imports
-
-- `std`
+The `support` module provides a collection of foundational utility functions and types for string handling, caching, and logging within the codebase. It includes transparent hash and equality functors for heterogeneous lookup, UTF‑8 text file I/O, string normalization (paths, line endings, BOM removal), and cache key construction and parsing. The module also defines the logging infrastructure through `clore::logging`, exposing log‑level proxies (`trace`, `debug`, `info`, `warn`, `err`) and a `log` function that dispatches messages to configured sinks. Additional helpers cover topological graph ordering, extraction of plain text paragraphs from Markdown, and console UTF‑8 enablement.
 
 ## Imported By
 
@@ -47,37 +41,37 @@ The public‑facing implementation encompasses a set of well‑defined functions
 
 ### `clore::logging::LogProxy`
 
-Declaration: `support/logging.cppm:112`
+Declaration: `src/support/logging.cppm:135`
 
-Definition: `support/logging.cppm:112`
+Definition: `src/support/logging.cppm:135`
 
 Declaration: [`Namespace clore::logging`](../../namespaces/clore/logging/index.md)
 
-The template struct `clore::logging::LogProxy` captures a compile‑time log level via its non‑type template parameter `spdlog::level::level_enum Level`; it has no data members. Its two `operator()` overloads constitute the entire implementation. The first overload accepts a `std::string_view` message and directly delegates to the free function `clore::logging::log(Level, msg)`. The second overload is a constrained function template that accepts a `std::format_string<Args...> fmt` followed by a variadic argument pack `Args&&... args` (the constraint requires `sizeof...(Args) > 0`); it formats the message using `std::format` and then passes the resulting string and the level to the same `clore::logging::log`. This design ensures that every invocation goes through the central logging point while keeping the level fixed at compile time, eliminating runtime dispatch on the level inside the proxy itself. The internal invariant is that the level is encoded in the type, and all logging logic is deferred to the underlying `log` function.
+The struct `clore::logging::LogProxy` is a lightweight callable wrapper whose sole purpose is to capture a specific log level as a compile‑time template parameter (`spdlog::level::level_enum Level`). Its internal structure consists only of the two `operator()` overloads, both of which immediately delegate to the free function `clore::logging::log`, passing `Level` and the composed message. The first overload accepts a raw `std::string_view` and forwards it unchanged; the second variadic overload accepts a `std::format_string<Args...>` plus corresponding arguments, formats the message using `std::format`, and then forwards the resulting `std::string`. Because `Level` is a non‑type template parameter, each instantiation is a distinct type, enabling the compiler to optimize away entire call sites when the level is inactive or to inline the level constant into the logging path. The key invariant is that every invocation of `LogProxy` results in exactly one call to the underlying logging function with the predefined severity, ensuring consistent dispatching without runtime level checks within the wrapper itself.
 
 #### Invariants
 
-- The logging level `Level` is fixed at compile time via a non-type template parameter.
-- All messages are forwarded to a free function `log` that must be defined in the surrounding scope.
-- The variadic overload requires at least one argument (`sizeof...(Args) > 0`).
+- The log level is fixed at compile time and determined solely by the `Level` template parameter.
+- All logging operations ultimately call `log(Level, ...)` which must be defined and accessible.
 
 #### Key Members
 
-- `void operator()(std::string_view msg) const`
-- `void operator()(std::format_string<Args...> fmt, Args&&... args) const` (template, requires `sizeof...(Args) > 0`)
+- `operator()(std::string_view msg) const`
+- `operator()(std::format_string<Args...> fmt, Args&&... args) const`
 
 #### Usage Patterns
 
-- Instantiated with a specific log level (e.g., `LogProxy<spdlog::level::info>`) to create a level‑specific logger object.
-- Called with either a plain string or a format string and arguments to produce a formatted log message at the predetermined level.
+- Instantiated with specific log levels to create lightweight level-specific logging functors.
+- Used in contexts where a callable object with a fixed log level is needed, such as in logger implementations or logging macros.
+- Relies on an external `log` function that is not defined within the struct.
 
 #### Member Functions
 
 ##### `clore::logging::LogProxy::operator()`
 
-Declaration: `support/logging.cppm:119`
+Declaration: `src/support/logging.cppm:142`
 
-Definition: `support/logging.cppm:119`
+Definition: `src/support/logging.cppm:142`
 
 Declaration: [`Namespace clore::logging`](../../namespaces/clore/logging/index.md)
 
@@ -91,9 +85,9 @@ void operator()(std::format_string<Args...> fmt, Args&&... args) const {
 
 ##### `clore::logging::LogProxy::operator()`
 
-Declaration: `support/logging.cppm:113`
+Declaration: `src/support/logging.cppm:136`
 
-Definition: `support/logging.cppm:113`
+Definition: `src/support/logging.cppm:136`
 
 Declaration: [`Namespace clore::logging`](../../namespaces/clore/logging/index.md)
 
@@ -107,18 +101,18 @@ void operator()(std::string_view msg) const {
 
 ### `clore::support::CacheKeyParts`
 
-Declaration: `support/logging.cppm:57`
+Declaration: `src/support/logging.cppm:80`
 
-Definition: `support/logging.cppm:57`
+Definition: `src/support/logging.cppm:80`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The struct `clore::support::CacheKeyParts` is an internal aggregate that bundles a source file path and a compile‑time signature for use as a cache key. Its two data members are the `std::string` field `path` and the `std::uint64_t` field `compile_signature`, the latter default‑initialized to zero. A zero `compile_signature` conventionally represents an unset or invalid signature; the struct does not enforce this invariant through member functions. No constructors, assignment `operator`s, or other special members are user‑declared, so the type relies entirely on compiler‑generated defaults, and all initialization and copying are performed via aggregate initialization or member‑wise operations.
+The struct bundles a file path and a compile signature into a single cache key. Its internal structure consists of two flat members: `path` as a `std::string` and `compile_signature` as a `std::uint64_t` defaulting to `0`. The zero-initialized signature acts as a sentinel for unset or invalid keys; the implementation relies on the default member initializer and does not define special constructors, so all instances are trivially constructible or copyable.
 
 #### Invariants
 
-- `compile_signature` defaults to `0` if not explicitly set.
-- `path` is a `std::string` with no additional constraints implied by the evidence.
+- `compile_signature` is initialized to 0 by default
+- Equality of two keys is determined by both fields
 
 #### Key Members
 
@@ -127,40 +121,39 @@ The struct `clore::support::CacheKeyParts` is an internal aggregate that bundles
 
 #### Usage Patterns
 
-- Defined as a fundamental part of cache key representation within the logging module.
-- Expected to be aggregated into a larger cache key or used directly to identify compiled artifacts.
+- Used as a key type in caching containers
+- Constructed by providing a file path and compilation signature
 
 ### `clore::support::TransparentStringEqual`
 
-Declaration: `support/logging.cppm:33`
+Declaration: `src/support/logging.cppm:56`
 
-Definition: `support/logging.cppm:33`
+Definition: `src/support/logging.cppm:56`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The internal structure of `clore::support::TransparentStringEqual` is minimal: it defines the public alias `is_transparent` as `void` to enable heterogeneous lookup in compatible containers, and provides four overloads of `operator()`. Each overload compares two string-like arguments, normalizing all inputs to `std::string_view` before performing equality. The overload taking two `std::string` arguments delegates to the equality `operator` of `std::string` directly, while the three mixed‑type variants convert a `const std::string&` to `std::string_view` via its implicit conversion, ensuring all comparisons are performed on `std::string_view` for consistency. All call `operator`s are marked `noexcept` and `[[nodiscard]]`, and they maintain the invariant that equal character sequences are always considered equal regardless of their original storage type.
+The struct `clore::support::TransparentStringEqual` provides four overloads of `operator()` that cover all combinations of `std::string` and `std::string_view` arguments. Internally, each overload normalises both arguments to `std::string_view` before performing a direct equality comparison; the two overloads that accept a `const std::string&` explicitly construct a `std::string_view` from that reference, ensuring that no temporary `std::string` copies are made. The member alias `is_transparent`, set to `void`, is the standard tag that enables heterogeneous lookup in associative containers such as `std::unordered_map` when this functor is used as the key equality predicate. All call `operator`s are `noexcept` and return `bool`, and the overall design guarantees that equality semantics are identical to comparing the underlying character sequences regardless of how the arguments are stored.
 
 #### Invariants
 
-- Provides equality comparison for strings
-- Supports heterogeneous lookup via `is_transparent`
-- All `operator()` overloads are `noexcept`
+- Equality comparison is symmetric and consistent with `std::string_view` comparison.
+- All overloads are `noexcept`.
 
 #### Key Members
 
-- `is_transparent` type alias
-- Four `operator()` overloads (each combination of `std::string_view` and `const std::string&`)
+- `is_transparent` typedef
+- `operator()` overloads for comparing `std::string` and `std::string_view`
 
 #### Usage Patterns
 
-- Used as a comparator in associative containers to enable transparent lookup
-- Allows efficient searching with `std::string_view` without constructing temporary `std::string` objects
+- Used as a transparent comparator for `std::unordered_set` or `std::unordered_map` to allow lookup with `std::string_view` without constructing `std::string`.
+- Can also be used as a standalone equality functor.
 
 #### Member Types
 
 ##### `clore::support::TransparentStringEqual::is_transparent`
 
-Declaration: `support/logging.cppm:34`
+Declaration: `src/support/logging.cppm:57`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
@@ -174,9 +167,26 @@ using is_transparent = void
 
 ##### `clore::support::TransparentStringEqual::operator()`
 
-Declaration: `support/logging.cppm:46`
+Declaration: `src/support/logging.cppm:64`
 
-Definition: `support/logging.cppm:46`
+Definition: `src/support/logging.cppm:64`
+
+Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
+
+###### Implementation
+
+```cpp
+[[nodiscard]] auto operator()(const std::string& lhs, std::string_view rhs) const noexcept
+        -> bool {
+        return std::string_view{lhs} == rhs;
+    }
+```
+
+##### `clore::support::TransparentStringEqual::operator()`
+
+Declaration: `src/support/logging.cppm:69`
+
+Definition: `src/support/logging.cppm:69`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
@@ -191,26 +201,9 @@ Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.m
 
 ##### `clore::support::TransparentStringEqual::operator()`
 
-Declaration: `support/logging.cppm:36`
+Declaration: `src/support/logging.cppm:74`
 
-Definition: `support/logging.cppm:36`
-
-Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
-
-###### Implementation
-
-```cpp
-[[nodiscard]] auto operator()(std::string_view lhs, std::string_view rhs) const noexcept
-        -> bool {
-        return lhs == rhs;
-    }
-```
-
-##### `clore::support::TransparentStringEqual::operator()`
-
-Declaration: `support/logging.cppm:51`
-
-Definition: `support/logging.cppm:51`
+Definition: `src/support/logging.cppm:74`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
@@ -225,36 +218,36 @@ Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.m
 
 ##### `clore::support::TransparentStringEqual::operator()`
 
-Declaration: `support/logging.cppm:41`
+Declaration: `src/support/logging.cppm:59`
 
-Definition: `support/logging.cppm:41`
+Definition: `src/support/logging.cppm:59`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
 ###### Implementation
 
 ```cpp
-[[nodiscard]] auto operator()(const std::string& lhs, std::string_view rhs) const noexcept
+[[nodiscard]] auto operator()(std::string_view lhs, std::string_view rhs) const noexcept
         -> bool {
-        return std::string_view{lhs} == rhs;
+        return lhs == rhs;
     }
 ```
 
 ### `clore::support::TransparentStringHash`
 
-Declaration: `support/logging.cppm:17`
+Declaration: `src/support/logging.cppm:40`
 
-Definition: `support/logging.cppm:17`
+Definition: `src/support/logging.cppm:40`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The implementation of `clore::support::TransparentStringHash` is built around a single, authoritative hashing path: the `operator()` overload that accepts a `std::string_view`. This overload directly invokes `std::hash<std::string_view>`, ensuring a consistent hash computation for all input types. The remaining two overloads—those taking `const std::string&` and `const char*`—are thin wrappers that explicitly convert their argument to a `std::string_view` and then forward the call to the primary overload. This design guarantees that no matter which input form is used, the same hashing logic applies, eliminating duplication and reducing the risk of accidental inconsistency. The typedef `is_transparent` is set to `void`, which enables heterogeneous lookup in unordered associative containers when combined with a transparent key equality comparator. All overloads are declared `noexcept` and return `std::size_t`, so the functor can be used in contexts that require exception safety and a standard hash result type.
+The struct provides a single hash functor that delegates all work to the `std::hash<std::string_view>` specialization. The core implementation lives in the `operator()(std::string_view)` overload, which directly invokes `std::hash<std::string_view>{}(value)`. The other two overloads—for `const std::string&` and `const char*`—simply construct a `std::string_view` from their argument and forward to that primary overload, ensuring a single source of hashing logic. The `is_transparent` typedef is a `void` tag that enables heterogeneous lookup in standard unordered associative containers; when present, the container can compare keys of different types without converting them to the stored key type first. All call `operator`s are marked `noexcept` and `[[nodiscard]]`.
 
 #### Invariants
 
-- Hash values are identical to `std::hash<std::string_view>` for equivalent string content
-- All three `operator()` overloads produce the same hash for equal string content
-- The `is_transparent` type alias enables heterogeneous lookup in unordered containers
+- Hash value depends only on the string content, not the type of the argument.
+- The functor is transparent, allowing heterogeneous lookup in unordered containers.
+- All `operator()` calls are `noexcept`.
 
 #### Key Members
 
@@ -265,15 +258,15 @@ The implementation of `clore::support::TransparentStringHash` is built around a 
 
 #### Usage Patterns
 
-- Used as the hash functor in `std::unordered_set` or `std::unordered_map` with transparent key equality
-- Enables lookup with `std::string_view` or `const char*` without constructing a `std::string`
-- Serves as a building block for string-based associative containers that require heterogeneous access
+- Used as a hash functor for `std::unordered_set` or `std::unordered_map` with transparent lookup.
+- Enables hashing keys without constructing temporary `std::string` objects, improving performance.
+- Can be passed as the `Hash` template parameter to associative containers.
 
 #### Member Types
 
 ##### `clore::support::TransparentStringHash::is_transparent`
 
-Declaration: `support/logging.cppm:18`
+Declaration: `src/support/logging.cppm:41`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
@@ -287,25 +280,9 @@ using is_transparent = void
 
 ##### `clore::support::TransparentStringHash::operator()`
 
-Declaration: `support/logging.cppm:24`
+Declaration: `src/support/logging.cppm:43`
 
-Definition: `support/logging.cppm:24`
-
-Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
-
-###### Implementation
-
-```cpp
-[[nodiscard]] auto operator()(const std::string& value) const noexcept -> std::size_t {
-        return (*this)(std::string_view{value});
-    }
-```
-
-##### `clore::support::TransparentStringHash::operator()`
-
-Declaration: `support/logging.cppm:20`
-
-Definition: `support/logging.cppm:20`
+Definition: `src/support/logging.cppm:43`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
@@ -319,9 +296,9 @@ Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.m
 
 ##### `clore::support::TransparentStringHash::operator()`
 
-Declaration: `support/logging.cppm:28`
+Declaration: `src/support/logging.cppm:51`
 
-Definition: `support/logging.cppm:28`
+Definition: `src/support/logging.cppm:51`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
@@ -333,44 +310,59 @@ Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.m
     }
 ```
 
+##### `clore::support::TransparentStringHash::operator()`
+
+Declaration: `src/support/logging.cppm:47`
+
+Definition: `src/support/logging.cppm:47`
+
+Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
+
+###### Implementation
+
+```cpp
+[[nodiscard]] auto operator()(const std::string& value) const noexcept -> std::size_t {
+        return (*this)(std::string_view{value});
+    }
+```
+
 ## Variables
 
 ### `clore::logging::debug`
 
-Declaration: `support/logging.cppm:125`
+Declaration: `src/support/logging.cppm:148`
 
 Declaration: [`Namespace clore::logging`](../../namespaces/clore/logging/index.md)
 
-`debug` is a compile-time `constexpr inline` instance of the `LogProxy` template specialized for `spdlog::level::debug`. It is consumed as a callable proxy that forwards log requests at the debug severity, sitting alongside peer proxies such as `clore::logging::trace`, `clore::logging::info`, `clore::logging::warn`, and `clore::logging::err`. Because it is `constexpr inline`, it carries no mutable state and serves purely as a routing handle to the underlying logging facility.
+This variable provides a logging proxy specifically for debug severity messages. As a `constexpr inline` variable, it is intended to be used directly without runtime overhead, enabling conditional compilation or optimization of debug log statements.
 
 #### Mutation
 
 No mutation is evident from the extracted code.
-
-#### Usage Patterns
-
-- invoked as a log proxy for `spdlog::level::debug` messages
-- used alongside other severity-level proxies in `clore::logging`
 
 ### `clore::logging::err`
 
-Declaration: `support/logging.cppm:128`
+Declaration: `src/support/logging.cppm:151`
 
 Declaration: [`Namespace clore::logging`](../../namespaces/clore/logging/index.md)
 
-The variable serves as a statically-typed logging interface for error severity. Since it is `constexpr`, its value is determined at compile time and it is not mutated during program execution. The provided evidence does not show any subsequent reads or mutation of this variable beyond its declaration.
+As a `LogProxy` instance, it is used to log messages at the error severity level, typically by calling its member functions with format strings and arguments.
 
 #### Mutation
 
 No mutation is evident from the extracted code.
+
+#### Usage Patterns
+
+- logging error messages via member functions of `LogProxy`
 
 ### `clore::logging::g_log_level`
 
-Declaration: `support/logging.cppm:102`
+Declaration: `src/support/logging.cppm:125`
 
 Declaration: [`Namespace clore::logging`](../../namespaces/clore/logging/index.md)
 
-This variable is used by `clore::logging::log` and `clore::logging::stderr_logger` to determine whether a log message should be emitted based on its severity level. When set, only messages at or above the specified level are processed; when unset, the filtering behavior may be defined elsewhere.
+This variable is read by logging functions to decide whether to emit a log message. If set, only messages with severity at or above this level are output; if not set, a default behavior may apply.
 
 #### Mutation
 
@@ -378,16 +370,16 @@ No mutation is evident from the extracted code.
 
 #### Usage Patterns
 
-- read by `clore::logging::log` to decide message output
-- read by `clore::logging::stderr_logger` to control logging behavior
+- Referenced in `clore::logging::log` to filter log messages
+- Referenced in `clore::logging::stderr_logger` to determine output level
 
 ### `clore::logging::info`
 
-Declaration: `support/logging.cppm:126`
+Declaration: `src/support/logging.cppm:149`
 
 Declaration: [`Namespace clore::logging`](../../namespaces/clore/logging/index.md)
 
-As a `constexpr inline` proxy specialized on `spdlog::level::info`, it is consumed as a stateless dispatcher that forwards formatted messages to the underlying logger at info severity. It is referenced by `clore::logging::cache_hit_rate`, which uses it to emit informational diagnostics such as cache hit-rate statistics, alongside sibling proxies like `debug`, `trace`, `warn`, and `err`.
+This variable acts as a log proxy object that formats and emits info-level log messages. It is typically used with the stream `operator` or passed to logging functions. Its behavior is affected by the global log level (`clore::logging::g_log_level`) which controls whether messages at this level are actually output.
 
 #### Mutation
 
@@ -395,17 +387,17 @@ No mutation is evident from the extracted code.
 
 #### Usage Patterns
 
-- invoked from `clore::logging::cache_hit_rate` to report informational messages
-- used as a severity-tagged dispatcher built on `LogProxy<spdlog::level::info>`
-- serves as the info-level counterpart to other `LogProxy` instances in the namespace
+- emits info-level log messages via stream `operator`
+- used in `clore::logging::cache_hit_rate`
+- passed as argument to logging functions
 
 ### `clore::logging::trace`
 
-Declaration: `support/logging.cppm:124`
+Declaration: `src/support/logging.cppm:147`
 
 Declaration: [`Namespace clore::logging`](../../namespaces/clore/logging/index.md)
 
-`trace` is a stateless proxy object specialized on `spdlog::level::trace`, used as the public handle for trace-severity logging within the `clore::logging` namespace. It sits alongside peer proxies such as `debug`, `info`, `warn`, and `err`, forming a uniform set of severity-tagged log entry points that callers invoke to dispatch formatted messages at the corresponding level.
+It serves as a logging proxy for trace-level messages, allowing structured log statements with formatting and arguments. It is read by surrounding code to output messages through the logging system.
 
 #### Mutation
 
@@ -413,16 +405,15 @@ No mutation is evident from the extracted code.
 
 #### Usage Patterns
 
-- invoked as a namespace-scope entry point for trace-level logging
-- parallels other severity proxies like `debug`, `info`, `warn`, and `err`
+- trace-level logging calls
 
 ### `clore::logging::warn`
 
-Declaration: `support/logging.cppm:127`
+Declaration: `src/support/logging.cppm:150`
 
 Declaration: [`Namespace clore::logging`](../../namespaces/clore/logging/index.md)
 
-`warn` is a `constexpr inline` instance of `LogProxy<spdlog::level::warn>`, providing a callable entry point for emitting log records at the `spdlog::level::warn` severity. It is referenced by callers such as `clore::support::enable_utf8_console` to dispatch warning messages through the underlying logger, alongside sibling proxies like `debug`, `trace`, `info`, and `err`.
+It is used to emit log messages at the warn severity level. The variable is part of the `clore::logging` facility and participates alongside proxies like `info`, `debug`, and `err` to provide a structured logging interface.
 
 #### Mutation
 
@@ -430,116 +421,111 @@ No mutation is evident from the extracted code.
 
 #### Usage Patterns
 
-- invoked as a logging entry point for warning-level messages
-- used by `clore::support::enable_utf8_console`
-- parallels other level proxies (`debug`, `trace`, `info`, `err`) in the namespace
+- warning-level logging proxy
 
 ## Functions
 
 ### `clore::logging::cache_hit_rate`
 
-Declaration: `support/logging.cppm:138`
+Declaration: `src/support/logging.cppm:161`
 
-Definition: `support/logging.cppm:138`
+Definition: `src/support/logging.cppm:161`
 
 Declaration: [`Namespace clore::logging`](../../namespaces/clore/logging/index.md)
 
-The function first computes the total as the sum of the `hits` and `misses` arguments. If `total` is zero, a `std::logic_error` is thrown with a formatted message that includes the `name` parameter, ensuring the cache hit rate is only computed for a non-empty cache. Otherwise, the hit rate is calculated as a percentage: `(static_cast<double>(hits) * 100.0) / static_cast<double>(total)`. The result is then passed to the logging proxy `clore::logging::info` along with `name`, `hits`, `misses`, and the computed `rate` (formatted to one decimal place).  
-
-The function depends on `std::format` for string formatting, `std::logic_error` for error reporting, and the `clore::logging::info` variable (an instance of `clore::logging::LogProxy`) to emit the log message. No external I/O or complex data structures are involved; the control flow is linear with an early error exit for the zero-total case.
+The function `clore::logging::cache_hit_rate` first validates its inputs by checking whether the sum of `hits` and `misses` is zero; if so, it throws a `std::logic_error` with a formatted message containing the `name` parameter. Next it computes the hit rate as a percentage using `static_cast<double>(hits) * 100.0 / static_cast<double>(total)`. Finally, it calls the `info` logging proxy (declared in `clore::logging`) to emit the formatted string containing the `name`, raw counts, and the computed `rate`. The implementation depends on `std::format` for string formatting and on the `info` logging facility for output.
 
 #### Side Effects
 
-- throws `std::logic_error` on zero total
-- logs via `info`
+- Logs a formatted message via `clore::logging::info`
+- Throws `std::logic_error` if total is zero
 
 #### Reads From
 
-- parameter `name`
-- parameter `hits`
-- parameter `misses`
+- Parameter `name`
+- Parameter `hits`
+- Parameter `misses`
 
 #### Writes To
 
-- logging output via `info`
+- Log output through `clore::logging::info`
 
 #### Usage Patterns
 
-- reporting cache hit rates
-- logging after cache lookups
+- Used to monitor and log cache hit rate
+- Called after cache access to record statistics
 
 ### `clore::logging::log`
 
-Declaration: `support/logging.cppm:104`
+Declaration: `src/support/logging.cppm:127`
 
-Definition: `support/logging.cppm:104`
+Definition: `src/support/logging.cppm:127`
 
 Declaration: [`Namespace clore::logging`](../../namespaces/clore/logging/index.md)
 
 Implementation: [Implementation](functions/log.md)
 
-The function `clore::logging::log` implements a level‑gated dispatch to the spdlog library. Its control flow begins by checking whether the module‑level global `g_log_level` has been set (via its `std::optional` state). If a threshold exists and the incoming `lvl` is strictly less than that threshold, the function returns immediately without performing any logging work. This early‑exit optimization avoids unnecessary formatting and I/O when the message would be filtered out by the current log level configuration. When the level passes the gate, the call is forwarded to `spdlog::default_logger_raw()->log(lvl, "{}", msg)`, which writes the formatted message through the default spdlog logger. No additional buffering or transformation is applied; the raw `spdlog::level::level_enum` and the `std::string_view` message are passed directly. The function therefore depends on `g_log_level` (a `std::optional<spdlog::level::level_enum>` defined in the same `clore::logging` namespace) and on the spdlog runtime API for the actual output. Its behaviour is fully synchronous and non‑allocating for the threshold check; allocation may occur inside spdlog depending on the sink configuration.
+The function first checks whether the global filtering level `g_log_level` has been set and, if so, whether the requested `lvl` is strictly lower than that threshold. When the condition holds, `log` returns immediately without performing any output. Otherwise, it forwards the `lvl` and the formatted `msg` to the underlying logging library by invoking `spdlog::default_logger_raw()->log(lvl, "{}", msg)`. This two‑step control flow—guard against insufficient severity, then delegate to the spdlog default logger—provides a lightweight, configurable filtering mechanism without modifying the logger’s own level settings.
 
 #### Side Effects
 
-- Writes a log record through `spdlog::default_logger_raw()` at the specified severity level
+- Logs a message via spdlog default logger, which may write to console or file.
 
 #### Reads From
 
-- parameter `lvl`
-- parameter `msg`
-- global optional `g_log_level`
-- the `spdlog` default logger via `spdlog::default_logger_raw()`
+- `g_log_level`
+- lvl parameter
+- msg parameter
 
 #### Writes To
 
-- the `spdlog` default logger's output sinks
+- spdlog default logger output
 
 #### Usage Patterns
 
-- Invoked by `clore::logging::LogProxy::operator()(std::string_view)` to route formatted messages to `spdlog`
-- Used as the underlying logging primitive that respects the `g_log_level` threshold
+- Called by `LogProxy::operator()` to dispatch logging
+- Used for conditional logging with level filtering
 
 ### `clore::logging::stderr_logger`
 
-Declaration: `support/logging.cppm:130`
+Declaration: `src/support/logging.cppm:153`
 
-Definition: `support/logging.cppm:130`
+Definition: `src/support/logging.cppm:153`
 
 Declaration: [`Namespace clore::logging`](../../namespaces/clore/logging/index.md)
 
-The implementation of `clore::logging::stderr_logger` delegates to the `spdlog` library. It calls `spdlog::stderr_color_mt` with the provided `name` (converted to `std::string`) to either create or retrieve a thread-safe, color-capable logger that writes to standard error. That logger is then promoted to the global default via `spdlog::set_default_logger`. After establishing the default, the function checks the optional global variable `g_log_level`; if it contains a value, that level is applied to all loggers through `spdlog::set_level`. This single‑point level override ensures that any threshold configured earlier (e.g., from an environment variable or command‑line argument) is respected immediately, without requiring callers to manage per‑logger levels individually.
+The function `clore::logging::stderr_logger` creates an spdlog logger on stderr by invoking `spdlog::stderr_color_mt` with a copy of the `name` parameter, then registers that logger as the global default via `spdlog::set_default_logger`. If the optional global level variable `clore::logging::g_log_level` holds a value, the function further calls `spdlog::set_level` to enforce that threshold, filtering out messages below the specified severity. The implementation has no branching beyond the existence check for `g_log_level` and delegates all output and color formatting to the spdlog library; it does not perform any additional message transformation, buffering, or stream synchronization.
 
 #### Side Effects
 
-- Creates a new spdlog logger instance
-- Sets the global default spdlog logger
-- Sets the spdlog log level if `g_log_level` has a value
+- Creates a new stderr color logger
+- Sets the new logger as the default logger
+- Possibly sets the global log level from `g_log_level`
 
 #### Reads From
 
-- `name` function parameter
-- `g_log_level` global variable
+- `name` parameter
+- Global variable `g_log_level`
 
 #### Writes To
 
-- Global spdlog default logger
-- Global spdlog log level (conditional)
+- Global spdlog default logger state
+- Global spdlog log level via `spdlog::set_level`
 
 #### Usage Patterns
 
-- Initializing logging configuration at startup
-- Switching global logging to stderr with a specific logger name
+- Used during logging initialization to direct output to stderr
+- Called early in program startup to configure logging
 
 ### `clore::support::build_cache_key`
 
-Declaration: `support/logging.cppm:70`
+Declaration: `src/support/logging.cppm:93`
 
-Definition: `support/logging.cppm:368`
+Definition: `src/support/logging.cppm:391`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The function constructs a cache key string by concatenating the given `normalized_path`, a delimiter character stored in the anonymous namespace constant `kCacheKeyDelimiter`, and the string representation of `compile_signature` obtained via `std::to_string`. It first reserves enough capacity—the length of the path plus one for the delimiter plus twenty digits—to avoid reallocation, then appends the three parts in order. No branching or iteration is used; the entire logic is a linear sequence of `std::string` append operations. The only external dependency beyond the standard library is the module-internal `kCacheKeyDelimiter` constant.
+The function `clore::support::build_cache_key` constructs a cache key string by concatenating a normalized path and a compile signature separated by a delimiter. It first allocates a `std::string` with sufficient capacity using `reserve` to avoid reallocation, then appends the `normalized_path` argument, a single character delimiter obtained from the anonymous namespace constant `kCacheKeyDelimiter`, and finally the string representation of `compile_signature` via `std::to_string`. The resulting key is returned directly. The implementation has no branching or error handling, relying on the caller to supply a correctly normalized path and a valid signature. The only dependency outside of the standard library is the `kCacheKeyDelimiter` constant defined in the enclosing anonymous namespace.
 
 #### Side Effects
 
@@ -547,28 +533,23 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `normalized_path`
-- `compile_signature`
-- `kCacheKeyDelimiter`
-
-#### Writes To
-
-- local `std::string key` (returned)
+- parameter `normalized_path`
+- parameter `compile_signature`
 
 #### Usage Patterns
 
-- building cache keys for compile results
-- combining a file path with a signature
+- Constructs cache keys for compilation artifacts
+- Used to key entries in a compilation cache
 
 ### `clore::support::build_compile_signature`
 
-Declaration: `support/logging.cppm:66`
+Declaration: `src/support/logging.cppm:89`
 
-Definition: `support/logging.cppm:352`
+Definition: `src/support/logging.cppm:375`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The function constructs a single null‑delimited payload by appending the normalized directory (via `clore::support::normalize_path_string`), the `normalized_file`, and each element of `arguments`, separated by `\0` bytes.  It then hashes the entire payload using `llvm::xxh3_64bits` and returns the resulting `std::uint64_t`.  The algorithm is a simple linear concatenation followed by a fixed‑size hash; control flow consists solely of a loop over the argument vector. There are no conditional branches or error paths.
+The function constructs a serialized payload by first applying `clore::support::normalize_path_string` to the `directory` argument, then appending the result, a null byte, the `normalized_file` parameter, another null byte, and finally each element of `arguments` followed by a null byte. It reserves capacity in advance to minimize reallocations. The resulting null‑terminated concatenation is then hashed using LLVM's `llvm::xxh3_64bits` to produce a 64‑bit unsigned integer that serves as the compile signature. The only explicit dependency is the path‑normalization helper; the rest of the logic is a straightforward serialization and hashing step.
 
 #### Side Effects
 
@@ -576,24 +557,23 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `directory`
-- parameter `normalized_file`
-- parameter `arguments` (each element read)
-- output of `clore::support::normalize_path_string`
+- `directory`
+- `normalized_file`
+- `arguments`
 
 #### Usage Patterns
 
-- computing a hash key for compile caching from directory, file, and arguments
+- Used to generate a unique identifier for a compilation unit based on its directory, file, and arguments.
 
 ### `clore::support::canonical_log_level_name`
 
-Declaration: `support/logging.cppm:77`
+Declaration: `src/support/logging.cppm:100`
 
-Definition: `support/logging.cppm:424`
+Definition: `src/support/logging.cppm:447`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The implementation of `clore::support::canonical_log_level_name` first guards against an empty input by returning `std::nullopt`.  It then creates a lowercased copy of the input string by applying `std::tolower` to each character, which standardises the casing for the subsequent validation step.  The core validation delegates to `spdlog::level::from_str`: if the returned level equals `spdlog::level::off` and the normalized string is not literally `"off"`, the function concludes that the original string does not name a recognised log level and returns `std::nullopt`.  Otherwise, it returns the lowercased string, signalling a valid canonical name.  The function thus relies on `spdlog`’s own level‑parsing routine to determine acceptability, while the manual casing normalisation guarantees that the output always has a consistent form.
+The function first handles the trivial empty-input case by returning `std::nullopt`. It then converts the input `value` to a lowercase `normalized` string by applying `std::tolower` (cast to `unsigned char` to avoid undefined behaviour) to each character. The core validation step delegates to `spdlog::level::from_str`, which interprets the lowercased name against spdlog’s built-in log-level enumeration. When the returned level equals `spdlog::level::off` and the normalized string is not literally `"off"`, the input is considered invalid and `std::nullopt` is returned; otherwise the normalized lower-case string is returned as the canonical form. This implementation depends on spdlog’s level parsing and the character conversion utilities, and performs no other external operations.
 
 #### Side Effects
 
@@ -601,88 +581,86 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the function parameter `value` of type `std::string_view`
+- parameter `value` of type `std::string_view`
+- internal spdlog level mapping via `spdlog::level::from_str`
 
 #### Usage Patterns
 
-- Canonicalizing user-provided log level strings before use
-- Validating log level configuration entries
-- Mapping raw input to a consistent lowercase representation
+- validating and normalizing user-provided log level names
+- converting log level strings to canonical form before use in logging configuration
 
 ### `clore::support::enable_utf8_console`
 
-Declaration: `support/logging.cppm:91`
+Declaration: `src/support/logging.cppm:114`
 
-Definition: `support/logging.cppm:534`
+Definition: `src/support/logging.cppm:557`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The function is guarded by the `_WIN32` preprocessor directive, so the implementation is a no‑op on non‑Windows platforms. On Windows, it calls `SetConsoleCP` and `SetConsoleOutputCP` with the constant `CP_UTF8` to switch the console’s input and output code pages to UTF‑8. If either call fails (returns `0`), the function retrieves the error code via `GetLastError` and issues a warning through `clore::logging::warn`, formatting the error as a `std::uint32_t`. The only dependencies are the Windows API functions and the project’s logging facility; no additional data structures or complex control flow are involved.
+The function `clore::support::enable_utf8_console` is conditionally compiled for Windows only using a `#ifdef _WIN32` guard. On Windows, it invokes the Win32 API `SetConsoleCP(CP_UTF8)` to set the console's input code page to UTF-8, and `SetConsoleOutputCP(CP_UTF8)` to set the output code page to UTF-8. If either call returns zero (indicating failure), it logs a warning via `clore::logging::warn`, including the extended error code from `GetLastError()`. The function has no effect on non‑Windows platforms.
+
+The implementation relies on the Windows SDK headers for `SetConsoleCP`, `SetConsoleOutputCP`, `CP_UTF8`, and `GetLastError`, and depends on the project’s logging facility `clore::logging::warn` for error reporting. No other control flow or branching occurs beyond the conditional compilation and the two error checks.
 
 #### Side Effects
 
-- Sets the console input code page to `CP_UTF8`
-- Sets the console output code page to `CP_UTF8`
-- Logs a warning if either code page change fails
+- Sets the console input code page to UTF-8.
+- Sets the console output code page to UTF-8.
+- Emits warning log messages on failure.
 
 #### Reads From
 
-- Preprocessor symbol `_WIN32`
-- Macro `CP_UTF8`
-- Windows system error state via `GetLastError()`
+- Result of `SetConsoleCP` and `SetConsoleOutputCP` to detect failure.
+- System error code via `GetLastError()` when a call fails.
 
 #### Writes To
 
-- Console input code page
-- Console output code page
-- Log system via `clore::logging::warn`
+- Windows console input code page.
+- Windows console output code page.
+- Logging output (via `clore::logging::warn`).
 
 #### Usage Patterns
 
-- Called during program initialization on Windows to enable UTF-8 console support
+- Called at application startup to ensure UTF-8 support in the Windows console.
 
 ### `clore::support::ensure_utf8`
 
-Declaration: `support/logging.cppm:75`
+Declaration: `src/support/logging.cppm:98`
 
-Definition: `support/logging.cppm:405`
+Definition: `src/support/logging.cppm:428`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
 Implementation: [Implementation](functions/ensure-utf8.md)
 
-The function `clore::support::ensure_utf8` implements a validation and repair pass over a `std::string_view` input. It reserves storage for the result and then iterates through the input by calling the helper `clore::support::(anonymous namespace)::valid_utf8_sequence_length` at each offset. If the sequence length is zero—indicating an invalid lead byte—the single byte is replaced with the constant `kUtf8Replacement` (the Unicode replacement character U+FFFD encoded as UTF-8) and the offset advances by one. Otherwise it appends the complete valid sequence and jumps the offset forward by that length. The entire algorithm depends solely on `valid_utf8_sequence_length` and the replacement literal; no other local functions or global state are involved in the loop.
+The implementation of `clore::support::ensure_utf8` iterates over the input `text` byte by byte, using the helper function `valid_utf8_sequence_length` (defined in an anonymous namespace) to determine the length of the UTF-8 sequence starting at each `offset`. If the helper returns `0`, the current byte is not a valid UTF-8 lead byte; in that case a replacement character (`kUtf8Replacement`) is appended to the output, and the iteration advances by one. When a valid sequence length is found, the corresponding substring is appended and `offset` is incremented by that length. The result accumulates into a `std::string` preallocated to the input size, and is returned as a fully valid UTF-8 string. The only explicit dependency is the sequence-length validator, which encapsulates the UTF-8 encoding rules.
 
 #### Side Effects
 
-- Allocates memory for a new `std::string`
-- Appends data to the newly allocated string
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `text` parameter
-- `valid_utf8_sequence_length` function result
-- `kUtf8Replacement` constant value
-- Bytes of input `text`
+- parameter `text`
+- constant `kUtf8Replacement`
 
 #### Writes To
 
-- Output `std::string` that is returned
+- returned `std::string`
 
 #### Usage Patterns
 
-- Used by `write_utf8_text_file` to sanitize input before writing
-- Used by `truncate_utf8` to ensure truncated result is valid UTF-8
+- Ensuring text is valid UTF-8 before passing to `write_utf8_text_file`
+- Sanitizing input before truncation in `truncate_utf8`
 
 ### `clore::support::extract_first_plain_paragraph`
 
-Declaration: `support/logging.cppm:62`
+Declaration: `src/support/logging.cppm:85`
 
-Definition: `support/logging.cppm:303`
+Definition: `src/support/logging.cppm:326`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The implementation iterates line‑by‑line through the input using `std::istringstream` and `std::getline`. Each line is trimmed of leading and trailing whitespace via `std::isspace`. A Boolean flag `in_code_block` toggles on encountering triple backticks; lines inside fenced code blocks are skipped entirely. If the trimmed line is empty, the function either continues (if no paragraph has started) or breaks out of the loop (ending the paragraph). Lines beginning with `#`, `>`, `|`, `- `, or `* ` (headings, block quotes, table rows, list items) also cause an early break if a paragraph has been started, otherwise they are skipped. All other non‑empty, non‑special lines are appended to the `paragraph` string, separated by a single space. After the loop, the accumulated text is passed through `clore::support::strip_inline_markdown_text` to strip inline formatting (bold, italic, code, etc.) before the result is returned. This function depends solely on `strip_inline_markdown_text` for the final cleanup; no other external functions or data structures are used.
+The function `clore::support::extract_first_plain_paragraph` processes the input `markdown` line by line using a `std::istringstream`. It maintains a `in_code_block` flag to skip content inside fenced code blocks (delimited by triple backticks). Each line is trimmed of leading and trailing whitespace. Empty lines that occur before any content are skipped; once a non-empty line has been accumulated, a blank line signals the end of the paragraph. Lines beginning with Markdown block‑level markers (`#`, `>`, `|`, `- `, or `* `) are also skipped unless they appear at the start of an empty paragraph buffer, in which case the paragraph is considered terminated. All remaining lines are joined into a single string separated by spaces. The resulting paragraph is then passed to `clore::support::(anonymous namespace)::strip_inline_markdown_text`, which removes inline formatting (such as bold, italic, or code spans), and the clean plain text is returned.
 
 #### Side Effects
 
@@ -691,21 +669,21 @@ No observable side effects are evident from the extracted code.
 #### Reads From
 
 - `markdown` parameter
-- `strip_inline_markdown_text` function
 
 #### Usage Patterns
 
-- Extracting plain text from Markdown documentation or log messages
+- extracting a plain text summary from Markdown
+- obtaining a human-readable description from documentation
 
 ### `clore::support::normalize_line_endings`
 
-Declaration: `support/logging.cppm:79`
+Declaration: `src/support/logging.cppm:102`
 
-Definition: `support/logging.cppm:442`
+Definition: `src/support/logging.cppm:465`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The function `clore::support::normalize_line_endings` normalizes line endings in a `std::string_view` input by converting both carriage-return (CR, `'\r'`) and carriage-return–line-feed (CRLF, `"\r\n"`) sequences to a single newline character (`'\n'`). The algorithm traverses the input character by character via an index-based loop. When it encounters a CR, it appends an LF to the result buffer and, if the next character is also LF (i.e., a CRLF pair), it increments the index to skip that LF. All other characters are copied unchanged. The output `std::string` is pre-allocated with `text.size()` capacity for efficiency. No external dependencies beyond the C++ standard library are used; the function relies solely on `std::string_view`, `std::string`, and plain character comparisons.
+The implementation iterates over the input `text` character by character using an index loop. For each `\r` (carriage return) encountered, it appends a single `\n` (line feed) to the output `normalized` string. If the `\r` is immediately followed by `\n` (i.e., a CRLF sequence), the `\n` is skipped by incrementing the index so that it is not duplicated. All other characters are copied verbatim. The algorithm has no dependencies beyond the C++ standard library containers (`std::string` and `std::string_view`); preallocation via `reserve` reduces reallocations when the input length is known. The result is a string that uses only LF line endings regardless of the original mixed CR, LF, or CRLF conventions.
 
 #### Side Effects
 
@@ -713,26 +691,28 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `text` (parameter of type `std::string_view`)
+- text (`std::string_view` parameter)
 
 #### Writes To
 
-- returned `std::string` with normalized line endings
+- returned `std::string` (local variable normalized)
 
 #### Usage Patterns
 
-- normalizing line endings in input text to Unix LF format
-- preprocessing text for consistent newline representation before further processing
+- Normalize line endings from different platforms
+- Preprocess text before further processing
 
 ### `clore::support::normalize_path_string`
 
-Declaration: `support/logging.cppm:64`
+Declaration: `src/support/logging.cppm:87`
 
-Definition: `support/logging.cppm:348`
+Definition: `src/support/logging.cppm:371`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The function delegates to the standard library's `std::filesystem::path` constructor and its `lexically_normal` member to resolve relative components like `..` and `.` and then converts the result to a generic string via `generic_string`. There is no branching or error handling; the single expression directly returns the normalized path. The only dependency is the C++17 filesystem library.
+Implementation: [Implementation](functions/normalize-path-string.md)
+
+The implementation delegates path normalization entirely to `std::filesystem::path`. It constructs a temporary `std::filesystem::path` from `path`, invokes `lexically_normal()` to collapse redundant `.` and `..` components and resolve directory separators in a platform-independent way, then calls `generic_string()` to output the result using forward slashes. There is no custom control flow—the function returns the result of this chained expression directly. Its only dependency is the C++ Standard Library’s filesystem support.
 
 #### Side Effects
 
@@ -744,46 +724,48 @@ No observable side effects are evident from the extracted code.
 
 #### Usage Patterns
 
-- used by `clore::support::build_compile_signature` to normalize path strings before constructing a hash
+- normalizing paths for signature computation
+- ensuring consistent path representation
 
 ### `clore::support::read_utf8_text_file`
 
-Declaration: `support/logging.cppm:85`
+Declaration: `src/support/logging.cppm:108`
 
-Definition: `support/logging.cppm:480`
+Definition: `src/support/logging.cppm:503`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The function `clore::support::read_utf8_text_file` first attempts to open the specified `path` as a binary input stream (`std::ifstream` with `std::ios::binary`). If the file cannot be opened, it returns a `std::unexpected` error message via `std::expected`. It then queries `std::filesystem::file_size` to pre‑reserve memory for `content`, improving performance. The file is read in 8192‑byte chunks using a fixed‑size `std::array<char, 8192>`, and each chunk is appended to `content` until the end of file is reached. After reading, the function checks the stream state; if a non‑recoverable error occurred (other than end‑of‑file), it returns an error. Finally, it calls the dependent function `strip_utf8_bom` on the raw `content`. If the BOM stripping changed the string (i.e., a BOM was present), the function returns the stripped view converted to `std::string`; otherwise it returns the original `content` to avoid an unnecessary allocation.
+The implementation opens the file in binary mode via `std::ifstream`. If that fails, it returns `std::unexpected` containing a formatted error message. To reduce reallocations, it optionally queries `std::filesystem::file_size` and calls `content.reserve` with that size. It then reads the file in fixed-size chunks using a local `std::array<char, 8192>`, calling `file.read` repeatedly and appending the reported `bytes_read` to `content`. After the loop, it checks for a hard read failure (`file.bad()`) or a non‑eof failure (`file.fail() && !file.eof()`) and returns an error in that case. Finally, it passes the raw `content` through `strip_utf8_bom`; if the resulting view has the same length as the original, the BOM was absent and the function returns `content` directly, otherwise it returns a `std::string` constructed from the stripped view. The only dependency used internally is `strip_utf8_bom` for removing a leading UTF‑8 byte order mark.
 
 #### Side Effects
 
-- reads file content from disk via `std::ifstream`
-- allocates memory for the `std::string` content
-- queries file size via `std::filesystem::file_size`
+- reads file from filesystem
+- allocates memory for string content
+- reads filesystem metadata via `file_size`
 
 #### Reads From
 
-- the file at the given `path`
-- filesystem metadata (file size)
+- the file at `path` from the filesystem
+- filesystem metadata via `std::filesystem::file_size`
+
+#### Writes To
+
+- heap memory allocated for the returned `std::string`
 
 #### Usage Patterns
 
-- load UTF-8 text files for logging configuration
-- read source files for processing or analysis
-- implement file-based data loading in support utilities
+- load UTF-8 text files into memory
+- obtain file contents as a `std::string` with error handling via `std::expected`
 
 ### `clore::support::split_cache_key`
 
-Declaration: `support/logging.cppm:73`
+Declaration: `src/support/logging.cppm:96`
 
-Definition: `support/logging.cppm:378`
+Definition: `src/support/logging.cppm:401`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The implementation of `clore::support::split_cache_key` proceeds in three sequential validation stages. It first searches the input cache key from the right for the delimiter constant `kCacheKeyDelimiter` using `rfind`. If no delimiter is found, the function returns an `std::unexpected` error constructed with `std::format`. Otherwise, it splits the view into a path part and a signature part via `substr`. If either part is empty, another error is returned.  
-
-The signature part is parsed as a `std::uint64_t` using `std::from_chars`. This call provides both a pointer to the first unconverted character and an error code. The function verifies that the conversion completed without error (`ec == std::errc{}`) and that the entire signature part was consumed (`ptr == signature_part.data() + signature_part.size()`). If parsing fails, an error is returned. On success, a `CacheKeyParts` struct is constructed with the path as a `std::string` and the parsed signature. No external utilities beyond `std::from_chars` and `std::format` are used; the delimiter constant and result type are defined within the `clore::support` namespace.
+The function first searches for the last occurrence of the anonymous‑namespace constant `kCacheKeyDelimiter` within the input `cache_key`. If the delimiter is absent, it returns an error message constructed via `std::format`. Otherwise it splits the string into two sub‑views: `path_part` (everything before the delimiter) and `signature_part` (everything after). Both sub‑views must be non‑empty; an empty part triggers an error. The `signature_part` is then parsed as a `std::uint64_t` using `std::from_chars`. Parsing is considered successful only when the entire substring is consumed and no error code (`std::errc`) is set. On success a `CacheKeyParts` value is returned with the path stored as a `std::string` and the parsed signature. Any failure at any of the validation or parsing steps returns a descriptive error string inside `std::unexpected`.
 
 #### Side Effects
 
@@ -791,25 +773,25 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `cache_key`
+- `cache_key` parameter
 - `kCacheKeyDelimiter`
 
 #### Usage Patterns
 
-- Used to split a combined cache key into its path and compile signature components for validation or further processing.
-- Complementary to `build_cache_key`.
+- Decompose cache keys created by `build_cache_key`
+- Validate and parse cache key strings
 
 ### `clore::support::strip_utf8_bom`
 
-Declaration: `support/logging.cppm:83`
+Declaration: `src/support/logging.cppm:106`
 
-Definition: `support/logging.cppm:470`
+Definition: `src/support/logging.cppm:493`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
 Implementation: [Implementation](functions/strip-utf8-bom.md)
 
-The implementation first verifies that the input `text` is at least as long as the `kUtf8Bom` byte sequence (three bytes). It then compares the first three bytes of `text` against `kUtf8Bom`, using `static_cast<unsigned char>` to avoid sign‑extension issues with `char` types. If all three bytes match, it returns a `std::string_view` starting after the BOM by calling `text.substr(std::size(kUtf8Bom))`. Otherwise, it returns the original `text` unchanged. The only dependency is the constant `kUtf8Bom`, which is defined in the anonymous namespace within the same translation unit.
+The function `clore::support::strip_utf8_bom` implements a simple prefix-stripping algorithm. It first checks whether the input `std::string_view` is long enough to contain the UTF-8 BOM sequence by comparing its size to `std::size(kUtf8Bom)`. If the length requirement is met, it performs three bytewise comparisons using `static_cast<unsigned char>` against the constant `kUtf8Bom` (defined in the anonymous namespace). When all three bytes match, the function returns a view starting after the BOM via `text.substr(std::size(kUtf8Bom))`. Otherwise, it returns the original string view unchanged. The implementation has no loops, no allocation, and relies solely on the inline constant `kUtf8Bom` for the BOM byte values.
 
 #### Side Effects
 
@@ -817,22 +799,23 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `text` of type `std::string_view`
-- constant `kUtf8Bom` (likely a three‑byte array `{0xEF, 0xBB, 0xBF}`)
+- text
 
 #### Usage Patterns
 
-- Stripping the UTF‑8 BOM from file contents before processing in `clore::support::read_utf8_text_file`
+- called by `read_utf8_text_file` to strip BOM
 
 ### `clore::support::topological_order`
 
-Declaration: `support/logging.cppm:93`
+Declaration: `src/support/logging.cppm:116`
 
-Definition: `support/logging.cppm:547`
+Definition: `src/support/logging.cppm:570`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The implementation performs a topological sort of a set of nodes using Kahn’s algorithm. It accepts a list of `nodes`, a `reverse_edges` map that records for each node the set of nodes that depend on it, and an `in_degree` map that tracks the number of outstanding dependencies for each node. Internally, a `std::set<std::string>` named `ready` collects all nodes whose in-degree is either missing or zero, and the algorithm repeatedly extracts the lexicographically smallest such node (via `ready.begin()`), appends it to the `order` vector, and then iterates over the node’s dependents in `reverse_edges`. For each dependent, the corresponding entry in `in_degree` is decremented; if the count reaches zero, the dependent is inserted into `ready`. If after exhausting `ready` the total number of nodes in `order` is less than the original node count, a cycle must exist, and the function returns `std::nullopt`. Otherwise it returns the computed `order`. The implementation depends on standard library containers (`std::vector`, `std::unordered_map`, `std::set`) and the `std::optional` wrapper for safe error signalling.
+The implementation of `clore::support::topological_order` employs Kahn’s algorithm to produce a lexicographically smallest topological ordering of the given `nodes`. The function accepts a list of all `nodes`, a `reverse_edges` map where each key maps to its dependents, and a mutable `in_degree` map that tracks the number of unprocessed predecessors for each node. It initialises a `std::set<std::string>` called `ready` with every node whose `in_degree` is zero or missing (treating missing entries as zero). The set stores strings in lexicographic order to guarantee deterministic output.
+
+The main loop repeatedly extracts the first element from `ready`, appends it to `order`, and locates its entry in `reverse_edges`. For each `dependent` of the current node, the corresponding `in_degree` value is decremented; if the value drops to zero, the dependent is inserted into `ready`. If the loop exhausts `ready` but the size of `order` is less than the number of `nodes`, a cycle exists and the function returns `std::nullopt`. Otherwise, it returns the completed `order`. The algorithm relies on `std::set` for sorted insertion and removal, and assumes that the `in_degree` map is correctly provided by the caller.
 
 #### Side Effects
 
@@ -840,24 +823,28 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `nodes` (const `std::vector<std::string>`&)
-- `reverse_edges` (const `std::unordered_map<std::string, std::vector<std::string>>`&)
-- `in_degree` (`std::unordered_map<std::string, int>`)
+- `nodes` parameter
+- `reverse_edges` parameter
+- `in_degree` parameter (passed by value)
+
+#### Writes To
+
+- local variables `ready`, `order`, and the parameter `in_degree` (copy)
 
 #### Usage Patterns
 
-- Used for dependency resolution and ordering tasks, such as scheduling build steps or validating `DAGs`.
-- Returns the topological order or indicates a cycle via `std::nullopt`.
+- topological ordering in dependency graphs
+- build system dependency resolution
 
 ### `clore::support::truncate_utf8`
 
-Declaration: `support/logging.cppm:81`
+Declaration: `src/support/logging.cppm:104`
 
-Definition: `support/logging.cppm:460`
+Definition: `src/support/logging.cppm:483`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The implementation first normalizes the input using the helper `clore::support::ensure_utf8`, which ensures the string is well-formed UTF-8 (replacing any invalid sequences). If the normalized string already fits within `max_bytes`, the function returns it immediately. Otherwise, it truncates the normalized string by resizing it to the byte count returned by `clore::support::(anonymous namespace)::utf8_prefix_length`, which determines the longest valid UTF-8 prefix that does not exceed `max_bytes`. The final result is a valid UTF-8 string guaranteed to be no longer than the requested byte limit. Both `ensure_utf8` and `utf8_prefix_length` are internal helpers defined in an anonymous namespace; the former ensures input integrity, the latter performs the actual boundary-aware truncation.
+The function first passes its input through `clore::support::ensure_utf8` to obtain a well-formed UTF‑8 string. If the normalized string’s byte count already satisfies the `max_bytes` bound, it is returned directly. Otherwise, the internal helper `clore::support::(anonymous namespace)::utf8_prefix_length` is called to compute the largest valid UTF‑8 prefix length that fits within the limit; `normalized` is then resized to that length and returned. Both dependencies are resolved within the `clore::support` namespace, with `utf8_prefix_length` being an anonymous‑namespace helper that examines the encoded sequence boundaries to avoid splitting a multi‑byte character.
 
 #### Side Effects
 
@@ -865,50 +852,45 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `text` parameter
-- `max_bytes` parameter
-- `ensure_utf8` call result
-- `utf8_prefix_length` helper function
-
-#### Writes To
-
-- returned `std::string`
+- text (`std::string_view`)
+- `max_bytes` (`std::size_t`)
 
 #### Usage Patterns
 
-- Truncating log messages to fit a byte limit
-- Limiting user-provided strings to a maximum UTF-8 byte length
-- Ensuring strings do not exceed storage constraints while maintaining encoding validity
+- Used to safely truncate UTF-8 text for storage or display constraints
+- Called when formatting log messages or database entries to limit byte length
 
 ### `clore::support::write_utf8_text_file`
 
-Declaration: `support/logging.cppm:88`
+Declaration: `src/support/logging.cppm:111`
 
-Definition: `support/logging.cppm:515`
+Definition: `src/support/logging.cppm:538`
 
 Declaration: [`Namespace clore::support`](../../namespaces/clore/support/index.md)
 
-The implementation of `clore::support::write_utf8_text_file` first normalizes the provided `content` by delegating to `clore::support::ensure_utf8`, which ensures the string is valid UTF‑8 and applies any required normalization. After obtaining the `normalized` string, the function attempts to open a `std::ofstream` in binary mode at the given `path`. If the stream fails to open (checked via `file.is_open()`), it immediately returns an error using `std::unexpected` with a formatted diagnostic message. Otherwise, it writes all bytes of `normalized` via `file.write`, flushes the stream with `file.flush()`, and then verifies the stream state. A failed write or flush also yields an error. On success, the function returns a `std::expected` containing no value. The control flow is a straightforward linear sequence with two early‑return error paths, relying solely on `ensure_utf8` for content preprocessing and on the standard library’s file I/O and error‑reporting facilities.
+The implementation first normalizes the input content by calling `clore::support::ensure_utf8`, which produces a `std::string` containing valid UTF-8. An `std::ofstream` is opened in binary mode on the given path. If the open fails, the function returns `std::unexpected` with a formatted error message. Otherwise, it writes the normalized data directly via `file.write`, flushes the stream, and checks the stream’s state. A failed write also results in an error, while success returns an empty `std::expected<void, std::string>`. The entire I/O path relies on `ensure_utf8` to guarantee well-formed output and on `std::format` for error reporting.
 
 #### Side Effects
 
-- writes to the file system at the path specified by the `path` parameter
+- writes to filesystem
 
 #### Reads From
 
-- `path` parameter
-- `content` parameter
+- path parameter
+- content parameter
+- `ensure_utf8` function call (reads its argument)
 
 #### Writes To
 
-- the file system at the location specified by `path`
+- file at path
 
 #### Usage Patterns
 
-- callers provide a filesystem path and string content to write a UTF-8 encoded file
-- used when a function needs to persist text data to disk with error handling
+- writing UTF-8 text files
 
 ## Internal Structure
 
-The `support` module is decomposed into two principal layers. The lower layer, implemented in an anonymous namespace within `support/logging.cppm`, provides low‑level UTF‑8 validation and manipulation primitives (e.g., `valid_utf8_sequence_length`, `is_continuation_byte`, `utf8_prefix_length`) as well as internal constants (`kUtf8Bom`, `kUtf8Replacement`, `kCacheKeyDelimiter`). The upper layer (namespace `clore::support`) exposes a cohesive public API that includes transparent string hashing and equality functors, path normalization, line‑ending normalization, UTF‑8 BOM stripping and truncation, file I/O helpers for UTF‑8 text, cache‑key construction and splitting, compile‑signature generation, topological ordering, and console encoding setup. The logging subsystem (`clore::logging`) is built on top of these utilities and `spdlog`, providing a global log‑level toggle, a central `log` function, and type‑safe `LogProxy` entry points for each severity. The module imports only `std` directly; all internal layering is expressed via anonymous namespace isolation and the clear distinction between private helpers and public interfaces.
+The `support` module is decomposed into two distinct namespaces: `clore::support` and `clore::logging`. The `clore::support` namespace exposes the project’s foundational utility layer, including UTF‑8 validation and truncation (`ensure_utf8`, `truncate_utf8`), line‑ending normalization (`normalize_line_endings`), path string normalization for stable keys (`normalize_path_string`), cache‑key construction and parsing (`build_cache_key`, `split_cache_key`, `CacheKeyParts`), compile‑signature generation (`build_compile_signature`), topological ordering of directed graphs (`topological_order`), and file I/O with UTF‑8 BOM handling (`read_utf8_text_file`, `write_utf8_text_file`, `strip_utf8_bom`). Heterogeneous‑lookup support for unordered containers is provided via the transparent hasher and equality functors (`TransparentStringHash`, `TransparentStringEqual`). Internal implementation details, such as the UTF‑8 sequence‑length helper (`valid_utf8_sequence_length`), markdown‑stripping (`strip_inline_markdown_text`), and the BOM and replacement constants, reside within an anonymous namespace to enforce encapsulation and avoid export leakage.
+
+The `clore::logging` namespace builds on the utilities from `clore::support` and external libraries (notably `spdlog`) to provide a lightweight logging façade. It defines a templated `LogProxy` for compile‑time log‑level selection and exposes pre‑instantiated inline variables (`trace`, `debug`, `info`, `warn`, `err`) that serve as callable logging proxies. The global log‑level threshold is stored in `g_log_level`. A direct‑to‑stderr path (`stderr_logger`) and a cache‑hit‑rate reporting function (`cache_hit_rate`) offer additional logging conveniences. The module’s layer structure ensures that lower‑level string‑ and path‑processing routines are separated from the log‑dispatch logic, promoting reuse and testability across the codebase.
 

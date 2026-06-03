@@ -72,9 +72,21 @@ endif()
 FetchContent_Declare(
     kotatsu
     GIT_REPOSITORY https://github.com/clice-io/kotatsu.git
-    GIT_TAG        main
+    GIT_TAG        229816fe32f690e81e8345c0ce3bb0c48753a3ae
 )
 FetchContent_MakeAvailable(kotatsu)
+
+if(APPLE)
+    set(CLORE_INSTALL_RPATH "/opt/homebrew/lib" CACHE STRING
+        "RPATH for installed binary (Homebrew prefix on macOS)")
+elseif(UNIX)
+    set(CLORE_INSTALL_RPATH "/usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}" CACHE STRING
+        "RPATH for installed binary (system lib on Linux)")
+endif()
+
+set(CMAKE_INSTALL_RPATH "${CLORE_INSTALL_RPATH}")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE)
 
 add_subdirectory(src)
 add_subdirectory(tests)

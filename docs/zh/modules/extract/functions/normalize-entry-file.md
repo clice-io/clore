@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::normalizeentryfile'
-description: '该函数解析 entry.file 路径并尝试将其转换为绝对形式，随后进行词法规范化和弱规范化。具体流程为：从 std::filesystem::path 构造开始，若路径是相对路径则将其与 entry.directory 拼接；接着调用 fs::absolute 将其转为绝对路径（若转换失败则保留原路径）；然后调用 lexically_normal() 消除冗余的 .. 和 . 组件。最后尝试 fs::weakly_canonical 以解析符号链接并将结果转换为通用字符串格式返回；若弱规范化失败则直接返回词法规范化后的通用字符串。整个函数完全依赖 <filesystem> 标准库，未涉及其他内部函数或复杂错误处理。'
+description: '该函数负责将编译条目中的源文件路径规范化为一个稳定、可移植的字符串表示。它首先将 entry.file 构造为 std::filesystem::path，若路径为相对路径，则将其与 entry.directory 拼接。随后调用 fs::absolute 并忽略错误地转为绝对路径，再执行 lexically_normal() 去除冗余的 . 与 .. 组件。接着尝试 fs::weakly_canonical 以解析符号链接并进一步归一化（该调用可能失败，例如路径不存在时）。成功时返回结果的 generic_string()；若 weakly_canonical 失败，则回退返回 lexically_normal 之后的通用格式字符串。整个过程仅依赖标准文件系统库与 CompileEntry 的两个字段 file 和 directory，不涉及外部数据库或缓存。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module extract:compiler](../compiler.md)
 
-Declaration: `extract/compiler.cppm:56`
+Declaration: `src/extract/compiler.cppm:72`
 
-Definition: `extract/compiler.cppm:91`
+Definition: `src/extract/compiler.cppm:107`
 
 Declaration: [`Namespace clore::extract`](../../../namespaces/clore/extract/index.md)
 
@@ -38,7 +38,7 @@ auto normalize_entry_file(const CompileEntry& entry) -> std::string {
 }
 ```
 
-该函数解析 `entry.file` 路径并尝试将其转换为绝对形式，随后进行词法规范化和弱规范化。具体流程为：从 `std::filesystem::path` 构造开始，若路径是相对路径则将其与 `entry.directory` 拼接；接着调用 `fs::absolute` 将其转为绝对路径（若转换失败则保留原路径）；然后调用 `lexically_normal()` 消除冗余的 `..` 和 `.` 组件。最后尝试 `fs::weakly_canonical` 以解析符号链接并将结果转换为通用字符串格式返回；若弱规范化失败则直接返回词法规范化后的通用字符串。整个函数完全依赖 `<filesystem>` 标准库，未涉及其他内部函数或复杂错误处理。
+该函数负责将编译条目中的源文件路径规范化为一个稳定、可移植的字符串表示。它首先将 `entry.file` 构造为 `std::filesystem::path`，若路径为相对路径，则将其与 `entry.directory` 拼接。随后调用 `fs::absolute` 并忽略错误地转为绝对路径，再执行 `lexically_normal()` 去除冗余的 `.` 与 `..` 组件。接着尝试 `fs::weakly_canonical` 以解析符号链接并进一步归一化（该调用可能失败，例如路径不存在时）。成功时返回结果的 `generic_string()`；若 `weakly_canonical` 失败，则回退返回 `lexically_normal` 之后的通用格式字符串。整个过程仅依赖标准文件系统库与 `CompileEntry` 的两个字段 `file` 和 `directory`，不涉及外部数据库或缓存。
 
 ## Side Effects
 
@@ -46,14 +46,13 @@ No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- `entry.file`
-- `entry.directory`
-- filesystem state for path resolution and canonicalization
+- `entry.file` and `entry.directory` members of the `CompileEntry` parameter
+- Filesystem via `std::filesystem::absolute` and `std::filesystem::weakly_canonical`
 
 ## Usage Patterns
 
-- used in `clore::extract::build_compile_signature` to generate a hash key
-- used in `clore::extract::ensure_cache_key_impl` to normalize the entry file before caching
+- Called by `clore::extract::build_compile_signature` to produce a normalized file string for hashing
+- Called by `clore::extract::ensure_cache_key_impl` to normalize the entry file path before caching
 
 ## Called By
 

@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::anthropic'
-description: 'The clore::net::anthropic namespace provides an asynchronous client interface for interacting with Anthropic language models. Its core responsibility is to manage the lifecycle of non‑blocking API requests through a set of overloaded functions that accept string‑view parameters for model identifiers, prompts, and system messages, along with a kota::event_loop reference to drive asynchronous operations.'
+description: 'The clore::net::anthropic namespace provides an asynchronous abstraction for interacting with the Anthropic language model API. It defines three core entry points: call_llm_async for general text generation, call_structured_async for requests returning a structured type, and call_completion_async for retrieving results of a previously issued request. Each function accepts parameters such as model identifier, prompt, system instructions, and a kota::event_loop reference, and returns an opaque integer handle that identifies the ongoing operation.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-The `clore::net::anthropic` namespace provides an asynchronous client interface for interacting with Anthropic language models. Its core responsibility is to manage the lifecycle of non‑blocking API requests through a set of overloaded functions that accept string‑view parameters for model identifiers, prompts, and system messages, along with a `kota::event_loop` reference to drive asynchronous operations.
+The `clore::net::anthropic` namespace provides an asynchronous abstraction for interacting with the Anthropic language model API. It defines three core entry points: `call_llm_async` for general text generation, `call_structured_async` for requests returning a structured type, and `call_completion_async` for retrieving results of a previously issued request. Each function accepts parameters such as model identifier, prompt, system instructions, and a `kota::event_loop` reference, and returns an opaque integer handle that identifies the ongoing operation.
 
-Notable declarations include `call_llm_async`, `call_completion_async`, and `call_structured_async`, all returning an `int` handle that uniquely identifies a pending request. The namespace acts as a dedicated layer within the `clore` networking subsystem, separating Anthropic‑specific protocol handling from generic event‑loop management. It is designed to be used with companion functions to retrieve results or track completion, and requires the caller to keep input string views and the event loop active for the duration of each operation.
+Architecturally, this namespace forms the networking layer for Anthropic-specific LLM calls, decoupling the client code from the underlying API details and threading model. The returned handles enable deferred result retrieval via `call_completion_async`, and the event loop parameter ensures the caller can integrate the asynchronous operations into their own concurrency framework. The design emphasizes asynchronous, non‑blocking invocation with explicit lifecycle management of the event loop and request handles.
 
 ## Diagram
 
@@ -36,65 +36,65 @@ graph TD
 
 ### `clore::net::anthropic::call_completion_async`
 
-Declaration: `network/anthropic.cppm:729`
+Declaration: `src/network/anthropic.cppm:738`
 
-Definition: `network/anthropic.cppm:771`
+Definition: `src/network/anthropic.cppm:780`
 
 Implementation: [`Module anthropic`](../../../../modules/anthropic/index.md)
 
-The function `clore::net::anthropic::call_completion_async` initiates an asynchronous request to obtain a completion for a previously started LLM interaction. The caller must provide an integer identifier (typically returned from an earlier call such as `call_llm_async`) and a reference to a `kota::event_loop` that will manage the asynchronous lifecycle. The function returns an integer that may represent a new request handle or a status code; the caller should use this value to track or verify the initiation of the request. This overload is part of the Anthropic client’s public async API, distinguished from related functions by its parameter types and purpose.
+The function `clore::net::anthropic::call_completion_async` initiates an asynchronous request to the Anthropic completion API. It accepts an `int` parameter (representing the context or identifier for the completion operation) and a reference to a `kota::event_loop` that will dispatch the callback upon completion. The function returns an `int` value that indicates the status of the operation or provides a handle for the asynchronous task. Callers are responsible for ensuring the provided event loop remains active until the operation completes.
 
 #### Usage Patterns
 
-- Calling this function to initiate an asynchronous LLM completion request to the Anthropic API
-- Awaiting the returned `kota::task` to obtain a `CompletionResponse` or handle an `LLMError`
+- Called to perform an Anthropic completion request asynchronously
+- Part of the coroutine-based API for LLM calls
 
 ### `clore::net::anthropic::call_llm_async`
 
-Declaration: `network/anthropic.cppm:739`
+Declaration: `src/network/anthropic.cppm:742`
 
-Definition: `network/anthropic.cppm:789`
+Definition: `src/network/anthropic.cppm:787`
 
 Implementation: [`Module anthropic`](../../../../modules/anthropic/index.md)
 
-The `clore::net::anthropic::call_llm_async` function initiates an asynchronous request to an Anthropic language model. It accepts three `std::string_view` parameters representing the model identifier, the input prompt, and an additional context (such as a system message or configuration), along with a reference to a `kota::event_loop` that will manage the asynchronous operation. The return value is an `int` handle that identifies the pending operation and can be used with `call_completion_async` to retrieve the result. The caller is responsible for ensuring that the provided string views remain valid until the operation completes, and that the event loop remains active for the duration of the request.
+Initiates an asynchronous call to the Anthropic language model API. The caller provides a system instruction (first `std::string_view`), a user message (second `std::string_view`), a maximum token limit (`int`), and a `kota::event_loop&` on which the operation will be scheduled. The function returns an `int` that serves as an opaque request identifier, which can later be used with related completion facilities (such as `clore::net::anthropic::call_completion_async`) to retrieve the response or monitor progress.
+
+The contract requires that the given `kota::event_loop` remains alive until the asynchronous operation completes. The returned integer is valid only within the lifetime of the same event loop and should not be reused after the associated request is finished. This overload is intended for simple text generation where the caller directly controls the maximum number of output tokens.
 
 #### Usage Patterns
 
-- Called as a coroutine within an event-loop-driven context
-- Used to obtain an LLM-generated string response asynchronously
-- Serves as a high-level entry point for Anthropic API interactions, alongside `call_completion_async` and `call_structured_async`
+- called as part of the `clore::net::anthropic` LLM API
+- may be used to initiate an asynchronous LLM call with a given request ID
 
 ### `clore::net::anthropic::call_llm_async`
 
-Declaration: `network/anthropic.cppm:733`
+Declaration: `src/network/anthropic.cppm:748`
 
-Definition: `network/anthropic.cppm:778`
+Definition: `src/network/anthropic.cppm:798`
 
 Implementation: [`Module anthropic`](../../../../modules/anthropic/index.md)
 
-`clore::net::anthropic::call_llm_async` initiates an asynchronous request to an Anthropic language model. The caller supplies two string views (typically an API key and a prompt or model identifier), an integer parameter (e.g., specifying generation configuration), and a `kota::event_loop &` to drive the asynchronous operation. The function returns an `int` handle that can be used with companion functions such as `call_completion_async` to retrieve the result or manage the pending call. The event loop must remain active for the duration of the operation; the contract guarantees that the returned handle uniquely identifies the pending request until completion or cancellation.
+The function `clore::net::anthropic::call_llm_async` initiates an asynchronous request to the Anthropic language model. The caller provides three mandatory `std::string_view` parameters—likely representing the model identifier, a system context or prompt, and the user input—along with a reference to a `kota::event_loop` that will drive the asynchronous operation. The function returns an `int` token that identifies this specific request. The caller can later pass this token to `call_completion_async` to retrieve the model’s response. It is the caller’s responsibility to ensure that the event loop remains active until the operation completes.
 
 #### Usage Patterns
 
-- asynchronous LLM call with error propagation
-- high-level wrapper over the core networking layer
+- Called from asynchronous contexts to obtain LLM completions
+- Used as a wrapper around the generic `call_llm_async` with the Anthropic protocol
 
 ### `clore::net::anthropic::call_structured_async`
 
-Declaration: `network/anthropic.cppm:746`
+Declaration: `src/network/anthropic.cppm:755`
 
-Definition: `network/anthropic.cppm:801`
+Definition: `src/network/anthropic.cppm:810`
 
 Implementation: [`Module anthropic`](../../../../modules/anthropic/index.md)
 
-The function `clore::net::anthropic::call_structured_async` is a template function that initiates an asynchronous request to the Anthropic API for a structured (typed) response. It expects a model identifier, system prompt, and user message as string views, along with a reference to a `kota::event_loop`. The template parameter `T` designates the expected structured output type. The function returns an `int` handle that identifies the pending operation; the caller can later combine this handle with `call_completion_async` to await the completed result.
+The template function `clore::net::anthropic::call_structured_async` initiates an asynchronous call to the Anthropic API and returns a structured result of type `T`. The caller supplies three `std::string_view` arguments representing the model identifier, the prompt, and additional configuration, along with a `kota::event_loop &` to which the completion will be posted. The function returns an `int` handle that can be passed to `clore::net::anthropic::call_completion_async` to await the result. The caller is responsible for ensuring that the event loop remains active until the asynchronous operation completes and that the resource identified by the returned handle is eventually consumed.
 
 #### Usage Patterns
 
-- Called with a concrete type `T` for structured response deserialization
-- Used in asynchronous contexts where a coroutine handles the result
-- Typically chained with other `kota::task` combinators or awaited directly
+- Public entry point for structured async LLM calls
+- Used to obtain a task that resolves to type T or `LLMError`
 
 ## Related Pages
 

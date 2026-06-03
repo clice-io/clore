@@ -1,10 +1,26 @@
 module;
 
+#include <cstdint>
+#include <expected>
+#include <format>
+#include <functional>
+#include <map>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <set>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
+
 #include "kota/codec/json/json.h"
 
 export module generate:analysis;
 
-import std;
 import :evidence;
 import :markdown;
 import :model;
@@ -251,7 +267,7 @@ auto parse_variable_analysis_lenient(std::string_view raw, std::string_view cont
 template <typename T>
 auto parse_structured_response(std::string_view raw, std::string_view context)
     -> std::expected<T, GenerateError> {
-    auto parsed = json::from_json<T>(raw);
+    auto parsed = json::parse<T>(raw);
     if(!parsed.has_value()) {
         return std::unexpected(GenerateError{
             .message = std::format("failed to parse structured response for {}: {}",

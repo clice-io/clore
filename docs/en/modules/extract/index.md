@@ -1,6 +1,6 @@
 ---
 title: 'Module extract'
-description: 'The extract module is responsible for orchestrating the asynchronous extraction of project metadata from source code. It parses translation units, builds a dependency graph of modules and files, and produces a structured model of the project’s symbols and their relationships. The module owns the public entry point extract_project_async, which accepts a project identifier and an event loop to drive the extraction pipeline, returning an integer handle for the operation. It also exposes the ExtractError struct as a uniform error type for extraction failures.'
+description: 'The extract module orchestrates the asynchronous extraction of project data, including symbols, dependencies, and compilation units, for a given project identified by an integer handle. It serves as the core engine that coordinates scanning, parsing, caching, and result assembly. Publicly, the module exposes the main entry point extract_project_async, which schedules all extraction work on a kota::event_loop and returns an operation handle; internal functions such as extract_ast_batch_async, extract_ast_entry, and cache‑I/O helpers (load_caches_async, save_caches_async) form the private implementation scope.'
 layout: doc
 template: doc
 ---
@@ -9,14 +9,13 @@ template: doc
 
 ## Summary
 
-The `extract` module is responsible for orchestrating the asynchronous extraction of project metadata from source code. It parses translation units, builds a dependency graph of modules and files, and produces a structured model of the project’s symbols and their relationships. The module owns the public entry point `extract_project_async`, which accepts a project identifier and an event loop to drive the extraction pipeline, returning an integer handle for the operation. It also exposes the `ExtractError` struct as a uniform error type for extraction failures.
+The `extract` module orchestrates the asynchronous extraction of project data, including symbols, dependencies, and compilation units, for a given project identified by an integer handle. It serves as the core engine that coordinates scanning, parsing, caching, and result assembly. Publicly, the module exposes the main entry point `extract_project_async`, which schedules all extraction work on a `kota::event_loop` and returns an operation handle; internal functions such as `extract_ast_batch_async`, `extract_ast_entry`, and cache‑I/O helpers (`load_caches_async`, `save_caches_async`) form the private implementation scope.
 
-Internally, the module manages a multi‑stage pipeline: loading and saving caches (scan caches, clice caches, and extract‑cache records), evaluating cache validity, performing parallel AST extraction via batching, resolving module dependencies, and building grouped module information. Publicly visible types and functions are limited to the main extraction interface and error reporting; all caching, batching, and parallel logic is encapsulated within anonymous namespaces to keep the public API minimal and focused on asynchronous project extraction.
+Behind the scenes, the module manages several interlocking data structures: `ExtractError` for reporting failures; `ParallelASTResult`, `LoadedCaches`, `CacheEvaluation`, `PreparedEntryState`, and `GroupedModuleInfo` for tracking parallel AST processing, cache coherence, and module information. It imports the `config` and `support` modules for configuration and low‑level utilities, and its internal logic handles dependency graph construction (`dep_graph`), database filtering (`filtered_db`), and both scan‑cache and extract‑cache validation. The result is an efficient, cache‑aware pipeline that produces a consistent project model from source files.
 
 ## Imports
 
 - [`config`](../config/index.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Imported By
@@ -40,77 +39,76 @@ Internally, the module manages a multi‑stage pipeline: loading and saving cach
 
 ### `clore::extract::ExtractError`
 
-Declaration: `extract/extract.cppm:21`
+Declaration: `src/extract/extract.cppm:43`
 
-Definition: `extract/extract.cppm:21`
+Definition: `src/extract/extract.cppm:43`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The `clore::extract::ExtractError` struct is implemented as a simple wrapper around a single `std::string` member named `message`. Its internal structure imposes no invariants beyond those of `std::string`; the `message` may be empty or contain any descriptive text. No custom constructor, assignment `operator`, or other member functions are defined, so the compiler provides default implementations for copy, move, and destruction. This minimal design makes the type lightweight and suitable for use as a straightforward error object that carries a human-readable explanation of an extraction failure.
+The struct `clore::extract::ExtractError` is a lightweight error type comprising a single data member, `message`, of type `std::string`. This member stores a human-readable description of the extraction failure. The struct imposes no special invariants; the string is assumed to be in a valid state as defined by `std::string` semantics. No additional constructors, assignment `operator`s, or member functions are present, making the type a plain data carrier with default copy, move, and destruction behavior supplied by the compiler.
 
 #### Invariants
 
-- The `message` member conforms to all invariants of `std::string` (e.g., valid state, no null pointer).
-- The `message` may be empty, indicating a generic error.
+- `message` may be empty or contain a descriptive error text
 
 #### Key Members
 
-- `std::string message`
+- `message` member
 
 #### Usage Patterns
 
-- Used as the `what()` or error payload in exception types or `std::error_code`-based error handling.
-- May be constructed with a string literal or localised error description.
-- Potentially returned as part of a `std::expected` or similar outcome type.
+- Returned from extraction functions when an error occurs
+- Accessed to display or log the error message
 
 ## Functions
 
 ### `clore::extract::extract_project_async`
 
-Declaration: `extract/extract.cppm:25`
+Declaration: `src/extract/extract.cppm:47`
 
-Definition: `extract/extract.cppm:539`
+Definition: `src/extract/extract.cppm:561`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function first loads and filters the compilation database, then loads persisted cache records and the clice cache via `load_caches_async`. For each filtered entry it computes a cache key, compile signature, and source hash, then evaluates whether the scan and AST results are cached (checking `CacheEvaluation::scan_valid` and `CacheEvaluation::ast_valid`). It builds a `DependencyGraph` using the seeded scan cache, computes a topological file order, and launches `extract_ast_batch_async` to obtain `ParallelASTResult` objects for files whose AST cache is invalid. For each file it either reuses the cached `ASTResult` or takes the parallel result, then resolves symbol declaration and definition locations using `resolve_symbol_location_path`, filters symbols and includes against the project filter, and merges them into the `ProjectModel`. After all files are processed it calls `rebuild_model_indexes`, `build_module_info`, and resolves source snippets, then persists caches via `save_caches_async`. The function uses `kota::event_loop` for all asynchronous operations and relies on `kota::fail` for error propagation, with a special `fail_after_persist` lambda that attempts to save caches before yielding the error.
+The function is a coroutine (`kota::task`) that orchestrates the multi‑phase extraction of a `ProjectModel` from a compilation database. It begins by loading and filtering the database entries using `matches_filter` and `filter_root_path`, then asynchronously loads existing caches via `load_caches_async`. For each filtered entry, it computes a `compile_signature`, `cache_key`, and `CacheEvaluation` record; if the entry’s source hash, signature, and AST dependencies match a prior cache entry, the scan and AST are reused (incrementing `ast_cache_hits`), otherwise a miss is recorded. A `DependencyGraph` is built asynchronously (`build_dependency_graph_async`), seeded with valid scan results, and a topological order is computed.
+
+Next, the function launches an asynchronous batch AST extraction (`extract_ast_batch_async`) for entries that are not fully cached. After obtaining the parallel AST results, it iterates over all entries in topological order. For each entry, it either uses the cached AST (`ast_view` from `cache_records`) or the freshly extracted `parallel_asts`. Symbol declarations and definitions are resolved via `resolve_symbol_location_path`, filtered against the project filter, and inserted or merged into `model.symbols`. Relations (inheritance, calls, references) are added to the model. Cache records are updated or inserted based on source hash availability. After processing all entries, `rebuild_model_indexes`, `build_module_info`, and `rebuild_lookup_maps` are called, followed by asynchronous source snippet resolution. Finally, all caches are persisted via `save_caches_async`, and the assembled `ProjectModel` is returned. Throughout, timing and diagnostic logs are emitted, and errors trigger a `fail_after_persist` lambda that attempts to save caches before failing the coroutine.
 
 #### Side Effects
 
-- loads compilation database from disk
-- loads caches from disk (`cache_records`, `clice_cache`)
-- saves caches to disk on success or failure
-- logs progress, timing, and diagnostic information
-- creates and populates `ProjectModel` (symbols, files, includes, relations)
-- resolves source snippets asynchronously
-- rebuilds lookup maps and model indexes
+- loads and saves cache files via `load_caches_async` and `save_caches_async`
+- modifies and returns the `ProjectModel`
+- performs logging at multiple stages
+- reads source files and compilation database from disk
+- resolves filesystem paths, possibly performing I/O
 
 #### Reads From
 
-- config (`config::TaskConfig`)
-- compilation database (`std::string_view` `compile_commands_path`)
-- cache files on disk
-- source files (via AST extraction and dependency scanning)
-- dependency graph (`DependencyGraph`)
+- `config::TaskConfig` (config)
+- `kota::event_loop` (loop)
+- compilation database file (via `load_compdb`)
+- cache files (via `load_caches_async`)
+- source files (via `extract_ast_batch_async`)
+- filesystem for path resolution
 
 #### Writes To
 
-- `ProjectModel` (model`.symbols`, model`.files`, model`.includes`, model`.relations`, etc.)
-- `cache_records` (`std::unordered_map<std::string, CacheRecord>`)
-- `clice_cache` (`CliceCache`)
-- log output (via `logging::info`, `logging::warn`, `logging::cache_hit_rate`)
+- returned `ProjectModel`
+- cache files (via `save_caches_async`)
+- logging output
 
 #### Usage Patterns
 
 - top-level entry point for project extraction
-- asynchronously called with a task configuration and event loop
-- used in clore tool to generate project model from compile commands
+- used with an event loop for asynchronous execution
+- integrated with caching for incremental extraction
+- called once per project analysis session
 
 ## Internal Structure
 
-The `extract` module is structured around a single public entry point, `extract_project_async`, which accepts a project identifier and an event loop to drive asynchronous work. All core logic resides in an anonymous namespace, decomposing the extraction into distinct phases: cache I/O (load/save caches), worker task scheduling (via `run_worker_task_async` and `run_cache_io_async`), parallel AST extraction (`extract_ast_entry`, `extract_ast_batch_async`), and module‑info construction (`build_module_info`). Data flows through transient structs such as `CacheEvaluation`, `PreparedEntryState`, `ParallelASTResult`, and `LoadedCaches`, which encapsulate per‑file states, cache records, and dependency snapshots. Asynchronous coordination uses `kota::event_loop` and lightweight task handles (`int` return values), enabling concurrent cache operations and AST processing without blocking the caller.
+The `extract` module is the core asynchronous extraction engine, organized around several internal layers that handle cache I/O, parallel AST processing, and dependency resolution. At the top level, `extract_project_async` orchestrates the entire pipeline by coordinating cache loading via `load_caches_async`, batch AST extraction through `extract_ast_batch_async`, and final cache persistence with `save_caches_async`. Internally, the module defines anonymous‑namespace structures such as `CacheEvaluation`, `LoadedCaches`, `ParallelASTResult`, and `PreparedEntryState` to represent intermediate state, while functions like `extract_ast_entry` and `build_module_info` encapsulate per‑entry and module‑level logic. Concurrency is managed through `kota::event_loop` handles, and all I/O‑bound operations (loading and saving clice/extract caches) are isolated in `run_cache_io_async` and `run_worker_task_async` to separate them from compute‑intensive AST work.
 
-The module imports `config` for extraction parameters, `support` for foundational utilities (logging, cache‑key generation, path normalization), and `std` for standard types. Internally, the code is layered: low‑level helper functions (e.g., `make_exception_error`, `unexpected_extract_error`) provide uniform error handling with `ExtractError`; the cache layer (load/save functions) isolates persistence from the core extraction logic; and the AST layer (`extract_ast_entry`, `extract_ast_batch_async`) performs per‑file symbol extraction, feeding results into module building (`build_module_info`). This separation of concerns allows independent evolution of caching, I/O parallelism, and symbol analysis while keeping the public interface minimal.
+The module imports from `config` and `support`, relying on `config` for application settings and `support` for foundational utilities such as string normalization, caching helpers, and file handling. This import structure provides clear separation: configuration drives the extraction parameters, while support utilities handle low‑level data manipulation and logging. The implementation structure thus layers cache management at the top, batch and entry‑level extraction in the middle, and utility functions at the bottom, all tied together by the asynchronous event loop pattern that enables non‑blocking extraction of project symbol, dependency, and compilation‑unit data.
 
 ## Related Pages
 

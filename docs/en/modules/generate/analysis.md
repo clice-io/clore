@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:analysis'
-description: 'The generate:analysis module is responsible for orchestrating the generation of structured analyses for code symbols—variables, functions, and types—by constructing AI prompts, parsing model responses, and normalizing the results. It owns the full pipeline of prompt building, response interpretation, fallback generation, and result persistence, ensuring that downstream consumers always have a well-formed analysis to work with.'
+description: 'The generate:analysis module is responsible for orchestrating the analysis phase of documentation generation. It builds prompts for symbol analysis using context from the generate:model and generate:evidence modules, sends them to a language model, and processes the responses. Its public interface includes functions to construct and classify analysis prompts (build_symbol_analysis_prompt, analysis_prompt_kind_for_symbol, is_declaration_summary_prompt), parse both structured and markdown outputs (parse_structured_response, parse_markdown_prompt_output), normalize markdown fragments, and apply analysis results back into the generation state (apply_symbol_analysis_response, store_fallback_analysis).'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-The `generate:analysis` module is responsible for orchestrating the generation of structured analyses for code symbols—variables, functions, and types—by constructing AI prompts, parsing model responses, and normalizing the results. It owns the full pipeline of prompt building, response interpretation, fallback generation, and result persistence, ensuring that downstream consumers always have a well-formed analysis to work with.
+The `generate:analysis` module is responsible for orchestrating the analysis phase of documentation generation. It builds prompts for symbol analysis using context from the `generate:model` and `generate:evidence` modules, sends them to a language model, and processes the responses. Its public interface includes functions to construct and classify analysis prompts (`build_symbol_analysis_prompt`, `analysis_prompt_kind_for_symbol`, `is_declaration_summary_prompt`), parse both structured and markdown outputs (`parse_structured_response`, `parse_markdown_prompt_output`), normalize markdown fragments, and apply analysis results back into the generation state (`apply_symbol_analysis_response`, `store_fallback_analysis`).
 
-Its public-facing scope includes entry points such as `parse_structured_response`, `normalize_markdown_fragment`, `build_symbol_analysis_prompt`, `apply_symbol_analysis_response`, `store_fallback_analysis`, and a set of predicate functions (`is_base_symbol_analysis_prompt`, `is_declaration_summary_prompt`, `analysis_prompt_kind_for_symbol`, `symbol_prompt_kinds_for_symbol`) that classify prompt kinds and drive the correct analysis strategy for each symbol. Internally, the module provides lenient parsing and fallback mechanisms for type, function, and variable analyses, as well as normalization and merging utilities to produce consistent, structured output from raw AI responses.
+Internally, the module defines utility functions for lenient parsing, merging, and fallback logic for function, type, and variable analyses, as well as normalization of markdown content. It depends on the `config`, `extract`, `generate:evidence`, `generate:markdown`, `generate:model`, and `support` modules to handle configuration, extraction of project data, evidence packaging, markdown rendering, core model types, and foundational utilities.
 
 ## Imports
 
@@ -20,7 +20,6 @@ Its public-facing scope includes entry points such as `parse_structured_response
 - [`generate:evidence`](evidence.md)
 - [`generate:markdown`](markdown.md)
 - [`generate:model`](model.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Imported By
@@ -45,13 +44,13 @@ graph LR
 
 ### `clore::generate::analysis_prompt_kind_for_symbol`
 
-Declaration: `generate/analysis.cppm:27`
+Declaration: `src/generate/analysis.cppm:43`
 
-Definition: `generate/analysis.cppm:286`
+Definition: `src/generate/analysis.cppm:302`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function implements an early-return dispatch based on the kind of the input symbol. It sequentially tests `is_function_kind`, `is_type_kind`, and `is_variable_kind` on `sym.kind`, returning the corresponding `PromptKind` enumerator `FunctionAnalysis`, `TypeAnalysis`, or `VariableAnalysis` as soon as a match is found. If none of the kind predicates hold, it returns `std::nullopt`. This control flow relies on the `extract::SymbolInfo` type, the `PromptKind` enumeration, and the three helper predicates; no external state or complex branching is involved.
+The function uses a simple if-else chain to map the `kind` field of the incoming `extract::SymbolInfo` to a `PromptKind` value. It first tests with `is_function_kind` and returns `PromptKind::FunctionAnalysis` if true; otherwise it tests with `is_type_kind` and `is_variable_kind` in that order, returning `PromptKind::TypeAnalysis` or `PromptKind::VariableAnalysis` respectively. When none of the three kind predicates match, it returns `std::nullopt`. This control flow depends only on the `extract::SymbolInfo` type, the three `is_*_kind` helper functions, and the `PromptKind` enumeration.
 
 #### Side Effects
 
@@ -59,55 +58,54 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `sym` (specifically `sym.kind`)
+- sym`.kind`
 
 #### Usage Patterns
 
-- Used to select the appropriate `PromptKind` when constructing analysis evidence and prompts for a symbol
+- used to map a symbol to its required analysis prompt kind
 
 ### `clore::generate::apply_symbol_analysis_response`
 
-Declaration: `generate/analysis.cppm:39`
+Declaration: `src/generate/analysis.cppm:55`
 
-Definition: `generate/analysis.cppm:348`
+Definition: `src/generate/analysis.cppm:364`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::apply_symbol_analysis_response` routes a raw LLM response into the appropriate symbol analysis store entry based on `PromptKind`. It first computes a `target_key` via `make_symbol_target_key` from the symbol `sym`. A `switch` on `kind` then dispatches to a case‑specific lenient parser (e.g., `parse_function_analysis_lenient`, `parse_type_analysis_lenient`, `parse_variable_analysis_lenient`, or `parse_markdown_prompt_output`). If parsing fails, the function returns `std::unexpected` with the captured error. On success, the outcome is integrated into `analyses`: for `FunctionAnalysis` and `TypeAnalysis`, a fallback analysis is generated (via `fallback_function_analysis` or `fallback_type_analysis`) and then merged with the parsed result using `merge_function_analysis` or `merge_type_analysis`; for declaration/implementation summary kinds, the parsed markdown is stored directly into the `overview_markdown` or `details_markdown` field of the appropriate function or type analysis; for `VariableAnalysis`, the parsed object is directly assigned to `analyses.variables[target_key]`. An unsupported `kind` triggers an error return. The implementation depends on the public lenient‑parsing helpers, fallback generators, and merge routines, all operating within the `clore::generate` namespace.
+The function `clore::generate::apply_symbol_analysis_response` implements the core dispatch logic for processing a raw LLM response into the `SymbolAnalysisStore`. Its control flow is a switch over `PromptKind`. For each case, it first derives a stable `target_key` from `sym` via `make_symbol_target_key`, then selects a parsing strategy (e.g., `parse_function_analysis_lenient`, `parse_markdown_prompt_output`, `parse_type_analysis_lenient`, or `parse_variable_analysis_lenient`) and a fallback strategy (e.g., `fallback_function_analysis`, `fallback_type_analysis`) from the anonymous namespace helpers. For structured analysis kinds (`FunctionAnalysis`, `TypeAnalysis`), it merges the parsed values into the existing store entry using `merge_function_analysis` or `merge_type_analysis`, with the fallback acting as a default baseline. For markdown summary kinds (`FunctionDeclarationSummary`, `FunctionImplementationSummary`, `TypeDeclarationSummary`, `TypeImplementationSummary`), it directly assigns the parsed markdown to the appropriate `overview_markdown` or `details_markdown` field of the corresponding symbol’s analysis. For `VariableAnalysis`, the parsed result is stored directly, and any unsupported kind returns a `GenerateError`. The function depends on several internal parsing, normalization, and fallback routines, as well as on `prompt_request_key` for constructing request identifiers used during parsing.
 
 #### Side Effects
 
-- Modifies `analyses` by inserting parsed data into `analyses.functions`, `analyses.types`, and `analyses.variables` maps
+- Modifies `analyses.functions`, `analyses.types`, or `analyses.variables` by adding or updating analysis data
 
 #### Reads From
 
-- `analyses`: reads existing analysis entries via `analyses.functions[target_key]`, `analyses.types[target_key]`
-- `sym`: used to build target key and for fallback analysis
-- `model`: used for fallback type analysis
-- `kind`: determines which parser and merge logic to apply
-- `raw_response`: the input string to parse
+- `analyses` reference
+- `sym` parameter
+- `model` parameter
+- `raw_response` parameter
+- internally constructed `PromptRequest` objects
 
 #### Writes To
 
-- `analyses.functions`: writes via `merge_function_analysis` or direct assignment of markdown fields
-- `analyses.types`: writes via `merge_type_analysis` or direct assignment of markdown fields
-- `analyses.variables`: writes via direct assignment after parsing
+- `analyses.functions[target_key]`
+- `analyses.types[target_key]`
+- `analyses.variables[target_key]`
 
 #### Usage Patterns
 
-- Called by generation infrastructure to integrate AI responses into the analysis store
-- Typically invoked after sending a prompt for a specific symbol and `PromptKind`
-- The response is parsed and merged, with fallback logic for robustness
+- Called after receiving a prompt response to store analysis results
+- Used in a loop over multiple prompt responses
 
 ### `clore::generate::build_symbol_analysis_prompt`
 
-Declaration: `generate/analysis.cppm:46`
+Declaration: `src/generate/analysis.cppm:62`
 
-Definition: `generate/analysis.cppm:429`
+Definition: `src/generate/analysis.cppm:445`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::build_symbol_analysis_prompt` constructs a complete analysis prompt for a given symbol. It begins by dispatching on the `PromptKind` to select the appropriate evidence builder (e.g., `build_evidence_for_function_analysis`), each of which gathers context from the `ProjectModel` and `SymbolAnalysisStore` into an `EvidencePack`. After building evidence, it sets common metadata fields ( `page_id`, `prompt_kind`, `subject_name` ) on the pack, then delegates to `build_prompt` to render the final prompt string. If the `PromptKind` is unsupported, or if `build_prompt` fails, the function returns a `GenerateError` describing the failure. Dependencies include the per‑kind evidence builders, `prompt_kind_name`, `make_symbol_target_key`, and the `build_prompt` utility.
+The function `clore::generate::build_symbol_analysis_prompt` orchestrates the construction of a prompt string for a given symbol analysis task. It begins by dispatching on the `kind` parameter—a `PromptKind` enumerator—to invoke one of several dedicated evidence‑gathering helpers (e.g., `build_evidence_for_function_analysis` or `build_evidence_for_type_declaration_summary`). Each helper populates an `EvidencePack` with the information relevant to that particular analysis type, drawing from the symbol’s `extract::SymbolInfo`, the `extract::ProjectModel`, and optionally the existing `SymbolAnalysisStore`. After building the evidence, the function stamps the pack with a fixed page identifier, the kind name (via `prompt_kind_name`), and the symbol’s qualified name. It then passes the enriched evidence to `build_prompt`, a generic routine that composes the final prompt string. If prompt construction fails, the function returns a `std::unexpected` containing a `GenerateError` with a descriptive message, which includes the symbol’s target key (formatted by `make_symbol_target_key`). On success, the prompt string is moved into the result.
 
 #### Side Effects
 
@@ -115,26 +113,30 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- const `extract::SymbolInfo`& sym (specifically sym`.qualified_name`)
-- `PromptKind` kind
-- const `extract::ProjectModel`& model
-- const `config::TaskConfig`& config (specifically config`.project_root`)
-- const `SymbolAnalysisStore`& analyses
+- parameter `sym` (a `const extract::SymbolInfo&`)
+- parameter `kind` (a `PromptKind`)
+- parameter `model` (a `const extract::ProjectModel&`)
+- parameter `config` (a `const config::TaskConfig&`)
+- parameter `analyses` (a `const SymbolAnalysisStore&`)
+- the `qualified_name` member of `sym`
+- the `project_root` member of `config`
+- the `analyses` store (via evidence-builders)
 
 #### Usage Patterns
 
-- generating prompts for function, type, and variable analysis
-- called from higher-level generation functions to produce LLM prompts
+- used to generate prompts for symbol analysis pipelines
+- called when building prompts for function, type, or variable analysis
+- typically invoked by higher-level prompt construction routines like `apply_symbol_analysis_response` or `build_dry_run_page_summary_texts`
 
 ### `clore::generate::is_base_symbol_analysis_prompt`
 
-Declaration: `generate/analysis.cppm:31`
+Declaration: `src/generate/analysis.cppm:47`
 
-Definition: `generate/analysis.cppm:325`
+Definition: `src/generate/analysis.cppm:341`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::is_base_symbol_analysis_prompt` performs a simple membership test: it accepts a `PromptKind` value and returns `true` if and only if the kind matches one of three known enumeration members—`PromptKind::FunctionAnalysis`, `PromptKind::TypeAnalysis`, or `PromptKind::VariableAnalysis`. The implementation consists of a single `return` statement combining those three comparisons with the logical OR `operator`, making the control flow unconditional and branch-free. No external dependencies are required beyond the `PromptKind` enum definition; the function serves as a lightweight predicate used to classify prompt types before further processing in the analysis pipeline.
+The function `clore::generate::is_base_symbol_analysis_prompt` implements a simple equality check: it returns `true` if the `PromptKind` argument matches one of three enumerators—`FunctionAnalysis`, `TypeAnalysis`, or `VariableAnalysis`—and `false` otherwise. There is no branching or iteration beyond the direct comparison of the input value against each of these constants. The logic relies solely on the `PromptKind` enumeration and performs no additional computation or external calls. This predicate is used internally to classify whether a given prompt kind corresponds to a base symbol analysis task, enabling selection of the appropriate processing path in the larger prompt‑generation and response‑handling pipeline.
 
 #### Side Effects
 
@@ -142,22 +144,22 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `kind`
+- Parameter `kind` of type `PromptKind` (int underlying)
 
 #### Usage Patterns
 
-- used to determine whether a given prompt kind belongs to the base symbol analysis category
-- called when building prompts or caching keys for symbol analysis
+- Used to test whether a prompt kind should trigger a base symbol analysis
+- Possibly called before dispatching to analysis-specific builders
 
 ### `clore::generate::is_declaration_summary_prompt`
 
-Declaration: `generate/analysis.cppm:33`
+Declaration: `src/generate/analysis.cppm:49`
 
-Definition: `generate/analysis.cppm:330`
+Definition: `src/generate/analysis.cppm:346`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function performs an equality check against two enumerators of `PromptKind`. It returns `true` if the input `kind` equals `PromptKind::FunctionDeclarationSummary` or `PromptKind::TypeDeclarationSummary`, and `false` otherwise. No additional logic, branching, or external state is involved. The only dependency is the definition of the `PromptKind` enumeration, which must contain the two named constants.
+The function `clore::generate::is_declaration_summary_prompt` implements a direct predicate check on its `PromptKind` parameter. It returns `true` only when the argument is `PromptKind::FunctionDeclarationSummary` or `PromptKind::TypeDeclarationSummary`; otherwise it returns `false`. The control flow consists of a single logical disjunction of two equality comparisons, with no loops, recursion, or branching beyond the expression itself. Its only dependencies are the definition of `PromptKind` and its two enumerator values.
 
 #### Side Effects
 
@@ -169,43 +171,20 @@ No observable side effects are evident from the extracted code.
 
 #### Usage Patterns
 
-- classifying prompt kinds
-- determining if a prompt is a declaration summary
+- used to branch prompt generation logic based on prompt kind
+- called in contexts that need to treat declaration summary prompts distinctly
 
 ### `clore::generate::normalize_markdown_fragment`
 
-Declaration: `generate/analysis.cppm:21`
+Declaration: `src/generate/analysis.cppm:37`
 
-Definition: `generate/analysis.cppm:267`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The function `clore::generate::normalize_markdown_fragment` takes a raw markdown string view and a context label, then produces a normalized `std::expected<std::string, GenerateError>`. It first ensures the input is valid UTF-8 via `clore::support::ensure_utf8`, strips any UTF-8 BOM with `clore::support::strip_utf8_bom`, and removes trailing ASCII whitespace using the internal helper `trim_trailing_ascii_whitespace`. If the result contains no non‑whitespace characters (checked by `contains_non_whitespace`), it returns an error with a descriptive message incorporating the `context` parameter. Otherwise it applies `normalize_analysis_markdown` to the string and returns the final normalized fragment.
-
-All processing relies on utilities from the `clore::support` namespace for Unicode handling and on two anonymous‑namespace helpers (`trim_trailing_ascii_whitespace` and `contains_non_whitespace`), plus the complex `normalize_analysis_markdown` routine that performs further markdown‑specific normalization. The function does not parse or generate analysis data itself; it is a low‑level text preparation step used by higher‑level analysis parsing functions to produce consistent, error‑checked markdown fragments.
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- `raw`
-- `context`
-
-#### Usage Patterns
-
-- Called when a raw markdown fragment needs to be validated and normalized before further processing; returns an error if the fragment is empty.
-
-### `clore::generate::parse_markdown_prompt_output`
-
-Declaration: `generate/analysis.cppm:24`
-
-Definition: `generate/analysis.cppm:281`
+Definition: `src/generate/analysis.cppm:283`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::parse_markdown_prompt_output` is a thin delegation wrapper that immediately calls `clore::generate::normalize_markdown_fragment` with the same `raw` and `context` arguments, then returns its result. Internally, control flow consists solely of that single function call; no additional processing or error handling is performed within this function itself. Its dependency is entirely on `normalize_markdown_fragment`, which performs the actual markdown normalization logic. By providing a dedicated entry point, `parse_markdown_prompt_output` isolates the markdown‑prompt parsing concern and offers a uniform signature that can be easily discovered or mocked elsewhere in the library.
+The function `clore::generate::normalize_markdown_fragment` first converts the input `raw` fragment into a well‑formed UTF‑8 string via `clore::support::ensure_utf8`. It then strips any leading UTF‑8 BOM using `clore::support::strip_utf8_bom` and calls the anonymous‑namespace helper `trim_trailing_ascii_whitespace` to remove trailing ASCII whitespace. If the result contains no non‑whitespace characters (checked by `contains_non_whitespace`), the function immediately returns `std::unexpected` with a `GenerateError` that includes the `context` identifier. Otherwise, it applies `normalize_analysis_markdown` to the cleaned string and returns the final normalized markdown as the expected value.
+
+Internally, the control flow is strictly sequential with early exit on an empty fragment. The function depends on UTF‑8 utilities from the `clore::support` module, two anonymous‑namespace helpers for whitespace handling, and the `normalize_analysis_markdown` routine that performs the actual markdown cleanup. All identifiers, types, and functions are referenced using inline code.
 
 #### Side Effects
 
@@ -216,24 +195,44 @@ No observable side effects are evident from the extracted code.
 - `raw` parameter (`std::string_view`)
 - `context` parameter (`std::string_view`)
 
-#### Writes To
+#### Usage Patterns
 
-- Return value of type `std::expected<std::string, GenerateError>`
+- Called during markdown fragment processing to ensure well-formed output
+- Used to validate and normalize markdown content before embedding in generated documentation
+
+### `clore::generate::parse_markdown_prompt_output`
+
+Declaration: `src/generate/analysis.cppm:40`
+
+Definition: `src/generate/analysis.cppm:297`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The implementation of `clore::generate::parse_markdown_prompt_output` is a thin delegating wrapper. It accepts two `std::string_view` parameters—`raw` (the model’s raw output) and `context` (supplementary contextual text)—and forwards them directly to `normalize_markdown_fragment`. The return type is `std::expected<std::string, GenerateError>`, so any normalization or parsing failure is propagated as an error rather than an exception. Internally, no extra control flow or intermediate transformations occur; the entire responsibility for trimming, validating, and normalizing the markdown content lies within `normalize_markdown_fragment`, which is defined in the same translation unit and is the sole dependency of this public entry point.
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- parameter `raw`
+- parameter `context`
 
 #### Usage Patterns
 
-- Used as a wrapper to normalize markdown prompt output fragments.
-- Likely called when processing raw text from LLM responses or similar sources.
+- Used to parse and normalize markdown output from prompt responses before further processing.
+- Called with the raw prompt output and the context in which the output was generated.
 
 ### `clore::generate::parse_structured_response`
 
-Declaration: `generate/analysis.cppm:18`
+Declaration: `src/generate/analysis.cppm:34`
 
-Definition: `generate/analysis.cppm:252`
+Definition: `src/generate/analysis.cppm:268`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `parse_structured_response` first attempts to deserialize the provided `raw` JSON string into type `T` via `json::from_json<T>`. If this operation fails, it immediately returns a `GenerateError` whose message incorporates the `context` parameter (typically identifying the symbol or prompt being parsed) and the underlying parse error description. On success, the parsed object is moved into a local variable and passed to the internal helper `normalize_analysis`, which performs post‑processing (such as trimming whitespace, merging analyses, or normalizing markdown content) before the result is returned. This two‑step flow ensures that any malformed or incomplete structured response is reported with a descriptive error, while a valid response undergoes a consistent normalization step that aligns the data structure for downstream consumption.
+The implementation of `clore::generate::parse_structured_response` follows a straightforward parse-and-normalize pipeline. It first invokes `json::parse<T>` on the `raw` string view; if parsing fails, it immediately returns a `std::unexpected` containing a `GenerateError` with a descriptive message that includes the `context` and the underlying parse error string. On success, the parsed value is moved into a local variable, then `normalize_analysis` is called on that value to apply any necessary post-processing (e.g., trimming whitespace, merging fallback data). The function concludes by returning the normalized value. The key dependencies are the generic `json::parse<T>` utility for deserialization and the overloaded `normalize_analysis` function, which handles type‑specific normalization logic.
 
 #### Side Effects
 
@@ -241,55 +240,61 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `raw` `string_view`
-- `context` `string_view`
-
-#### Usage Patterns
-
-- parsing structured responses from AI prompts
-- handling JSON parse errors with context
-- normalizing parsed analysis objects
-
-### `clore::generate::store_fallback_analysis`
-
-Declaration: `generate/analysis.cppm:35`
-
-Definition: `generate/analysis.cppm:335`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The function `clore::generate::store_fallback_analysis` dispatches to a kind-specific fallback generator based on the symbol type, then inserts the result into the appropriate analysis store. It first constructs a target key by calling `make_symbol_target_key(sym)`. Control then branches on the symbol kind: for function kinds, `fallback_function_analysis(sym)` is stored in `analyses.functions`; for type kinds, `fallback_type_analysis(sym, model)` is stored in `analyses.types`; for variable kinds, `fallback_variable_analysis(sym)` is stored in `analyses.variables`. The function relies on helper predicates `is_function_kind`, `is_type_kind`, and `is_variable_kind` to determine the branch, and on the three anonymous‑namespace fallback generators (`fallback_function_analysis`, `fallback_type_analysis`, `fallback_variable_analysis`) to produce the default analysis data. The updated `analyses` is the sole output, mutated via direct map assignment.
-
-#### Side Effects
-
-- Modifies the `analyses` object by inserting or overwriting a fallback analysis into its `functions`, `types`, or `variables` map.
-
-#### Reads From
-
-- `sym` (the `extract::SymbolInfo` parameter) including its `kind` field
-- `model` (the `extract::ProjectModel` parameter)
-- `analyses` is not read for values, only written to
+- `raw` parameter (string view)
+- `context` parameter (string view)
 
 #### Writes To
 
-- `analyses.functions` (if symbol is a function kind)
-- `analyses.types` (if symbol is a type kind)
-- `analyses.variables` (if symbol is a variable kind)
+- returned `std::expected<T, GenerateError>` object
 
 #### Usage Patterns
 
-- Called to store a fallback analysis for a symbol when direct analysis is missing or incomplete.
-- Used in contexts where a symbol must have an analysis entry before further processing.
+- Used to parse and validate structured AI responses within the generation pipeline.
+- Typically called after receiving a prompt output, passing the raw response and a contextual identifier for error messages.
 
-### `clore::generate::symbol_prompt_kinds_for_symbol`
+### `clore::generate::store_fallback_analysis`
 
-Declaration: `generate/analysis.cppm:29`
+Declaration: `src/generate/analysis.cppm:51`
 
-Definition: `generate/analysis.cppm:299`
+Definition: `src/generate/analysis.cppm:351`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function first obtains a base analysis `PromptKind` by delegating to `analysis_prompt_kind_for_symbol`. If that call returns `std::nullopt`, an empty vector is returned immediately. Otherwise, the function dispatches on the base kind: for `PromptKind::FunctionAnalysis` it returns a vector containing the base kind together with `PromptKind::FunctionDeclarationSummary` and `PromptKind::FunctionImplementationSummary`; for `PromptKind::TypeAnalysis` it similarly returns the base kind plus `TypeDeclarationSummary` and `TypeImplementationSummary`; for `PromptKind::VariableAnalysis` only the base kind is returned; all other values yield an empty vector. The control flow thus maps a high-level prompt category into a concrete set of `PromptKind` values that will be requested from the generation pipeline.
+The function `clore::generate::store_fallback_analysis` populates a `SymbolAnalysisStore` with a default analysis for a given symbol when no generated analysis is available. It first derives the storage key by calling `make_symbol_target_key` on the symbol. Then, based on the symbol’s `kind` (determined via helpers like `is_function_kind`, `is_type_kind`, `is_variable_kind`), it dispatches to an anonymous-namespace fallback generator: `fallback_function_analysis`, `fallback_type_analysis` (which additionally accepts the `ProjectModel` for type‑level context), or `fallback_variable_analysis`. The returned analysis is inserted into the corresponding map (`functions`, `types`, or `variables`) inside `analyses`. This ensures that every symbol in the analysis store has at least a minimal placeholder entry, enabling downstream processing to proceed without missing entries.
+
+#### Side Effects
+
+- modifies the `SymbolAnalysisStore` by inserting a fallback analysis entry
+
+#### Reads From
+
+- `sym` (`SymbolInfo`)
+- `sym.kind`
+- `model` (`ProjectModel` for type analysis)
+- `make_symbol_target_key` result
+
+#### Writes To
+
+- `analyses.functions` map
+- `analyses.types` map
+- `analyses.variables` map
+
+#### Usage Patterns
+
+- called when a symbol's analysis fails or is missing
+- used as a default handler in analysis building pipelines
+
+### `clore::generate::symbol_prompt_kinds_for_symbol`
+
+Declaration: `src/generate/analysis.cppm:45`
+
+Definition: `src/generate/analysis.cppm:315`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The function `clore::generate::symbol_prompt_kinds_for_symbol` determines the set of analysis prompt kinds to generate for a given symbol. It delegates to `analysis_prompt_kind_for_symbol` to obtain a single base `PromptKind` for the symbol. If no base kind exists (i.e., the symbol is not supported), it returns an empty vector. Otherwise, it maps the base kind to a list of specific prompt kinds: for `PromptKind::FunctionAnalysis` it yields the base kind followed by `PromptKind::FunctionDeclarationSummary` and `PromptKind::FunctionImplementationSummary`; for `PromptKind::TypeAnalysis` it similarly yields the base kind plus `PromptKind::TypeDeclarationSummary` and `PromptKind::TypeImplementationSummary`; for `PromptKind::VariableAnalysis` it returns only the base kind. Unrecognized base kinds produce an empty result.
+
+This function depends on the `PromptKind` enumeration and the `analysis_prompt_kind_for_symbol` helper, which determines the most appropriate analysis category for the given `extract::SymbolInfo`. It also assumes the existence of distinct summary prompt kinds for functions and types, while variable analysis uses a single prompt kind. The returned vector is used by the caller to drive the generation of analysis prompts in the correct order.
 
 #### Side Effects
 
@@ -297,16 +302,18 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `extract::SymbolInfo` parameter `sym`
-- `analysis_prompt_kind_for_symbol`
+- `sym` parameter
+- `analysis_prompt_kind_for_symbol(sym)` result
 
 #### Usage Patterns
 
-- Called to decide which prompt variants to generate for a symbol (e.g., declaration summary, implementation summary).
+- Determining the set of analysis prompts to generate for a symbol in page generation
 
 ## Internal Structure
 
-The `generate:analysis` module is responsible for structuring the analysis of code symbols—functions, types, and variables—by classifying prompt kinds, building analysis prompts, parsing and normalizing model responses, and storing fallback analyses. It is organized into three internal layers: a set of anonymous-namespace helpers that handle lenient parsing (e.g., `parse_type_analysis_lenient`), merging (`merge_type_analysis`, `merge_function_analysis`), and fallback generation (`fallback_variable_analysis`, `fallback_function_analysis`); a normalization tier that transforms raw markdown fragments and analysis lists into consistent representations; and a public API that exposes functions such as `build_symbol_analysis_prompt`, `apply_symbol_analysis_response`, and `store_fallback_analysis`. The module imports `config`, `extract`, `generate:evidence`, `generate:markdown`, `generate:model`, `support`, and `std`, making it a higher-level consumer of evidence collection and Markdown formatting abstractions while remaining independent of page-level orchestration.
+The `generate:analysis` module, residing within the `clore::generate` namespace, is the core orchestration layer that constructs analysis prompts, processes LLM responses, and integrates the resulting evidence into the generation pipeline. It imports supporting infrastructure from the `config`, `extract`, `support`, and the sibling modules `generate:evidence`, `generate:markdown`, and `generate:model`, thereby depending on the project configuration, extraction services, common utilities, evidence packaging, markdown formatting, and the shared data types (such as `PromptKind`, `FunctionAnalysis`, and `SymbolAnalysisStore`).
+
+Internally, the module is decomposed into an anonymous namespace containing focused utilities for parsing, merging, and normalizing analysis responses—for example, `parse_type_analysis_lenient`, `merge_function_analysis`, and `fallback_variable_analysis`. These are complemented by public entry points that drive the prompt lifecycle: `build_symbol_analysis_prompt` constructs the prompt for a given symbol; `apply_symbol_analysis_response` ingests raw LLM text into a mutable target; `store_fallback_analysis` populates a store when primary analysis is unavailable; and predicate functions such as `is_declaration_summary_prompt` and `is_base_symbol_analysis_prompt` classify prompt kinds to dispatch appropriate logic. This layered design separates the raw string processing from the higher‑level orchestration, allowing the module to sanitize, merge, and fall back to default analyses while keeping the prompt‑building and response‑application pathways clean and testable.
 
 ## Related Pages
 

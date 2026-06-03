@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:evidence'
-description: 'The generate:evidence module is responsible for collecting, structuring, and formatting evidence from code analysis to support documentation generation. It owns the public API for building evidence packs tailored to specific page types—such as namespace summaries, function analysis, type declarations, and module architecture—and for formatting that evidence into bounded or unbounded text for downstream prompt construction and content rendering. Internally, it provides caching mechanisms for namespace fact collection and utilities for merging facts and summaries, ensuring efficient reuse across multiple evidence-building calls.'
+description: 'The generate:evidence module is responsible for collecting, formatting, and packaging evidence that feeds into documentation generation prompts. It owns the logic for transforming raw symbol and analysis data—gathered from the extract and generate:model modules—into structured EvidencePack objects that describe namespaces, modules, functions, types, variables, index overviews, and architectural summaries. The module exposes high-level entry points such as build_evidence_for_* functions (for each page kind), format_evidence_text (and a bounded variant), and build_prompt, which assembles the final LLM prompt from an evidence pack and a prompt template. Internally, it manages caching (via NamespaceFactsCacheEntry), detail-level rendering helpers, and the SymbolFact structure that captures per-symbol attributes like qualified names, signatures, documentation, and template parameters.'
 layout: doc
 template: doc
 ---
@@ -9,15 +9,12 @@ template: doc
 
 ## Summary
 
-The `generate:evidence` module is responsible for collecting, structuring, and formatting evidence from code analysis to support documentation generation. It owns the public API for building evidence packs tailored to specific page types—such as namespace summaries, function analysis, type declarations, and module architecture—and for formatting that evidence into bounded or unbounded text for downstream prompt construction and content rendering. Internally, it provides caching mechanisms for namespace fact collection and utilities for merging facts and summaries, ensuring efficient reuse across multiple evidence-building calls.
-
-The module’s public interface includes functions like `build_evidence_for_namespace_summary`, `build_evidence_for_type_analysis`, and `build_evidence_for_function_implementation_summary`, each returning an integer handle or evidence pack, along with formatting functions `format_evidence_text` and `format_evidence_text_bounded`. Core data structures such as `EvidencePack` and `SymbolFact` are defined here, aggregating contextual facts, source snippets, and related page summaries that the generation pipeline consumes to produce final documentation pages.
+The `generate:evidence` module is responsible for collecting, formatting, and packaging evidence that feeds into documentation generation prompts. It owns the logic for transforming raw symbol and analysis data—gathered from the `extract` and `generate:model` modules—into structured `EvidencePack` objects that describe namespaces, modules, functions, types, variables, index overviews, and architectural summaries. The module exposes high-level entry points such as `build_evidence_for_*` functions (for each page kind), `format_evidence_text` (and a bounded variant), and `build_prompt`, which assembles the final LLM prompt from an evidence pack and a prompt template. Internally, it manages caching (via `NamespaceFactsCacheEntry`), detail-level rendering helpers, and the `SymbolFact` structure that captures per-symbol attributes like qualified names, signatures, documentation, and template parameters.
 
 ## Imports
 
 - [`extract`](../extract/index.md)
 - [`generate:model`](model.md)
-- `std`
 
 ## Imported By
 
@@ -29,82 +26,76 @@ The module’s public interface includes functions like `build_evidence_for_name
 
 ### `clore::generate::EvidencePack`
 
-Declaration: `generate/evidence.cppm:22`
+Declaration: `src/generate/evidence.cppm:34`
 
-Definition: `generate/evidence.cppm:22`
+Definition: `src/generate/evidence.cppm:34`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::EvidencePack` is a plain aggregate of vectors and strings that acts as a data transfer object, collecting all evidence needed to produce a documentation page. Each member serves a distinct purpose: `page_id` identifies the target page, `prompt_kind` records the generation phase, `subject_name` and `subject_kind` describe the documented entity, `target_facts` hold the primary facts about that entity, while `local_context` and `dependency_context` provide surrounding symbol information from the same translation unit and its imports respectively. `reverse_usage_context` lists symbols that use the subject, `related_page_summaries` enables cross‑reference generation, and `source_snippets` captures relevant code excerpts. As a public aggregate, no invariants are enforced beyond the type system; consumers should ensure that `page_id` and `subject_name` are non‑empty for meaningful output.
+The struct `clore::generate::EvidencePack` serves as a flat container that aggregates all evidence required by the documentation generator. Its fields are plain data members of standard types, with no custom constructors, destructors, or accessors, making it a simple aggregate. The invariants are implicit: each field is expected to be populated consistently before the pack is consumed; for example, `page_id` and `prompt_kind` should form a valid key pair, and the various vector fields (`target_facts`, `local_context`, `dependency_context`, `reverse_usage_context`, `source_snippets`, `related_page_summaries`) are expected to contain complete, non‑overlapping information for a single subject. No member functions or special member definitions are present, so the implementation relies entirely on the default compiler‑generated behavior for copy, move, and assignment.
 
 #### Invariants
 
-- All fields are expected to be populated before the struct is used for generation.
-- `subject_name` and `subject_kind` must be non-empty strings.
-- Vectors may be empty but should be consistent with the evidence collected.
+- All vector fields may be empty
+- Scalar string fields may be empty
 
 #### Key Members
 
-- `subject_name`
-- `subject_kind`
-- `page_id`
-- `prompt_kind`
 - `target_facts`
 - `local_context`
-- `dependency_context`
-- `reverse_usage_context`
-- `source_snippets`
-- `related_page_summaries`
+- `subject_name`
+- `subject_kind`
 
 #### Usage Patterns
 
-- `EvidencePack` is constructed by evidence collection logic that scans the codebase for facts about a symbol.
-- It is passed to a prompt generator or LLM invocation to provide context for documentation generation.
-- Each field is used to shape the final prompt, such as `subject_name` for identification and context vectors for relevance.
+- Assembled by evidence collectors and consumed by generation logic
+- Each field is independently populated
 
 ### `clore::generate::PromptError`
 
-Declaration: `generate/evidence.cppm:90`
+Declaration: `src/generate/evidence.cppm:102`
 
-Definition: `generate/evidence.cppm:90`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The `clore::generate::PromptError` struct is implemented as a trivial wrapper around a single `std::string` member named `message`. This member holds a descriptive error text that can be populated when a prompt‑related error occurs. No additional invariants or special member functions are defined beyond those implicitly generated by the compiler; the struct functions as a lightweight, value‑type error container whose public data member can be directly read or written. The absence of custom constructors or validation logic means that the implementation relies solely on the behavior of `std::string` and the default access rules of a struct.
-
-#### Key Members
-
-- `message`: a `std::string` that holds a descriptive error message.
-
-#### Usage Patterns
-
-- The struct is used to represent errors that occur during prompt generation, likely as a thrown exception or a return value from generation-related functions.
-
-### `clore::generate::SymbolFact`
-
-Declaration: `generate/evidence.cppm:9`
-
-Definition: `generate/evidence.cppm:9`
+Definition: `src/generate/evidence.cppm:102`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The struct `clore::generate::SymbolFact` is an aggregate value type that holds extracted metadata for a single code symbol. Its fields store the symbol’s unique `id` (`extract::SymbolID`), human-readable `qualified_name`, the access level (`access`), a `signature` string, a `kind_label` for classification, and the `declaration_file`/`declaration_line` location. Boolean `is_template` defaults to `false`, and `template_params` carries the template parameter list when applicable; `doc_comment` captures any associated documentation. No invariants are enforced beyond the default member initializers (`is_template = false`, `declaration_line = 0`), so the struct is a straightforward record of parsed facts ready for downstream processing.
+The struct `clore::generate::PromptError` is a lightweight error type that holds a single `std::string` member `message` to store a human‑readable error description. No other data members or invariants exist beyond those inherent to the string itself; the struct is trivially constructible, copyable, and movable. Its internal structure directly mirrors its role as a simple carrier for error information, with no additional validation or state management in the implementation.
 
 #### Invariants
 
-- id holds a valid `SymbolID` from the extraction phase
-- `qualified_name`, signature, `kind_label`, access are populated with corresponding extracted values
-- `is_template` is false by default and true only for templated symbols
-- `declaration_line` defaults to 0 if unknown
-- `doc_comment` may be empty if no comment exists
+- The `message` string is expected to be non-empty when representing an actual error.
 
 #### Key Members
 
-- id
+- `message`: a `std::string` that holds the error description.
+
+#### Usage Patterns
+
+- Used as the exception type or error result in prompt generation contexts, such as in `clore::generate::PromptGenerator` or related functions.
+
+### `clore::generate::SymbolFact`
+
+Declaration: `src/generate/evidence.cppm:21`
+
+Definition: `src/generate/evidence.cppm:21`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The struct `clore::generate::SymbolFact` serves as a flat, aggregate data holder for all evidence extracted about a single symbol from source code. All member fields are directly set during the extraction phase; no invariants are enforced by the struct itself beyond the default values provided in the member initializers. The boolean `is_template` defaults to `false`, and `declaration_line` defaults to `0`, meaning a zero line number is the expected sentinel for an unset location when `declaration_file` is empty. The fields `qualified_name`, `signature`, `kind_label`, `access`, `template_params`, and `doc_comment` are all plain `std::string` values, filled by the extractor. There is no hidden state or computed member—every field is a raw piece of data that the generation pipeline later consumes to produce documentation.
+
+#### Invariants
+
+- Fields are expected to be populated with consistent data from extraction
+- `is_template` defaults to `false` if not set
+- `declaration_line` defaults to `0` if not provided
+
+#### Key Members
+
+- `id`
 - `qualified_name`
-- signature
+- `signature`
 - `kind_label`
-- access
+- `access`
 - `is_template`
 - `template_params`
 - `declaration_file`
@@ -113,20 +104,19 @@ The struct `clore::generate::SymbolFact` is an aggregate value type that holds e
 
 #### Usage Patterns
 
-- Created after symbol extraction to hold per-symbol facts
-- Consumed by generation code to produce documentation output
-- Stored in containers and passed by value or const reference
-- Fields are read directly without abstraction
+- Instantiated by extraction phases to hold symbol data
+- Consumed by generation phases to produce documentation output
+- Stored or passed between components as a value type
 
 ## Functions
 
 ### `clore::generate::__detail::collect_analysis_summaries`
 
-Declaration: `generate/evidence.cppm:121`
+Declaration: `src/generate/evidence.cppm:133`
 
-Definition: `generate/evidence.cppm:241`
+Definition: `src/generate/evidence.cppm:253`
 
-The function `clore::generate::__detail::collect_analysis_summaries` serves as a thin forwarding wrapper. It receives the analysis storage (type `SymbolAnalysisStore`), a project model (`extract::ProjectModel`), and a vector of `extract::SymbolID` values, then delegates all work to `collect_analysis_summaries_impl`. The `symbol_id_of` callable argument is provided as an identity lambda that simply returns the given `extract::SymbolID` unchanged. This allows the core implementation to iterate over the supplied `ids`, query the `analyses` store, and build a supporting context from `model` while processing each symbol. The actual algorithmic logic—fact collection, text assembly, and summarization—resides entirely in the `_impl` overload, making this function a direct pass‑through that centralizes argument forwarding.
+The function `clore::generate::__detail::collect_analysis_summaries` acts as a thin forwarding wrapper that delegates to `clore::generate::__detail::collect_analysis_summaries_impl`. It accepts a `SymbolAnalysisStore` (`analyses`), a `ProjectModel` (`model`), and a `std::vector<extract::SymbolID>` (`ids`). Internally, it passes these three arguments to the implementation function along with an identity callable that returns each `extract::SymbolID` unchanged. The returned value is a `std::vector<std::string>` containing the collected analysis summaries. This design separates the generic summarization logic from the specific ID mapping — in this case, the `IDs` are used directly without transformation, relying on the implementation to iterate over the provided `IDs`, query the analysis store for each symbol, and produce the corresponding summary text.
 
 #### Side Effects
 
@@ -134,27 +124,21 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `analyses` (`const SymbolAnalysisStore&`)
-- `model` (`const extract::ProjectModel&`)
-- `ids` (`const std::vector<extract::SymbolID>&`)
-
-#### Writes To
-
-- return value (`std::vector<std::string>`)
+- `analyses`
+- `model`
+- `ids`
 
 #### Usage Patterns
 
-- Called to collect analysis summaries for a set of symbol identifiers.
+- Called with an analysis store, project model, and a list of symbol `IDs` to obtain a vector of summary strings.
 
 ### `clore::generate::__detail::collect_analysis_summaries_impl`
 
-Declaration: `generate/evidence.cppm:116`
+Declaration: `src/generate/evidence.cppm:128`
 
-Definition: `generate/evidence.cppm:213`
+Definition: `src/generate/evidence.cppm:225`
 
-The function `clore::generate::__detail::collect_analysis_summaries_impl` iterates over each element in `items` (of template type `Range`), deduplicating by `extract::SymbolID` using a local `std::unordered_set<extract::SymbolID> seen`. For each unique `symbol_id` extracted via the callable `symbol_id_of`, it performs a lookup in the `extract::ProjectModel` via `extract::lookup_symbol`. If the resulting `symbol` pointer is non-null, it retrieves the corresponding analysis overview markdown from the `SymbolAnalysisStore` using `analysis_overview_markdown`. If that pointer is non-null and the contained `std::string` is non-empty, the string is appended to the output vector `result`. The function returns the collected vector.
-
-Internally, the function depends on two primary stores: `SymbolAnalysisStore` (which must already contain precomputed analysis text for each symbol) and `extract::ProjectModel` (which provides symbol lookup by ID). The callable `SymbolIDOf` abstracts the extraction of a `extract::SymbolID` from each range element, enabling reuse across different container and key schemes. The deduplication set `seen` ensures each symbol contributes at most one summary string.
+The function `clore::generate::__detail::collect_analysis_summaries_impl` iterates over the given `Range` of `items`, deduplicating by symbol identity. For each item, it extracts a symbol ID using the forwarded `SymbolIDOf` callable and inserts it into a local `seen` set; if insertion fails the symbol has already been processed and the item is skipped. It then calls `extract::lookup_symbol` on the provided `model` to retrieve the corresponding symbol; if the lookup fails the item is also skipped. Finally it attempts to obtain a precomputed analysis summary via `analysis_overview_markdown` using the `analyses` store and the symbol; if the returned pointer is null or the string is empty the item is skipped. Otherwise the summary string is appended to the result vector. The function reserves capacity upfront and returns a collection of all successfully collected summary strings. Its core dependencies are the `extract::lookup_symbol` and `analysis_overview_markdown` functions, along with the external `analyses` and `model` objects that supply the analysis cache and symbol database.
 
 #### Side Effects
 
@@ -162,27 +146,25 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the `analyses` parameter of type `SymbolAnalysisStore`
-- the `model` parameter of type `extract::ProjectModel`
-- the `items` parameter of type `Range`
-- the `symbol_id_of` callable parameter
-- the symbol data accessed via `extract::lookup_symbol`
-- the result of `analysis_overview_markdown`
+- `analyses`
+- `model`
+- `items`
+- `symbol_id_of` functor
+- `extract::lookup_symbol(model, symbol_id)` result
+- `analysis_overview_markdown(analyses, *symbol)` result
 
 #### Usage Patterns
 
-- Called to collect deduplicated analysis summaries for a range of items
-- Used in conjunction with `analysis_overview_markdown` and `extract::lookup_symbol`
+- Used internally to aggregate analysis summaries from a set of symbol `IDs`
+- Supports `collect_analysis_summaries` and similar batch functions
 
 ### `clore::generate::__detail::collect_facts`
 
-Declaration: `generate/evidence.cppm:103`
+Declaration: `src/generate/evidence.cppm:115`
 
-Definition: `generate/evidence.cppm:163`
+Definition: `src/generate/evidence.cppm:175`
 
-The function `clore::generate::__detail::collect_facts` iterates over the provided vector of `extract::SymbolID` values, using a local `std::unordered_set<extract::SymbolID>` to deduplicate entries before processing. For each unique identifier, it calls `extract::lookup_symbol` on the given `extract::ProjectModel` to obtain a pointer to the corresponding symbol; if the pointer is non-null, it converts the symbol into a `clore::generate::SymbolFact` via the helper `to_symbol_fact` and appends it to the result vector.
-
-The algorithm is straightforward: it filters duplicates with an insertion check on the set, then performs a model lookup per ID. The function depends on the external symbol resolution facility (`extract::lookup_symbol`) and on the `to_symbol_fact` conversion routine, both of which are assumed to be correct for the given `project_root` context. The output is a deduplicated, ordered list of `SymbolFact` objects ready for downstream evidence assembly.
+The function `clore::generate::__detail::collect_facts` deduplicates a list of symbol identifiers and converts each unique identifier into a `SymbolFact` object. It iterates over the provided `ids` vector, using a `std::unordered_set<extract::SymbolID>` named `seen` to skip previously encountered identifiers. For each unseen identifier, it calls `extract::lookup_symbol(model, id)` to obtain a pointer to the corresponding symbol within the `extract::ProjectModel`. If the pointer is non‑null, the symbol is transformed via `to_symbol_fact(*sym, project_root)`, which extracts relevant attributes (such as `qualified_name`, `declaration_file`, `signature`, etc.) using the given `project_root` path. The resulting `SymbolFact` objects are appended to a local vector, which is returned to the caller. This function depends on the `extract` module for symbol lookup and on the internal helper `to_symbol_fact` for attribute extraction.
 
 #### Side Effects
 
@@ -193,86 +175,80 @@ No observable side effects are evident from the extracted code.
 - const `extract::ProjectModel`& model
 - const `std::vector<extract::SymbolID>`& ids
 - const `std::string`& `project_root`
-- Symbol objects returned by `extract::lookup_symbol`
+- `extract::lookup_symbol`
 
 #### Usage Patterns
 
-- Used to accumulate a deduplicated vector of `SymbolFact` from a list of symbol `IDs`.
-- Typically called during fact generation, possibly as part of a larger pipeline like `collect_merged_facts`.
+- Converts a list of symbol `IDs` into a deduplicated vector of `SymbolFact` objects
+- Used in fact generation pipelines, likely called by other collect functions
 
 ### `clore::generate::__detail::collect_merged_facts`
 
-Declaration: `generate/evidence.cppm:108`
+Declaration: `src/generate/evidence.cppm:120`
 
-Definition: `generate/evidence.cppm:179`
+Definition: `src/generate/evidence.cppm:191`
 
-The function uses a variadic template parameter pack `Groups` to accept an arbitrary number of collections of `extract::SymbolID` values. Internally, it maintains a `std::vector<SymbolFact> facts` and a `std::unordered_set<extract::SymbolID> seen` for global deduplication across all groups. A lambda `append_group` is defined to iterate over the `IDs` in a single group; for each ID it attempts insertion into `seen` and proceeds only if the ID has not been encountered before. If the ID is new, it calls `extract::lookup_symbol` on the `extract::ProjectModel model` to retrieve the symbol, and then converts it to a `SymbolFact` via `to_symbol_fact`, passing the symbol and `project_root`. The lambda is applied to each group in the pack using a fold expression with the comma `operator`, ensuring all groups are processed in left-to-right order. The final vector of deduplicated facts is returned.
-
-Key dependencies include `extract::lookup_symbol` for symbol resolution, `to_symbol_fact` for conversion, and the `SymbolFact` and `extract::SymbolID` types. The function relies on the caller to provide valid `Groups` that are iterable over `extract::SymbolID`.
+The function `clore::generate::__detail::collect_merged_facts` accepts a `extract::ProjectModel`, a `project_root` string, and a variadic pack of `Groups` (each expected to be a container of `extract::SymbolID`). It collects a deduplicated set of `SymbolFact` objects from the symbol `IDs` across all supplied groups. Internally, a `std::unordered_set<extract::SymbolID>` named `seen` records already‑processed symbols to avoid duplicates. A lambda `append_group` iterates over a group’s `IDs`; for each `id`, it attempts insertion into `seen`. If the insertion succeeds (i.e., the ID is new), it calls `extract::lookup_symbol(model, id)` to retrieve the symbol, and if the pointer is non‑null, converts it to a `SymbolFact` via `to_symbol_fact(*sym, project_root)` and appends the fact to the result vector. The groups are processed left‑to‑right using a fold expression `(append_group(groups), ...)`. The final vector of `SymbolFact` is returned, containing all unique symbols from the combined input groups, in the order they appear across the groups.
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- allocates and returns a new vector of `SymbolFact`
+- allocates and temporarily uses an `unordered_set` for deduplication
 
 #### Reads From
 
-- const `extract::ProjectModel`& model
-- const `std::string`& `project_root`
-- const Groups&... groups
-
-#### Writes To
-
-- local `std::vector<SymbolFact>` facts
-- local `std::unordered_set<extract::SymbolID>` seen
+- `model` parameter
+- `project_root` parameter
+- each `groups` parameter (containers of `extract::SymbolID`)
 
 #### Usage Patterns
 
-- called with a project model and root to gather facts from multiple collections of symbol `IDs`
-- used to merge symbol facts across different groups while eliminating duplicates
-- can be invoked with one or more group arguments via parameter pack expansion
+- collecting deduplicated facts from multiple ID groups for code generation
 
 ### `clore::generate::__detail::collect_namespace_facts_cached`
 
-Declaration: `generate/evidence.cppm:133`
+Declaration: `src/generate/evidence.cppm:145`
 
-Definition: `generate/evidence.cppm:275`
+Definition: `src/generate/evidence.cppm:287`
 
-The function `clore::generate::__detail::collect_namespace_facts_cached` implements a caching layer over per‑namespace symbol fact collection. It first performs an early return if `namespace_name` is empty. A cache key is formed by concatenating `namespace_name` and `project_root`, and a lookup is done in a module‑static `namespace_facts_cache()` (an `std::unordered_map`). On a cache miss, a `NamespaceFactsCacheEntry` is created, and the function iterates over the namespace‘s symbols (obtained from `model.namespaces`). For each symbol, it uses `extract::lookup_symbol` and `to_symbol_fact` to build a `SymbolFact`, then classifies it into one of three vectors (`all_functions`, `all_types`, or `all_variables`) using the predicates `is_function_kind`, `is_type_kind`, and `is_variable_kind`. The entry is then stored in the cache.
+The function employs a static cache indexed by a composite key of `namespace_name` and `project_root` to avoid redundant traversals of namespace symbols. Upon invocation, it first checks the cache; if no entry exists, it creates a `NamespaceFactsCacheEntry` and populates it by iterating over all symbols within the namespace (obtained via `extract::lookup_symbol` on the provided `model`). Each symbol is converted to a `SymbolFact` using `to_symbol_fact`, then classified by kind into separate vectors (`all_functions`, `all_types`, `all_variables`) using the `is_function_kind`, `is_type_kind`, and `is_variable_kind` predicates. This lazy population ensures that once cached, subsequent calls for the same namespace and project reuse the precomputed facts.
 
-After cache resolution, the appropriate vector is selected based on `target_kind`. The result vector is populated by copying all facts from that vector except the one whose `id` matches `exclude_id`. This avoids repeated traversal of the same namespace when collecting evidence for multiple sibling symbols, and the per‑kind classification enables efficient retrieval based on the caller‘s required symbol kind.
+After cache lookup, the function selects the appropriate sub-vector based on the `target_kind` parameter and performs a final filter to exclude the symbol identified by `exclude_id`. The result is a copy of the matching facts (or an empty vector if the namespace string is empty or no symbols of the requested kind exist). Key dependencies include the global `namespace_facts_cache()` map, `to_symbol_fact` for constructing fact objects, and the kind‑checking utility functions.
 
 #### Side Effects
 
-- Mutates a static cache (`namespace_facts_cache()`) by adding new cache entries.
-- Allocates memory via `reserve` and `push_back` calls.
+- mutates the `namespace_facts_cache()` by inserting a new cache entry on cache miss
 
 #### Reads From
 
-- `model` parameter (specifically `model.namespaces` map)
-- `namespace_name` parameter
-- `project_root` parameter
-- `target_kind` parameter
-- `exclude_id` parameter
-- Static cache via `namespace_facts_cache()`
+- parameter `model` (const `extract::ProjectModel`&)
+- parameter `namespace_name` (const `std::string`&)
+- parameter `project_root` (const `std::string`&)
+- parameter `target_kind` (`extract::SymbolKind`)
+- parameter `exclude_id` (`extract::SymbolID`)
+- static cache returned by `namespace_facts_cache()`
+- symbol data via `extract::lookup_symbol(model, sym_id)`
+- `sym` fields and `project_root` via `to_symbol_fact`
+- predicate functions `is_function_kind`, `is_type_kind`, `is_variable_kind`
 
 #### Writes To
 
-- Static cache via `namespace_facts_cache()` (modified by `emplace`)
+- static cache (`namespace_facts_cache()`) via `cache.emplace`
 
 #### Usage Patterns
 
-- Called when generating evidence for multiple symbols in the same namespace to avoid repeated traversals of namespace symbols.
-- Used internally by the generation pipeline to collect facts for all symbols in a namespace.
+- called when building evidence for multiple symbols in the same namespace to avoid redundant traversal
+- likely invoked from sibling functions like `collect_facts` or `collect_summaries`
 
 ### `clore::generate::__detail::collect_summaries`
 
-Declaration: `generate/evidence.cppm:112`
+Declaration: `src/generate/evidence.cppm:124`
 
-Definition: `generate/evidence.cppm:200`
+Definition: `src/generate/evidence.cppm:212`
 
-The function iterates over the provided vector of string keys, performing a lookup in the `PageSummaryCache` for each key. If the key exists in the cache and its associated value is non‑empty, that value is appended to the result vector. This filtered collection of summary strings is then returned as the output. No ordering or deduplication is applied beyond the order of keys.
+The function `clore::generate::__detail::collect_summaries` accepts a `PageSummaryCache` (a map-like container keyed by strings) and a `std::vector<std::string>` of keys. It iterates over each `key` in the input vector, queries the cache for that key, and if the entry exists (`cache.find(key) != cache.end()`) and the stored string is non-empty (`!it->second.empty()`), appends `it->second` to a local `result` vector. The function returns the collected `result` vector, which may be shorter than the input key list because missing or empty cache entries are silently skipped.
 
-The implementation depends only on the `PageSummaryCache` type—assumed to be an associative container supporting `find`—and the input keys. The control flow is a simple loop with a conditional guard, and no external functions or state are consulted.
+The control flow is a simple linear scan over the keys, relying on the cache’s lookup operation and the empty‑string check to filter summaries. No external functions are called; dependencies are limited to the cache container’s `find` method and the `std::vector` push‑back. The function does not modify the cache or the input keys.
 
 #### Side Effects
 
@@ -280,21 +256,23 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `cache` (a `PageSummaryCache` accessed via `find`)
-- `keys` (a `const std::vector<std::string>&`)
+- `cache` (of type `PageSummaryCache`)
+- `keys` (of type `std::vector<std::string>`)
 
 #### Usage Patterns
 
-- Called to extract cached summaries for a list of keys, discarding missing or empty entries.
-- Used in the documentation generation pipeline to obtain precomputed summary strings before further processing.
+- filter summary entries from cache
+- collect non-empty cached summaries
 
 ### `clore::generate::__detail::to_symbol_fact`
 
-Declaration: `generate/evidence.cppm:101`
+Declaration: `src/generate/evidence.cppm:113`
 
-Definition: `generate/evidence.cppm:147`
+Definition: `src/generate/evidence.cppm:159`
 
-The function `clore::generate::__detail::to_symbol_fact` constructs a `SymbolFact` from an `extract::SymbolInfo` and a `project_root` path. Its control flow is a single return statement that aggregate-initializes a `SymbolFact` by directly copying most fields from `sym`, including `id`, `qualified_name`, `signature`, `kind_label`, `access`, `is_template`, `template_params`, and `declaration_line`. The only transformation occurs for the `declaration_file` field, which is produced by calling `clore::generate::make_source_relative` on `sym.declaration_location.file` with `project_root` to obtain a project-relative file path. The `doc_comment` field is also copied directly. The function depends on `extract::SymbolInfo` for input, `clore::generate::make_source_relative` for path normalization, and `extract::symbol_kind_name` (indirectly via `sym.kind`) for the `kind_label` field.
+`clore::generate::__detail::to_symbol_fact` performs a direct field‑by‑field mapping from an `extract::SymbolInfo` input to a `clore::generate::SymbolFact` value. It copies scalar or string fields such as `id`, `qualified_name`, `signature`, `access`, `is_template`, `template_params`, `declaration_line`, and `doc_comment` verbatim. The `kind_label` is produced by calling `extract::symbol_kind_name(sym.kind)`. The `declaration_file` is made relative to the project root via `clore::generate::make_source_relative(sym.declaration_location.file, project_root)`.  
+
+The function has no branching or loops; its entire body is a single aggregate‑initialisation expression. It depends on the `extract::SymbolInfo` type and `extract::symbol_kind_name`, the `SymbolFact` structure, and the `make_source_relative` utility. As a pure conversion helper, it does not perform any I/O, caching, or validation beyond the implicit copying of data.
 
 #### Side Effects
 
@@ -302,135 +280,135 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- sym (`extract::SymbolInfo`)
-- `project_root` (`std::string`)
+- `extract::SymbolInfo` parameter `sym`
+- `std::string` parameter `project_root`
+- `extract::symbol_kind_name` (global state implicitly read by function)
 
 #### Writes To
 
-- Returned `SymbolFact` object
+- Returned `SymbolFact` object (local copy)
 
 #### Usage Patterns
 
-- Used internally during generation of symbol facts from extracted symbol information.
-- Likely called by other `__detail` functions such as `collect_namespace_facts_cached` or `collect_merged_facts`.
+- Convert extracted symbol info to symbol fact for further processing
+- Used in fact-collection functions within `clore::generate::__detail`
 
 ### `clore::generate::build_evidence_for_function_analysis`
 
-Declaration: `generate/evidence.cppm:40`
+Declaration: `src/generate/evidence.cppm:52`
 
-Definition: `generate/evidence_builder.cppm:53`
+Definition: `src/generate/evidence_builder.cppm:61`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function builds its evidence by iterating over `project_root` and traversing `file_it` to collect `page_summaries`. For each encountered `target`, it calls the helper `maybe_resolve_snippet` to conditionally resolve snippet references, then accumulates `analyses` from local `pack` and `model` entries. The algorithm merges these with `imported_summaries` and processes `namespace_fact` facts while walking `ns` and `mod` hierarchies. Control flow branches based on the success of `maybe_resolve_snippet`, which gates inclusion of certain evidence components; the final `analyses` set is assembled by aggregating results across multiple `pack` and `model` combinations, with `root` serving as the context for symbol resolution and fact collection.
+The function `clore::generate::build_evidence_for_function_analysis` constructs an evidence model for a specified function target by iterating over `page_summaries` and `imported_summaries`. It first resolves the `project_root` and initializes a `model` object, then processes each package (`pack`) to collate `analyses`, `member_ids`, `dependency_ids`, and `symbol_ids`. For each summary, it calls the internal helper `maybe_resolve_snippet` to conditionally resolve inline snippets, and aggregates relevant facts (e.g., `namespace_fact`, `local_ids`). The control flow centers on a nested traversal of `root` components, `mod` modules, and `file_it` entries, populating the evidence data structure that the function finally returns as an integer status code. Dependencies include the project model infrastructure and the snippet‑resolution utility within the anonymous namespace.
 
 #### Side Effects
 
 No observable side effects are evident from the extracted code.
 
-#### Reads From
-
-- its three parameters: two `const int &` and one `int`
-
 #### Usage Patterns
 
-- Invoked as part of the evidence preparation pipeline for function analysis, alongside similar builders for other symbol kinds.
+- called by other evidence-building functions
+- used in analysis generation workflows
 
 ### `clore::generate::build_evidence_for_function_declaration_summary`
 
-Declaration: `generate/evidence.cppm:67`
+Declaration: `src/generate/evidence.cppm:79`
 
-Definition: `generate/evidence_builder.cppm:238`
+Definition: `src/generate/evidence_builder.cppm:246`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function iterates over a set of analyses, using `project_root` and `root` to navigate the project structure and locate the target function declaration. It collects relevant facts from a `model` (likely an abstract syntax tree or semantic representation) and builds a collection of `page_summaries` by processing packages (`pack`), modules (`mod`), and namespaces (`ns`). The internal flow involves resolving snippets via `maybe_resolve_snippet`, gathering `imported_summaries`, and constructing evidence facts such as `namespace_fact`. The algorithm depends on the analysis framework (`analyses`), the document model, and the file system abstraction provided by `project_root` and `root`.
+The implementation begins by initializing the local model, pack, and root structures, then retrieving project-level configuration via `project_root` and `model`. It iterates over imported summaries and page summaries, using `maybe_resolve_snippet` to conditionally resolve any embedded code snippets for each declaration target. Dependencies are collected into `dependency_ids`, `symbol_ids`, and `member_ids` by traversing `analyses` and `pack` entries. The function assembles a hierarchical evidence tree rooted at `root`, linking `namespace_fact`, `local_ids`, and `mod` objects, and finally returns an integer status code representing the outcome of the evidence construction.
 
 #### Side Effects
 
 No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- the first `const int&` parameter (likely a symbol analysis store or target key)
-- the second `const int&` parameter (likely a page identity or request identifier)
-- the third `const int&` parameter (possibly a prompt kind or context identifier)
-- the `int` parameter (likely an integer flag or depth limit)
-
-#### Usage Patterns
-
-- called to build evidence for a function declaration summary during page generation
-- likely invoked by higher-level page builders like `build_page_root` or `render_page_markdown`
 
 ### `clore::generate::build_evidence_for_function_implementation_summary`
 
-Declaration: `generate/evidence.cppm:72`
+Declaration: `src/generate/evidence.cppm:84`
 
-Definition: `generate/evidence_builder.cppm:268`
+Definition: `src/generate/evidence_builder.cppm:276`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function begins by establishing a `root` and `project_root` to anchor path resolution. It then iterates over each entry in `analyses`, which likely contains per-file or per-symbol analysis data. For each item, it calls `maybe_resolve_snippet` to determine whether a code snippet can be resolved; if successful, it records the evidence from the corresponding `page_summaries` or `imported_summaries`. A `namespace_fact` is also extracted from the analysis to capture namespace-level context. These pieces are accumulated into a `pack` structure, which is then passed to a `model` builder. The final `model` aggregates all evidence packs, associating each with the original `target` function, and is returned as the constructed evidence set. Dependencies include the anonymous namespace helper `maybe_resolve_snippet` and external data structures for `page_summaries` and `imported_summaries`.
+The implementation of `clore::generate::build_evidence_for_function_implementation_summary` constructs a collection of evidence entries for a given function by first resolving the target symbol via `clore::generate::(anonymous namespace)::maybe_resolve_snippet`. It then fetches `summary_keys`, `dependency_ids`, and `member_ids` from the `model` and iterates over `analyses` to assemble the evidence. For each candidate, the algorithm conditionally calls `maybe_resolve_snippet` to verify snippet availability, then combines data from `page_summaries`, `imported_summaries`, and the `pack`’s symbol information. The function also scans `namespace_fact` entries and `local_ids` to capture cross-references, and it handles file-level evidence via `file_it`. The overall flow depends on the `project_root` for path resolution, the `model` for symbol and snippet metadata, and the `analyses` structure to produce the final evidence set. The return value (an `int`) represents the count or status of the evidence built.
 
 #### Side Effects
 
 No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- `const int &` first parameter
+- `const int &` second parameter
+- `std::string_view` third parameter
+
+#### Writes To
+
+- returns an `int` handle (no concrete state identified)
+
+#### Usage Patterns
+
+- used to generate evidence for function implementation summaries during documentation generation
 
 ### `clore::generate::build_evidence_for_index_overview`
 
-Declaration: `generate/evidence.cppm:64`
+Declaration: `src/generate/evidence.cppm:76`
 
-Definition: `generate/evidence_builder.cppm:204`
+Definition: `src/generate/evidence_builder.cppm:212`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::build_evidence_for_index_overview` constructs an evidence model for an index overview by iterating over the project structure rooted at `root` and `project_root`. It uses a `file_it` to traverse files and calls `clore::generate::(anonymous namespace)::maybe_resolve_snippet` to conditionally resolve code snippets. The algorithm collects `page_summaries` from `pack` and `model`, and accumulates `analyses` from the same sources, then merges `imported_summaries` across the project. It builds a `target` evidence, incorporating `namespace_fact` and `sym` data, while iterating over modules (`mod`) to aggregate summaries and analyses into a unified `pack` for the index. Dependencies include the `model`, `analyses`, `page_summaries`, and the helper function `maybe_resolve_snippet`, which controls snippet inclusion based on the current context.
+The function begins by establishing the `project_root` and retrieving `page_summaries` and `imported_summaries`. It then initializes a `target` from one of the integer parameters and uses `maybe_resolve_snippet` to conditionally process snippet references. The core algorithm iterates over `page_summaries`, extracting `summary_keys` and `dependency_ids` to build an `analyses` collection. For each summary key, it resolves the corresponding `sym`, gathers `member_ids`, `local_ids`, and `namespace_fact` from the `model`, and constructs a `pack` that aggregates these pieces—including the `root`, `target`, `symbol_ids`, and `dependency_ids`—into a structured evidence object. The function returns a result of type `int`, typically indicating the number of successfully processed summaries or a status code. Dependencies include the `model` (which stores symbol and namespace hierarchies), the `maybe_resolve_snippet` helper, and the `pack` assembly logic that feeds into the index overview generation.
 
 #### Side Effects
 
 No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- the two `const int &` parameters passed to the function; these likely represent handles or identifiers to analysis data or page plan entries.
-
-#### Usage Patterns
-
-- used when generating the index overview page in the documentation generation pipeline.
 
 ### `clore::generate::build_evidence_for_module_architecture`
 
-Declaration: `generate/evidence.cppm:58`
+Declaration: `src/generate/evidence.cppm:70`
 
-Definition: `generate/evidence_builder.cppm:173`
+Definition: `src/generate/evidence_builder.cppm:181`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function begins by setting up the `project_root` and iterating over files via `file_it`. For each file, it builds a `root` structure, then invokes `clore::generate::(anonymous namespace)::maybe_resolve_snippet` on the file’s content; if the snippet resolves successfully, the function gathers related data into `analyses`, `page_summaries`, and `imported_summaries`. These per‑file results feed into a `model` representing the module architecture, and later a `pack` is constructed from the `root`, `model`, and various facts such as `namespace_fact`. The function iterates across all files, gradually assembling the overall architecture evidence.
+The implementation of `clore::generate::build_evidence_for_module_architecture` begins by initializing containers for `project_root`, `page_summaries`, and `imported_summaries`. It then iterates over `summary_keys`; for each key it invokes the helper `clore::generate::(anonymous namespace)::maybe_resolve_snippet` to determine whether the corresponding snippet should be included. If the snippet is resolved, the algorithm populates a `model` with a `namespace_fact`, `local_ids`, `member_ids`, and a `root` structure, while also aggregating entries into `analyses`, `dependency_ids`, and `symbol_ids`. The control flow branches based on the presence of constraints such as `pack` and `target`, and uses `file_it` and `mod` to navigate the module hierarchy.
 
-Internally, the control flow revolves around a main loop over `file_it`, with branching for snippet resolution and file‑specific processing. Dependencies include the helper `maybe_resolve_snippet` for snippet validation, and numerous local variables (`root`, `target`, `pack`, `sym`, `ns`, `mod`, etc.) that mediate the construction of `analyses`, `model`, and `page_summaries`. The function returns an `int` indicating the outcome of the build process.
+Throughout the process, `project_root` and `root` serve as base paths, `ns` and `pack` manage namespace and package scoping, and `sym` tracks symbol identifiers. The function returns an integer (likely the count of resolved summaries or a status code), relying on the external `maybe_resolve_snippet` callback and the internal accumulation of evidence into structured analysis records.
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- Modifies the evidence storage for the module architecture
+- May update internal caches or aggregated analysis data
 
 #### Reads From
 
-- the five input parameters (four `const int &` and one `int`)
+- The four integer parameters representing entity identifiers
+- The `string_view` parameter representing the module name
+- Global or context-level analysis stores (e.g., `SymbolAnalysisStore`)
+
+#### Writes To
+
+- Evidence storage (e.g., `EvidencePack` or similar) for the module architecture
 
 #### Usage Patterns
 
-- Called during the generation of documentation evidence for module architecture pages.
+- Called during page generation for module documentation
+- Invoked as part of the evidence-building pipeline for module-level pages
 
 ### `clore::generate::build_evidence_for_module_summary`
 
-Declaration: `generate/evidence.cppm:52`
+Declaration: `src/generate/evidence.cppm:64`
 
-Definition: `generate/evidence_builder.cppm:142`
+Definition: `src/generate/evidence_builder.cppm:150`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function begins by initializing `root` and `project_root` from its parameters, then enters a loop driven by `file_it` that iterates over source files. For each file, it consults the helper `clore::generate::(anonymous namespace)::maybe_resolve_snippet` to determine whether a snippet-based reference can be resolved; if so, it accumulates data into `page_summaries`. After the file loop, a series of `analyses` objects are constructed, each coupled with a `pack` that groups relevant facts extracted from the page summaries. These analyses are then folded into a `model` that represents the aggregated evidence. The function proceeds to build `imported_summaries` by cross-referencing `model` entries with `project_root`, and finally iterates over `target` and `namespace_fact` to assemble the return value. Throughout, local variables such as `sym`, `ns`, and `mod` serve as temporary keys or indices, and `root` is repeatedly rebound to navigate nested data structures.
+The function constructs evidence for a module summary by aggregating data from multiple analyses and summaries. It first resolves snippet references for the given `target` using `clore::generate::(anonymous namespace)::maybe_resolve_snippet`. Then it iterates over `page_summaries`, `imported_summaries`, and `analyses` to collect `summary_keys`, `dependency_ids`, `member_ids`, `symbol_ids`, `local_ids`, and `namespace_fact`. Key entities such as `pack`, `mod`, `root`, and `ns` are retrieved from the `model` and `project_root`. The function also processes `file_it` to gather file-level information and updates the `model` or `root` object with the collected evidence. Internal control flow involves multiple loops over analysis results, conditionally inserting `IDs` and facts into the evidence structure, and finally returning the assembled `model`. Dependencies include the `model`, `project_root`, and the internal snippet resolution helper.
 
 #### Side Effects
 
@@ -438,47 +416,37 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the four `const int &` parameters passed by reference
-- the `int` parameter passed by value
+- parameters: const int & (four instances) representing module, file, namespace, or depth identifiers
+- parameter: `std::string_view` providing a module name or view key
 
 #### Usage Patterns
 
-- Called during the generation of module summary documentation
+- called when constructing module summary evidence for a code generation page
+- used in the page building pipeline for module documentation
 
 ### `clore::generate::build_evidence_for_namespace_summary`
 
-Declaration: `generate/evidence.cppm:35`
+Declaration: `src/generate/evidence.cppm:47`
 
-Definition: `generate/evidence_builder.cppm:21`
+Definition: `src/generate/evidence_builder.cppm:29`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The implementation of `clore::generate::build_evidence_for_namespace_summary` begins by acquiring a `root` representation and iterating over file-level structures via `file_it`. For each entry, it uses the anonymous namespace helper `maybe_resolve_snippet` to conditionally resolve snippet references, then accumulates relevant data into `analyses`, `model`, and `page_summaries` structures. The core loop repeatedly extracts `sym` and `target` identifiers from `pack` and `ns` containers, cross-references them with the current `project_root` and `mod`, and calls into `imported_summaries` to merge evidence from external modules.
-
-The function’s internal control flow rest on two primary dependencies: the `maybe_resolve_snippet` utility that determines whether a snippet can be resolved, and the composition of `namespace_fact` objects from the resolved `target` and `sym` data. After building the evidence set, it assembles the result into a `pack` that records all relevant `namespace_fact` instances, returning an integer summary handle that can be later used by downstream callers. The overall algorithm is essentially a multi‑pass collection and aggregation of namespace‑level facts from the filesystem and module boundaries.
+The function constructs a `namespace_fact` for the given `target` namespace by resolving its `sym` and traversing the project's `model`. It begins by retrieving `page_summaries` and `imported_summaries` from `project_root`, then uses `model` to obtain the namespace's `root` node and iterates over associated `file_it`, `mod`, and `pack` elements. For each encountered child symbol, it collects `member_ids`, `symbol_ids`, and `local_ids`, applying `maybe_resolve_snippet` as a filter. The final `namespace_fact` is assembled from these collected identifiers, along with `dependency_ids` derived from `summary_keys` and `dependency_ids` computed from the imported summaries. The resulting evidence is stored in `analyses` and returned as an integer status code.
 
 #### Side Effects
 
-- Allocates and populates an `EvidencePack` object
-
-#### Reads From
-
-- The `const int &` parameters representing namespace identifier, analysis store, and related resources
-
-#### Usage Patterns
-
-- Called during namespace page generation to provide evidence for AI summary prompts
-- Used by `clore::generate::build_namespace_page_root` and similar page root builders
+No observable side effects are evident from the extracted code.
 
 ### `clore::generate::build_evidence_for_type_analysis`
 
-Declaration: `generate/evidence.cppm:44`
+Declaration: `src/generate/evidence.cppm:56`
 
-Definition: `generate/evidence_builder.cppm:82`
+Definition: `src/generate/evidence_builder.cppm:90`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function begins by initializing `root` and `project_root` to represent the analysis target and its enclosing project. It then iterates over a collection of `pack` entries, each representing a compilation unit or module. For each `pack`, it locates the corresponding `file_it` and builds a `page_summaries` structure by traversing the `root` hierarchy. During traversal, it calls the internal helper `maybe_resolve_snippet` on each candidate snippet to determine whether it contributes to the evidence. If resolution succeeds, the snippet is incorporated into the current `analyses`. The function also processes `namespace_fact` elements derived from the `root` to generate type‑level facts, which are stored in `model`. After processing all packs, the function merges `imported_summaries` from dependent modules into the local `page_summaries` using the `project_root` to resolve cross‑module references. Finally, it collects all `analyses`, `model`, and the enriched `page_summaries` into a single result that represents the evidence for type analysis. The control flow is driven by a top‑down traversal of the `root` scope, with snippet resolution acting as a gate for evidence inclusion, and cross‑module imports handled via the `imported_summaries` merge step.
+The function begins by resolving the target entity from the provided parameters, establishing the `project_root` and the `model` that contain the type’s definition. It then collects `page_summaries` and `imported_summaries` for the entity, merging them while using `clore::generate::(anonymous namespace)::maybe_resolve_snippet` to filter out incomplete or unresolvable snippet references. A set of `dependency_ids` is built by traversing the `pack` and `analyses` associated with the target, and these `IDs` are later used to prune duplicate evidence from the final structure. The algorithm then iterates over the model’s symbol graph—processing `sym`, `ns`, `mod`, and `file_it`—to extract relevant `namespace_fact`, `member_ids`, and `local_ids`, which are aggregated into a single `analyses` container. Finally, it constructs a `root` evidence node that summarises the type’s context, combines the collected fact groups, and returns an integer (likely a count of successfully assembled evidence items or a status code).
 
 #### Side Effects
 
@@ -486,46 +454,24 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameters `const int &` and `const int &` (likely representing an analysis store and a symbol key)
-- parameter `int` (likely a type analysis identifier)
-- possible global or module-level analysis data structures accessible via `clore::generate::find_type_analysis`
+- const int & (likely store or symbol identifier)
+- const int & (likely additional identifier)
+- `std::string_view` (type name or analysis key)
 
 #### Usage Patterns
 
-- Used during documentation generation for type symbols to build a structured evidence pack.
-- Probably called from `clore::generate::build_prompt` or similar orchestration functions.
-- Part of a family of `build_evidence_for_*_analysis` functions for different symbol kinds.
+- Called during page generation for type symbols
+- Used to prepare evidence for type analysis prompts
 
 ### `clore::generate::build_evidence_for_type_declaration_summary`
 
-Declaration: `generate/evidence.cppm:77`
+Declaration: `src/generate/evidence.cppm:89`
 
-Definition: `generate/evidence_builder.cppm:302`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The function begins by traversing the project structure from `root` using `file_it` over `project_root`, building a collection of `page_summaries` and `imported_summaries`. For each `sym` in a `target` `pack`, it invokes the helper `maybe_resolve_snippet` to conditionally inline snippet content. The core algorithm then processes `analyses` and the `model`, resolving `namespace_fact` entries, and assembling evidence by merging `pack`-level data with per-symbol `ns` and `mod` information. Dependencies include the internal `maybe_resolve_snippet` resolver and the project‑wide `pack` and `model` data structures. Control flow iterates over multiple nested collections (file iterators, summary maps, and symbol packs) to produce the final summary for the type declaration.
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Usage Patterns
-
-- Used in the page generation pipeline for type declaration documentation
-- Called by higher-level builders to create evidence for type summaries
-
-### `clore::generate::build_evidence_for_type_implementation_summary`
-
-Declaration: `generate/evidence.cppm:82`
-
-Definition: `generate/evidence_builder.cppm:334`
+Definition: `src/generate/evidence_builder.cppm:310`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::build_evidence_for_type_implementation_summary` constructs the evidence required to support a type’s implementation summary page. It begins by using the provided `target` and `root` to compute the `project_root` and locate the relevant `pack`. The core algorithm iterates over the `model` and its associated `analyses`, invoking the helper `maybe_resolve_snippet` to conditionally resolve any inline code snippets. It then aggregates `page_summaries` from the resolved model and merges them with `imported_summaries`, which come from external dependencies. The resulting evidence is assembled into a `namespace_fact` structure that records the final implementation facts for the target type.
-
-Control flow proceeds through multiple nested traversals of the `model`’s internal nodes (indexed by `file_it`, `sym`, `ns`, and `mod`) to collect all relevant implementation details. The function relies on the external helper `maybe_resolve_snippet` for snippet resolution and on the `analyses` container for per‑entity analysis data. The `project_root` and `pack` parameters anchor the file‑system paths, while `imported_summaries` ensures that re‑exported or inherited implementation evidence is also incorporated. The algorithm completes once all contributions from the current module and its imports have been processed into the final evidence object.
+The function accepts four parameters—three integer handles and a string view—and returns an integer result. It constructs evidence for a type declaration summary by navigating the semantic model. First, it resolves the declaration target from the first integer parameter, then uses the second integer as a pack identifier to locate the relevant analysis group. The third integer serves as a project root handle, which is used to retrieve the directory tree (`root`) and a mutable document model (`model`). The function iterates over `page_summaries` and `imported_summaries` to collect `summary_keys` and `dependency_ids`, filtering entries that are reachable from the current `project_root`. It calls `maybe_resolve_snippet` for each candidate to verify resolvability. Then it builds a set of `member_ids` by inspecting `analyses` associated with the target `pack`, and assembles `namespace_fact` and `local_ids` from the symbol table. Finally, it constructs a proof object (evidence) inside the `model` by correlating `member_ids`, `dependency_ids`, and the resolved `symbol_ids`, returning a status code that indicates success or failure of the summary generation.
 
 #### Side Effects
 
@@ -533,25 +479,55 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- first `const int &` parameter
+- first `const int &` parameter (likely symbol analysis store or page plan set)
 - second `const int &` parameter
-- third `int` parameter
+- third `const int &` parameter
+- `std::string_view` parameter (type name)
+
+#### Writes To
+
+- return value (int, indicating status)
+
+#### Usage Patterns
+
+- invoked during type declaration summary generation
+
+### `clore::generate::build_evidence_for_type_implementation_summary`
+
+Declaration: `src/generate/evidence.cppm:94`
+
+Definition: `src/generate/evidence_builder.cppm:342`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+The function constructs evidence for a type implementation summary by iterating over the model's analyses and packs of identifiers. It traverses the model graph starting from `root`, processing `target`'s dependencies and using `project_root` to resolve paths. For each `pack` it collects `summary_keys`, `dependency_ids`, `member_ids`, and `symbol_ids` from the model, and utilizes `namespace_fact` to capture enclosing namespace context. The internal control flow relies on `maybe_resolve_snippet` to conditionally resolve snippet references, and it populates the `page_summaries` and `imported_summaries` structures by walking nodes such as `mod`, `file_it`, and `sym`. The algorithm depends on the `model` object for symbol and analysis lookups, and coordinates with `root` to ensure all relevant evidence is aggregated for the implementation summary.
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- `const int &` first parameter (likely a symbol or analysis store identifier)
+- `const int &` second parameter (likely a context or page plan identifier)
+- `std::string_view` third parameter (likely a type name or key)
 
 #### Usage Patterns
 
 - called during generation of type implementation summary pages
-- used to build evidence data for type documentation
-- likely invoked from higher-level page generation functions like `build_symbol_analysis_prompt`
+- invoked by higher-level page building functions like `clore::generate::append_type_member_sections`
 
 ### `clore::generate::build_evidence_for_variable_analysis`
 
-Declaration: `generate/evidence.cppm:48`
+Declaration: `src/generate/evidence.cppm:60`
 
-Definition: `generate/evidence_builder.cppm:113`
+Definition: `src/generate/evidence_builder.cppm:121`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function initializes by establishing the `root` directory and deriving a `project_root` from the given parameters. It then iterates over project files via `file_it`, calling `maybe_resolve_snippet` on each entry to determine whether a snippet can be resolved; if so, it accumulates `page_summaries` and updates internal analysis state. After the file traversal, the function processes each `pack` and `mod` combination, constructing a `model` that incorporates `namespace_fact` and `sym` evidence. It builds `imported_summaries` by examining dependencies among packages and uses `analyses` to aggregate results across the entire project. The final output—an integer—likely represents a success code or a count of generated evidence items. The control flow is a nested loop over packages and modules, with conditional branching on snippet resolution and model validation, culminating in a return value that signals completion.
+The function builds evidence by first loading the project model from `project_root` and retrieving the `page_summaries` and `imported_summaries` collections. It then resolves the variable analysis `target` to a specific symbol `sym` within the model, and uses the `pack` to gather a set of `analyses` and their associated `dependency_ids`. For each analysis, the algorithm collects local facts via `namespace_fact`, `local_ids`, and member-level identifiers in `member_ids`, as well as broader `symbol_ids`. A key step involves calling `maybe_resolve_snippet` for each relevant entry to determine whether a snippet needs to be materialized, influencing which summary keys are ultimately included.
+
+Control flow iterates through the analyses and their dependencies, populating `summary_keys` and potentially updating `root` and `mod` references to reflect the current context. The function consults the model’s hierarchy—traversing namespaces and modules through `ns` and `mod`—and synchronizes with `file_it` to align file-level evidence. Throughout, it relies on the cached `page_summaries` and `imported_summaries` to avoid redundant work, and all collected evidence is aggregated into a structure that captures the variable’s syntactic and semantic dependencies.
 
 #### Side Effects
 
@@ -559,23 +535,24 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the first parameter of type `const int &`
-- the second parameter of type `const int &`
-- the third parameter of type `int`
+- `const int &` (first parameter)
+- `const int &` (second parameter)
+- `std::string_view` (third parameter)
 
-#### Writes To
+#### Usage Patterns
 
-- the return value of type `int`
+- Called during documentation generation for variable symbols
+- Part of the evidence building pipeline for analysis
 
 ### `clore::generate::build_prompt`
 
-Declaration: `generate/evidence.cppm:94`
+Declaration: `src/generate/evidence.cppm:106`
 
-Definition: `generate/evidence.cppm:651`
+Definition: `src/generate/evidence.cppm:663`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::build_prompt` accepts a `PromptKind` and a `const EvidencePack &`, then retrieves the appropriate prompt template by calling `prompt_template_of` with the kind. If the returned template is empty, the function immediately returns an `std::unexpected` containing a `PromptError` with a descriptive message. Otherwise, it delegates to `instantiate_prompt_with_evidence`, passing the template string, the evidence pack, and the result of `format_evidence_text(evidence)` as the evidence block to be embedded. The internal control flow is linear: validation followed by construction; no iteration or branching occurs beyond the emptiness check. Dependencies include the template lookup function `prompt_template_of`, the instantiation helper `instantiate_prompt_with_evidence`, and the evidence‑formatter `format_evidence_text`, all of which are part of the `clore::generate` library. The function itself acts as a thin orchestrator that decouples template selection from template filling.
+The function begins by calling `prompt_template_of(kind)` to retrieve the appropriate template string based on the prompt kind. If the returned view is empty, it returns a `PromptError` with an explanatory message. Otherwise, it constructs a `std::string` from the template and delegates to `instantiate_prompt_with_evidence`, passing the template string, the `EvidencePack`, and the result of `format_evidence_text(evidence)` as the evidence text. This internal helper merges the formatted evidence into the template, producing the final prompt string. The only external dependency is the pair of helpers `format_evidence_text` (which renders all evidence sections into a single string) and `instantiate_prompt_with_evidence` (which performs template substitution).
 
 #### Side Effects
 
@@ -583,74 +560,80 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- kind parameter
-- evidence parameter
-- `prompt_template_of`(kind)
-- `prompt_kind_name`(kind)
-- `format_evidence_text`(evidence)
-
-#### Usage Patterns
-
-- Used to construct a prompt string for a given `PromptKind` and `EvidencePack`
-- Returns either the prompt string or a `PromptError`
-
-### `clore::generate::format_evidence_text`
-
-Declaration: `generate/evidence.cppm:86`
-
-Definition: `generate/evidence.cppm:580`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The implementation of `clore::generate::format_evidence_text` serves as a thin entry point that delegates directly to `clore::generate::format_evidence_text_bounded`, passing the provided `EvidencePack` and a maximum length set to `std::numeric_limits<std::size_t>::max()`. This effectively removes any length constraint, allowing the bounded variant to produce the full formatted evidence text without truncation. The function has no internal control flow of its own beyond this delegation; all algorithmic logic—section assembly, token‑budget management, and prompt instantiation—resides within `format_evidence_text_bounded` and its helpers, which are the true core of the formatting pipeline.
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- `pack` parameter of type `EvidencePack`
-
-#### Usage Patterns
-
-- Used as a convenience wrapper around `format_evidence_text_bounded` to produce unbounded evidence text.
-- Called when the full evidence string is needed without any truncation.
-
-### `clore::generate::format_evidence_text_bounded`
-
-Declaration: `generate/evidence.cppm:88`
-
-Definition: `generate/evidence.cppm:584`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The function constructs a bounded evidence text by accumulating formatted sections from the `EvidencePack` into a single string. It first reserves capacity and attempts to append a header using `append_if_fits`; if the header exceeds `max_length`, an empty string is returned. It then iterates over a fixed array of `SymbolSection` entries—representing target facts, local context, dependencies, and reverse usage—and for each calls `append_section_bounded` to conditionally add the section title and its items via the appropriate render function (`render_detailed_fact` or `render_context_fact`). After the symbol-based sections, a similar loop processes `TextSection` entries for source snippets and related page summaries, using `render_source_snippet` and `render_summary_item`. The entire algorithm is a greedy, sequential appending process that relies on `append_if_fits` and `append_section_bounded` to check length constraints before adding each section. The function depends on the `EvidencePack` fields (`target_facts`, `local_context`, `dependency_context`, `reverse_usage_context`, `source_snippets`, `related_page_summaries`) and the internal helpers `append_section_bounded` and `append_if_fits`, which themselves interact with render callbacks and the `max_length` budget.
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- const `EvidencePack`& pack: members `target_facts`, `local_context`, `dependency_context`, `reverse_usage_context`, `source_snippets`, `related_page_summaries`
-- `std::size_t` `max_length` parameter
-- Render function pointers: `render_detailed_fact`, `render_context_fact`, `render_source_snippet`, `render_summary_item`
-- String literals for titles
+- parameter `kind`
+- parameter `evidence`
+- internal prompt template store via `prompt_template_of(kind)`
+- `format_evidence_text(evidence)`
 
 #### Writes To
 
-- Local `std::string` text (returned by value)
+- returned `std::expected<std::string, PromptError>` object
 
 #### Usage Patterns
 
-- Called to produce a length-limited evidence markdown string for inclusion in prompt building or document generation contexts
+- called by prompt-building infrastructure
+- used to generate documentation prompts from evidence packs
+
+### `clore::generate::format_evidence_text`
+
+Declaration: `src/generate/evidence.cppm:98`
+
+Definition: `src/generate/evidence.cppm:592`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+Implementation: [Implementation](functions/format-evidence-text.md)
+
+The function `clore::generate::format_evidence_text` acts as a thin delegation wrapper around `clore::generate::format_evidence_text_bounded`. It calls that bounded function with `std::numeric_limits<std::size_t>::max()` as the maximum length parameter, effectively disabling any truncation of the generated evidence text. This design centralises the actual evidence‑text construction logic in the bounded variant, while providing a convenient unbounded interface for callers that do not need to enforce a length cap. No additional algorithm or control flow is introduced; the entire behaviour is determined by `format_evidence_text_bounded`, which handles the accumulation of text sections, symbol facts, source snippets, and analysis results under a configurable length constraint.
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- pack parameter of type `const EvidencePack &`
+
+#### Usage Patterns
+
+- called by `clore::generate::build_prompt` to obtain the full evidence text for a prompt
+
+### `clore::generate::format_evidence_text_bounded`
+
+Declaration: `src/generate/evidence.cppm:100`
+
+Definition: `src/generate/evidence.cppm:596`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+Implementation: [Implementation](functions/format-evidence-text-bounded.md)
+
+The function `clore::generate::format_evidence_text_bounded` assembles a Markdown evidence block from an `EvidencePack` while respecting a caller-provided `max_length` budget. It preallocates a result string with `text.reserve(4096)`, then attempts to write the top-level heading `"## EVIDENCE\n\n"` via `append_if_fits`; if that fails, it returns an empty string immediately.  
+
+Internally, it defines two local helper structs — `SymbolSection` (holding a title, a pointer to a `std::vector<SymbolFact>` and a render function pointer) and `TextSection` (analogous for `std::vector<std::string>` items). It creates an `std::array` of four `SymbolSection` instances covering target facts, local context, dependency context, and reverse usage context, in that order. A second array holds two `TextSection` instances for source snippets and related page summaries. The function iterates over each section array, calling `append_section_bounded` for each section to add its title and rendered items, always checking against `max_length` to avoid exceeding the budget. The sole explicitly listed dependency is `append_if_fits`, which is used for the initial heading and presumably also internally by `append_section_bounded` for individual lines or items. The final returned `text` contains the full (possibly truncated) evidence string.
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- `EvidencePack::target_facts`
+- `EvidencePack::local_context`
+- `EvidencePack::dependency_context`
+- `EvidencePack::reverse_usage_context`
+- `EvidencePack::source_snippets`
+- `EvidencePack::related_page_summaries`
+- `max_length` parameter
+
+#### Usage Patterns
+
+- called by `clore::generate::format_evidence_text`
+- used to generate bounded evidence strings for prompts
 
 ## Internal Structure
 
-The `generate:evidence` module is the bridge between code extraction and prompt construction, responsible for assembling and formatting code facts into structured evidence packs. It imports `extract` for project metadata and `generate:model` for shared types such as `SymbolAnalysisStore` and `PagePlanSet`, ensuring a clean separation of concerns. Public builder functions such as `build_evidence_for_namespace_summary`, `build_evidence_for_function_analysis`, and `build_evidence_for_type_implementation_summary` each produce an `EvidencePack` tailored to a specific page kind, while `format_evidence_text` and `format_evidence_text_bounded` render the evidence into a textual form ready for prompt injection.
-
-Internally, the module is layered into a `__detail` namespace that contains helper functions for fact collection (`collect_facts`, `collect_summaries`, `collect_merged_facts`) and a caching subsystem (`namespace_facts_cache`) to avoid redundant namespace traversals. An anonymous namespace houses rendering logic (`render_context_fact`, `render_detailed_fact`, `render_source_snippet`) and prompt templates (`kNamespaceSummaryPrompt`, `kFunctionAnalysisPrompt`, etc.), isolating implementation details from the public interface. This decomposition keeps the evidence-building logic modular and testable, while the caching layer optimizes repeated queries for symbols in the same namespace.
+The `generate:evidence` module, implemented in `src/generate/evidence.cppm`, is responsible for collecting, structuring, and formatting evidence required to produce LLM prompts for documentation generation. It imports the `extract` module for symbol and analysis data, and the `generate:model` module for core types such as `EvidencePack`, `SymbolFact`, and `PromptKind`. Internally, the module is decomposed into three layers: a public API surface (functions like `build_evidence_for_namespace_summary`, `build_evidence_for_function_analysis`, `format_evidence_text`, and `build_prompt`), an internal `__detail` namespace that handles fact collection with caching (e.g., `collect_namespace_facts_cached`, `collect_analysis_summaries_impl`), and anonymous‑namespace helpers that provide low‑level rendering, prompt template constants, and bounded formatting logic. The data structures `EvidencePack` and `SymbolFact` serve as the primary evidence containers, while `TextSection` and `SymbolSection` are used internally by the bounded formatter to organize output. A `NamespaceFactsCacheEntry` structure enables efficient reuse of namespace facts across multiple sibling symbol queries, avoiding redundant traversals.
 
 ## Related Pages
 

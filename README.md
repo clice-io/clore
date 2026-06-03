@@ -52,11 +52,11 @@ Enable autonomous codebase exploration and guide generation:
 clore \
   --config clore.en.toml \
   --experimental-agent-mode \
-  --compile-commands build/RelWithDebInfo/compile_commands.json \
+  --compile-commands build/Release/compile_commands.json \
   --source-dir . \
   --output-dir docs/en \
-  --model deepseek-chat \
-  --rate-limit 16
+  --model deepseek-v4-flash \
+  --rate-limit 500
 ```
 
 ### Arguments

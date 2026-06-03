@@ -1,13 +1,22 @@
 module;
 
+#include <cstdint>
+#include <expected>
+#include <format>
+#include <functional>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <variant>
+
 #include "kota/async/async.h"
-#include "kota/codec/json/error.h"
 #include "kota/codec/json/json.h"
 #include "kota/http/http.h"
 
 export module anthropic;
 
-import std;
 import http;
 import protocol;
 import schema;

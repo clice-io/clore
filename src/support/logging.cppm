@@ -4,13 +4,36 @@ module;
 #include <Windows.h>
 #endif
 
+#include <array>
+#include <atomic>
+#include <charconv>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <ios>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <set>
+#include <source_location>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <thread>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 #include "spdlog/sinks/stdout_color_sinks.h"
 #include "spdlog/spdlog.h"
 #include "llvm/Support/xxhash.h"
 
 export module support;
-
-import std;
 
 export namespace clore::support {
 

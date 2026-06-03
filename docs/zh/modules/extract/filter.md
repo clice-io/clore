@@ -1,6 +1,6 @@
 ---
 title: 'Module extract:filter'
-description: 'extract:filter 模块负责提供路径过滤与解析的核心工具集，用于在图形数据结构中筛选、规范化及比较路径。其公开实现围绕一组以整数标识符抽象路径的函数展开，包括路径前缀匹配、相对路径计算、规范化转换、目录下路径解析以及过滤判断，同时定义一个 PathResolveError 异常类型用于表示解析失败。模块内部维护多个缓存变量（如 filter_root、relative_str）以支持高效的状态管理，并依赖 config 和 std 模块提供配置与基础支持。'
+description: 'extract:filter 模块负责处理文件系统路径的规范化、筛选和解析操作，为提取流程提供路径匹配与安全访问的基础设施。它公开了 canonical_graph_path、filter_root_path、matches_filter、project_relative_path、resolve_path_under_directory 和 path_prefix_matches 等函数，以及用于报告路径解析错误的 PathResolveError 结构体。这些接口共同支持将任意路径转换为图可用的规范形式、根据过滤器规则判断路径是否匹配、计算项目相对路径、安全地将路径限定在指定目录下，以及检查路径前缀匹配，从而确保文件系统操作的一致性和安全性。'
 layout: doc
 template: doc
 ---
@@ -9,12 +9,11 @@ template: doc
 
 ## Summary
 
-`extract:filter` 模块负责提供路径过滤与解析的核心工具集，用于在图形数据结构中筛选、规范化及比较路径。其公开实现围绕一组以整数标识符抽象路径的函数展开，包括路径前缀匹配、相对路径计算、规范化转换、目录下路径解析以及过滤判断，同时定义一个 `PathResolveError` 异常类型用于表示解析失败。模块内部维护多个缓存变量（如 `filter_root`、`relative_str`）以支持高效的状态管理，并依赖 `config` 和 `std` 模块提供配置与基础支持。
+`extract:filter` 模块负责处理文件系统路径的规范化、筛选和解析操作，为提取流程提供路径匹配与安全访问的基础设施。它公开了 `canonical_graph_path`、`filter_root_path`、`matches_filter`、`project_relative_path`、`resolve_path_under_directory` 和 `path_prefix_matches` 等函数，以及用于报告路径解析错误的 `PathResolveError` 结构体。这些接口共同支持将任意路径转换为图可用的规范形式、根据过滤器规则判断路径是否匹配、计算项目相对路径、安全地将路径限定在指定目录下，以及检查路径前缀匹配，从而确保文件系统操作的一致性和安全性。
 
 ## Imports
 
 - [`config`](../config/index.md)
-- `std`
 
 ## Imported By
 
@@ -24,52 +23,40 @@ template: doc
 
 ### `clore::extract::PathResolveError`
 
-Declaration: `extract/filter.cppm:8`
+Declaration: `src/extract/filter.cppm:17`
 
-Definition: `extract/filter.cppm:8`
+Definition: `src/extract/filter.cppm:17`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-`clore::extract::PathResolveError` 的实现仅包含一个 `std::string message` 数据成员，用以承载错误描述文本。该结构体本身是平凡可复制、可移动的，其复制、移动、赋值和析构行为完全由 `std::string` 的对应操作隐式提供。内部不存在额外的对齐控制或自定义分配器逻辑，因此消息的存储与管理完全委托给标准字符串。作为错误类型，该结构体不维护超过 `message` 内容之外的任何状态，也不要求 `message` 必须非空——调用者可以将其构造为默认的空字符串。这一简单设计使 `PathResolveError` 可以在 `clore::extract` 内部作为轻量级错误载体使用，直接通过字符串内容传达失败原因，无需额外的错误码或枚举。
+结构体 `clore::extract::PathResolveError` 是一个仅包含单一成员 `message` 的聚合类型，用于存储路径解析失败时的错误描述。该成员为 `std::string` 类型，承担保存人类可读错误信息的职责。实现上未定义任何构造函数或赋值运算符，依赖编译器生成的默认成员函数，因此其不变量完全由调用方维护——`message` 的内容应在构造后保持有效且不包含未初始化状态。作为轻量级错误载体，该类型不提供任何比较或序列化操作，其内部结构直接反映了作为简单错误值传递的设计意图。
+
+#### Invariants
+
+- `message` 成员始终包含有效的字符串，可能为空但不应为未初始化状态
+
+#### Key Members
+
+- `message`（`std::string`）：存储路径解析错误的描述信息
+
+#### Usage Patterns
+
+- 被用作路径解析函数的错误返回类型或异常包装
+- 其他代码通过检查 `message` 内容来获取错误详情
 
 ## Functions
 
 ### `clore::extract::canonical_graph_path`
 
-Declaration: `extract/filter.cppm:21`
+Declaration: `src/extract/filter.cppm:30`
 
-Definition: `extract/filter.cppm:103`
-
-Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
-
-该函数尝试将输入路径转换为规范的通用字符串形式，核心采用分级回退策略。首先通过 `std::filesystem::absolute` 将路径转为绝对形式，若成功则应用 `std::filesystem::weakly_canonical` 做弱规范化，并结合 `lexically_normal` 处理多余分隔符或 `.`/`..` 成分；若任一阶段出现 `std::error_code`，则回退到仅对原始路径执行 `lexically_normal`，再用 `weakly_canonical` 尝试第二次规范化。所有成功路径最终均调用 `generic_string` 输出以正斜杠分隔的字符串。
-
-实现依赖标准库 `<filesystem>` 的 `absolute`、`weakly_canonical`、`lexically_normal` 以及 `generic_string`，并通过 `error_code` 捕获可能的环境错误（如路径不存在或权限问题）。当 `weakly_canonical` 失败时，函数会回退到规范化后的字符串形式，确保始终返回一个可用的表示，不抛出异常。
-
-#### Side Effects
-
-- Filesystem queries to resolve symlinks and determine absolute path (via `std::filesystem::absolute` and `std::filesystem::weakly_canonical`)
-
-#### Reads From
-
-- filesystem (via `std::filesystem::absolute` and `std::filesystem::weakly_canonical`)
-- input parameter `path` of type `const std::filesystem::path&`
-
-#### Usage Patterns
-
-- Normalizing file paths for consistent representation in a graph
-- Canonicalizing paths for use as identifiers or keys
-- Handling filesystem errors gracefully by falling back to lexical normalization
-
-### `clore::extract::filter_root_path`
-
-Declaration: `extract/filter.cppm:27`
-
-Definition: `extract/filter.cppm:161`
+Definition: `src/extract/filter.cppm:112`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该实现首先检查 `config.workspace_root` 是否为空；若不为空，则直接返回 `std::filesystem::path(config.workspace_root)` 经过 `lexically_normal()` 规范化的结果。否则，回退到 `config.project_root` 并执行相同的规范化操作。整个流程仅依赖 `config::TaskConfig` 的两个字段和 `<filesystem>` 的路径规范化方法，无额外分支或错误处理。
+Implementation: [Implementation](functions/canonical-graph-path.md)
+
+该函数通过分层回退策略将任意文件系统路径转换为规范的图形路径表示形式。首先尝试使用 `std::filesystem::absolute` 和 `std::filesystem::weakly_canonical` 解析路径，同时通过 `std::error_code` 捕获错误。若成功，则返回弱规范化路径的 `generic_string`；若失败，则回退到绝对路径的 `lexically_normal` 版本。如果绝对路径解析本身失败，则直接对输入路径进行 `lexically_normal`，再次尝试 `weakly_canonical`，最终返回最有效的规范化结果。整个过程避免异常抛出，完全依赖于 `<filesystem>` 库提供的操作系统级路径解析能力。
 
 #### Side Effects
 
@@ -77,25 +64,101 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `config::TaskConfig::workspace_root`
-- `config::TaskConfig::project_root`
+- filesystem via `fs::absolute` (reads current working directory and path components)
+- filesystem via `fs::weakly_canonical` (reads symlinks and directory existence)
 
 #### Usage Patterns
 
-- Used to obtain a normalized root directory path from task configuration
-- Provides the effective base path for filtering or extraction operations
+- called by `matches_filter` to obtain a consistent path for filtering
 
-### `clore::extract::matches_filter`
+### `clore::extract::filter_root_path`
 
-Declaration: `extract/filter.cppm:23`
+Declaration: `src/extract/filter.cppm:36`
 
-Definition: `extract/filter.cppm:124`
+Definition: `src/extract/filter.cppm:170`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该函数首先通过 `canonical_graph_path` 规范化输入参数 `file` 和 `filter_root`，得到 `file_path` 与 `root_path`，再调用 `project_relative_path` 计算相对于过滤根目录的项目相对路径。若相对路径计算失败（返回 `std::nullopt`），则直接返回 `false`。随后将相对路径转换为通用字符串 `relative_str`，依次在 `filter.include` 和 `filter.exclude` 上应用 `path_prefix_matches` 进行前缀匹配：若 `include` 列表非空且无任何模式匹配，立即返回 `false`；若 `exclude` 中任一模式匹配，同样返回 `false`；否则返回 `true`。
+该函数通过检查 `config.workspace_root` 是否为空来决定返回路径：若不为空，则返回其 `lexically_normal()` 形式；否则返回 `config.project_root` 的规范化结果。过程依赖 `config::TaskConfig` 结构体的两个成员，并利用 `std::filesystem::path::lexically_normal` 进行路径标准化，没有分支合并或复杂算法。
 
-控制流为典型的“先用 include 白名单筛选，再用 exclude 黑名单剔除”。所有路径操作依赖 `canonical_graph_path` 和 `project_relative_path`，匹配逻辑依赖 `path_prefix_matches` 与 `config::FilterRule` 的结构字段。未处理文件系统错误（如路径不存在），但 `project_relative_path` 内部可能抛异常或返回空值。
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- config`.workspace_root`
+- config`.project_root`
+
+#### Usage Patterns
+
+- derive canonical root for path filtering
+- obtain normalized workspace or project root
+
+### `clore::extract::matches_filter`
+
+Declaration: `src/extract/filter.cppm:32`
+
+Definition: `src/extract/filter.cppm:133`
+
+Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
+
+该函数首先通过 `clore::extract::canonical_graph_path` 规范化 `file` 和 `filter_root` 路径，得到 `file_path` 与 `root_path`，然后调用 `clore::extract::project_relative_path` 计算相对路径；若计算失败（例如文件不在根目录内），直接返回 `false`。将相对路径转为通用字符串 `relative_str` 后，依次处理 `filter.include` 中的模式：遍历每个 `pattern` 并借助 `clore::extract::path_prefix_matches` 检查是否匹配，若无一匹配则返回 `false`。接着处理 `filter.exclude` 中的模式，一旦有任意模式匹配同样返回 `false`。仅当 include 检查（若列表非空）与 exclude 检查均通过时，函数才返回 `true`。核心依赖为 `canonical_graph_path`、`project_relative_path` 与 `path_prefix_matches` 三个工具函数。
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- parameter `file`
+- parameter `filter` (a `config::FilterRule`)
+- parameter `filter_root`
+- `filter.include` (container of strings)
+- `filter.exclude` (container of strings)
+- return value of `canonical_graph_path`
+- return value of `project_relative_path`
+
+#### Usage Patterns
+
+- called to decide whether a compilation entry's source file should be processed based on include/exclude rules
+- used during extraction to filter files that match a given filter rule
+
+### `clore::extract::path_prefix_matches`
+
+Declaration: `src/extract/filter.cppm:21`
+
+Definition: `src/extract/filter.cppm:42`
+
+Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
+
+函数 `clore::extract::path_prefix_matches` 判断一个路径前缀（`pattern`）是否匹配给定的相对路径（`relative`），其核心在于处理尾部斜杠并区分单组件与多组件前缀。该算法不依赖任何其他自定义函数，仅使用标准库的 `std::string_view` 操作（如 `empty`、`back`、`remove_suffix`、`find`、`starts_with` 以及下标访问）。
+
+内部控制流首先排除空 `pattern` 并移除尾部所有 `/` 字符，若去除后为空则直接返回 `false`。随后根据 `pattern` 中是否包含 `/` 分为两路：若存在（多组件），则要求 `relative` 必须以 `pattern` 开头，且后续字符要么不存在（完全相等），要么是 `/`；若不存在（单组件），则在相等性检测失败后，额外检查 `relative` 长度是否至少比 `pattern` 多 1，以及 `relative` 是否以 `pattern` 开头且第 `pattern.size()` 个字符为 `/`。两种分支都确保 `pattern` 仅作为完整路径段的前缀，而非部分文件名。
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- `relative` (`std::string_view`)
+- `pattern` (`std::string_view`)
+
+#### Usage Patterns
+
+- Filtering relative file paths against a directory or component prefix
+- Path matching in `matches_filter` or similar predicate functions
+
+### `clore::extract::project_relative_path`
+
+Declaration: `src/extract/filter.cppm:23`
+
+Definition: `src/extract/filter.cppm:73`
+
+Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
+
+该函数通过调用 `file.lexically_relative(root_path)` 计算相对路径 `rel`。若 `rel.empty()` 成立（即 `file` 与 `root_path` 之间不存在词典上的相对关系），或 `rel` 的任一路径部件等于 `".."`（表明文件位于 `root_path` 的目录树之外），则立即返回 `std::nullopt`；否则直接返回 `rel`。算法完全依赖于 `std::filesystem::path` 的成员函数，不调用任何其他 `clore::extract` 内部函数。
 
 #### Side Effects
 
@@ -104,96 +167,51 @@ No observable side effects are evident from the extracted code.
 #### Reads From
 
 - `file` parameter
-- `filter` parameter (including `filter.include` and `filter.exclude`)
-- `filter_root` parameter
-
-#### Usage Patterns
-
-- Filtering source files during project extraction
-- Evaluating include/exclude rules for scanning
-- Deciding whether to process a compilation entry
-
-### `clore::extract::path_prefix_matches`
-
-Declaration: `extract/filter.cppm:12`
-
-Definition: `extract/filter.cppm:33`
-
-Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
-
-函数 `clore::extract::path_prefix_matches` 通过纯 `std::string_view` 操作判断 `relative` 是否以 `pattern` 为路径前缀，内部不依赖任何外部项目函数。算法首先处理空输入和尾部斜杠：若 `pattern` 为空直接返回 `false`；然后循环删除尾部 `/`，再次检查空字符串。之后按 `pattern` 是否包含 `'/'` 分两支：若包含，要求 `relative` 必须以 `pattern` 开头且长度要么完全相等，要么紧跟 `/`；若不包含，则除精确匹配外，还需确保 `relative` 长度至少比 `pattern` 多 1，且后一个字符为 `/`，从而避免匹配部分文件名（如 `pattern` 为 `foo` 而 `relative` 为 `foobar`）。控制流仅依赖 `std::string_view` 的成员函数（`empty`、`back`、`remove_suffix`、`find`、`starts_with`、`size`、`operator[]`），无其他依赖性。
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- parameter `relative` of type `std::string_view`
-- parameter `pattern` of type `std::string_view`
-
-#### Usage Patterns
-
-- used as a predicate to filter file paths that belong to a given directory prefix
-- likely called from path-matching logic in `clore::extract::matches_filter` or other filter functions
-
-### `clore::extract::project_relative_path`
-
-Declaration: `extract/filter.cppm:14`
-
-Definition: `extract/filter.cppm:64`
-
-Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
-
-该函数首先通过调用 `std::filesystem::path::lexically_relative` 计算输入参数 `file` 相对于 `root_path` 的词汇相对路径，结果存入 `rel`。随后检查 `rel` 是否为空——若为空则直接返回 `std::nullopt`，表示无法建立相对关系。接着遍历 `rel` 的各组成部分，若发现任意一部分等于 `".."`，表明路径试图跳出 `root_path` 目录范围，此时同样返回 `std::nullopt`。仅当上述两项检查均通过时，才返回 `rel` 作为有效的相对路径。
-
-整个实现仅依赖标准库的 `std::filesystem` 组件，未调用其他 `clore::extract` 内部函数。核心逻辑围绕 `lexically_relative` 的返回值进行简单验证，无复杂控制流或外部依赖。
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- const `std::filesystem::path`& file
-- const `std::filesystem::path`& `root_path`
-
-#### Usage Patterns
-
-- Compute a safe project-relative path for a file under a given root
-- Ensure a file path does not escape a project directory by rejecting `..` components
-
-### `clore::extract::resolve_path_under_directory`
-
-Declaration: `extract/filter.cppm:18`
-
-Definition: `extract/filter.cppm:79`
-
-Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
-
-该实现首先对空路径进行防御性检查，若 `path` 为空则返回带有 `PathResolveError::message` 的意外结果。然后通过 `std::filesystem::path` 构造路径对象 `p`；若 `p` 为相对路径，则要求 `directory` 非空，否则同样返回错误。在 `directory` 非空时，将 `directory` 与 `p` 拼接形成绝对路径。最后对所有路径调用 `p.lexically_normal()` 以消除冗余的 `.` 和 `..` 组件，返回规范化后的 `std::filesystem::path`。整个流程无其他内部函数依赖，仅依赖于 `std::filesystem` 库和自定义错误类型 `PathResolveError`。
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- the `path` parameter (`std::string`)
-- the `directory` parameter (`std::string`)
+- `root_path` parameter
+- the relative path `rel` computed by `lexically_relative`
 
 #### Writes To
 
-- the returned `std::expected<std::filesystem::path, PathResolveError>` object
+- local variable `rel`
+- return value of type `std::optional<std::filesystem::path>`
 
 #### Usage Patterns
 
-- resolving file paths from `compile_commands.json` entries
-- normalizing relative paths against a project root directory
+- Convert absolute paths to project-relative paths for consistent representation
+- Ensure a file path does not escape a given project root directory
+
+### `clore::extract::resolve_path_under_directory`
+
+Declaration: `src/extract/filter.cppm:27`
+
+Definition: `src/extract/filter.cppm:88`
+
+Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
+
+函数首先检查传入的 `path` 是否为空，若为空则直接返回一个 `PathResolveError`，其中 `message` 指示“compilation database entry has empty file path”。将 `path` 转换为 `std::filesystem::path` 对象 `p` 后，若 `p.is_relative()` 为真，则校验 `directory` 是否非空：若为空则返回错误，提示需要提供非空目录；否则将 `directory` 与 `p` 拼接形成绝对路径。最后对所有情况都调用 `p.lexically_normal()` 进行词法规范化，并返回规范化后的路径。该实现依赖 `std::filesystem` 的路径操作和 `PathResolveError` 结构体，未使用其他内部辅助函数。
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- the `path` parameter of type `const std::string&`
+- the `directory` parameter of type `const std::string&`
+
+#### Writes To
+
+- the returned `std::filesystem::path` value (no external mutation)
+
+#### Usage Patterns
+
+- resolving file paths from compilation database entries
+- combining a relative path with a base directory
+- validating and normalizing path inputs before further processing
 
 ## Internal Structure
 
-该模块实现了路径过滤的核心逻辑，依赖 `config` 模块提供过滤根目录和规则，依赖 `std` 提供基础类型和算法。内部按职责分为三层：底层是路径解析，通过 `canonical_graph_path`、`resolve_path_under_directory` 等函数将输入的路径标识符转换为规范化的内部表示；中层是匹配层，提供 `path_prefix_matches` 和 `matches_filter` 等谓词函数，用于判断路径是否符合配置中的过滤模式；上层是应用接口，如 `filter_root_path`、`project_relative_path`，将解析与匹配组合为可直接被调用者使用的功能。实现结构围绕一组公开变量（如 `filter_root`、`root_path`、`config`、`pattern`）和模块作用域的局部变量（如 `relative_str`、`rel_opt`、`matched`）展开，通过 `PathResolveError` 结构体规范化错误处理流程，确保路径操作的可靠性。
+该模块 `extract:filter` 被分解为若干公开的路径查询与过滤函数，以及一些内部辅助工具，它们共同负责将文件系统路径转化为可用于过滤与匹配的规范化形式。对外接口包括 `matches_filter`、`filter_root_path`、`project_relative_path`、`resolve_path_under_directory`，以及一个错误类型 `PathResolveError`；内部则依赖 `canonical_graph_path`、`path_prefix_matches` 等私有函数实现路径标准化与前缀匹配。模块通过导入 `config` 依赖获得过滤规则（如 `FilterRule`），形成从配置到路径过滤的清晰分层，内部实现按照“路径规范化 → 相对化 → 前缀匹配”的步骤组织，并使用 `std::expected` 与自定义错误类型处理边界情况。
 
 ## Related Pages
 

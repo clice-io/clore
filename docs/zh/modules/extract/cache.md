@@ -1,6 +1,6 @@
 ---
 title: 'Module extract:cache'
-description: '该模块负责管理代码提取操作的缓存逻辑，包括生成、持久化和验证提取结果。它公开了构建编译签名（build_compile_signature）、捕获依赖状态快照（capture_dependency_snapshot）以及检测依赖是否发生变化（dependencies_changed）等关键函数，并提供对文件内容进行哈希（hash_file）的能力。缓存键的生成（build_cache_key）与解析（split_cache_key）被封装为独立接口，而 load_extract_cache 和 save_extract_cache 则负责以键值对形式读写提取缓存。此外，它还提供针对 CLICE 工作区的专用缓存数据（CliceCacheData、CliceCachePCMEntry、CliceCachePCHEntry 等）的序列化与存取操作（load_clice_cache、save_clice_cache）。模块内部包含匿名命名空间中的辅助函数，用于路径规范化、缓存文件路径推导、依赖快照的编码/解码以及多线程并行哈希等实现细节。'
+description: 'extract:cache 模块负责管理 C++ 提取过程的缓存系统，提供键值存储、依赖跟踪和结果序列化能力。它公开了 CacheKeyParts、DependencySnapshot、CacheRecord、CliceCacheData（包含 CliceCachePCMEntry、CliceCachePCHEntry、CliceCacheDepEntry）等核心数据结构，以及 build_cache_key、split_cache_key、hash_file、build_compile_signature、capture_dependency_snapshot、dependencies_changed 和 load_extract_cache / save_extract_cache、load_clice_cache / save_clice_cache 等公共函数。通过这些接口，调用方可以生成并解析缓存键、计算文件或编译单元摘要、捕获依赖快照并检测变化，以及将提取结果（如 AST 和依赖信息）持久化到磁盘，从而在后续编译中跳过重复的提取工作。该模块依赖于 extract:ast、extract:compiler、extract:scan 和 support 模块，共同构成提取管线的缓存基础设施。'
 layout: doc
 template: doc
 ---
@@ -9,32 +9,32 @@ template: doc
 
 ## Summary
 
-该模块负责管理代码提取操作的缓存逻辑，包括生成、持久化和验证提取结果。它公开了构建编译签名（`build_compile_signature`）、捕获依赖状态快照（`capture_dependency_snapshot`）以及检测依赖是否发生变化（`dependencies_changed`）等关键函数，并提供对文件内容进行哈希（`hash_file`）的能力。缓存键的生成（`build_cache_key`）与解析（`split_cache_key`）被封装为独立接口，而 `load_extract_cache` 和 `save_extract_cache` 则负责以键值对形式读写提取缓存。此外，它还提供针对 CLICE 工作区的专用缓存数据（`CliceCacheData`、`CliceCachePCMEntry`、`CliceCachePCHEntry` 等）的序列化与存取操作（`load_clice_cache`、`save_clice_cache`）。模块内部包含匿名命名空间中的辅助函数，用于路径规范化、缓存文件路径推导、依赖快照的编码/解码以及多线程并行哈希等实现细节。
+`extract:cache` 模块负责管理 C++ 提取过程的缓存系统，提供键值存储、依赖跟踪和结果序列化能力。它公开了 `CacheKeyParts`、`DependencySnapshot`、`CacheRecord`、`CliceCacheData`（包含 `CliceCachePCMEntry`、`CliceCachePCHEntry`、`CliceCacheDepEntry`）等核心数据结构，以及 `build_cache_key`、`split_cache_key`、`hash_file`、`build_compile_signature`、`capture_dependency_snapshot`、`dependencies_changed` 和 `load_extract_cache` / `save_extract_cache`、`load_clice_cache` / `save_clice_cache` 等公共函数。通过这些接口，调用方可以生成并解析缓存键、计算文件或编译单元摘要、捕获依赖快照并检测变化，以及将提取结果（如 AST 和依赖信息）持久化到磁盘，从而在后续编译中跳过重复的提取工作。该模块依赖于 `extract:ast`、`extract:compiler`、`extract:scan` 和 `support` 模块，共同构成提取管线的缓存基础设施。
 
 ## Imports
 
 - [`extract:ast`](ast.md)
 - [`extract:compiler`](compiler.md)
 - [`extract:scan`](scan.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Types
 
 ### `clore::extract::cache::CacheError`
 
-Declaration: `extract/cache.cppm:20`
+Declaration: `src/extract/cache.cppm:36`
 
-Definition: `extract/cache.cppm:20`
+Definition: `src/extract/cache.cppm:36`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-`clore::extract::cache::CacheError` 是一个仅含单一 `std::string` 数据成员 `message` 的简单值类型。该结构体不维护任何额外的不变量——`message` 的内容完全由调用者控制，并且没有隐式的格式化或验证逻辑。设计上，它作为轻量级错误载体，直接暴露 `message` 供外部读取，无需虚函数或继承，仅依赖字符串的默认构造、复制和析构行为。
+结构体 `clore::extract::cache::CacheError` 的内部状态由唯一的成员 `message` 承载，该成员是一个 `std::string` 实例。`message` 负责记录与缓存提取错误相关的描述性文本，是错误信息的唯一载体。由于结构体没有任何其他数据成员或虚函数，其实例的内存布局等价于一个 `std::string` 对象，不引入额外开销。
+
+该结构体是一个聚合类型，因此其构造完全依赖于 `message` 的默认初始化或直接聚合初始化。实现中不存在自定义构造函数、析构函数或拷贝/移动控制函数，所有特殊成员函数均由编译器隐式生成。不变量仅要求 `message` 在错误对象的生命周期内保持有效，没有额外的约束或变体机制。
 
 #### Invariants
 
-- The `message` member may be empty or contain any string
-- No additional constraints beyond standard `std::string` behavior
+- The `message` field holds a human-readable error description.
 
 #### Key Members
 
@@ -42,50 +42,49 @@ Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/
 
 #### Usage Patterns
 
-- Returned or caught as an error result from cache operations
-- Constructed with a descriptive string to indicate failure cause
-- Likely used with `std::expected` or `std::variant` error handling patterns
+- Returned or thrown as an error type within the `clore::extract::cache` module.
+- Its `message` member is expected to be accessed to obtain error details.
 
 ### `clore::extract::cache::CacheKeyParts`
 
-Declaration: `extract/cache.cppm:24`
+Declaration: `src/extract/cache.cppm:40`
 
-Definition: `extract/cache.cppm:24`
+Definition: `src/extract/cache.cppm:40`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-`clore::extract::cache::CacheKeyParts` 是一个聚合结构体，直接持有缓存键的两个核心组成部分。其成员 `path` 为 `std::string` 类型，存储源文件路径；`compile_signature` 为 `std::uint64_t` 类型，记录文件的编译时签名（通常是依赖树哈希或修改时间戳）。这两个字段共同唯一标识一个缓存条目：`path` 定位目标文件，`compile_signature` 区分同一文件在不同编译上下文下的版本。结构体本身无自定义构造函数或成员函数，完全依赖聚合初始化，所有成员均公有且不维护额外不变式——调用方需确保 `path` 为空时能按预期处理，并保持 `compile_signature` 与 `path` 的关联一致性。
+`clore::extract::cache::CacheKeyParts` 是一个纯数据容器，组合了 `path` 与 `compile_signature` 两个字段，用作缓存查找的分解键。`path` 是 `std::string` 类型，保存源文件路径；`compile_signature` 是 `std::uint64_t` 类型，携带编译签名（通常根据编译器选项、源文件内容等计算得出）。该结构不强加内部不变量——合法状态由调用者保证，例如 `path` 通常应为非空，而 `compile_signature` 的任何值都是有效的。其存在是为了将原本可能作为复合键（如 `std::pair` 或哈希元组）处理的逻辑拆分为具名字段，从而提高代码可读性并便于在缓存子系统内部按部件进行序列化或比较。
 
 #### Invariants
 
-- `path` 应该是一个有效的文件系统路径
-- `compile_signature` 应当唯一标识一个编译单元的特定版本
+- `path` stores a file path as a string.
+- `compile_signature` stores a 64-bit unsigned integer representing a compile-time signature.
+- Both members together uniquely identify a cache entry.
 
 #### Key Members
 
-- `path`：文件路径
-- `compile_signature`：编译签名
+- `path`
+- `compile_signature`
 
 #### Usage Patterns
 
-- 用作缓存键的一部分，与完整的缓存键组合或比较
-- 可能通过其成员来生成哈希或进行相等性判断
+- Used as a key part for caching extract results based on file path and compile signature.
+- Aggregate initialization allows straightforward construction in cache lookup code.
 
 ### `clore::extract::cache::CacheRecord`
 
-Declaration: `extract/cache.cppm:36`
+Declaration: `src/extract/cache.cppm:52`
 
-Definition: `extract/cache.cppm:36`
+Definition: `src/extract/cache.cppm:52`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-`clore::extract::cache::CacheRecord` 将缓存的提取结果分解为五个公有字段。其核心不变式在于 `compile_signature` 与 `source_hash` 的组合唯一标识一组输入，而 `ast_deps`、`scan` 和 `ast` 则分别存储对该输入进行依赖分析、扫描及 AST 解析后得到的结果。在缓存命中时，外部组件首先校验两个哈希值是否与当前编译上下文匹配，随后即可安全地读取其余三个字段的内容。由于该结构体仅作为纯数据聚合体，所有字段均直接暴露，验证、序列化及生命周期管理等职责由 `CacheManager` 等配套类型承担。
+`CacheRecord`结构体封装了一个提取缓存条目，其内部按身份标识与缓存负载组织。`compile_signature`和`source_hash`构成唯一键，用于校验缓存命中；零值默认初始化表示记录未设置。`ast_deps`维护编译期依赖快照，`scan`和`ast`分别存储扫描与抽象语法树结果。核心不变量是：只有`compile_signature`和`source_hash`均匹配时，后续三个数据字段才被视为对当前源有效；任何字段的修改必须伴随相应键的更新。
 
 #### Invariants
 
-- `compile_signature` 与 `source_hash` 的组合唯一标识一个编译单元
-- 缓存记录中的 `ast_deps`、`scan`、`ast` 应与对应的 `source_hash` 和 `compile_signature` 保持一致
-- 当源文件或编译配置变化时，相关字段应失效或更新
+- `compile_signature` and `source_hash` are initialized to zero
+- No further invariants are specified in the evidence
 
 #### Key Members
 
@@ -97,137 +96,135 @@ Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/
 
 #### Usage Patterns
 
-- 在缓存查找时通过 `source_hash` 和 `compile_signature` 匹配记录
-- 提取过程中生成新的 `CacheRecord` 实例并存储到缓存中
-- 其他代码通过读取成员（如 `scan`、`ast`）获取缓存的分析结果
+- Populated and stored in a cache keyed by compile signature and source hash
+- Retrieved to reuse previously computed scan and AST results
 
 ### `clore::extract::cache::CliceCacheData`
 
-Declaration: `extract/cache.cppm:68`
+Declaration: `src/extract/cache.cppm:84`
 
-Definition: `extract/cache.cppm:68`
+Definition: `src/extract/cache.cppm:84`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-结构体 `clore::extract::cache::CliceCacheData` 是一个纯聚合类型，用于容纳缓存数据的三个独立领域：`paths` 中存储原始路径字符串，`pch` 中按序存储预编译头缓存条目（类型 `CliceCachePCHEntry`），`pcm` 中按序存储模块缓存条目（类型 `CliceCachePCMEntry`）。三个 `std::vector` 成员在逻辑上互相独立，没有隐式的同步或对齐约束；实现上将路径、PCH 与 PCM 分离主要是为了配合上层存取逻辑的差异，并简化序列化/反序列化的布局。该结构体本身不维护任何跨字段的不变性——所有成员均可独立修改，依赖外部调用方保证语义一致性。
+`clore::extract::cache::CliceCacheData` 是一个聚合结构体，通过三个 `std::vector` 成员来存储提取的缓存数据：`paths` 保存源文件路径字符串，`pch` 保存预编译头条目（类型为 `CliceCachePCHEntry`），`pcm` 保存模块条目（类型为 `CliceCachePCMEntry`）。该结构体没有用户声明的构造函数、析构函数或赋值运算符，因此其内存布局和生命周期完全由默认成员初始化器和标准容器的复制/移动语义管理。不变量要求这三个向量在逻辑上保持一致——例如，`pch` 和 `pcm` 中的每个条目都可能引用 `paths` 中的某个索引——但这种一致性依赖调用方在填充和访问数据时加以保证，结构体本身不提供校验机制。
 
 #### Invariants
 
-- All three member vectors may be empty; no non‑empty guarantee is implied.
-- The struct provides no validation or ordering invariants beyond what `std::vector` offers.
+- No explicit invariants are stated; the vectors are independent containers.
 
 #### Key Members
 
-- `paths`
-- `pch`
-- `pcm`
+- `paths` — a vector of file paths as strings
+- `pch` — a vector of `CliceCachePCHEntry` objects
+- `pcm` — a vector of `CliceCachePCMEntry` objects
 
 #### Usage Patterns
 
-- Used to aggregate and transfer cache data in the extraction pipeline.
-- Likely populated by serialization or extraction routines and consumed by cache lookup or storage logic.
+- Used to aggregate cache entries for PCH and PCM along with their associated paths
+- Likely serialized or passed around within the caching subsystem
 
 ### `clore::extract::cache::CliceCacheDepEntry`
 
-Declaration: `extract/cache.cppm:46`
+Declaration: `src/extract/cache.cppm:62`
 
-Definition: `extract/cache.cppm:46`
+Definition: `src/extract/cache.cppm:62`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-该结构体 `clore::extract::cache::CliceCacheDepEntry` 是一个扁平的数据载体，内部仅包含两个字段：`path`（`std::uint32_t`）和 `hash`（`std::uint64_t`）。两个字段均默认初始化为零，使得默认构造的实例立即处于可判定的“空”或“无效”状态。整个结构体保持与外部 `clice/src/server/workspace.cpp` 中 `CacheData` 的 schema 兼容，因此其内存布局、成员顺序及类型均严格匹配，以便直接进行底层序列化或内存映射。由于该结构体为平凡可复制类型（trivially copyable），不依赖虚函数或自定义构造函数，其实现完全由成员默认值和非虚析构函数构成，无需额外的运行时维护逻辑。
+结构体 `clore::extract::cache::CliceCacheDepEntry` 以紧凑的 12 字节布局表示单条依赖项记录，用于工作区缓存的数据交换格式。两个字段 `path`（`std::uint32_t`）与 `hash`（`std::uint64_t`）分别存储依赖文件的路径标识符（推测为路径表索引）及其内容哈希，默认零值表示“未设置”状态。该布局与上游模块 `clore::src::server::workspace.cpp` 中的 `CacheData` 保持二进制兼容性，因此字段顺序、对齐及总计大小均受跨模块 ABI 约束。所有成员均通过默认初始化置零，无需自定义构造函数或析构函数；`path` 和 `hash` 的取值由外部缓存序列化逻辑保证，不设访问器或修改器。
 
 #### Invariants
 
-- `path` 和 `hash` 的类型固定为 `std::uint32_t` 和 `std::uint64_t`
-- 所有成员初始化为零，表示空或未设置状态
-- 结构的字段布局与外部 `CacheData` 保持兼容
+- `path` 和 `hash` 均为无符号整数类型
+- 默认初始化时两个成员均为零
+- 结构体为平凡类型，无自定义构造函数或析构函数
 
 #### Key Members
 
-- `path`
-- `hash`
+- `path`：32 位路径标识符
+- `hash`：64 位内容哈希
 
 #### Usage Patterns
 
-- 作为缓存数据结构中的元素，用于存储依赖项的路径和哈希值
-- 通过比较 `path` 和 `hash` 判断依赖是否发生变化
-- 是 `CliceCacheEntry` 或其他缓存容器的一部分（未在证据中明确）
+- 作为 `CliceCache` 或其内部容器中的元素类型
+- 与 server 端的 `CacheData` 结构体保持二进制兼容，用于磁盘缓存读写
+- 通过直接比较 `hash` 和 `path` 来实现依赖项的快速匹配
 
 ### `clore::extract::cache::CliceCachePCHEntry`
 
-Declaration: `extract/cache.cppm:51`
+Declaration: `src/extract/cache.cppm:67`
 
-Definition: `extract/cache.cppm:51`
+Definition: `src/extract/cache.cppm:67`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-`clore::extract::cache::CliceCachePCHEntry` 是一个内部记录类型，用于表示单个预编译头缓存项的元数据。其字段 `filename` 存储缓存文件的路径，`source_file` 记录关联的主源文件在缓存数据库中的索引，`hash` 是 PCH 内容的摘要值，用于检测内容是否已变化；`bound` 是一个引用计数，指示当前有多少编译任务已绑定到该项以确保并发安全，`build_at` 是构建完成的时间戳，用于判断缓存时效，而 `deps` 则包含一个 `CliceCacheDepEntry` 向量，列出该项的所有直接依赖项。这些成员共同维护了缓存项在本地的完整状态，使缓存系统能够高效地进行验证、重用和失效处理。
+该结构表示一个预编译头（PCH）缓存条目，其内部由六个字段共同构成缓存键值与状态。`filename` 存储PCH文件的路径字符串；`source_file` 是一个32位标识符，可能索引至外部源文件表；`hash` 用于快速校验内容一致性；`bound` 记录绑定次数或关联性计数；`build_at` 为构建时间戳，用于失效判断；`deps` 保存依赖项列表，类型为 `CliceCacheDepEntry` 的向量。这些字段之间维持着隐式的不变性：例如 `hash` 应反映 `filename`、`deps` 及 `source_file` 的组合特征，而 `build_at` 的单调递增性则确保时间顺序的合理性。整个条目的完整性依赖于 `deps` 向量中每个依赖项的正确解析与 `bound` 计数器的同步更新。
 
 #### Invariants
 
-- `hash` uniquely identifies the PCH content
-- `deps` holds all dependency entries for the PCH
-- `build_at` is a timestamp (likely Unix epoch in seconds or milliseconds)
-- `bound` represents a binding count or reference counter
+- All integer fields are zero-initialized.
+- The `filename` and `deps` are empty by default.
+- The `deps` vector contains only valid `CliceCacheDepEntry` objects if non-empty.
 
 #### Key Members
 
-- `filename`
-- `source_file`
-- `hash`
-- `bound`
-- `build_at`
-- `deps`
+- `filename` - the path or name of the PCH file
+- `source_file` - index of the source file associated with the PCH
+- `hash` - 64-bit content hash of the PCH
+- `bound` - unsigned integer counting bindings to this entry
+- `build_at` - 64-bit timestamp of when the PCH was built
+- `deps` - vector of `CliceCacheDepEntry` representing dependencies
 
 #### Usage Patterns
 
-- Used as element in a cache container (e.g., map or vector)
-- Fields accessed directly for read/write by cache serialization and comparison logic
-- Dependency information stored in `deps` for validity checks
+- Used as the value type in a cache container (e.g., a map from filename to entry).
+- Entries are created when a PCH is built and looked up during cache validation.
+- The `deps` field is populated with the dependencies of the PCH to track changes.
 
 ### `clore::extract::cache::CliceCachePCMEntry`
 
-Declaration: `extract/cache.cppm:60`
+Declaration: `src/extract/cache.cppm:76`
 
-Definition: `extract/cache.cppm:60`
+Definition: `src/extract/cache.cppm:76`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-该结构体是一个聚合类型，用于持久化缓存中的已编译 PCM 条目。内部通过 `filename` 存储 PCM 文件的路径，`module_name` 记录关联的模块名称，`source_file` 引用源文件标识符（默认初始化为 0），`build_at` 记录构建时间戳（默认初始化为 0），`deps` 以 `std::vector<CliceCacheDepEntry>` 保存依赖项列表。所有成员均为公有，支持直接成员初始化；其不变性体现在：`build_at` 的非负性（语义上应为时间戳），以及 `source_file` 若大于 0 则代表有效的源文件索引，但这些约束由外部调用方保证，结构体本身不执行校验。
+内部结构由五个成员组成：`filename` 存储缓存的 PCM 文件路径，`source_file` 为源文件索引（默认 0 表示未关联），`module_name` 记录模块名，`build_at` 为构建时间戳（默认 0 表示未构建），`deps` 为依赖项向量（可包含零个或多个 `CliceCacheDepEntry`）。初始化时 `source_file` 与 `build_at` 的零值作为无效或未设置状态的标记，`filename` 与 `module_name` 在有效条目中应非空。`deps` 的默认构造为空向量，其元素通过分隔的 `CliceCacheDepEntry` 对象表示模块间的依赖关系，该结构体本身不维护额外的不变量，各字段直接支持序列化与比较操作。
 
 #### Invariants
 
-- `source_file` and `build_at` default to zero when not explicitly initialized
-- `deps` is a vector that may be empty
+- `source_file` defaults to `0`
+- `build_at` defaults to `0`
+- `deps` holds a vector of `CliceCacheDepEntry` objects
 
 #### Key Members
 
-- `filename`
-- `module_name`
-- `source_file`
-- `build_at`
-- `deps`
+- `filename` field
+- `source_file` field
+- `module_name` field
+- `build_at` field
+- `deps` field
 
 #### Usage Patterns
 
-- Stored in a cache collection managed by `clore::extract::cache`
-- Populated during PCM extraction and used for build system dependency tracking
-- Likely serialized or persisted to disk for incremental builds
+- Used within the cache system to store PCM entry data
+- Likely serialized or deserialized as part of cache persistence
 
 ### `clore::extract::cache::DependencySnapshot`
 
-Declaration: `extract/cache.cppm:29`
+Declaration: `src/extract/cache.cppm:45`
 
-Definition: `extract/cache.cppm:29`
+Definition: `src/extract/cache.cppm:45`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-该结构体以三个并行向量为核心：`files` 存储依赖项的文件路径，`hashes` 存储每个文件的内容哈希，`mtimes` 存储最后的修改时间。这些向量之间的索引隐含的对应关系是核心不变性：对于任意索引 `i`，`files[i]`、`hashes[i]` 和 `mtimes[i]` 描述的是同一个文件。`build_at` 记录该快照创建的时间戳，默认值为 `0` 表示未设置。所有成员均可直接访问，不提供额外的封装或校验逻辑，因此调用方必须自行维护向量的同步性（例如在添加或删除文件时同时处理三个向量）确保快照的一致性。
+`clore::extract::cache::DependencySnapshot` 是缓存机制中用于记录依赖项状态的核心数据载体。其内部结构由四个字段构成：`files` 存储依赖项的路径列表，`hashes` 存储每个文件对应的内容哈希值，`mtimes` 存储每个文件的最后修改时间，`build_at` 是一个时间戳，标记该快照生成的时间点。这三个向量隐含的不变量是它们必须保持长度一致，且索引对齐，即第 *i* 个文件路径、哈希值与修改时间一一对应。`build_at` 默认初始化为 `0`，通常表示无效或未设置的时间戳，在实现中需要被正确赋值为实际构建时刻。该结构体本身不提供成员函数，其正确性依赖于调用方在填充数据时维护向量的同步性和时间戳的准确性，因此所有修改操作必须确保 `files`、`hashes`、`mtimes` 通过原子性操作同时调整。
 
 #### Invariants
 
-- No documented invariants; the vectors are not explicitly constrained to have the same length.
+- The vectors `files`, `hashes`, and `mtimes` are expected to have the same size (parallel sequences).
+- The `build_at` field provides a timestamp for the snapshot, defaulting to zero.
 
 #### Key Members
 
@@ -238,21 +235,21 @@ Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/
 
 #### Usage Patterns
 
-- Used to bundle file paths, hashes, modification times, and build timestamp for caching purposes.
+- Used to cache dependency information and compare against current file states to determine if a rebuild is necessary.
+- Likely serialized and deserialized for persistence across build invocations.
+- Consumed by code that validates or updates cached dependency data.
 
 ## Functions
 
 ### `clore::extract::cache::build_cache_key`
 
-Declaration: `extract/cache.cppm:76`
+Declaration: `src/extract/cache.cppm:92`
 
-Definition: `extract/cache.cppm:228`
+Definition: `src/extract/cache.cppm:244`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-该函数通过字符串拼接构造缓存键。首先为 `normalized_path` 的长度加 1（分隔符占用）再加 20（`uint64_t` 最大十进制长度）预分配空间，然后依次追加 `normalized_path`、常量 `kCacheKeyDelimiter` 以及通过 `std::to_string` 转换的 `compile_signature` 十进制形式。整个过程仅涉及线性字符串操作，无分支或循环，依赖 `kCacheKeyDelimiter` 作为内部定界符。
-
-内部逻辑的核心是生成一个确定性、可解析的唯一键，供 `split_cache_key` 反向拆解为 `CacheKeyParts`。该键直接作为缓存查找的依据，与 `cache_file_path` 及 `clice_cache_file_path` 等文件路径生成函数配合使用。
+该实现通过预分配输出缓冲区避免了多次内存分配：先计算 `normalized_path` 的长度、一个字节的分隔符以及 `compile_signature` 最多 20 个字符的十进制表示，然后依次追加这三部分。分隔符由常量 `kCacheKeyDelimiter` 提供，数字转换依赖 `std::to_string`。整个函数无分支、无循环，控制流为纯线性拼接，唯一的依赖是 `clore::extract::cache` 命名空间下的分隔符定义和标准库的数字格式化。
 
 #### Side Effects
 
@@ -260,23 +257,24 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- 参数 `normalized_path`
-- 参数 `compile_signature`
-- 常量 `kCacheKeyDelimiter`
+- `normalized_path` parameter
+- `compile_signature` parameter
+- `kCacheKeyDelimiter` constant
 
 #### Usage Patterns
 
-- 被缓存相关函数用于构建唯一缓存键
+- Used by cache save and load functions to generate keys for file-based caching of extraction data
+- Pairs with `split_cache_key` for round-trip parsing
 
 ### `clore::extract::cache::build_compile_signature`
 
-Declaration: `extract/cache.cppm:74`
+Declaration: `src/extract/cache.cppm:90`
 
-Definition: `extract/cache.cppm:224`
+Definition: `src/extract/cache.cppm:240`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-函数 `clore::extract::cache::build_compile_signature` 接受一个 `CompileEntry` 常量引用，直接转发至 `clore::extract::build_compile_signature`，并将该调用的返回值作为结果返回。其内部不包含任何算法或控制流，仅作为接口适配层，依赖下层模块提供的签名计算实现。该实现可能基于输入的编译选项和源文件内容生成一个 `std::uint64_t` 哈希，用于缓存键的构建。
+该函数完全委托给 `clore::extract::build_compile_signature`，没有引入任何额外的验证、转换或缓存机制。它的存在是为了在 `clore::extract::cache` 命名空间中提供一个一致的接口，而实际计算由底层模块完成。
 
 #### Side Effects
 
@@ -284,250 +282,252 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `entry` parameter (a `const CompileEntry&`)
+- `entry` parameter of type `const CompileEntry &`
 
 #### Usage Patterns
 
-- Used to obtain a compile signature for cache key operations by delegating to the core signature builder.
+- called to compute a hash‑based compile signature for caching purposes
+- used internally by other cache functions such as `load_extract_cache` or `save_extract_cache`
 
 ### `clore::extract::cache::capture_dependency_snapshot`
 
-Declaration: `extract/cache.cppm:83`
+Declaration: `src/extract/cache.cppm:99`
 
-Definition: `extract/cache.cppm:282`
+Definition: `src/extract/cache.cppm:298`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-该函数首先对输入的文件列表进行规范化、排序和去重，得到 `normalized` 路径集合，并记录当前时间戳到 `snapshot.build_at`。随后，它根据硬件并发数计算线程数 `num_threads`，将工作均匀分配给 `per_thread` 大小的块，并启动一组 `std::thread`。每个工作线程调用 `llvm::sys::fs::status` 获取文件的修改时间 `mtime`，再调用 `hash_file` 计算内容哈希；若 `hash_file` 失败（例如依赖文件已被删除），则将哈希置为 `0` 而非中止，以保证后续缓存比较能够检测到变化。所有线程通过 `std::mutex` 保护的 `first_error` 变量同步错误状态——一旦某个线程发现错误，其余线程将提前退出。
+The function first normalizes the input file paths via `normalize_path_string`, sorts and deduplicates them, then records the current system clock in nanoseconds as `snapshot.build_at`.  For each file it computes a `DependencyHashTaskResult` containing the file's content hash, modification time, and an optional error message.  
 
-所有线程汇合后，若存在错误，则返回 `std::unexpected<CacheError>`；否则，将每个 `DependencyHashTaskResult` 中的文件路径、哈希值和修改时间分别移入 `snapshot.files`、`snapshot.hashes` 和 `snapshot.mtimes` 字段，最终返回完整的 `DependencySnapshot`。该实现通过并行化 I/O 密集型操作和容错处理，在保证性能的同时应对文件系统的不确定性。
+Hashing and status retrieval are performed in parallel using `std::thread`: a worker lambda acquires the file's `mtime` via `llvm::sys::fs::status` and computes the hash via `hash_file`.  If `hash_file` fails (e.g. the file was deleted between runs), the function records `hash=0` instead of failing.  A shared mutex (`error_mutex`) guards a `first_error` optional that short-circuits remaining tasks on the first failure.  After all threads join, the results are assembled into the `DependencySnapshot` vectors `files`, `hashes`, and `mtimes`, and the snapshot is returned.  Key internal dependencies include `normalize_path_string`, `hash_file`, and filesystem status calls from LLVM.
 
 #### Side Effects
 
-- Reads file metadata via `llvm::sys::fs::status`
-- Reads file content via `hash_file`
-- Uses `std::thread` to spawn concurrent workers
-- Uses `std::mutex` to synchronize error-checking between threads
+- Reads file status and content from the filesystem using `llvm::sys::fs::status` and `hash_file`
+- Creates and joins multiple `std::thread` objects
+- Acquires a `std::mutex` to check and set the first error
+- Records the current system time via `std::chrono::system_clock::now`
+- Modifies local state such as `normalized`, `task_results`, and `snapshot`
 
 #### Reads From
 
-- Parameter `files` of type `const std::vector<std::string>&`
-- File system metadata (modification time) for each file path
-- File system content (via `hash_file`) for each file path
+- Input parameter `files` (a `const std::vector<std::string>&`)
+- Filesystem for each file to obtain status and content via `llvm::sys::fs::status` and `hash_file`
+- System clock for timestamp via `std::chrono::system_clock::now`
+- Hardware concurrency via `std::thread::hardware_concurrency`
 
 #### Writes To
 
-- Local `DependencySnapshot` object (`snapshot`)
-- Thread-shared `first_error` optional (under mutex)
-- Temporary vectors `normalized` and `task_results`
+- Local variables `normalized`, `task_results`, `snapshot`, `first_error`, `threads`
+- Fields of `snapshot`: `build_at`, `files`, `hashes`, `mtimes`
+- Shared optional `first_error` under mutex
 
 #### Usage Patterns
 
-- Capturing dependency state for incremental compilation cache
-- Feeding snapshot to `dependencies_changed` for change detection
-- Storing snapshot in cache via `save_clice_cache`
+- Called to capture the current state of a set of dependency files
+- Used to compare against a previous snapshot to detect changes
+- Typically invoked as part of cache invalidation or rebuild logic
 
 ### `clore::extract::cache::dependencies_changed`
 
-Declaration: `extract/cache.cppm:86`
+Declaration: `src/extract/cache.cppm:102`
 
-Definition: `extract/cache.cppm:401`
+Definition: `src/extract/cache.cppm:417`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-该函数首先对输入参数进行快速合法性检查：若 `snapshot.build_at` 不大于零或 `snapshot.files` 为空，或 `snapshot.files` 的长度与 `snapshot.hashes` 或 `snapshot.mtimes` 不一致，则立即返回 `true`，表示依赖已变化。随后根据依赖数量决定执行路径：当文件数量不超过内部常量 `kParallelThreshold`（16）时，采用串行循环依次调用 `check_single_dependency` 检查每一项依赖，一旦发现变化立即返回 `true`；否则进入并行路径，基于 `std::thread::hardware_concurrency` 确定线程数，使用 `std::atomic<bool> changed` 作为协调标志，创建多个线程分别处理连续区间，每个线程在发现依赖变化时通过 `changed.store` 通知其他线程提前退出。所有线程汇合后返回 `changed` 的最终值。该函数的整个控制流仅依赖 `check_single_dependency` 对单个依赖项的判定逻辑，以及标准库线程原语。
+该函数首先执行快速健全性检查：若快照的 `build_at` 非正或 `files` 为空，则立即返回 `true`。接着验证 `files`、`hashes` 与 `mtimes` 三个集合的大小是否一致，若不匹配也直接视为已变更。对于小型依赖集（文件数不超过 `kParallelThreshold`，即 16），采用顺序遍历：逐一调用 `check_single_dependency` 检查每个依赖项，一旦发现变更即提前返回 `true`，否则返回 `false`。对于大型依赖集，启动并行路径：根据 `hardware_threads` 计算线程数（至少为 1），将索引范围均分给多个工作线程。每个工作线程在循环前先检查原子标志 `changed`（使用 `memory_order_relaxed`），若已为 `true` 则提前返回；否则对已分配范围内的每个索引调用 `check_single_dependency`，若发现变更则设置 `changed` 并返回。所有线程汇合后，函数返回 `changed` 的最终值。
+
+该函数的全部依赖项仅为同一匿名命名空间中的辅助函数 `check_single_dependency`，后者负责判断单个依赖项（给定其在快照中的索引）是否发生变更。并行路径的实现避免了昂贵的线程创建开销用于小规模检查，并通过提前终止和原子标志实现了高效的短路行为。
 
 #### Side Effects
 
-- Creates and joins worker threads when the dependency set exceeds the parallel threshold
-- Performs atomic loads and stores on a local `std::atomic<bool>` variable
+- Creates and joins multiple `std::thread` objects when the dependency set size exceeds 16
+- Uses `std::atomic<bool>` for inter-thread synchronization and early termination
 
 #### Reads From
 
-- `snapshot.build_at`
-- `snapshot.files`
-- `snapshot.hashes`
-- `snapshot.mtimes`
-- Underlying file system state accessed by `check_single_dependency`
+- `const DependencySnapshot& snapshot` (reads `build_at`, `files`, `hashes`, `mtimes` members)
+- `std::thread::hardware_concurrency()` for thread count
+- `check_single_dependency(snapshot, index)` for each dependency
 
 #### Usage Patterns
 
-- Called before deciding whether to reuse a cached extraction result
-- Used in conjunction with `capture_dependency_snapshot` and cache loading/saving functions
+- Called before recompilation or extraction to test cache validity
+- Part of cache invalidation logic in extract cache system
 
 ### `clore::extract::cache::hash_file`
 
-Declaration: `extract/cache.cppm:81`
+Declaration: `src/extract/cache.cppm:97`
 
-Definition: `extract/cache.cppm:270`
+Definition: `src/extract/cache.cppm:286`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-该函数使用 LLVM 提供的 `llvm::MemoryBuffer::getFile` 读取指定路径的文件。若读取失败，函数立即返回一个 `std::unexpected<CacheError>`，其中包含格式化的错误信息，明确报告无法读取文件及其原因。若读取成功，则将文件内容传递给 `llvm::xxh3_64bits` 以计算 64 位 XXH3 哈希值，并直接返回该哈希值。整个过程不涉及并行处理或外部缓存，依赖仅限于 LLVM 核心库的文件读取与哈希计算功能。
+该函数利用 LLVM 的 `llvm::MemoryBuffer::getFile` 将给定路径的文件映射到内存中；若读取失败，则构造一个 `CacheError`，其 `message` 字段包含格式化的操作系统错误信息。成功时，将整个文件缓冲区直接传递给 `llvm::xxh3_64bits` 以计算 64 位 `xxHash3` 值并返回。该实现不进行分块或流式处理，依赖 LLVM 的缓冲区抽象来处理任意大小的文件，适用于需要快速、确定性哈希的场景。所有错误均通过 `std::expected` 的 `std::unexpected` 路径传播，无外部依赖除 LLVM 基础库外。
 
 #### Side Effects
 
-- 读取文件系统中的文件内容
+- Reads file content from the filesystem via `llvm::MemoryBuffer::getFile`
 
 #### Reads From
 
-- 参数 `path` 指定的文件系统上的文件
+- Parameter `path` (file path)
+- Contents of the file at `path` (through `llvm::MemoryBuffer::getFile`)
 
 #### Usage Patterns
 
-- 用于计算文件内容的哈希值，通常作为缓存键的一部分
-- 被 `build_cache_key` 或类似缓存管理函数调用
+- Used to generate a hash of a source file for cache key derivation
+- Called before caching dependencies or compile signatures to detect file changes
 
 ### `clore::extract::cache::load_clice_cache`
 
-Declaration: `extract/cache.cppm:95`
+Declaration: `src/extract/cache.cppm:111`
 
-Definition: `extract/cache.cppm:670`
+Definition: `src/extract/cache.cppm:686`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-函数 `clore::extract::cache::load_clice_cache` 通过以下顺序步骤从磁盘加载缓存的编译数据：它首先调用 `clice_cache_file_path` 将 `workspace_root` 解析为预期的缓存文件路径；若该步骤失败，则立即返回 `CacheError`。接着使用 `fs::exists` 检查路径是否存在，若文件不存在（且无底层错误）则直接返回一个空的 `CliceCacheData`；若存在但无法读取，则通过 `clore::support::read_utf8_text_file` 读取完整内容并返回错误。读取成功后，调用 `json::from_json` 将 JSON 内容反序列化为 `CliceCacheData` 结构；若反序列化失败（例如格式错误或版本不匹配），函数会记录一条警告并返回空 `CliceCacheData` 以静默忽略损坏的缓存。最终返回反序列化后的数据。
-
-该函数的内部流程完全依赖于外层提供的 `workspace_root` 字符串、文件系统操作（`fs::exists`、`clice_cache_file_path`）以及 JSON 解析库（`json::from_json`）。错误处理采用 `std::expected` 模式，将大部分异常情况转化为显式的 `CacheError` 或空数据回退，确保调用方不会因缓存损坏而崩溃。
+该函数首先通过 `clore::extract::cache::(anonymous namespace)::clice_cache_file_path` 将输入的 `workspace_root` 转换为缓存文件路径。如果路径构造失败，立即返回对应的 `CacheError`。接着检查文件是否存在；若不存在且无系统错误，则返回一个空的 `CliceCacheData` 实例表示缓存未命中。若文件存在，则调用 `clore::support::read_utf8_text_file` 读取其完整内容到字符串。读取失败时同样返回错误。成功读取后，使用 `json::from_json` 将 JSON 内容反序列化为 `CliceCacheData` 结构。若 JSON 解析失败，记录警告并返回空的 `CliceCacheData`（视为过期缓存），否则返回填充好的数据结构。整个过程依赖 `clice_cache_file_path` 的文件路径构造、文件系统存在性检查、文本文件读取以及 JSON 反序列化，控制流简单且无重试逻辑。
 
 #### Side Effects
 
-- logs a warning via `logging::warn` when JSON deserialization fails
+- 读取文件系统（检查文件存在、读取文件内容）
+- 调用 `logging::warn` 记录警告消息
+
+#### Reads From
+
+- 参数 `workspace_root`
+- 文件系统（通过 `clice_cache_file_path(workspace_root)` 确定的路径，文件存在性与内容）
+- 全局或外部依赖：`clore::support::read_utf8_text_file` 和 `json::from_json` 的内部状态
+
+#### Writes To
+
+- 日志系统（通过 `logging::warn`）
+
+#### Usage Patterns
+
+- 在提取流程开始时加载缓存，若返回空 `CliceCacheData` 则表示无可用缓存或缓存失效
+- 与 `save_clice_cache` 配合实现缓存生命周期管理
+
+### `clore::extract::cache::load_extract_cache`
+
+Declaration: `src/extract/cache.cppm:104`
+
+Definition: `src/extract/cache.cppm:473`
+
+Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
+
+该函数首先通过 `cache_file_path` 获取缓存文件路径，检查文件是否存在——若不存在则返回空映射；若存在但无法读取或其内容无法反序列化为 `SerializedCacheData`，则记录警告并返回空映射。反序列化后，还会校验 `data.format_version` 是否与 `kExtractCacheFormatVersion` 一致，版本不匹配时同样警告并返回空映射。
+
+通过上述验证后，函数遍历 `data.entries` 中的每个 `SerializedCacheEntry`，依次验证 `entry.source_file` 索引有效，调用 `decode_dependency_snapshot` 解码 `entry.ast_deps` 得到 `DependencySnapshot`，利用 `normalize_path_string` 规范化路径字符串，再通过 `build_cache_key` 结合规范化路径和 `entry.compile_signature` 构造缓存的键，最后构建 `CacheRecord` 并存入 `records` 映射。依赖的内部函数包括 `decode_dependency_snapshot`、`normalize_path_string` 和 `build_cache_key`，它们均位于 `clore::extract::cache` 匿名命名空间内。
+
+#### Side Effects
+
+- reads the cache file from the filesystem
+- logs warning messages via `logging::warn` when the cache file is stale or has an invalid format version
 
 #### Reads From
 
 - `workspace_root` parameter
-- file system via `fs::exists`
-- cache file content via `clore::support::read_utf8_text_file`
-
-#### Writes To
-
-- logging system (via `logging::warn`)
+- cache file located at path derived from `workspace_root`
+- `kExtractCacheFormatVersion` constant
+- `cache_file_path` helper (implicit filesystem state)
+- `clore::support::read_utf8_text_file` reads the file content
 
 #### Usage Patterns
 
-- called to load previously cached clice data from disk
-- used before processing to check for stale cache
-
-### `clore::extract::cache::load_extract_cache`
-
-Declaration: `extract/cache.cppm:88`
-
-Definition: `extract/cache.cppm:457`
-
-Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
-
-函数 `clore::extract::cache::load_extract_cache` 的核心流程分为三个部分：路径解析与存在性检查、缓存文件的解析与版本校验、以及缓存记录的重构。首先通过 `cache_file_path` 将 `workspace_root` 转换为缓存文件路径 `path`，若文件不存在则直接返回空的 `std::unordered_map`；否则读取其 UTF-8 文本内容，并用 `json::from_json` 反序列化为 `SerializedCacheData`。若反序列化失败或 `data.format_version` 与常量 `kExtractCacheFormatVersion` 不匹配，函数记录警告并返回空映射以忽略失效缓存。
-
-在通过校验后，函数遍历 `data.entries` 中的每个 `entry`：检查 `entry.source_file` 是否在 `data.paths` 的合法范围内，然后调用 `decode_dependency_snapshot` 将 `entry.ast_deps` 解码为 `DependencySnapshot`。接着使用 `normalize_path_string` 规范化源路径，并通过 `build_cache_key` 组合规范化路径和 `entry.compile_signature` 生成缓存键。每个有效条目被封装为 `CacheRecord` 并插入到结果映射中。该函数依赖 `cache_file_path`、`json::from_json`、`decode_dependency_snapshot` 及 `build_cache_key` 等内部函数，以及 `kExtractCacheFormatVersion` 常量和 `SerializedCacheData`、`CacheRecord` 等数据结构。
-
-#### Side Effects
-
-- reads file from filesystem via `clore::support::read_utf8_text_file`
-- logs warnings via `logging::warn` when cache format is stale or invalid
-- allocates memory for the returned map and its entries
-
-#### Reads From
-
-- parameter `workspace_root`
-- filesystem cache file at path derived from `workspace_root`
-- constant `kExtractCacheFormatVersion`
-- serialised cache data fields `data.paths` and `data.entries`
-
-#### Usage Patterns
-
-- load cached extraction results before performing extraction
-- check cache validity and optionally fall back to empty cache
-- used in conjunction with `save_extract_cache` for cache round-trip
+- called with a workspace root to retrieve previously saved extract cache data
+- used before extracting to check if a cached result exists
+- typically paired with `save_extract_cache` for caching extraction results
 
 ### `clore::extract::cache::save_clice_cache`
 
-Declaration: `extract/cache.cppm:97`
+Declaration: `src/extract/cache.cppm:113`
 
-Definition: `extract/cache.cppm:710`
+Definition: `src/extract/cache.cppm:726`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-函数首先通过 `clice_cache_file_path` 获得目标缓存路径，并创建其父目录。随后调用 `json::to_json` 将 `CliceCacheData` 序列化为 JSON 字符串。为了安全地写入，它构造一个唯一的临时文件路径：在一个最多 32 次的重试循环中，利用当前时间戳、进程 ID、当前尝试序号和这些值的 `llvm::xxh3_64bits` 哈希生成候选文件名，并检查该文件是否已存在，若不存在则选定为临时路径。若循环结束后仍未找到不冲突的路径，则返回 `CacheError`。
+函数 `clore::extract::cache::save_clice_cache` 通过串行化、临时文件与原子重命名实现缓存持久化。首先获取 `clice_cache_file_path` 确定目标路径，并确保其父目录存在。随后调用 `json::to_json` 将 `CliceCacheData` 串行化为 JSON 字符串。为避免写入过程中并发读取损坏，算法生成一个唯一的临时文件路径：利用当前时间戳、进程 ID 与一个递增尝试次数经 `llvm::xxh3_64bits` 计算 nonce，形成形如 `<cache_path>.tmp.<pid>.<timestamp>.<nonce>` 的路径，并在循环中通过 `fs::exists` 检测最多 32 次以确保路径不存在。之后通过 `write_utf8_text_file` 将串行化内容写入临时文件。
 
-选定临时路径后，使用 `clore::support::write_utf8_text_file` 将序列化内容写入该临时文件。接着尝试通过 `fs::rename` 将临时文件原子地替换到目标路径。若 `rename` 因 `permission_denied`、`file_exists` 或 `operation_not_permitted` 而失败，则先删除目标文件（若不存在则忽略错误），再重新尝试 `rename`。若最终重命名仍失败，则返回 `CacheError`。整个过程中所有的文件系统操作和序列化错误都会被捕获并包装为 `CacheError` 返回。
+写入成功后将临时文件通过 `fs::rename` 原子替换目标缓存文件。若重命名因权限拒绝、文件已存在或操作不允许而失败，则尝试先 `fs::remove` 移除已存在的目标文件（忽略文件不存在的错误），再重新执行重命名。整个流程依赖 `llvm::sys::Process::getProcessId` 获取进程 ID、`llvm::xxh3_64bits` 生成 nonce，以及 `clice_cache_file_path`、`write_utf8_text_file` 等辅助函数。任何步骤出错均返回包含错误描述的 `CacheError`。
 
 #### Side Effects
 
-- Creates a clice cache directory if it does not exist.
-- Writes a temporary file on disk containing serialized JSON data.
-- Renames the temporary file to the final cache path, potentially overwriting an existing cache file.
-- Removes the existing cache file if rename fails due to permission or file-exists issues.
+- creates directories via `fs::create_directories`
+- writes a temporary file via `clore::support::write_utf8_text_file`
+- renames the temporary file to the final cache path via `fs::rename`
+- removes the existing cache file when rename fails with certain errors
 
 #### Reads From
 
-- `std::string_view workspace_root` parameter
-- `const CliceCacheData& data` parameter
-- Filesystem state (existence of temp candidate paths via `fs::exists`)
-- System clock (for timestamp used in temp file name)
-- Process ID through `llvm::sys::Process::getProcessId()`
+- `workspace_root` parameter
+- `data` parameter
+- filesystem state via `fs::exists`
+- system clock for timestamp generation
+- process ID via `llvm::sys::Process::getProcessId`
 
 #### Writes To
 
-- Clice cache file at path derived from `workspace_root`
-- Temporary file (deleted or moved after rename)
-- Parent directory of clice cache (via `fs::create_directories`)
+- cache directory determined by `clice_cache_file_path`
+- temporary file at a unique path near the cache file
+- final cache file at the path returned by `clice_cache_file_path`
 
 #### Usage Patterns
 
-- Called to save/update clice cache data after extraction.
-- Used similarly to `save_extract_cache` but for a different data type.
-- Expected to be paired with `load_clice_cache` for persistence.
+- called to persist a `CliceCacheData` snapshot to disk
+- used after cache computation completes to store results
+- likely invoked by `clore::extract::cache::save_extract_cache` or similar cache-saving routines
 
 ### `clore::extract::cache::save_extract_cache`
 
-Declaration: `extract/cache.cppm:91`
+Declaration: `src/extract/cache.cppm:107`
 
-Definition: `extract/cache.cppm:533`
+Definition: `src/extract/cache.cppm:549`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-函数首先通过调用 `clore::extract::cache::cache_directory` 获取缓存根目录，并尝试创建该目录。接着构造一个 `SerializedCacheData` 对象，其内部维护路径索引表 `path_ids` 和序列化条目列表。对于每个输入的 `CacheRecord`，它使用 `clore::extract::cache::split_cache_key` 解析缓存键，验证记录中的 `compile_signature` 与键解析结果一致，然后通过 `clore::extract::cache::encode_dependency_snapshot` 将依赖快照编码为扁平化结构，同时借助内部 lambda `intern_path` 对路径字符串进行规范化并分配唯一索引，最终组装成 `SerializedCacheEntry` 并追加到 `data.entries` 中。整个数据结构最终由 `json::to_json` 序列化为 JSON 字符串。
+首先通过 `cache_directory` 确定缓存根目录并确保其存在，然后遍历传入的 `records` 映射：对每条记录调用 `split_cache_key` 解析出路径与编译签名，并校验签名与记录中的 `compile_signature` 一致。接着使用 `intern_path` lambda 对路径字符串执行规范化（经 `normalize_path_string`）并去重，将结果存入 `SerializedCacheData::paths` 表；同时调用 `encode_dependency_snapshot` 将依赖快照编码为索引列表。所有记录转换后形成 `SerializedCacheEntry` 列表，通过 `json::to_json` 序列化为 JSON 字符串。
 
-写入阶段采用“先写临时文件，再原子重命名”的策略。它利用系统时间戳、进程 ID 和随机数生成唯一的临时文件路径，最多重试 32 次避免冲突。序列化内容通过 `clore::support::write_utf8_text_file` 写入临时文件，然后使用 `fs::rename` 将其移动到目标路径 `cache.json`。若重命名因权限或文件冲突失败，则先尝试删除目标文件再重试。任何步骤失败都会立即返回带有描述性消息的 `CacheError`。
+写入阶段先为最终缓存路径（`cache.json`）构造一个唯一的临时文件路径（组合进程 ID、时间戳和基于 nonce 的哈希，最多尝试 32 次避免冲突），然后用 `clore::support::write_utf8_text_file` 写入序列化内容。最后通过 `fs::rename` 将临时文件原子地移到目标位置；若因权限不足或文件已存在等错误导致重命名失败，则先尝试删除目标文件再重命名。任一环节出错均返回 `CacheError`。
 
 #### Side Effects
 
-- creates the extract cache directory via `fs::create_directories` if it does not exist
-- writes a temporary JSON file under the cache directory
-- renames the temporary file to `cache.json`, replacing any existing file
-- may call `fs::remove` on the target path if the initial rename fails with certain errors
+- Creates or ensures existence of the extract cache directory via filesystem operations
+- Writes a temporary JSON file to the cache directory
+- Removes the existing cache file if a rename conflict occurs
+- Renames the temporary file to the final cache path, atomically replacing the cache
 
 #### Reads From
 
-- parameter `workspace_root` of type `std::string_view`
-- parameter `records` of type `const std::unordered_map<std::string, CacheRecord>&`
-- internal state of `split_cache_key` and `normalize_path_string`
-- internal `json::to_json` reading the built `SerializedCacheData` object
+- `workspace_root` parameter
+- records parameter
+- filesystem state for existence checks of temporary file candidates and the final cache file
+- internal helper `normalize_path_string` reads its input string
 
 #### Writes To
 
-- filesystem: the cache directory (created if missing)
-- filesystem: temporary file with name based on process id, timestamp, and nonce
-- filesystem: the final `cache.json` file under the cache root directory
-- filesystem: if rename conflict, the existing `cache.json` file is removed before replacement
+- filesystem: cache directory (via `create_directories`)
+- filesystem: temporary file in cache directory (via `write_utf8_text_file`)
+- filesystem: final cache file `cache.json` (via `rename`)
+- filesystem: may remove existing cache file when replacing
 
 #### Usage Patterns
 
-- called during extract caching to persist processed `CacheRecord` data to disk
-- used after building a collection of cache records for the workspace
+- Called to persist a collection of `CacheRecord` entries after an extraction pass
+- Used in the cache management pipeline alongside `load_extract_cache`
+- Typically invoked when the caller has built the records from compilation and dependency analysis
 
 ### `clore::extract::cache::split_cache_key`
 
-Declaration: `extract/cache.cppm:79`
+Declaration: `src/extract/cache.cppm:95`
 
-Definition: `extract/cache.cppm:238`
+Definition: `src/extract/cache.cppm:254`
 
 Declaration: [`Namespace clore::extract::cache`](../../namespaces/clore/extract/cache/index.md)
 
-The function first locates the last occurrence of the delimiter constant `kCacheKeyDelimiter` within the input `cache_key` using `rfind`. If no delimiter is found, or if either the path portion or the signature portion is empty after splitting, an `CacheError` is returned with a descriptive message. Otherwise, the signature portion is parsed as a `std::uint64_t` via `std::from_chars`; if parsing fails or does not consume the entire substring, an error is again returned.
-
-On success, a `CacheKeyParts` structure is returned, populating its `path` field with a `std::string` copy of the path substring and its `compile_signature` field with the parsed integer. The implementation relies on the character-level operations of `std::string_view` for substring extraction and on the standard library’s `std::from_chars` for error‑safe integer conversion. No external dependencies beyond the language runtime and the module’s own error and part types are introduced.
+函数 `clore::extract::cache::split_cache_key` 通过解析传入的 `cache_key` 字符串，将其拆分为路径和编译签名两部分。首先利用 `std::string_view::rfind` 查找最后一个 `kCacheKeyDelimiter` 分隔符的位置；若未找到，立即返回一个包含格式化错误信息的 `CacheError`。若找到分隔符，则通过 `substr` 提取 `path_part` 与 `signature_part`，并校验两部分均非空；任意部分为空时同样返回错误。随后，使用 `std::from_chars` 将 `signature_part` 的字符序列转换为 `std::uint64_t` 类型的 `signature`；转换失败或未完全消耗输入字符串时，返回带有具体错误描述的 `CacheError`。成功转换后，函数返回一个 `CacheKeyParts` 结构体，其中 `path` 字段为路径字符串的拷贝，`compile_signature` 字段为解析出的签名值。该函数依赖 `kCacheKeyDelimiter` 常量、`CacheError` 错误类型以及 `CacheKeyParts` 输出类型，内部仅使用标准库的字符串操作和字符转换设施，无其他外部依赖。
 
 #### Side Effects
 
@@ -535,18 +535,19 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `cache_key` 参数
-- `kCacheKeyDelimiter` 常量
+- parameter `cache_key` (type `std::string_view`)
+- constant `kCacheKeyDelimiter`
 
 #### Usage Patterns
 
-- 解析由 `build_cache_key` 生成的缓存键
-- 从组合缓存键中提取文件路径和签名
-- 在使用缓存键组件前验证其格式
+- decompose keys built by `build_cache_key`
+- validate and extract parts of a cache key before further processing
 
 ## Internal Structure
 
-`extract:cache` 是代码提取系统的持久化与失效管理层，负责将提取结果（AST、扫描数据、依赖状态）按缓存键存储和恢复，并检测依赖文件是否变更以决定缓存是否有效。模块依赖 `extract:ast`、`extract:compiler` 和 `extract:scan` 提供的上层数据结构，同时使用 `support` 模块的基础工具；内部通过匿名命名空间隔离实现细节，包括序列化格式（`SerializedCacheData`、`SerializedCacheEntry`、`SerializedDependencySnapshot`）、缓存文件路径生成、路径规范化与哈希，以及基于多线程的依赖快照捕获与变更检测。公开接口（如 `build_cache_key`、`split_cache_key`、`capture_dependency_snapshot`、`dependencies_changed`、`save_extract_cache`/`load_extract_cache`、`save_clice_cache`/`load_clice_cache`）围绕编译签名和文件哈希构建稳定标识，实现可复用的缓存逻辑，与上层提取流程（编译、扫描、AST）形成清晰的调用边界。
+`extract:cache` 模块提供了提取结果的持久化机制，将 AST、扫描和依赖信息序列化到文件系统，以实现增量构建。它公开了缓存键构建与拆分（`build_cache_key`、`split_cache_key`）、文件哈希（`hash_file`）、依赖快照捕获与变化检测（`capture_dependency_snapshot`、`dependencies_changed`）、编译签名生成（`build_compile_signature`）以及两类缓存数据的保存与加载（`*_extract_cache` 和 `*_clice_cache` 系列函数）。内部按用途分解为公共接口和匿名命名空间的实现细节，其中私有结构如 `SerializedCacheData`、`CachedPathHash` 封装了磁盘格式，`normalize_path_string`、`cache_directory` 等辅助函数处理路径规范化与目录定位，并通过临时文件与重命名实现原子写入。
+
+模块直接依赖 `extract:ast`、`extract:compiler`、`extract:scan` 和 `support`，其中前三个提供提取、编译数据库和扫描的领域类型，`support` 提供日志、文件操作等底层工具。内部通过 `CliceCacheData` 统一管理三种条目（PCM、PCH、依赖），依赖快照使用 `DependencySnapshot` 记录文件列表与哈希值，并通过并行哈希任务（`DependencyHashTaskResult`）提升性能。整个模块围绕“缓存键 → 编译单元 → 文件路径 → 序列化数据”的层次组织，外部调用者只需使用顶层函数，无需关心底层存储布局。
 
 ## Related Pages
 

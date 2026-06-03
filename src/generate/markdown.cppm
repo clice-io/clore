@@ -1,6 +1,17 @@
-export module generate:markdown;
+module;
 
-import std;
+#include <algorithm>
+#include <cstdint>
+#include <format>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <variant>
+#include <vector>
+
+export module generate:markdown;
 
 export namespace clore::generate {
 

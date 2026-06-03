@@ -1,6 +1,6 @@
 ---
 title: 'Module extract:model'
-description: 'The extract:model module defines the core data model for representing the results of C++ source code extraction. It owns a collection of public data structures—ProjectModel, SymbolInfo, ModuleUnit, FileInfo, NamespaceInfo, SymbolID, SourceLocation, SourceRange, and the SymbolKind enumeration—that capture extracted symbols, their hierarchical relationships, source locations, C++20 module units, file metadata, and namespace structure. The module also provides a suite of query functions, such as lookup_symbol, find_symbol, find_module_by_name, find_modules_by_name, find_module_by_source, find_symbols, resolve_source_snippet, split_top_level_qualified_name, join_qualified_name_parts, namespace_prefix_from_qualified_name, and symbol_kind_name, enabling consumers to efficiently search and navigate the extracted data.'
+description: 'The extract:model module defines the core data structures that represent a fully extracted C++ project. It owns the public types ProjectModel, SymbolInfo, SymbolID, SymbolKind, SourceLocation, SourceRange, FileInfo, NamespaceInfo, and ModuleUnit, along with the query functions (lookup_symbol, find_symbol, find_symbols, find_module_by_name, find_module_by_source, find_modules_by_name) used to navigate the model. It also provides utility functions (split_top_level_qualified_name, join_qualified_name_parts, namespace_prefix_from_qualified_name, symbol_kind_name, resolve_source_snippet) that support both internal processing and external callers. By encapsulating all symbol metadata and project‑level indexing, this module serves as the authoritative data layer for the extraction pipeline.'
 layout: doc
 template: doc
 ---
@@ -9,11 +9,10 @@ template: doc
 
 ## Summary
 
-The `extract:model` module defines the core data model for representing the results of C++ source code extraction. It owns a collection of public data structures—`ProjectModel`, `SymbolInfo`, `ModuleUnit`, `FileInfo`, `NamespaceInfo`, `SymbolID`, `SourceLocation`, `SourceRange`, and the `SymbolKind` enumeration—that capture extracted symbols, their hierarchical relationships, source locations, C++20 module units, file metadata, and namespace structure. The module also provides a suite of query functions, such as `lookup_symbol`, `find_symbol`, `find_module_by_name`, `find_modules_by_name`, `find_module_by_source`, `find_symbols`, `resolve_source_snippet`, `split_top_level_qualified_name`, `join_qualified_name_parts`, `namespace_prefix_from_qualified_name`, and `symbol_kind_name`, enabling consumers to efficiently search and navigate the extracted data.
+The `extract:model` module defines the core data structures that represent a fully extracted C++ project. It owns the public types `ProjectModel`, `SymbolInfo`, `SymbolID`, `SymbolKind`, `SourceLocation`, `SourceRange`, `FileInfo`, `NamespaceInfo`, and `ModuleUnit`, along with the query functions (`lookup_symbol`, `find_symbol`, `find_symbols`, `find_module_by_name`, `find_module_by_source`, `find_modules_by_name`) used to navigate the model. It also provides utility functions (`split_top_level_qualified_name`, `join_qualified_name_parts`, `namespace_prefix_from_qualified_name`, `symbol_kind_name`, `resolve_source_snippet`) that support both internal processing and external callers. By encapsulating all symbol metadata and project‑level indexing, this module serves as the authoritative data layer for the extraction pipeline.
 
 ## Imports
 
-- `std`
 - [`support`](../support/index.md)
 
 ## Imported By
@@ -25,47 +24,30 @@ The `extract:model` module defines the core data model for representing the resu
 
 ### `clore::extract::FileInfo`
 
-Declaration: `extract/model.cppm:122`
+Declaration: `src/extract/model.cppm:139`
 
-Definition: `extract/model.cppm:122`
+Definition: `src/extract/model.cppm:139`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The struct `clore::extract::FileInfo` is a plain aggregate data holder that groups together the key pieces of information produced by the extraction process for a single source file. Its three public data members—`path`, `symbols`, and `includes`—are left directly accessible; there is no encapsulation or computed accessors. The invariant across all instances is that `path` must contain a valid, normalized file path string (relative or absolute), while `symbols` and `includes` are simply vectors that may be empty or filled with the corresponding extracted entities. Because the struct has no constructors beyond the implicitly generated ones and no member functions, its sole implementation concern is that its fields are default‑initialized correctly: `path` is an empty string, and both vectors are empty. This minimal design prioritises simplicity and direct field access over information hiding, making it suitable for use as a lightweight transport object within the extraction pipeline.
-
-#### Invariants
-
-- No invariants enforced beyond type safety of the fields
-- All fields are public and mutable
-
-#### Key Members
-
-- `path`: the filesystem path of the source file
-- `symbols`: a vector of `SymbolID` representing symbols defined or declared in the file
-- `includes`: a vector of strings representing include directives encountered in the file
-
-#### Usage Patterns
-
-- Populated by extraction logic to record symbolic information per file
-- Consumed by downstream analysis or serialization to retrieve file-level extraction results
+The struct `clore::extract::FileInfo` is a plain aggregate that bundles the three core pieces of information extracted from a single translation unit: the `path` (a `std::string`) identifying the source file, a `symbols` vector of `SymbolID` values representing the symbols defined or declared in that file, and an `includes` vector of `std::string` listing the file paths included by that source. No invariants are enforced beyond the default constructors and member initializers, so every field is freely mutable after construction. The struct serves solely as a transport container; no member functions other than the implicitly defined ones are provided.
 
 ### `clore::extract::ModuleUnit`
 
-Declaration: `extract/model.cppm:135`
+Declaration: `src/extract/model.cppm:152`
 
-Definition: `extract/model.cppm:135`
+Definition: `src/extract/model.cppm:152`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The struct `clore::extract::ModuleUnit` is a plain aggregate used internally to hold the result of parsing a single C++20 module unit (either an interface unit or a partition). Its fields directly capture the unit’s identity and content: `name` stores the fully qualified module name (e.g., `"foo"` or `"foo:bar"`), `is_interface` distinguishes `export module` units from non‑export ones, `source_file` records the normalized source path, `imports` lists the names of every module imported by this unit, and `symbols` collects the `SymbolID` values for all declarations that belong to the unit. No invariants are enforced by the struct itself; it serves as a straightforward data transfer object that the extraction pipeline populates and downstream consumers read.
+The implementation of `clore::extract::ModuleUnit` is a simple aggregate holding the parsed data for a single C++20 module unit. The invariant is that `name` stores the fully qualified module name (e.g., `"foo"` or `"foo:bar"`), and `is_interface` distinguishes an exported interface (`true` for `export module`) from a partition or implementation unit (`false` for `module`). The `source_file` member holds the normalized filesystem path to the source file, and `imports` collects the names of modules imported by this unit. The `symbols` vector is populated with `SymbolID` values representing the declarations introduced in the unit; its contents are the primary output of the extraction process. All fields have straightforward defaults (`is_interface` defaults to `false`, string members are empty by default) and are populated during the parsing phase.
 
 #### Invariants
 
-- `name` is a full module name in `"module"` or `"module:partition"` form.
-- `is_interface` is `true` for `export module` units, `false` for internal partition units.
-- `source_file` is a normalized filesystem path.
-- `imports` contains only module names, not header units or other imports.
-- `symbols` lists all symbols declared within that unit.
+- `is_interface` is `true` for `export module` and `false` for `module`.
+- `name` is the full module name as written in the source (e.g., `"foo"` or `"foo:bar"`).
+- `source_file` is a normalized path (absolute or relative) to the source file.
+- `imports` and `symbols` contain the parsed imports and symbols from the module unit.
 
 #### Key Members
 
@@ -77,85 +59,105 @@ The struct `clore::extract::ModuleUnit` is a plain aggregate used internally to 
 
 #### Usage Patterns
 
-- Populated during module extraction and used as a data carrier for further analysis.
-- Accessed by other parts of `clore::extract` to query module metadata.
-- Stored in collections or containers for processing across multiple module units.
+- Stores the parsed result of a C++20 module unit in the extraction pipeline.
+- Used as a data source for building module dependency graphs and symbol tables.
+- Referenced by other structures in the `clore::extract` model to represent collection of module units.
 
 ### `clore::extract::NamespaceInfo`
 
-Declaration: `extract/model.cppm:128`
+Declaration: `src/extract/model.cppm:145`
 
-Definition: `extract/model.cppm:128`
+Definition: `src/extract/model.cppm:145`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The `clore::extract::NamespaceInfo` struct is a plain data container that captures the results of extracting a single C++ namespace. It stores the namespace’s unqualified `name` as a `std::string`, a vector of `SymbolID` values representing all symbols declared directly within that namespace (e.g., functions, classes, variables), and a `children` vector of `std::string` names listing the immediate nested namespaces. The design is intentionally minimal: no member functions, no invariants beyond the requirement that each `children` entry must correspond to a valid subordinate namespace (enforced externally by the extraction logic). The struct serves purely as a transfer object between the extraction phase and any analysis or serialization that follows, relying entirely on the caller to populate and interpret its fields consistently.
+The struct `clore::extract::NamespaceInfo` serves as a plain data container for representing a C++ namespace during extraction. Its internal structure consists of three fields: `name` holds the fully qualified namespace name as a `std::string`, `symbols` stores a `std::vector<SymbolID>` of the symbol identifiers defined directly within that namespace (not in nested scopes), and `children` lists the names of immediate child namespaces as a `std::vector<std::string>`. There are no invariants enforced beyond the natural constraints of the types; the fields are populated externally by the extraction logic and are not modified after construction. The struct has no member functions other than the implicitly defined default constructor and destructor, making it a pure aggregate that simplifies serialization and iteration.
 
 #### Invariants
 
-- The `name` uniquely identifies the namespace within its parent scope
-- `symbols` contains only `IDs` of symbols defined directly in this namespace, not inherited
-- `children` contains names of direct child namespaces, not transitive
+- No explicit invariants are documented from the provided evidence.
 
 #### Key Members
 
-- `name`
-- `symbols`
-- `children`
+- `name`: the namespace name
+- `symbols`: list of symbol identifiers belonging to this namespace
+- `children`: names of child namespaces
 
 #### Usage Patterns
 
-- Populated during the namespace extraction phase by iterating over declarations
-- Later read by documentation generators to produce namespace pages and links to contained symbols and sub-namespaces
+- `NamespaceInfo` is used to model namespace hierarchy and symbol membership within the extraction framework.
 
 ### `clore::extract::ProjectModel`
 
-Declaration: `extract/model.cppm:143`
+Declaration: `src/extract/model.cppm:160`
 
-Definition: `extract/model.cppm:143`
-
-Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
-
-The struct `clore::extract::ProjectModel` serves as the central container holding all extracted information for a single parsed project. Its primary maps (`symbols`, `files`, `namespaces`, `modules`) store the core entities keyed by `SymbolID`, file path, namespace name, and normalized source file path respectively. The `files` and `modules` maps use `std::string` keys with transparent hash and equality comparators (`clore::support::TransparentStringHash` and `clore::support::TransparentStringEqual`) to enable efficient heterogenous lookups without constructing temporary string objects. The `file_order` vector preserves the stable order in which files were processed, which is essential for deterministic output generation.
-
-To support fast generation and cross-linking, the model maintains two auxiliary lookup maps: `symbol_ids_by_qualified_name` maps a fully qualified name to a `std::vector<SymbolID>` (allowing multiple overloads to share the same qualified name), and `module_name_to_sources` maps a module name to the list of source file paths that define or declare that module. The boolean `uses_modules` is initially `false` and is set to `true` when at least one module declaration is encountered during extraction, indicating that the project uses C++20 modules. Key invariants include that every entry in `symbols`, `files`, and `namespaces` is fully populated after extraction, that `file_order` contains exactly the keys of `files`, and that all string keys in the transparent maps are normalized to a canonical form.
-
-### `clore::extract::SourceLocation`
-
-Declaration: `extract/model.cppm:64`
-
-Definition: `extract/model.cppm:64`
+Definition: `src/extract/model.cppm:160`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The struct `clore::extract::SourceLocation` aggregates three data members: a `std::string file` for the source file path, and two `std::uint32_t` members `line` and `column`. The core invariant is that `line == 0` denotes an unknown or invalid location; all valid source lines are numbered from 1 onward. The `column` member is only meaningful when `line` is known, though no additional constraints are imposed on its value. The member function `is_known` is implemented as a straightforward comparison `return line != 0;`, providing a canonical, efficient check for location validity. Default construction zero-initializes `line` and `column`, ensuring that every default‑created instance is initially in the unknown state.
+The internal structure of `clore::extract::ProjectModel` consists of several hash maps and a vector that together capture every extracted entity from a single project. The core containers are `symbols` (keyed by `SymbolID`), `files` (keyed by normalized file path), `namespaces` (keyed by name), and `modules` (keyed by normalized source path). Two additional maps enable efficient lookup: `symbol_ids_by_qualified_name` maps a fully qualified name to a vector of `SymbolID` values (to handle overloads), and `module_name_to_sources` maps a module name to the list of source file paths that contribute to it. The `file_order` vector preserves the order in which files were processed, and the boolean `uses_modules` is set to `true` if at least one C++20 module declaration was encountered.
+
+Key invariants include consistent key formats across maps: file paths are normalized before insertion, and qualified names are stored exactly as they appear. The transparent string hashing (`clore::support::TransparentStringHash`) and equality (`clore::support::TransparentStringEqual`) used for `modules`, `symbol_ids_by_qualified_name`, and `module_name_to_sources` allow heterogeneous lookup without requiring `std::string` temporaries. The integrity of the model relies on the fact that every `FileInfo` in `files` corresponds to an entry in `file_order`, and every `SymbolID` referenced in `symbol_ids_by_qualified_name` exists in `symbols`. The `modules` map is a subset of `files`, and `module_name_to_sources` collects the normalized paths from those entries.
 
 #### Invariants
 
-- Line 0 signifies an unknown location; valid lines start at 1.
-- Column may be 0 even for known locations, indicating an unknown column.
-- The `file` string is stored as-is without validation.
+- `uses_modules` is `true` if and only if at least one module declaration was found during extraction.
+- Keys in `modules` are normalized source file paths.
+- `symbol_ids_by_qualified_name` may contain multiple `SymbolID` entries per qualified name when overloads exist.
+- All maps are populated only after extraction completes.
 
 #### Key Members
 
-- `file` field
-- `line` field
-- `column` field
-- `is_known()` method
+- `symbols`
+- `files`
+- `namespaces`
+- `modules`
+- `symbol_ids_by_qualified_name`
+- `module_name_to_sources`
+- `file_order`
+- `uses_modules`
 
 #### Usage Patterns
 
-- Track source positions in extracted or generated code.
-- Check with `is_known()` before relying on `line` or `column` values.
-- Default-constructed locations are treated as unknown.
+- Used during code generation and evidence building to look up symbols by qualified name and modules by name.
+- Accessed after extraction to retrieve the project model for downstream processing.
+
+### `clore::extract::SourceLocation`
+
+Declaration: `src/extract/model.cppm:81`
+
+Definition: `src/extract/model.cppm:81`
+
+Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
+
+The struct holds location information in three public fields: a `std::string file`, a `std::uint32_t line`, and a `std::uint32_t column`. The key invariant is that a `line` value of `0` marks an unknown location; valid declarations use 1-based line numbers. This invariant is exposed by the `is_known()` member, which simply returns `line != 0`. The default initialization of `line` to `0` ensures that a default-constructed `clore::extract::SourceLocation` is considered unknown, and the `is_known()` query is efficient, consisting of a single comparison. No other invariants are enforced; the fields are freely writable and represent no implicit relationships among themselves beyond the documented meaning of `line == 0`.
+
+#### Invariants
+
+- `line == 0` indicates an unknown location
+- Valid source lines are positive integers (>=1)
+- Default construction yields an unknown location
+
+#### Key Members
+
+- `file`
+- `line`
+- `column`
+- `is_known()`
+
+#### Usage Patterns
+
+- Stored as a member in other extraction-related types
+- Checked via `is_known()` to determine if location is valid
+- Passed around as a value type to convey source provenance
 
 #### Member Functions
 
 ##### `clore::extract::SourceLocation::is_known`
 
-Declaration: `extract/model.cppm:70`
+Declaration: `src/extract/model.cppm:87`
 
-Definition: `extract/model.cppm:70`
+Definition: `src/extract/model.cppm:87`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -169,68 +171,64 @@ Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.m
 
 ### `clore::extract::SourceRange`
 
-Declaration: `extract/model.cppm:75`
+Declaration: `src/extract/model.cppm:92`
 
-Definition: `extract/model.cppm:75`
+Definition: `src/extract/model.cppm:92`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The struct `clore::extract::SourceRange` is a plain aggregate data type that stores two `clore::extract::SourceLocation` fields, `begin` and `end`. Together these define a contiguous region in source code; no inherent invariant (such as ordering or half‑open intervals) is enforced by the struct itself—any such semantics are imposed externally by the code that constructs or consumes a `SourceRange`. Because the struct declares no user‑defined special member functions, it relies entirely on the compiler‑generated default constructor, destructor, and copy/move operations, making it a trivial value type for representing a pair of source positions.
+The struct is a simple aggregate type that bundles two `SourceLocation` values, `begin` and `end`, to represent an interval in source text. No invariants are enforced by the class itself; callers are responsible for ensuring that `begin` logically precedes `end` when constructing or assigning a `SourceRange`. Because the struct declares no user‑defined special member functions, the compiler provides default constructor, copy, move, assignment, and destructor, giving the object plain value semantics.
 
 #### Invariants
 
-- Both `begin` and `end` are valid `SourceLocation` values.
-- The struct is trivially copyable and movable as an aggregate.
+- No documented invariants; the relationship between begin and end is not enforced by the type.
 
 #### Key Members
 
-- `begin`
-- `end`
+- `begin`: the starting location of the range
+- `end`: the ending location of the range
 
 #### Usage Patterns
 
-- Used to represent a source code span, likely for diagnostics or code extraction.
-- Can be passed by value or returned from functions that produce a location range.
-- Expected to be compared or ordered, though no `operator`s are shown in evidence.
+- Likely used to represent source regions for diagnostics or highlighting in `clore::extract` contexts.
 
 ### `clore::extract::SymbolID`
 
-Declaration: `extract/model.cppm:28`
+Declaration: `src/extract/model.cppm:45`
 
-Definition: `extract/model.cppm:28`
+Definition: `src/extract/model.cppm:45`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The struct `clore::extract::SymbolID` stores a pair of fields that together uniquely identify a named entity: a 64‑bit `hash` and a 32‑bit `signature`. The core invariant is that a value of `hash == 0` denotes the invalid or null sentinel; all valid identifiers have a non‑zero `hash`. The `signature` provides an additional disambiguation token, derived from the same USR source, to guard against the astronomically unlikely event of a 64‑bit hash collision.  
+The implementation of `clore::extract::SymbolID` stores a compound identifier composed of a primary 64-bit `hash` and a secondary 32-bit `signature`. The critical invariant is that a valid `SymbolID` must have a non-zero `hash`; a zero `hash` represents the invalid or null sentinel. The `signature` field is derived from the same USR source and serves to disambiguate the extremely improbable scenario of a 64-bit hash collision, effectively widening the unique identifier space.
 
-The member function `is_valid` simply checks `hash != 0` and is marked `noexcept`. Both `operator==` and `operator<=>` are defaulted, giving the struct straightforward equality and total ordering semantics based on all fields.
+The member functions enforce and leverage this invariant. The `is_valid()` method simply checks whether `hash` is non-zero. Both `operator==` and `operator<=>` are defaulted, performing lexicographic comparison first by `hash` and then by `signature`. This ordering ensures that invalid `IDs` (with zero `hash`) consistently compare as less than any valid ID, and that valid `IDs` are strictly ordered by their combined `hash` and `signature` values.
 
 #### Invariants
 
-- A `SymbolID` with `hash == 0` is invalid/null; all valid `IDs` have non-zero hash.
-- The `hash` and `signature` together form a unique identity for a symbol.
+- `hash == 0` denotes an invalid/null identifier.
+- Valid `SymbolID` objects always have a non-zero `hash`.
+- The `signature` field disambiguates the astronomically unlikely case of a 64-bit hash collision.
 
 #### Key Members
 
-- `std::uint64_t hash`
-- `std::uint32_t signature`
-- `bool is_valid() const noexcept`
-- `bool operator==(const SymbolID&) const = default`
-- `auto operator<=>(const SymbolID&) const = default`
+- `hash`
+- `signature`
+- `is_valid()`
 
 #### Usage Patterns
 
-- Used as a key or identifier for symbols in extraction pipelines.
-- Comparison `operator`s enable use in sorted containers and equality checks.
-- `is_valid()` guards against using default-constructed or sentinel values.
+- Used as a unique, comparable identifier for symbols extracted from source code.
+- Comparison `operator`s (`==`, `<=>`) allow sorting and hashing in containers.
+- `is_valid()` is used to test whether a `SymbolID` represents an actual symbol.
 
 #### Member Functions
 
 ##### `clore::extract::SymbolID::is_valid`
 
-Declaration: `extract/model.cppm:35`
+Declaration: `src/extract/model.cppm:52`
 
-Definition: `extract/model.cppm:35`
+Definition: `src/extract/model.cppm:52`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -244,9 +242,9 @@ Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.m
 
 ##### `clore::extract::SymbolID::operator<=>`
 
-Declaration: `extract/model.cppm:40`
+Declaration: `src/extract/model.cppm:57`
 
-Definition: `extract/model.cppm:40`
+Definition: `src/extract/model.cppm:57`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -258,9 +256,9 @@ auto operator<=>(const SymbolID&) const = default
 
 ##### `clore::extract::SymbolID::operator==`
 
-Declaration: `extract/model.cppm:39`
+Declaration: `src/extract/model.cppm:56`
 
-Definition: `extract/model.cppm:39`
+Definition: `src/extract/model.cppm:56`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -272,61 +270,88 @@ bool operator==(const SymbolID&) const = default
 
 ### `clore::extract::SymbolInfo`
 
-Declaration: `extract/model.cppm:80`
+Declaration: `src/extract/model.cppm:97`
 
-Definition: `extract/model.cppm:80`
-
-Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
-
-The struct `clore::extract::SymbolInfo` aggregates all extracted metadata for a single symbol. Its design separates identity (`id`, `name`, `qualified_name`, `enclosing_namespace`, `signature`) from source provenance (`declaration_location`, optional `definition_location`, `doc_comment`, and the `source_snippet` fields). To reduce memory when the full snippet is not needed, the implementation supports a lazy‑resolution pattern: if `source_snippet` is empty, the raw text is implicitly referenced by the file path in `declaration_location.file` combined with `source_snippet_offset`, `source_snippet_length`, `source_snippet_file_size`, and `source_snippet_hash`; these fields are unused when the snippet is stored directly.  
-
-The struct maintains two orthogonal hierarchies: a tree of `parent`/`children` relationships (with `lexical_parent_name` and `lexical_parent_kind` for quick display) and an inheritance graph via `bases`/`derived`. Call‑graph edges are stored in `calls`/`called_by`, and generic reference links in `references`/`referenced_by`. Template specialisation is flagged with `is_template` and its formal parameters are captured in `template_params`. Access specifier is stored as a string (`access`). All relationship fields are vectors of `SymbolID`, ensuring no strong ownership cycles and allowing the extractor to build these links after all symbols have been collected.
-
-### `clore::extract::SymbolKind`
-
-Declaration: `extract/model.cppm:8`
-
-Definition: `extract/model.cppm:8`
+Definition: `src/extract/model.cppm:97`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The `clore::extract::SymbolKind` enum is a scoped enumeration backed by `std::uint8_t` that categorises all symbol types encountered during extraction. Each enumerator maps to a distinct kind, with `Unknown` serving as the default fallback value. The enumerators are implicitly assigned consecutive integer values starting from zero, and the underlying type ensures the representation remains compact and trivially copyable. No invariants beyond the ordering are enforced; the enum is intended for straightforward classification and switch‑based dispatch within the extraction internals.
+The struct `clore::extract::SymbolInfo` aggregates all extracted metadata about a single symbol. It stores core identity through `id`, `name`, `qualified_name`, `enclosing_namespace`, and `signature`. Location information is captured by `declaration_location` and an optional `definition_location`. Documentation and source text are retained in `doc_comment` and `source_snippet`; when the snippet is empty, the four companion fields (`source_snippet_offset`, `source_snippet_length`, `source_snippet_file_size`, `source_snippet_hash`) encode a lazy reference into the raw file content of `declaration_location.file`, minimizing memory overhead. The hierarchy is represented by an optional `parent`, explicit `lexical_parent_name` and `lexical_parent_kind`, and a `children` vector. Relationship tracking includes `bases`/`derived` for inheritance, `calls`/`called_by` for call graph edges, and `references`/`referenced_by` for usage links. Additional metadata fields are `access` (e.g., public/private), `is_template`, and `template_params`. All identifiers for related symbols use `SymbolID` values, ensuring a consistent, referential structure throughout the extraction model.
 
 #### Invariants
 
-- Each enumerator is a distinct integer value within `std::uint8_t` range.
-- All possible symbol kinds are represented by named enumerators; `Unknown` acts as a catch-all.
-- The enum is not a bitmask; values are mutually exclusive.
+- `id` is unique per symbol
+- `name` is the unqualified name
+- `source_snippet_offset`/`length`/`file_size`/`hash` are used only when `source_snippet` is empty
+- `parent` and `children` are consistent for tree structure
+- `bases` and `derived` are consistent for inheritance
+- `calls` and `called_by` are consistent for call graph
+- `references` and `referenced_by` are consistent for reference graph
+
+#### Key Members
+
+- `id`
+- `kind`
+- `name`
+- `qualified_name`
+- `declaration_location`
+- `definition_location`
+- `parent`
+- `children`
+- `bases`
+- `derived`
+- `calls`
+- `called_by`
+- `references`
+- `referenced_by`
+- `is_template`
+
+#### Usage Patterns
+
+- Used as the output of extraction
+- Clients read fields to build documentation or analysis
+- `parent`/`children` used for hierarchy
+- `bases`/`derived` for inheritance
+- `calls`/`called_by` for call graph
+- `references`/`referenced_by` for usage tracking
+- Lazy source snippet fields used for on-demand loading
+
+### `clore::extract::SymbolKind`
+
+Declaration: `src/extract/model.cppm:25`
+
+Definition: `src/extract/model.cppm:25`
+
+Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
+
+The `clore::extract::SymbolKind` enumeration is defined as a scoped `enum class` with an underlying type of `std::uint8_t`, ensuring compact storage and compatibility with serialization or bit‑level operations. Its enumerators directly represent the distinct categories of symbols recognized during extraction, such as `Namespace`, `Class`, `Struct`, `Union`, `Enum`, `EnumMember`, `Function`, `Method`, `Variable`, `Field`, `TypeAlias`, `Macro`, `Template`, `Concept`, and the sentinel `Unknown`. The inclusion of `Unknown` guarantees a catch‑all value for handling unsupported or unrecognized symbols, allowing fallback logic without undefined behavior. No custom member functions are declared; the enumeration relies on default compiler‑generated operations, maintaining a trivial, value‑type invariant where every valid symbol kind maps to a unique integral code in the range `0`–`14`.
+
+#### Invariants
+
+- Each enumerator represents a unique symbol category.
+- The underlying type `std::uint8_t` ensures compact storage.
+- The set of members is fixed and defined at compile time.
 
 #### Key Members
 
 - `Namespace`
 - `Class`
-- `Struct`
-- `Union`
-- `Enum`
-- `EnumMember`
 - `Function`
 - `Method`
 - `Variable`
-- `Field`
-- `TypeAlias`
-- `Macro`
-- `Template`
-- `Concept`
 - `Unknown`
 
 #### Usage Patterns
 
-- Used as a member in symbol data structures to indicate the kind of symbol.
-- Switched upon in extraction or serialization logic to handle each kind appropriately.
-- Stored alongside symbol name and location to enable type-safe operations on symbols.
+- Used to tag extracted symbols with their kind for downstream processing.
+- Employed in switch statements or lookup tables to dispatch behavior per symbol type.
+- Referenced in serialization or storage of symbol metadata.
 
 #### Member Variables
 
 ##### `clore::extract::SymbolKind::Class`
 
-Declaration: `extract/model.cppm:10`
+Declaration: `src/extract/model.cppm:27`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -338,7 +363,7 @@ Class
 
 ##### `clore::extract::SymbolKind::Concept`
 
-Declaration: `extract/model.cppm:22`
+Declaration: `src/extract/model.cppm:39`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -350,7 +375,7 @@ Concept
 
 ##### `clore::extract::SymbolKind::Enum`
 
-Declaration: `extract/model.cppm:13`
+Declaration: `src/extract/model.cppm:30`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -362,7 +387,7 @@ Enum
 
 ##### `clore::extract::SymbolKind::EnumMember`
 
-Declaration: `extract/model.cppm:14`
+Declaration: `src/extract/model.cppm:31`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -374,7 +399,7 @@ EnumMember
 
 ##### `clore::extract::SymbolKind::Field`
 
-Declaration: `extract/model.cppm:18`
+Declaration: `src/extract/model.cppm:35`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -386,7 +411,7 @@ Field
 
 ##### `clore::extract::SymbolKind::Function`
 
-Declaration: `extract/model.cppm:15`
+Declaration: `src/extract/model.cppm:32`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -398,7 +423,7 @@ Function
 
 ##### `clore::extract::SymbolKind::Macro`
 
-Declaration: `extract/model.cppm:20`
+Declaration: `src/extract/model.cppm:37`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -410,7 +435,7 @@ Macro
 
 ##### `clore::extract::SymbolKind::Method`
 
-Declaration: `extract/model.cppm:16`
+Declaration: `src/extract/model.cppm:33`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -422,7 +447,7 @@ Method
 
 ##### `clore::extract::SymbolKind::Namespace`
 
-Declaration: `extract/model.cppm:9`
+Declaration: `src/extract/model.cppm:26`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -434,7 +459,7 @@ Namespace
 
 ##### `clore::extract::SymbolKind::Struct`
 
-Declaration: `extract/model.cppm:11`
+Declaration: `src/extract/model.cppm:28`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -446,7 +471,7 @@ Struct
 
 ##### `clore::extract::SymbolKind::Template`
 
-Declaration: `extract/model.cppm:21`
+Declaration: `src/extract/model.cppm:38`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -458,7 +483,7 @@ Template
 
 ##### `clore::extract::SymbolKind::TypeAlias`
 
-Declaration: `extract/model.cppm:19`
+Declaration: `src/extract/model.cppm:36`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -470,7 +495,7 @@ TypeAlias
 
 ##### `clore::extract::SymbolKind::Union`
 
-Declaration: `extract/model.cppm:12`
+Declaration: `src/extract/model.cppm:29`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -482,7 +507,7 @@ Union
 
 ##### `clore::extract::SymbolKind::Unknown`
 
-Declaration: `extract/model.cppm:23`
+Declaration: `src/extract/model.cppm:40`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -494,7 +519,7 @@ Unknown
 
 ##### `clore::extract::SymbolKind::Variable`
 
-Declaration: `extract/model.cppm:17`
+Declaration: `src/extract/model.cppm:34`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -508,42 +533,39 @@ Variable
 
 ### `clore::extract::find_module_by_name`
 
-Declaration: `extract/model.cppm:188`
+Declaration: `src/extract/model.cppm:205`
 
-Definition: `extract/model.cppm:416`
+Definition: `src/extract/model.cppm:433`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function `clore::extract::find_module_by_name` first delegates to `find_modules_by_name` to obtain all `ModuleUnit` pointers in the `ProjectModel` whose name matches the given `module_name`. If the resulting collection is empty, it returns `nullptr`. For a single candidate, it returns that module directly. When multiple modules share the same name, the function applies a disambiguation strategy based on the `ModuleUnit::is_interface` flag: if exactly one of them is an interface unit, that one is returned; if none are interfaces, it logs a warning via `logging::warn` and falls back to the first module; if two or more interfaces exist, it logs an ambiguity warning and returns `nullptr`. This control flow relies solely on `find_modules_by_name` and the interface flag, with fallback and warning mechanisms for ambiguous or implementation‑only scenarios.
+The function `clore::extract::find_module_by_name` resolves a module name to a single `ModuleUnit` pointer by first delegating to `find_modules_by_name` to collect all matching modules from the `ProjectModel`. The control flow then branches based on the size of the returned collection: an empty result yields `nullptr`, a single result is returned directly, and multiple results trigger a scan to count interface units (using `ModuleUnit::is_interface`). If exactly one interface unit exists, it is returned; if none exist, a warning is logged and the first module is returned as a fallback; if multiple interfaces are found, an ambiguity warning is logged and `nullptr` is returned. The algorithm depends on `find_modules_by_name`, the `ModuleUnit` and `ProjectModel` types, and the `logging::warn` facility.
 
 #### Side Effects
 
-- Logs warnings via `logging::warn` when multiple modules with the same name exist or when there is no interface unit
+- Logs warnings via `logging::warn` when there are multiple modules matching the name (either all non-interface or multiple interfaces)
 
 #### Reads From
 
-- `ProjectModel` object (via delegation to `find_modules_by_name`)
-- `module_name` parameter
-- `is_interface` field of each `ModuleUnit` returned by `find_modules_by_name`
-
-#### Writes To
-
-- logging subsystem
+- `model` (the `ProjectModel`)
+- `module_name` (a `std::string_view`)
+- collection returned by `clore::extract::find_modules_by_name(model, module_name)`
+- `module->is_interface` for each `ModuleUnit*` in the collection
 
 #### Usage Patterns
 
-- Resolving a unique module from a project model by name
-- Handling ambiguous module name lookups after extraction
+- Resolve a module name to a single module unit, handling ambiguous definitions
+- Used in contexts where a unique module is required for further analysis
 
 ### `clore::extract::find_module_by_source`
 
-Declaration: `extract/model.cppm:194`
+Declaration: `src/extract/model.cppm:211`
 
-Definition: `extract/model.cppm:449`
+Definition: `src/extract/model.cppm:466`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The implementation of `clore::extract::find_module_by_source` performs a single lookup in the `ProjectModel::modules` container, which is keyed by source file path (as `std::string_view`). It calls `model.modules.find(source_file)` and, if the iterator is not equal to `model.modules.end()`, returns a pointer to the corresponding `ModuleUnit`; otherwise it returns `nullptr`. The function is entirely dependent on the structure of `ProjectModel::modules`, which must already be populated during model construction. Unlike the companion `clore::extract::find_module_by_name`, which searches by module name across all modules, this function relies directly on the file‑based mapping and requires no additional traversal or indexing.
+The function performs a direct lookup in the `model.modules` associative container using the provided `source_file` as a key. If the key exists, it returns a pointer to the corresponding `ModuleUnit`; otherwise, it returns `nullptr`. There is no iteration or fallback logic, making the implementation a simple constant-time (or logarithmic, depending on the underlying container) search. The only external dependency is the `ProjectModel` structure, specifically its `modules` member, which is expected to be a map from source file paths to `ModuleUnit` objects. No other model fields or helper functions are consulted.
 
 #### Side Effects
 
@@ -551,23 +573,25 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `model.modules` (the map from source file paths to module units)
-- `source_file` (the parameter used as the lookup key)
+- `model.modules`
+- `source_file` parameter
 
 #### Usage Patterns
 
-- Used to obtain the module unit associated with a given source file path
-- Typical in module resolution or when accessing module metadata from a source location
+- used to obtain a module unit by its source path
+- often called during project traversal or resolution
 
 ### `clore::extract::find_modules_by_name`
 
-Declaration: `extract/model.cppm:191`
+Declaration: `src/extract/model.cppm:208`
 
-Definition: `extract/model.cppm:395`
+Definition: `src/extract/model.cppm:412`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function `clore::extract::find_modules_by_name` retrieves all module units with a given name. It first performs a lookup in the `model.module_name_to_sources` map using the provided `module_name`. If the key is absent or the associated vector of source identifiers is empty, it returns an empty `std::vector<const ModuleUnit*>`. Otherwise, it reserves capacity for the number of sources and iterates over each entry, calling `find_module_by_source` to resolve each source index to a pointer to a `ModuleUnit`; only non‑null results are appended to the result vector. Finally, the collected module pointers are sorted by their `source_file` field to guarantee a deterministic order, and the sorted vector is returned. The entire flow depends on the `ProjectModel`’s auxiliary index (`module_name_to_sources`) and the helper `find_module_by_source`, which translates a source file identifier into the corresponding `ModuleUnit`.
+The function iterates over the result of a map lookup in `model.module_name_to_sources` for the given `module_name`. If the lookup fails or the associated list is empty, an empty vector is returned immediately. Otherwise, it reserves capacity for the expected number of results and calls `find_module_by_source` for each source file entry, appending any valid `ModuleUnit` pointer. Finally, the collected pointers are sorted by their `source_file` field to produce a deterministic order, and the vector is returned.
+
+Internally, the function relies on the `ProjectModel`'s mapping from module names to source file paths (`module_name_to_sources`) and on the helper `find_module_by_source` to resolve a source path to a `ModuleUnit`. It does not perform any in-depth symbol analysis; its purpose is to locate all module units that match a given logical module name, handling the case where a module spans multiple source files or translation units.
 
 #### Side Effects
 
@@ -575,28 +599,26 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `model.module_name_to_sources` map
-- `module_name` parameter
-- indirectly reads `model` via `find_module_by_source`
-- indirectly reads `ModuleUnit::source_file` during sort
-
-#### Writes To
-
-- local `modules` vector (returned by value)
+- `model.module_name_to_sources`
+- indirectly reads from `model` via `find_module_by_source`
 
 #### Usage Patterns
 
-- Lookup all modules with a given name in the project model
+- resolving module references by name
+- enumerating module units with a specific name
+- preparing data for module-related queries
 
 ### `clore::extract::find_symbol`
 
-Declaration: `extract/model.cppm:179`
+Declaration: `src/extract/model.cppm:198`
 
-Definition: `extract/model.cppm:371`
+Definition: `src/extract/model.cppm:396`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function `clore::extract::find_symbol` delegates directly to `clore::extract::find_symbols` to obtain a collection of symbols that match the given `qualified_name`. It then inspects the size of the returned container; if the container contains exactly one element, that element is returned as a pointer to `const SymbolInfo`; otherwise `nullptr` is returned. This simple control‑flow ensures that the function only returns a symbol when the qualified name uniquely identifies a single symbol within the `ProjectModel`, avoiding ambiguous results. The implementation depends on `find_symbols` to perform the underlying matching logic, which may consider multiple symbol kinds, namespaces, and module scopes.
+Implementation: [Implementation](functions/find-symbol.md)
+
+The function first checks whether the `signature` argument is empty; if so, it delegates to the single‑parameter overload of `find_symbol`, which performs a direct lookup of `qualified_name` in the `ProjectModel`’s `symbol_ids_by_qualified_name` mapping. Otherwise, it calls `find_symbols` to retrieve all symbols whose qualified name matches, then linearly scans the returned list, comparing each symbol’s `SymbolInfo::signature` field against the provided `signature`. The first match is returned; if no match is found, `nullptr` is returned. This disambiguation step handles overloaded or otherwise ambiguous names by requiring exact signature equality.
 
 #### Side Effects
 
@@ -604,24 +626,29 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `model` of type `const ProjectModel &`
-- parameter `qualified_name` of type `std::string_view`
-- function call `clore::extract::find_symbols(model, qualified_name)` returns a collection of `SymbolInfo *`
+- `model` (the `ProjectModel`)
+- `qualified_name`
+- `signature`
+- the `SymbolInfo` objects returned by `find_symbols`
+- the `signature` field of each `SymbolInfo`
 
 #### Usage Patterns
 
-- Callers use this function when they need to look up a single symbol by its fully qualified name and expect exactly one match.
-- Typically employed in code that resolves symbol names from user input or configuration where uniqueness is guaranteed.
+- Lookup a symbol by name and signature
+- Fallback to name-only lookup when signature is empty
+- Iterate over matching symbols to find exact signature match
 
 ### `clore::extract::find_symbol`
 
-Declaration: `extract/model.cppm:181`
+Declaration: `src/extract/model.cppm:196`
 
-Definition: `extract/model.cppm:379`
+Definition: `src/extract/model.cppm:388`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function first inspects the signature parameter. If it is empty, control immediately delegates to the two‑argument overload `clore::extract::find_symbol(model, qualified_name)`, which performs a name‑based lookup — typically leveraging a cached split of the qualified name via `clore::extract::(anonymous namespace)::split_qualified_name_cache` and searching `ProjectModel::symbols`, `ProjectModel::namespaces`, and module units for a match. When a non‑empty signature is provided, the implementation calls `clore::extract::find_symbols(model, qualified_name)` to retrieve every symbol whose `qualified_name` matches the given string. It then iterates over that result set, comparing each symbol’s `signature` field against the requested signature. The first `SymbolInfo*` whose `signature` equals the parameter is returned; if no symbol satisfies both the name and the signature, the function returns `nullptr`. This two‑stage approach separates name resolution from overload disambiguation, reusing the existing name‑based search infrastructure.
+Implementation: [Implementation](functions/find-symbol.md)
+
+The implementation of `clore::extract::find_symbol` delegates to `clore::extract::find_symbols` to collect all symbols matching the given `qualified_name` within the `ProjectModel`. If the returned container of matches contains exactly one element, that element (a pointer to `SymbolInfo`) is returned; otherwise, `nullptr` is returned to indicate either no match or an ambiguous result. The function serves as a restricted query that requires a unique resolution, relying entirely on the internal logic of `find_symbols` (which traverses the model’s symbol tables, namespace hierarchies, and module storage) for candidate collection. No additional caching or state management is performed at this level.
 
 #### Side Effects
 
@@ -629,26 +656,23 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `model` (const `ProjectModel&`)
-- first integer parameter (likely a qualified name identifier)
-- second integer parameter (likely a signature identifier)
+- `model` (the project model's symbol index)
+- `qualified_name` (the lookup string)
 
 #### Usage Patterns
 
-- Used internally for efficient symbol lookup by numeric `IDs`
-- Complemented by `find_symbol` overloads using `std::string_view` parameters
+- Used to resolve a uniquely identifiable symbol by qualified name.
+- Called by the three-parameter overload to refine lookup by module.
 
 ### `clore::extract::find_symbols`
 
-Declaration: `extract/model.cppm:185`
+Declaration: `src/extract/model.cppm:202`
 
-Definition: `extract/model.cppm:354`
+Definition: `src/extract/model.cppm:371`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The implementation of `clore::extract::find_symbols` performs a direct lookup in `model.symbol_ids_by_qualified_name` using the provided `qualified_name` key. If the key is absent, an empty vector is returned immediately. Otherwise, the function reserves capacity and iterates over each `SymbolID` stored in the corresponding value, calling `lookup_symbol` to obtain the corresponding `const SymbolInfo*` pointer; only non-null pointers are appended to the result vector.
-
-This approach efficiently resolves multiple symbols sharing the same fully qualified name (e.g., overloaded functions or declarations across modules) by relying on the precomputed hash map, while the individual symbol retrieval delegates to the global symbol table via `lookup_symbol`. The function is a pure query—it does not modify the model and uses no internal caching beyond the provided index.
+The function `clore::extract::find_symbols` performs a direct lookup in the `ProjectModel::symbol_ids_by_qualified_name` map using the provided `qualified_name` string. If the key is absent, it immediately returns an empty vector. Otherwise, it reserves capacity for the associated collection of `SymbolID` values and iterates over each element, calling `clore::extract::lookup_symbol` with the model and the current `SymbolID` to obtain a pointer to a `const SymbolInfo`. Only non‑null pointers are appended to the result vector, which is finally returned. The algorithm depends on the integrity of the `symbol_ids_by_qualified_name` index and on `lookup_symbol` being able to resolve every stored `SymbolID` within the same `ProjectModel`.
 
 #### Side Effects
 
@@ -656,24 +680,24 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- model
 - model`.symbol_ids_by_qualified_name`
 - `lookup_symbol`(model, `symbol_id`)
 
 #### Usage Patterns
 
-- retrieve all symbols that share a given qualified name
-- query the model for multiple overloads or entities with the same name
+- Resolving all symbols with a given fully qualified name within a project model
+- Displaying symbol information for autocompletion or navigation
+- Finding overloads or multiple declarations of the same name
 
 ### `clore::extract::join_qualified_name_parts`
 
-Declaration: `extract/model.cppm:59`
+Declaration: `src/extract/model.cppm:76`
 
-Definition: `extract/model.cppm:328`
+Definition: `src/extract/model.cppm:345`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function iterates over the first `count` elements of the input `parts` vector, or all elements if `count` exceeds the vector size, and concatenates them with `::` separators. It first computes a `safe_count` by clamping `count` to `parts.size()`, then loops from 0 to `safe_count - 1`, appending `::` before each element after the first. The resulting `std::string` is returned. No external project dependencies are used; only `std::vector`, `std::string`, and `std::size_t` are required. The implementation is self-contained and focuses solely on string assembly, handling edge cases such as an empty `parts` or a `count` of zero gracefully.
+The function first determines `safe_count` as the minimum of `count` and `parts.size()`, ensuring it never exceeds the actual number of elements. It then iterates over the first `safe_count` elements of the `parts` vector, concatenating each element to a local `joined` string. Before appending any element beyond the first, it inserts the scope resolution `operator` `"::"`. The loop index `index` is used both for bounds checking and to conditionally add the separator. The resulting `joined` string is returned. The algorithm relies only on standard library facilities (`std::vector` and `std::string`) and performs no external lookups or model traversals.
 
 #### Side Effects
 
@@ -681,23 +705,23 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `parts` parameter (a `const std::vector<std::string>&`)
-- `count` parameter (a `std::size_t`)
+- parameter `const std::vector<std::string>& parts`
+- parameter `std::size_t count`
 
 #### Usage Patterns
 
-- Used to reassemble qualified names from a split vector of components
-- Likely called during symbol extraction or name resolution to construct fully qualified names
+- Reconstructing a qualified name from its individual components
+- Used when combining namespace or type name parts
 
 ### `clore::extract::lookup_symbol`
 
-Declaration: `extract/model.cppm:177`
+Declaration: `src/extract/model.cppm:194`
 
-Definition: `extract/model.cppm:349`
+Definition: `src/extract/model.cppm:366`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function performs a single hash-based lookup on the `ProjectModel::symbols` associative container using the supplied `SymbolID` as the key. The control flow is linear: it invokes the container's `find` method, then checks whether the returned iterator equals `model.symbols.end()`. If the symbol is present, it returns a pointer to the corresponding `SymbolInfo` object; otherwise it returns `nullptr`. No additional validation, name resolution, or traversal of other projection structures (e.g., `ModuleUnit`, `NamespaceInfo`, or `FileInfo`) occurs within this function. The implementation relies solely on the `SymbolID` ordering semantics (defined by `operator<=>` and `operator==`) and the hash or tree structure of the underlying container.
+The implementation of `clore::extract::lookup_symbol` performs a direct lookup in the `ProjectModel::symbols` map using the provided `SymbolID` as the key. It calls `std::map::find` on the `model.symbols` container, relying on the ordering defined by `SymbolID::operator<=>` and hashing via `std::hash<SymbolID>`. If the key is found, the function returns a pointer to the corresponding `SymbolInfo`; otherwise, it returns `nullptr`. No additional validation, fallback logic, or cross‑reference resolution is performed—the function is a straightforward accessor that delegates entirely to the associative container’s lookup mechanism. Its dependencies are limited to the `ProjectModel` type (specifically the `symbols` field) and the comparability of `SymbolID`.
 
 #### Side Effects
 
@@ -705,118 +729,115 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `model.symbols` container
+- `model.symbols` (member of `ProjectModel`)
 - `id` parameter
 
 #### Usage Patterns
 
-- Retrieve symbol information by ID
-- Check if a symbol exists in the model
-- Perform safe lookup with nullptr check
+- Look up a symbol by its unique identifier
+- Used in symbol resolution and merging operations
 
 ### `clore::extract::namespace_prefix_from_qualified_name`
 
-Declaration: `extract/model.cppm:62`
+Declaration: `src/extract/model.cppm:79`
 
-Definition: `extract/model.cppm:341`
+Definition: `src/extract/model.cppm:358`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The implementation of `clore::extract::namespace_prefix_from_qualified_name` splits the input `qualified_name` into its top-level components using `split_top_level_qualified_name`. If the resulting vector of parts contains fewer than two elements, the function returns an empty string, indicating no namespace prefix exists. Otherwise, it reconstructs the prefix by joining all parts except the last one via `join_qualified_name_parts`, producing the namespace portion of the original qualified name. The only internal dependencies are these two utility functions, which handle the actual splitting and joining logic.
+The function splits the input `qualified_name` into its top-level components by calling `split_top_level_qualified_name`. If the resulting number of parts is one or fewer, an empty string is returned immediately—there is no namespace qualifier. Otherwise, it invokes `join_qualified_name_parts` with all parts except the last one (the simple name) to reconstruct the namespace prefix as a `std::string`. The algorithm relies on two helper functions: `split_top_level_qualified_name` to decompose the qualified name and `join_qualified_name_parts` to recombine the leading components. Internal control flow is minimal: a single conditional branch followed by either an early `return {}` or a call to the joiner.
 
 #### Side Effects
 
 No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- Input parameter `qualified_name` of type `std::string_view`
-
-#### Usage Patterns
-
-- Extract namespace prefix from a fully qualified symbol name before further processing
-- Utility used in symbol and namespace extraction logic
-
-### `clore::extract::resolve_source_snippet`
-
-Declaration: `extract/model.cppm:200`
-
-Definition: `extract/model.cppm:455`
-
-Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
-
-The function first acquires a per-symbol mutex via `source_snippet_mutex_for(sym)` to ensure thread safety, then checks if `sym.source_snippet` has already been resolved (cached). If the snippet is empty and required fields (`source_snippet_length`, `declaration_location.file`) are valid, it uses `std::filesystem::file_size` to open the source file and performs bounds checking on `offset` and `length` relative to the actual file size. An `std::ifstream` reads exactly `source_snippet_length` bytes starting at `source_snippet_offset`. If a `source_snippet_hash` is present, the function verifies the original raw bytes by computing `hash_source_snippet_bytes` and comparing against the stored hash. Finally, it normalizes Windows-style line endings (`\r\n`) to Unix (`\n`) by scanning the buffer and copying characters while skipping `\r` before `\n`. The normalized string is moved into `sym.source_snippet`, and the function returns `true` on success.
-
-Internally, the function relies on the fields of `SymbolInfo` (`source_snippet`, `source_snippet_length`, `source_snippet_offset`, `source_snippet_file_size`, `source_snippet_hash`, `declaration_location`), the file system API, and the helper `hash_source_snippet_bytes`. The mutex striping mechanism (`source_snippet_mutex_for`) reduces contention when multiple symbols in the same file are resolved concurrently.
-
-#### Side Effects
-
-- modifies the `source_snippet` member of the provided `SymbolInfo`
-- acquires a mutex for thread safety
-- reads from the on-disk file
-- potentially allocates memory for the snippet string
-
-#### Reads From
-
-- sym`.declaration_location``.file`
-- sym`.source_snippet_length`
-- sym`.source_snippet_offset`
-- sym`.source_snippet_file_size`
-- sym`.source_snippet_hash`
-- the file at the recorded path
-
-#### Writes To
-
-- sym`.source_snippet`
-
-#### Usage Patterns
-
-- Called to populate the `source_snippet` field of a `SymbolInfo` after extraction
-- Used in symbol resolution pipelines to lazily load source text from disk
-
-### `clore::extract::split_top_level_qualified_name`
-
-Declaration: `extract/model.cppm:57`
-
-Definition: `extract/model.cppm:265`
-
-Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
-
-The function first performs an early return if the input `qualified_name` is empty. It then consults a thread‑safe cache obtained via `split_qualified_name_cache()`: under a shared lock it looks up the precomputed parts; a hit returns the cached `std::vector<std::string>` immediately. On a miss, the function parses the qualified name character by character. It maintains a `template_depth` counter to correctly handle `::` that appear inside template argument lists (`<…>`), so that only scope‑resolution `operator`s at depth zero split the string. Consecutive colons (`::`) trigger a push of the current segment (if non‑empty) and skip the second colon. After the loop, the trailing segment is added, and any leading empty segment (caused by a leading `::`) is removed. Finally, the result is inserted into the cache under a unique lock; if the cache has grown beyond `kSplitQualifiedNameCacheMaxEntries` it is cleared to bound memory usage.
-
-#### Side Effects
-
-- acquires shared lock and later unique lock on `split_qualified_name_cache().mutex`
-- reads from `split_qualified_name_cache().parts_by_qualified_name` map
-- writes to `split_qualified_name_cache().parts_by_qualified_name` map (insertion or assignment)
-- may clear the entire cache map if its size reaches `kSplitQualifiedNameCacheMaxEntries`
 
 #### Reads From
 
 - parameter `qualified_name`
-- global cache `split_qualified_name_cache().parts_by_qualified_name`
-- global cache mutex `split_qualified_name_cache().mutex` (for shared lock)
-
-#### Writes To
-
-- global cache `split_qualified_name_cache().parts_by_qualified_name` map
-- global cache mutex `split_qualified_name_cache().mutex` (for unique lock)
 
 #### Usage Patterns
 
-- called during symbol name resolution to obtain top-level name components
-- used internally to cache repeated splitting of the same qualified name
-- employed in preprocessing steps for module or symbol identification
+- Extract namespace prefix from qualified name
+- Used in symbol processing to determine containing namespace
 
-### `clore::extract::symbol_kind_name`
+### `clore::extract::resolve_source_snippet`
 
-Declaration: `extract/model.cppm:26`
+Declaration: `src/extract/model.cppm:217`
 
-Definition: `extract/model.cppm:244`
+Definition: `src/extract/model.cppm:472`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-The function `clore::extract::symbol_kind_name` maps each enumerator of `clore::extract::SymbolKind` to a corresponding string literal and returns it as a `std::string_view`. The implementation consists of a single `switch` statement covering all enumeration cases, including `SymbolKind::Unknown` for unrecognized values. A fallback `return "unknown"` at the end ensures safety if the enumeration is extended without updating the switch. The function has no external dependencies beyond the definition of `SymbolKind` and performs no additional computation or branching.
+The implementation of `clore::extract::resolve_source_snippet` begins by acquiring a per-symbol mutex via `source_snippet_mutex_for`, ensuring thread-safe access to the `SymbolInfo` fields. It short-circuits if `sym.source_snippet` is already populated, returning `true`. Otherwise, it validates that `sym.source_snippet_length` is non‑zero and that `sym.declaration_location.file` is non‑empty; failure here returns `false`. The function then checks the on‑disk file size against the cached `sym.source_snippet_file_size` (if nonzero) and verifies that the stored `source_snippet_offset` and `source_snippet_length` are within bounds of the current file. It opens the file in binary mode, seeks to the recorded offset, and reads exactly `length` bytes into a local buffer. If `sym.source_snippet_hash` is nonzero, the function computes a hash of the buffer via `hash_source_snippet_bytes` and compares it; a mismatch causes early return `false`. Finally, it normalizes any `\r\n` sequences to `\n` and moves the result into `sym.source_snippet`, returning `true` to indicate successful resolution.
+
+#### Side Effects
+
+- Acquires a mutex (`source_snippet_mutex_for(sym)`)
+- Reads from the filesystem (file size via `std::filesystem::file_size`, file content via `std::ifstream`)
+- Writes to `sym.source_snippet` (mutates the `SymbolInfo` object)
+
+#### Reads From
+
+- `sym.source_snippet`
+- `sym.source_snippet_length`
+- `sym.declaration_location.file`
+- `sym.source_snippet_offset`
+- `sym.source_snippet_file_size`
+- `sym.source_snippet_hash`
+- File system state (file size and contents)
+- Return value of `hash_source_snippet_bytes(result)`
+
+#### Writes To
+
+- `sym.source_snippet` (the normalized snippet string)
+- Mutex state (acquired and released)
+
+#### Usage Patterns
+
+- Called to lazily resolve the source snippet for a `SymbolInfo`
+- Used after symbol extraction to provide the source text
+- May be invoked from display or export code paths
+
+### `clore::extract::split_top_level_qualified_name`
+
+Declaration: `src/extract/model.cppm:74`
+
+Definition: `src/extract/model.cppm:282`
+
+Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
+
+The function first performs an early return with an empty vector if the input `qualified_name` is empty. To avoid redundant work, it attempts a shared-lock lookup in the global cache obtained from `split_qualified_name_cache()`. If a match for `qualified_name` is found, the cached result is returned immediately. Otherwise, the algorithm parses the string character by character. It maintains a `template_depth` counter to ignore `::` separators that appear inside template angle brackets (e.g., `A<B::C>::D`). When a `::` is encountered at depth zero, the accumulated `current` token is appended to the `parts` vector and cleared. Angle brackets increment or decrement the depth as appropriate, and all other characters are appended to `current`. After the loop, any remaining `current` content is moved into `parts`, and a leading empty token (caused by a leading `::`) is removed. Finally, a unique lock is acquired on the same cache; if the cache has reached `kSplitQualifiedNameCacheMaxEntries` entries, it is cleared before inserting the new mapping. The computed `parts` vector is then returned.
+
+#### Side Effects
+
+- mutates the global cache `split_qualified_name_cache` by inserting or updating entries
+- acquires and releases shared and unique locks on the cache mutex
+
+#### Reads From
+
+- parameter `qualified_name`
+- global cache returned by `split_qualified_name_cache()` (mutex, map)
+
+#### Writes To
+
+- global cache map `parts_by_qualified_name` inside `split_qualified_name_cache()`
+
+#### Usage Patterns
+
+- decomposing qualified names for symbol lookup or matching
+- cached parsing of qualified names to avoid repeated work
+
+### `clore::extract::symbol_kind_name`
+
+Declaration: `src/extract/model.cppm:43`
+
+Definition: `src/extract/model.cppm:261`
+
+Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
+
+The function `clore::extract::symbol_kind_name` implements a direct mapping from the `SymbolKind` enumeration to a human-readable string label. Its control flow consists of a single `switch` statement that exhaustively covers every `SymbolKind` enumerator — `Namespace`, `Class`, `Struct`, `Union`, `Enum`, `EnumMember`, `Function`, `Method`, `Variable`, `Field`, `TypeAlias`, `Macro`, `Template`, `Concept`, and `Unknown` — returning a corresponding string literal such as `"namespace"` or `"enum_member"`. A fallback `return "unknown"` clause ensures a safe default even if the enumeration is extended, though all known values are explicitly handled.
+
+The function depends solely on the `SymbolKind` type, which is defined in the same module. No additional data structures, external lookups, or allocation are required; the result is a compile-time constant `std::string_view` for each case.
 
 #### Side Effects
 
@@ -824,19 +845,17 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `kind` parameter
+- the `kind` parameter of type `SymbolKind`
 
 #### Usage Patterns
 
-- converting symbol kind to display name
-- serialization of symbol kind
-- debug output
+- convert `SymbolKind` to string for logging or UI
+- used in error messages
+- used in debugging output
 
 ## Internal Structure
 
-The `extract:model` module defines the core data structures and query interface for representing C++20 code extraction results. It decomposes the extraction domain into a layered record hierarchy: base types (`SourceLocation`, `SourceRange`) and core identifiers (`SymbolID`, `SymbolKind`) underpin richer entities (`SymbolInfo`, `FileInfo`, `NamespaceInfo`, `ModuleUnit`), which are aggregated into the top‑level `ProjectModel`. Accessor functions (`find_symbol`, `find_module_by_name`, `find_modules_by_name`, `lookup_symbol`, `find_symbols`, `find_module_by_source`) provide lookup by symbol identity, qualified‑name parts, or source location, while `resolve_source_snippet` and `namespace_prefix_from_qualified_name` offer deferred‑loading and decomposition utilities.
-
-Internally, the module imports `std` for containers and algorithms and `support` for foundational utilities. An anonymous namespace encapsulates mutable global caches (`SplitQualifiedNameCache`, a source‑snippet mutex pool) and hashing primitives (`kSourceSnippetHashPrime`, `kSourceSnippetHashOffsetBasis`), together with the helper functions `hash_source_snippet_bytes` and `source_snippet_mutex_for`. This layering keeps shared, mutable state private while exposing a flat public API that operates on the model‑level types.
+The `extract:model` module defines the core data structures and query interface for representing an extracted C++ project. It imports the `support` module for string handling and utility functions. Internally, the module is decomposed into public entity types—`SymbolKind`, `SymbolID`, `SourceLocation`, `SourceRange`, `SymbolInfo`, `FileInfo`, `NamespaceInfo`, `ModuleUnit`, and `ProjectModel`—alongside public lookup functions (`lookup_symbol`, `find_symbol`, `find_symbols`, `find_module_*`) and name decomposition helpers (`split_top_level_qualified_name`, `join_qualified_name_parts`). An anonymous namespace provides internal caching (`SplitQualifiedNameCache`) and thread-safe mechanisms for on‑demand source snippet resolution, using a stripe‑based mutex strategy to limit contention. This layering separates the raw, immutable model data from the higher‑level query logic, while the internal helpers improve performance for repeated operations during indexing and cross‑referencing.
 
 ## Related Pages
 

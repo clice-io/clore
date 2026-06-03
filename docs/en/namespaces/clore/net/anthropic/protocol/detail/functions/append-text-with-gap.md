@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::anthropic::protocol::detail::appendtextwithgap'
-description: 'This function appends the content of a std::string_view to a std::string, inserting a separator or “gap” as required by the protocol’s text‑block formatting rules. It is designed for internally composing multi‑segment text content (for example, within a message or content block) where a structural break must be placed between adjacent pieces of text. The caller supplies the target string as the first argument, which is mutated in place, and the incoming text as the second argument.'
+description: 'Appends a text segment, provided as a std::string_view, to the given std::string, ensuring a gap (typically a newline) is inserted between any existing content and the newly appended text. By managing this separation, the function helps structure the output string so that logically distinct textual parts remain visually separated, which is useful when constructing multi‑line message bodies or JSON content. Callers supply the destination string and the text to append; after the call, the destination string contains the original content, a gap, and the appended text.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Namespace clore::net::anthropic::protocol::detail](../index.md)
 
-Declaration: `network/anthropic.cppm:25`
+Declaration: `src/network/anthropic.cppm:34`
 
-Definition: `network/anthropic.cppm:25`
+Definition: `src/network/anthropic.cppm:34`
 
 Implementation: [`Module anthropic`](../../../../../../../modules/anthropic/index.md)
 
@@ -21,11 +21,11 @@ Implementation: [`Module anthropic`](../../../../../../../modules/anthropic/inde
 auto (std::string &, std::string_view) -> void;
 ```
 
-This function appends the content of a `std::string_view` to a `std::string`, inserting a separator or “gap” as required by the protocol’s text‑block formatting rules. It is designed for internally composing multi‑segment text content (for example, within a message or content block) where a structural break must be placed between adjacent pieces of text. The caller supplies the target string as the first argument, which is mutated in place, and the incoming text as the second argument.
+Appends a text segment, provided as a `std::string_view`, to the given `std::string`, ensuring a gap (typically a newline) is inserted between any existing content and the newly appended text. By managing this separation, the function helps structure the output string so that logically distinct textual parts remain visually separated, which is useful when constructing multi‑line message bodies or JSON content. Callers supply the destination string and the text to append; after the call, the destination string contains the original content, a gap, and the appended text.
 
 ## Usage Patterns
 
-- Used by `build_request_json` to accumulate JSON text blocks with gap separation.
+- called by `build_request_json` to concatenate text segments with separation
 
 ## Called By
 

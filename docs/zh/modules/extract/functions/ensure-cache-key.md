@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::ensurecachekey'
-description: '函数 clore::extract::ensure_cache_key 直接将控制权委托给 clore::extract::ensure_cache_key_impl，将给定的 CompileEntry 引用 entry 原样转发。作为 ensure_cache_key 唯一的实现，它充当一个薄包装器：所有实际的缓存键生成逻辑、错误处理和副作用都发生在 ensure_cache_key_impl 内部。这种分离允许将来在缓存键计算流程周围统一添加日志记录、断言或性能监控，而无需修改核心算法的调用点。'
+description: 'clore::extract::ensure_cache_key 完全将实现委托给 ensure_cache_key_impl，传递相同的 CompileEntry 引用。该函数本身不包含任何条件逻辑或错误处理，仅充当直接的转发接口，确保缓存键的计算通过内部实现函数进行。其唯一依赖是 ensure_cache_key_impl，后者在匿名命名空间中定义，负责处理解析编译器调用、规范化文件路径以及基于工具链和输入文件生成签名的全部细节。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module extract:compiler](../compiler.md)
 
-Declaration: `extract/compiler.cppm:60`
+Declaration: `src/extract/compiler.cppm:76`
 
-Definition: `extract/compiler.cppm:225`
+Definition: `src/extract/compiler.cppm:241`
 
 Declaration: [`Namespace clore::extract`](../../../namespaces/clore/extract/index.md)
 
@@ -23,23 +23,23 @@ auto ensure_cache_key(CompileEntry& entry) -> void {
 }
 ```
 
-函数 `clore::extract::ensure_cache_key` 直接将控制权委托给 `clore::extract::ensure_cache_key_impl`，将给定的 `CompileEntry` 引用 `entry` 原样转发。作为 `ensure_cache_key` 唯一的实现，它充当一个薄包装器：所有实际的缓存键生成逻辑、错误处理和副作用都发生在 `ensure_cache_key_impl` 内部。这种分离允许将来在缓存键计算流程周围统一添加日志记录、断言或性能监控，而无需修改核心算法的调用点。
+`clore::extract::ensure_cache_key` 完全将实现委托给 `ensure_cache_key_impl`，传递相同的 `CompileEntry` 引用。该函数本身不包含任何条件逻辑或错误处理，仅充当直接的转发接口，确保缓存键的计算通过内部实现函数进行。其唯一依赖是 `ensure_cache_key_impl`，后者在匿名命名空间中定义，负责处理解析编译器调用、规范化文件路径以及基于工具链和输入文件生成签名的全部细节。
 
 ## Side Effects
 
-- Modifies the `CompileEntry` object passed by reference, as delegated to `clore::extract::ensure_cache_key_impl`.
+- Modifies the `CompileEntry` by setting its cache key.
 
 ## Reads From
 
-- The `CompileEntry` reference `entry`.
+- The `CompileEntry` parameter (read by `ensure_cache_key_impl` to compute key).
 
 ## Writes To
 
-- The `CompileEntry` reference `entry`.
+- The `CompileEntry` parameter (cache key field set).
 
 ## Usage Patterns
 
-- Called before `clore::extract::query_toolchain_cached` to ensure a cache key is present.
+- Called prior to `query_toolchain_cached`.
 
 ## Calls
 

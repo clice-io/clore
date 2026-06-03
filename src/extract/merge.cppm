@@ -1,6 +1,20 @@
+module;
+
+#include <algorithm>
+#include <expected>
+#include <filesystem>
+#include <map>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
 export module extract:merge;
 
-import std;
 import config;
 import :model;
 import :filter;

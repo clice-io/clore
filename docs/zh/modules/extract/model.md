@@ -1,6 +1,6 @@
 ---
 title: 'Module extract:model'
-description: '模块 extract:model 定义了代码提取过程产生的结构化数据模型，是整个提取系统的核心数据层。它公开了 ProjectModel、SymbolInfo、FileInfo、NamespaceInfo、ModuleUnit、SymbolID、SourceLocation、SourceRange 以及 SymbolKind 枚举等类型，用于表示项目、符号、文件、模块单元及其关系。这些类型以只读方式提供对提取结果的访问，调用者可通过 find_symbol、lookup_symbol、find_module_by_name、find_module_by_source 等公开函数按标识符或源文件索引进行查找，以及通过 resolve_source_snippet 延迟加载源码片段。此外，模块还提供了 split_top_level_qualified_name、join_qualified_name_parts、namespace_prefix_from_qualified_name 等名称处理工具，以支持符号树的遍历和分析。'
+description: '模块 extract::model 定义了提取流程的核心数据结构，包括 ProjectModel、SymbolInfo、FileInfo、ModuleUnit、NamespaceInfo、SymbolID、SourceLocation 和 SourceRange 等类型。这些类型共同描述了从 C++ 项目中提取出的符号（函数、类、模块单元等）及其层级关系、位置信息与引用关系，构成后续分析、生成文档或证据的基础数据模型。'
 layout: doc
 template: doc
 ---
@@ -9,11 +9,12 @@ template: doc
 
 ## Summary
 
-模块 `extract:model` 定义了代码提取过程产生的结构化数据模型，是整个提取系统的核心数据层。它公开了 `ProjectModel`、`SymbolInfo`、`FileInfo`、`NamespaceInfo`、`ModuleUnit`、`SymbolID`、`SourceLocation`、`SourceRange` 以及 `SymbolKind` 枚举等类型，用于表示项目、符号、文件、模块单元及其关系。这些类型以只读方式提供对提取结果的访问，调用者可通过 `find_symbol`、`lookup_symbol`、`find_module_by_name`、`find_module_by_source` 等公开函数按标识符或源文件索引进行查找，以及通过 `resolve_source_snippet` 延迟加载源码片段。此外，模块还提供了 `split_top_level_qualified_name`、`join_qualified_name_parts`、`namespace_prefix_from_qualified_name` 等名称处理工具，以支持符号树的遍历和分析。
+模块 `extract::model` 定义了提取流程的核心数据结构，包括 `ProjectModel`、`SymbolInfo`、`FileInfo`、`ModuleUnit`、`NamespaceInfo`、`SymbolID`、`SourceLocation` 和 `SourceRange` 等类型。这些类型共同描述了从 C++ 项目中提取出的符号（函数、类、模块单元等）及其层级关系、位置信息与引用关系，构成后续分析、生成文档或证据的基础数据模型。
+
+该模块公开了丰富的查找与操作接口，如 `find_symbol`、`find_symbols`、`find_module_by_name`、`find_module_by_source`、`lookup_symbol` 以及辅助函数 `split_top_level_qualified_name`、`join_qualified_name_parts`、`namespace_prefix_from_qualified_name`、`symbol_kind_name` 和 `resolve_source_snippet`。这些接口允许使用者按限定名称、签名、源文件路径或 `SymbolID` 高效定位符号与模块单元，并支持延迟解析源代码片段。模块依赖底层 `support` 模块提供的通用工具，专注于为提取系统提供一致的数据模型和查询抽象。
 
 ## Imports
 
-- `std`
 - [`support`](../support/index.md)
 
 ## Imported By
@@ -25,121 +26,142 @@ template: doc
 
 ### `clore::extract::FileInfo`
 
-Declaration: `extract/model.cppm:122`
+Declaration: `src/extract/model.cppm:139`
 
-Definition: `extract/model.cppm:122`
+Definition: `src/extract/model.cppm:139`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-`clore::extract::FileInfo` 是一个纯数据聚合体，其内部直接暴露三个公开字段以保存单个源文件的提取结果。`path` 存储文件的磁盘路径；`symbols` 是一个 `std::vector<SymbolID>`，记录了在该文件中定义的符号标识符；`includes` 是一个 `std::vector<std::string>`，列出该文件直接包含的头文件路径。整个结构体没有封装或继承，所有成员均为公开且可直接赋值，因此不变量仅限于标准库容器自身的合法状态（如字符串非空、向量元素有效）。由于不存在私有数据或访问控制，该类仅作为携带相关信息的简单记录，外部代码可直接修改其字段以适应不同的构造场景。
-
-#### Invariants
-
-- 成员 `path` 为 `std::string` 类型，无隐含约束
-- 成员 `symbols` 为 `std::vector<SymbolID>` 类型，表示可能为空的符号列表
-- 成员 `includes` 为 `std::vector<std::string>` 类型，表示可能为空的包含路径列表
-
-#### Key Members
-
-- `path`
-- `symbols`
-- `includes`
-
-#### Usage Patterns
-
-- 用于表示提取操作的结果，将文件路径与其符号和包含项关联起来
-- 可能被传递给其他处理函数或序列化
+`clore::extract::FileInfo` 是一个聚合类型，用于存储单个源文件的提取结果。其内部包含三个数据成员：`path` 记录文件路径，`symbols` 保存该文件中定义的所有符号标识符（`SymbolID`），`includes` 列出文件直接引用的包含路径。该结构体不维护任何超越其成员默认初始化的不变性——例如，`symbols` 和 `includes` 的顺序由填充逻辑自由决定，且没有强制要求元素唯一性。唯一隐含的约定是 `path` 应当指向一个实际存在的源文件，但此约束由构造或填充 `FileInfo` 的代码负责，而非在结构体内部检查。
 
 ### `clore::extract::ModuleUnit`
 
-Declaration: `extract/model.cppm:135`
+Declaration: `src/extract/model.cppm:152`
 
-Definition: `extract/model.cppm:135`
-
-Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
-
-结构体 `clore::extract::ModuleUnit` 的内部表示围绕五个核心字段展开，用于描述一个 C++20 模块单元（接口或分区）。`name` 存储完整的模块名（如 `"foo"` 或 `"foo:bar"`），而 `is_interface` 是一个布尔标志：当其值为 `true` 时表示该单元是 `export module` 导出的接口单元，为 `false` 时则为普通实现单元（`module` 声明）。`source_file` 记录归一化的源文件路径，`imports` 是一个字符串向量，列出该单元导入的所有外部模块名。`symbols` 则持有当前单元中声明的所有符号标识符（`SymbolID` 向量），是实现提取模块符号表的核心枢纽。这四个数据成员共同构成一个完整的模块单元抽象，其中 `name` 与 `source_file` 通常应保持非空，`is_interface` 的正确性依赖于解析阶段的判定，而 `imports` 和 `symbols` 的内容则分别由模块导入收集和符号提取过程填充，保证了模块间依赖与符号表的可追踪性。
-
-### `clore::extract::NamespaceInfo`
-
-Declaration: `extract/model.cppm:128`
-
-Definition: `extract/model.cppm:128`
+Definition: `src/extract/model.cppm:152`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-结构体 `clore::extract::NamespaceInfo` 是一个普通聚合，用于存储提取过程中单个命名空间的元数据。它的三个公有字段分别承担不同角色：`name` 持有命名空间的完整限定名（例如 `std::chrono`），`symbols` 记录该命名空间内直接声明的符号标识符（类型为 `SymbolID`），`children` 则按顺序列出其直接子命名空间的名称字符串。该结构体不维护额外的不变量——所有字段均可自由读写，且无特殊构造函数或成员函数，其完整性完全由调用者保证。重要的是，`children` 中的字符串与 `name` 共同构成子命名空间的全名，但此处仅存储相对名称。
+内部结构由五个核心字段组成：`name` 存储模块的全限定名称（例如 `"foo"` 或 `"foo:bar"`），`is_interface` 区分该单元是否为导出接口（`export module`）还是内部实现单元（`module`），`source_file` 记录规范化后的源文件路径，`imports` 列出本单元直接导入的所有模块名称，`symbols` 则按声明顺序存储该单元内出现的符号标识符。关键不变式是 `is_interface` 必须与单元声明中的 `export` 关键字一致，且 `name` 永远不会为空（即使是未命名模块也有特定占位符表示）。所有 vector 成员保持声明的先后顺序，`imports` 中不会出现重复的模块名称，`source_file` 在整个提取管道中始终以操作系统原生路径形式存储，用于后续诊断和查询。这些字段共同构成了模块提取模型中最基础的数据单元，描述了模块的声明属性、物理位置以及它所引入和导出的符号依赖关系。
 
 #### Invariants
 
-- `name` 是命名空间的标识字符串
-- `symbols` 和 `children` 可能为空向量
-- `symbols` 中的每个元素是有效的 `SymbolID` 值
+- `name` 表示完整的模块标识符
+- `is_interface` 为 `true` 时该单元为接口单元
+- `source_file` 是经过规范化的文件路径
+- `imports` 列出本单元直接导入的所有模块
+- `symbols` 包含本单元内声明的符号 ID
 
 #### Key Members
 
 - `name`
+- `is_interface`
+- `source_file`
+- `imports`
 - `symbols`
-- `children`
 
 #### Usage Patterns
 
-- 在提取过程中由相关逻辑填充
-- 在文档生成或其他下游处理中遍历 `symbols` 和 `children` 以构建命名空间树
+- 此结构体由模块提取器填充，用于封装解析后的单个模块单元信息
+- 其他组件可通过 `name` 和 `imports` 分析模块间的依赖关系
+- `symbols` 用于关联模块单元与其内部声明的符号定义
+- `source_file` 可用于定位或索引原始源文件
 
-### `clore::extract::ProjectModel`
+### `clore::extract::NamespaceInfo`
 
-Declaration: `extract/model.cppm:143`
+Declaration: `src/extract/model.cppm:145`
 
-Definition: `extract/model.cppm:143`
+Definition: `src/extract/model.cppm:145`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-`clore::extract::ProjectModel` 是提取过程的核心数据聚合体，将解构后的源码信息组织为相互关联的索引结构。内部由多个无序映射构成：`symbols` 按 `SymbolID` 存储所有声明信息，`namespaces` 和 `files` 分别按名称和路径索引命名空间与文件条目；`modules` 以规范化源文件路径为键存储模块单元信息，并利用透明字符串散列实现高效的路径查询。为支持生成与证据构建，`symbol_ids_by_qualified_name` 维护完全限定名到符号 ID 集合的映射（以容纳重载），而 `module_name_to_sources` 则记录模块名对应的源文件列表。`file_order` 向量忠实记录文件处理顺序，与 `files` 映射的键集合一一对应，确保迭代稳定性。`uses_modules` 布尔标志作为整体不变量，当检测到至少一个模块声明时置为 true，从而允许后续代码根据不同编译模型选择处理路径。这些字段共同维护一组隐含一致性约束：所有引用到的路径和名称必须在各自映射中有对应条目，且 `file_order` 不会包含 `files` 中不存在的键。
+`NamespaceInfo` 是一个聚合结构体，其内部直接暴露三个公共数据成员。`name` 存储命名空间的限定名；`symbols` 维护该命名空间内直接声明的符号 ID 序列，用于快速查询当前作用域下的实体；`children` 则列出所有直接子命名空间的名称字符串，以支持递归命名空间树遍历。该结构体不包含构造函数或成员函数，因此不强制任何不变量——调用方可以直接修改各成员，依赖调用方在组装数据时保证 `name` 非空、`symbols` 和 `children` 无重复等语义约束。作为值类型，其拷贝和移动均按默认逐成员处理，仅用于在提取阶段临时保存解析结果。
 
 #### Invariants
 
-- `symbols` 中的每个 `SymbolID` 映射到唯一 `SymbolInfo`。
-- `files` 和 `modules` 的键是标准化源文件路径。
-- `symbol_ids_by_qualified_name` 中一个限定名可对应多个 `SymbolID`（存在重载时）。
-- `module_name_to_sources` 中一个模块名可对应多个源文件路径。
-- `uses_modules` 为 `true` 当且仅当项目中发现至少一个模块声明。
+- `name` 成员用于标识命名空间的唯一名称
+- `symbols` 和 `children` 成员可以为空，表示没有符号或子命名空间
+
+#### Key Members
+
+- `name`：命名空间名称
+- `symbols`：命名空间内符号的标识符列表
+- `children`：子命名空间名称列表
+
+#### Usage Patterns
+
+- 外部代码通过访问 `name`、`symbols` 和 `children` 来获取命名空间的层级结构
+- 通常被其他提取逻辑填充并用于构建命名空间树或符号索引
+
+### `clore::extract::ProjectModel`
+
+Declaration: `src/extract/model.cppm:160`
+
+Definition: `src/extract/model.cppm:160`
+
+Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
+
+struct `clore::extract::ProjectModel` 是提取阶段的核心数据容器，用于持有整个项目的解析结果。其内部由若干无序映射（`std::unordered_map`）构成，分别按不同键索引：`symbols` 以 `SymbolID` 索引所有符号信息；`files` 以规范化源文件路径索引 `FileInfo`；`namespaces` 以名称索引命名空间信息；`modules` 以路径索引 `ModuleUnit`（仅当项目使用 C++20 模块时有效）；`symbol_ids_by_qualified_name` 提供精确限定名称到 `SymbolID` 向量的反向查找（允许一个名称对应多个重载）；`module_name_to_sources` 将模块名映射到其所属的源文件路径列表。此外，`file_order` 按处理顺序保存所有文件路径，确保遍历顺序的确定性。`uses_modules` 布尔标志作为一个整体不变性，指示项目中是否至少存在一条模块声明，从而影响模块相关容器的解释方式。各容器之间通过键的规范化（如文件路径和模块名）和透明散列/等价谓词维护一致性，支撑后续的代码生成与证据构建。
+
+#### Invariants
+
+- `file_order` 按解析顺序存储文件路径，保证遍历顺序稳定
+- `symbol_ids_by_qualified_name` 中的值向量至少包含一个元素，且可能包含多个表示重载
+- `module_name_to_sources` 中的值向量可能包含多个源文件路径（当模块跨文件分区时）
+- `uses_modules` 为 `true` 当且仅当至少一个模块单元存在
 
 #### Key Members
 
 - `symbols`
 - `files`
 - `namespaces`
+- `file_order`
 - `modules`
 - `symbol_ids_by_qualified_name`
 - `module_name_to_sources`
-- `file_order`
 - `uses_modules`
 
 #### Usage Patterns
 
-- 作为 `clore::extract::ProjectExtractor` 的输出结果，填充后传递给代码生成阶段。
-- 其他组件通过 `symbol_ids_by_qualified_name` 进行符号的精确限定名查找。
-- 模块依赖分析和交叉链接依赖 `modules` 和 `module_name_to_sources`。
-- 文档生成、代码补全等功能读取 `symbols`、`namespaces` 等字段获取项目信息。
+- 用于文档生成阶段遍历所有符号和文件
+- 通过 `symbol_ids_by_qualified_name` 实现精确的限定名查找，以处理链接和引用
+- 通过 `module_name_to_sources` 将模块名映射到源文件，用于跨模块的交叉引用
+- 通过 `file_order` 确定文件的处理顺序
+- `uses_modules` 被其他组件用来调整生成策略（例如是否启用模块相关格式）
 
 ### `clore::extract::SourceLocation`
 
-Declaration: `extract/model.cppm:64`
+Declaration: `src/extract/model.cppm:81`
 
-Definition: `extract/model.cppm:64`
+Definition: `src/extract/model.cppm:81`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该结构体通过 `line` 字段的零值约定来表示未知或无效源代码位置；当 `line` 为 `0` 时，`column` 和 `file` 的内容不具有语义意义。内置的 `is_known()` 成员函数直接检查此不变量，返回 `line != 0`，它被标记为 `noexcept` 且 `[[nodiscard]]`，以确保调用方不会忽略位置的有效性。
+`clore::extract::SourceLocation` 的内部布局由三个字段组成：字符串型 `file`、32 位无符号整型 `line`（默认值为 `0`）和 32 位无符号整型 `column`（默认值为 `0`）。其核心不变量是：`line` 等于 `0` 时标识位置未知，有效行号从 `1` 开始。关键成员函数 `is_known()` 通过 `return line != 0` 实现，直接利用了该不变量，因此当 `line` 非零时返回 `true`，否则返回 `false`。
+
+#### Invariants
+
+- `line == 0` 表示位置未知，有效行号从 1 开始
+
+#### Key Members
+
+- `file`
+- `line`
+- `column`
+- `is_known`
+
+#### Usage Patterns
+
+- 在 `clore::extract` 命名空间内作为源代码位置的载体
+- 通过 `is_known` 方法判断位置是否已确定，以便进行后续处理
 
 #### Member Functions
 
 ##### `clore::extract::SourceLocation::is_known`
 
-Declaration: `extract/model.cppm:70`
+Declaration: `src/extract/model.cppm:87`
 
-Definition: `extract/model.cppm:70`
+Definition: `src/extract/model.cppm:87`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -153,66 +175,68 @@ Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.m
 
 ### `clore::extract::SourceRange`
 
-Declaration: `extract/model.cppm:75`
+Declaration: `src/extract/model.cppm:92`
 
-Definition: `extract/model.cppm:75`
+Definition: `src/extract/model.cppm:92`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-`clore::extract::SourceRange` 是一个仅包含两个数据成员的结构体：`begin` 和 `end`，类型均为 `SourceLocation`。它将一个连续的源码位置区间表示为半开区间 `[begin, end)`，其中 `begin` 指向第一个字符，`end` 指向最后一个字符之后的位置。该结构体本身不提供构造或验证逻辑，因此调用者负责保证 `begin` 在 `end` 之前（或相等），否则范围语义将无效。
-
-作为简单的聚合体，`SourceRange` 的两个成员直接暴露，没有额外的封装或成员函数。不变量完全由创建它的代码维护，例如在解析或词法分析过程中，通过逐字符推进位置来构造有效的区间。
+`clore::extract::SourceRange` 是一个聚合结构体，内部仅包含两个 `SourceLocation` 类型的公开数据成员：`begin` 和 `end`。它未定义任何自定义构造函数、析构函数或成员函数，完全依赖默认的聚合初始化与逐成员复制语义，因此其存储布局是平凡的。该类型的使用者负责维护 `begin` 应代表范围的逻辑起始、`end` 代表逻辑结束这一不变性——例如，假设 `SourceLocation` 存在全序关系，则通常要求 `begin` 不大于 `end`，但该约束并未通过结构体自身的成员函数或断言来强制实施。作为仅含两个字段的 POD 式类型，`SourceRange` 在实现中常被直接拷贝或作为函数参数传递，其实现开销仅等同于两次 `SourceLocation` 的复制。
 
 #### Invariants
 
-- `begin` 和 `end` 分别是范围的起始和结束位置
-- 范围通常是左闭右开或左右均包含，但具体语义由使用上下文决定
+- `begin` 和 `end` 通常用于表示一个连续的范围
+- 范围语义上期望 `begin` 不晚于 `end`（但未强制检查）
 
 #### Key Members
 
-- `begin`：起始位置的 `SourceLocation`
-- `end`：结束位置的 `SourceLocation`
+- `begin`：范围的起始位置
+- `end`：范围的结束位置
 
 #### Usage Patterns
 
-- 用于表示解析器、词法分析器或错误报告中的源代码区间
-- 作为其他结构体或函数的成员，传递代码片段范围
+- 其他代码通过访问 `begin` 和 `end` 来获取范围边界
+- 可能用于传递或存储源代码片段的定位信息
 
 ### `clore::extract::SymbolID`
 
-Declaration: `extract/model.cppm:28`
+Declaration: `src/extract/model.cppm:45`
 
-Definition: `extract/model.cppm:28`
+Definition: `src/extract/model.cppm:45`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该结构体直接编码了一对整数作为标识符：一个64位 `hash` 和一个32位 `signature`，其中 `hash` 为0被保留为无效哨兵。`is_valid()` 通过检查 `hash` 是否非零来实现这一不变量；一旦构造完成，有效ID的 `hash` 和 `signature` 均不应被单独改变。默认的 `operator==` 和 `operator<=>` 对这两个字段进行逐成员比较，因此比较顺序是先 `hash` 后 `signature`。这种设计使极罕见的64位哈希碰撞可以通过 `signature` 进一步区分，而无需依赖外部映射或更宽的哈希值。
+结构体 `clore::extract::SymbolID` 内部由两个字段组成：一个 64 位的无符号整数 `hash` 和一个 32 位的无符号整数 `signature`。其核心不变式是：有效标识符的 `hash` 必须非零，零值作为全局无效哨兵（由 `is_valid()` 检查 `hash != 0` 实现），而 `signature` 字段则源自同一 USR 来源，专门用于在极其罕见的情况下进一步消除 64 位哈希碰撞带来的歧义。
+
+成员实现方面，`operator==` 和 `operator<=>` 均使用默认合成，因此比较基于 `hash` 和 `signature` 的字典序，同时生成 `std::strong_ordering` 全序关系。`is_valid()` 仅依赖 `hash` 的零值判断，不要求 `signature` 一定为特定值，这保持了简单的有效性验证。
 
 #### Invariants
 
-- 有效 `SymbolID` 的 `hash` 必须非零
-- `hash` 为 0 时 `signature` 应被忽略，是无效哨兵
+- A valid `SymbolID` has a non-zero `hash`.
+- The `hash` field is zero for the invalid/null sentinel.
+- Both `hash` and `signature` are derived from the same USR source.
 
 #### Key Members
 
-- `hash`: 主要哈希值，非零表示有效
-- `signature`: 附加签名，用于消除哈希碰撞
-- `is_valid()`: 通过检查 `hash != 0` 判断是否有效
-- `operator==` 和 `operator<=>`: 默认实现的比较操作
+- `hash` field
+- `signature` field
+- `is_valid()` method
+- `operator==`
+- `operator<=>`
 
 #### Usage Patterns
 
-- 作为符号的唯一键在集合或映射中使用
-- 通过 `is_valid()` 快速判断标识是否初始化
-- 依赖默认比较进行排序和去重
+- Serves as the primary identifier for symbols in the extraction pipeline.
+- Used as a key or value in containers that support default comparison and ordering.
+- Returned by functions that need to refer to a symbol without exposing its full name.
 
 #### Member Functions
 
 ##### `clore::extract::SymbolID::is_valid`
 
-Declaration: `extract/model.cppm:35`
+Declaration: `src/extract/model.cppm:52`
 
-Definition: `extract/model.cppm:35`
+Definition: `src/extract/model.cppm:52`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -226,9 +250,9 @@ Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.m
 
 ##### `clore::extract::SymbolID::operator<=>`
 
-Declaration: `extract/model.cppm:40`
+Declaration: `src/extract/model.cppm:57`
 
-Definition: `extract/model.cppm:40`
+Definition: `src/extract/model.cppm:57`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -240,9 +264,9 @@ auto operator<=>(const SymbolID&) const = default
 
 ##### `clore::extract::SymbolID::operator==`
 
-Declaration: `extract/model.cppm:39`
+Declaration: `src/extract/model.cppm:56`
 
-Definition: `extract/model.cppm:39`
+Definition: `src/extract/model.cppm:56`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -254,64 +278,93 @@ bool operator==(const SymbolID&) const = default
 
 ### `clore::extract::SymbolInfo`
 
-Declaration: `extract/model.cppm:80`
+Declaration: `src/extract/model.cppm:97`
 
-Definition: `extract/model.cppm:80`
+Definition: `src/extract/model.cppm:97`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-`clore::extract::SymbolInfo` 是一个复合数据结构，用于存储单个符号的提取元数据。其内部包含符号标识符 `id`、类型 `kind`、多个名称字段（如 `name`、`qualified_name`、`enclosing_namespace`、`signature`），以及源代码位置信息 `declaration_location` 和可选的定义位置 `definition_location`。文档注释 `doc_comment` 和源代码片段 `source_snippet` 直接存储文本内容；当 `source_snippet` 为空时，实际源码文本按需从 `declaration_location` 指向的文件中获取，位置与完整性由 `source_snippet_offset`、`source_snippet_length`、`source_snippet_file_size` 和 `source_snippet_hash` 共同维护。关系字段（`parent`、`children`、`bases`、`derived`、`calls`、`called_by`、`references`、`referenced_by`）通过 `SymbolID` 列表构建符号图的邻接结构，其中 `parent` 为可选值，`lexical_parent_name` 与 `lexical_parent_kind` 记录了父对象的字符串标识和类型以备快速查询。访问控制 `access`、模板状态 `is_template` 及参数 `template_params` 补充了符号的上下文属性。
-
-该结构的不变性主要体现在：当 `source_snippet` 为空时，所有四个 `source_snippet_*` 字段必须同时有效且对应 `declaration_location.file` 中的原始文本区间；关系向量中引用的 `SymbolID` 应存在于同一提取集合中（外部保证），`parent` 与 `children` 之间双向一致由调用方维护。`is_template` 为 `true` 时，`template_params` 包含模板参数列表的字符串表示；`kind` 决定了其他字段（如 `bases`、`access`）的实际含义，但类型安全由外部逻辑保证。
+实现层面的 `clore::extract::SymbolInfo` 是一个扁平的聚合体，集中存储单个符号的完整提取元数据。其字段按职责分为若干逻辑组：符号标识与签名（ `id`、`kind`、`name`、`qualified_name`、`enclosing_namespace`、`signature`）、位置信息（ `declaration_location` 与可选的 `definition_location`）、文档与源码快照（ `doc_comment`、`source_snippet` 以及后备的偏移/长度/文件大小/哈希四元组）、层次与父级关系（ `parent`、`children` 以及 `lexical_parent_name`/`lexical_parent_kind`）、继承关系（ `bases`、`derived`）、调用关系（ `calls`、`called_by`）、引用关系（ `references`、`referenced_by`），以及访问控制和模板信息（ `access`、`is_template`、`template_params`）。一个关键不变量是：当 `source_snippet` 为空字符串时，该符号的源码片段并不直接驻留内存，而是通过 `declaration_location` 所引用的文件，结合 `source_snippet_offset`、`source_snippet_length`、`source_snippet_file_size` 和 `source_snippet_hash` 这四条信息按需懒加载，从而在不损失精确性的前提下降低大规模符号集的内存占用。所有关系字段（ `parent`、`children`、`bases`、`derived`、`calls`、`called_by`、`references`、`referenced_by`）均使用 `SymbolID` 进行跨符号引用，保证了关系图的无环性与查找效率。
 
 #### Invariants
 
-- `id` is a unique identifier for the symbol
-- `kind` defaults to `SymbolKind::Unknown`
-- `declaration_location` always stores a valid `SourceLocation`
-- If `source_snippet` is empty, the snippet text can be retrieved from the file indicated by `declaration_location.file` using the offset/length/`file_size`/hash fields
-- `parent` is empty for top-level symbols; `children` lists immediate child symbols
-- `bases` and `derived` are only populated for class types
-- `calls` and `called_by` are used for functions and callable objects
-- `references` and `referenced_by` indicate cross-references between symbols
+- `id` is unique per symbol within an extraction session.
+- `kind` must be a valid `SymbolKind` enumerator.
+- `source_snippet_hash` is computed from the snippet content when `source_snippet` is non-empty.
+- `parent` is `std::nullopt` if the symbol has no parent in the extracted hierarchy.
+- `children` excludes the symbol itself; relationships are directed.
+- `bases` and `derived` are non-empty only for class/struct types.
+- `calls` and `called_by` capture call graph edges; symmetry is not guaranteed.
+- `references` and `referenced_by` capture use relations; symmetry not guaranteed.
 
 #### Key Members
 
-- `id`: unique identifier for the symbol
-- `kind`: enum indicating the symbol type
-- `name`: the simple name of the symbol
-- `qualified_name`: fully qualified name
-- `declaration_location`: `SourceLocation` of the declaration
-- `parent`: optional `SymbolID` of the enclosing symbol
-- `children`: list of direct child `SymbolID`s
-- `bases` and `derived`: inheritance relationships
-- `calls` and `called_by`: call graph edges
-- `references` and `referenced_by`: reference graph edges
-- `source_snippet_offset`, `source_snippet_length`, `source_snippet_file_size`, `source_snippet_hash`: lazy snippet resolution metadata
+- `id`
+- `kind`
+- `name`
+- `qualified_name`
+- `declaration_location`
+- `definition_location`
+- `parent`
+- `children`
+- `bases`
+- `derived`
+- `calls`
+- `called_by`
+- `references`
+- `referenced_by`
+- `source_snippet`
+- `doc_comment`
+- `access`
+- `is_template`
+- `template_params`
 
 #### Usage Patterns
 
-- Filled by the extraction engine when traversing translation units
-- Used by documentation generators to render symbol pages
-- Consumed by graph analysis tools to build dependency or call trees
-- Referenced by other structures via `SymbolID` lists (e.g. `children`, `bases`, `calls`)
-- The optional lazy-snippet fields allow on-demand reading of source text to reduce memory footprint
+- Returned by extraction functions to represent a single symbol.
+- Consumed by documentation generators to produce symbol documentation pages.
+- Populated by tools that walk the AST and fill in fields like `id`, `kind`, `parent`, and `children`.
+- Used to build relationship graphs via `bases`/`derived`, `calls`/`called_by`, and `references`/`referenced_by`.
+- On-demand snippet resolution when `source_snippet` is empty: consumers read `source_snippet_offset` and siblings to load from file.
 
 ### `clore::extract::SymbolKind`
 
-Declaration: `extract/model.cppm:8`
+Declaration: `src/extract/model.cppm:25`
 
-Definition: `extract/model.cppm:8`
+Definition: `src/extract/model.cppm:25`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-枚举 `clore::extract::SymbolKind` 是一个底层类型为 `std::uint8_t` 的枚举类，其成员按编译单元中符号种类的自然分类顺序排列：从 `Namespace` 开始，经 `Class`、`Struct`、`Union`、`Enum` 等类型实体，再到 `Function`、`Method`、`Variable`、`Field` 等值实体，最后是 `TypeAlias`、`Macro`、`Template`、`Concept` 以及作为后备值的 `Unknown`。各成员均未显式指定数值，其隐式赋值从 0 递增，因此枚举值的具体数值与其声明顺序严格对应。内部实现中，`SymbolKind` 通过窄底层类型实现紧凑存储，适合作为分析管线中频繁传递的轻量级标签。`Unknown` 成员作为哨兵值处理未识别或超出预定义类别的符号，维护了枚举的完整性。
+`clore::extract::SymbolKind` 是一个基于底层类型 `std::uint8_t` 的枚举类，编译器会为其成员自动分配整数值（从 0 开始）。成员按语义类别分组排列：首先是位于命名空间或类型作用域的实体（`Namespace`、`Class`、`Struct`、`Union`、`Enum`、`EnumMember`），接着是函数与成员函数（`Function`、`Method`），然后是数据成员（`Variable`、`Field`），再是类型别名、宏及模板或概念相关（`TypeAlias`、`Macro`、`Template`、`Concept`），最后以 `Unknown` 结束。这种分组顺序并非强制要求，但直观反映了各类 C++ 符号的层级关系。`Unknown` 成员作为兜底值，用于处理无法分类或尚未识别的符号，保证了枚举空间的完备性。整个枚举实例仅占用一个字节，适合嵌入其他结构或作为紧凑的标签类型使用。
+
+#### Invariants
+
+- Each symbol has exactly one `SymbolKind` value
+- Enum values are mutually exclusive and uniquely identify a symbol's category
+- The `Unknown` value serves as a default or error sentinel
+- Underlying type is `std::uint8_t` for fixed-width storage
+
+#### Key Members
+
+- `Namespace`
+- `Class`
+- `Function`
+- `Method`
+- `Variable`
+- `Unknown`
+
+#### Usage Patterns
+
+- Used to tag extracted symbol nodes with their semantic category
+- Code switches on `SymbolKind` to dispatch handling logic
+- Symbol filtering and grouping operations depend on this enumeration
+- Probably compared or serialized in diagnostics and reports
 
 #### Member Variables
 
 ##### `clore::extract::SymbolKind::Class`
 
-Declaration: `extract/model.cppm:10`
+Declaration: `src/extract/model.cppm:27`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -323,7 +376,7 @@ Class
 
 ##### `clore::extract::SymbolKind::Concept`
 
-Declaration: `extract/model.cppm:22`
+Declaration: `src/extract/model.cppm:39`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -335,7 +388,7 @@ Concept
 
 ##### `clore::extract::SymbolKind::Enum`
 
-Declaration: `extract/model.cppm:13`
+Declaration: `src/extract/model.cppm:30`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -347,7 +400,7 @@ Enum
 
 ##### `clore::extract::SymbolKind::EnumMember`
 
-Declaration: `extract/model.cppm:14`
+Declaration: `src/extract/model.cppm:31`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -359,7 +412,7 @@ EnumMember
 
 ##### `clore::extract::SymbolKind::Field`
 
-Declaration: `extract/model.cppm:18`
+Declaration: `src/extract/model.cppm:35`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -371,7 +424,7 @@ Field
 
 ##### `clore::extract::SymbolKind::Function`
 
-Declaration: `extract/model.cppm:15`
+Declaration: `src/extract/model.cppm:32`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -383,7 +436,7 @@ Function
 
 ##### `clore::extract::SymbolKind::Macro`
 
-Declaration: `extract/model.cppm:20`
+Declaration: `src/extract/model.cppm:37`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -395,7 +448,7 @@ Macro
 
 ##### `clore::extract::SymbolKind::Method`
 
-Declaration: `extract/model.cppm:16`
+Declaration: `src/extract/model.cppm:33`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -407,7 +460,7 @@ Method
 
 ##### `clore::extract::SymbolKind::Namespace`
 
-Declaration: `extract/model.cppm:9`
+Declaration: `src/extract/model.cppm:26`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -419,7 +472,7 @@ Namespace
 
 ##### `clore::extract::SymbolKind::Struct`
 
-Declaration: `extract/model.cppm:11`
+Declaration: `src/extract/model.cppm:28`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -431,7 +484,7 @@ Struct
 
 ##### `clore::extract::SymbolKind::Template`
 
-Declaration: `extract/model.cppm:21`
+Declaration: `src/extract/model.cppm:38`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -443,7 +496,7 @@ Template
 
 ##### `clore::extract::SymbolKind::TypeAlias`
 
-Declaration: `extract/model.cppm:19`
+Declaration: `src/extract/model.cppm:36`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -455,7 +508,7 @@ TypeAlias
 
 ##### `clore::extract::SymbolKind::Union`
 
-Declaration: `extract/model.cppm:12`
+Declaration: `src/extract/model.cppm:29`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -467,7 +520,7 @@ Union
 
 ##### `clore::extract::SymbolKind::Unknown`
 
-Declaration: `extract/model.cppm:23`
+Declaration: `src/extract/model.cppm:40`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -479,7 +532,7 @@ Unknown
 
 ##### `clore::extract::SymbolKind::Variable`
 
-Declaration: `extract/model.cppm:17`
+Declaration: `src/extract/model.cppm:34`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
@@ -493,39 +546,41 @@ Variable
 
 ### `clore::extract::find_module_by_name`
 
-Declaration: `extract/model.cppm:188`
+Declaration: `src/extract/model.cppm:205`
 
-Definition: `extract/model.cppm:416`
+Definition: `src/extract/model.cppm:433`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该函数首先委托给 `clore::extract::find_modules_by_name`，获取所有名称匹配 `module_name` 的 `ModuleUnit` 指针列表。若列表为空，直接返回 `nullptr`；若仅有一个候选，则直接返回该指针。当存在多个同名模块时，算法遍历所有候选项，统计其 `is_interface` 标志为 `true` 的接口单元数量。若恰好有一个接口单元，则返回该单元；若没有任何接口单元，记录一条警告后回退到列表中的第一个模块作为结果；若多于一个接口单元，则认为模块名称存在歧义，记录另一条警告并返回 `nullptr`。该函数依赖 `clore::extract::find_modules_by_name` 完成初步检索，并利用 `ModuleUnit` 结构体的 `is_interface` 字段进行接口单元识别，从而在有多份同名模块定义时优先返回明确的接口单元。
+该函数通过委托给 `find_modules_by_name` 获取匹配 `module_name` 的所有 `ModuleUnit` 指针来启动。若结果为空则立即返回 `nullptr`；若仅有一个匹配则直接返回该指针。对于多个匹配的情况，函数遍历所有候选模块，统计其中 `is_interface` 为 `true` 的单元数量并记录最后一个接口单元。若恰好存在一个接口单元则将其返回；若不存在任何接口单元，则通过 `logging::warn` 记录一条警告（指出拥有多个实现单元但缺少接口单元），并回退返回第一个候选模块；若存在多个接口单元，则同样记录歧义警告并返回 `nullptr`。
+
+该实现依赖 `find_modules_by_name` 提供初步的模块列表，依赖 `ModuleUnit::is_interface` 区分接口与实现单元，并利用 `logging::warn` 报告非唯一或缺失接口的情况。返回值在接口唯一时优先于实现单元，在无接口时采用保守回退策略。
 
 #### Side Effects
 
-- Logs warnings via `logging::warn` when multiple modules are found with the same name and no interface or multiple interfaces.
+- Logs a warning when no interface unit exists for the module
+- Logs a warning when multiple interface units are found
 
 #### Reads From
 
-- `model` parameter
+- `model` parameter (passed to `find_modules_by_name`)
 - `module_name` parameter
-- `is_interface` member of `ModuleUnit` objects returned by `find_modules_by_name`
+- `module->is_interface` for each module in the candidate list
 
 #### Usage Patterns
 
-- Resolve module ambiguity by preferring interface units
-- Lookup module by name in project model
-- Fallback to first unit when no interface
+- Resolve a module name to a unique module unit during extraction or analysis
+- Handle module name lookup with disambiguation and logging
 
 ### `clore::extract::find_module_by_source`
 
-Declaration: `extract/model.cppm:194`
+Declaration: `src/extract/model.cppm:211`
 
-Definition: `extract/model.cppm:449`
+Definition: `src/extract/model.cppm:466`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该函数通过给定源文件路径在 `ProjectModel::modules` 映射中查找对应的 `ModuleUnit` 实例。其内部流程非常简单：使用 `std::map::find` 在 `model.modules` 中搜索键为 `source_file` 的条目，若找到则返回关联值的指针，否则返回 `nullptr`。实现依赖 `ProjectModel` 类型中定义的 `modules` 成员（一个以源文件路径为键、`ModuleUnit` 为值的映射）以及 `ModuleUnit` 的完整定义。整个查找过程的时间复杂度为对数级别（取决于映射的底层实现）。
+该函数通过直接查询传入的 `ProjectModel` 实例中的 `modules` 成员（其类型为关联容器），实现基于源文件名到模块单元的映射查找。它使用 `model.modules.find(source_file)` 进行一次容器查找，若找到则返回对应 `ModuleUnit` 对象的指针，否则返回 `nullptr`。整个实现仅依赖 `ProjectModel.modules` 这一数据结构，不涉及任何遍历、排序或额外的函数调用，因此算法的时间复杂度完全由该容器的查找复杂度决定。
 
 #### Side Effects
 
@@ -533,22 +588,25 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `model.modules` (the map inside `ProjectModel`)
-- `source_file` parameter
+- `model.modules` (the map from source file paths to `ModuleUnit` objects)
+- `source_file` (the lookup key)
 
 #### Usage Patterns
 
-- Used to retrieve a module unit by its source file path during extraction or analysis.
+- Used to obtain a module unit given a source file path during project model queries
+- Expected to be called when resolving modules by source location
 
 ### `clore::extract::find_modules_by_name`
 
-Declaration: `extract/model.cppm:191`
+Declaration: `src/extract/model.cppm:208`
 
-Definition: `extract/model.cppm:395`
+Definition: `src/extract/model.cppm:412`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该函数根据传入的模块名 `module_name` 在 `model.module_name_to_sources` 映射中执行查找操作。若未命中或关联的源文件列表为空，则立即返回空向量。否则，遍历源文件列表并对每个元素调用 `find_module_by_source` 获取对应的 `ModuleUnit` 指针，跳过返回空指针的情形。结果容器按每个模块的 `source_file` 字段升序排序后返回。实现仅依赖 `ProjectModel` 的内部映射和辅助函数 `find_module_by_source`，无额外全局状态。
+该函数首先通过 `model.module_name_to_sources`（一个从模块名到源文件路径列表的映射）查找给定的 `module_name`。如果映射不存在或对应的值列表为空，则立即返回一个空的 `std::vector<const ModuleUnit*>`。否则，预先分配足够的容量，并依次对列表中的每个 `source` 调用 `find_module_by_source` 来获取对应的 `ModuleUnit` 指针，将其存入结果向量。最后，使用 `std::sort` 按 `ModuleUnit::source_file` 的字典序对所有找到的模块指针进行排序，以确保输出的顺序稳定且可预测。
+
+内部控制流完全依赖于 `ProjectModel` 中预先构建的 `module_name_to_sources` 索引以及 `find_module_by_source` 辅助函数。排序步骤保证了即使在同一模块名对应多个源文件（例如接口和分区）时，结果也能按文件路径升序排列。
 
 #### Side Effects
 
@@ -556,24 +614,26 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `model.module_name_to_sources` map
-- `find_module_by_source` function (reads the model and source ID)
-- `lhs->source_file` and `rhs->source_file` for comparison during sorting
+- `model.module_name_to_sources`
+- `find_module_by_source` (reads from `model`)
+- `ModuleUnit::source_file` for sorting
 
 #### Usage Patterns
 
-- Used to find all modules with a specific name in the project model
-- Called during extraction to collect module units for processing
+- Used to retrieve all module units sharing a name.
+- Typically called when resolving named modules in a project model.
 
 ### `clore::extract::find_symbol`
 
-Declaration: `extract/model.cppm:179`
+Declaration: `src/extract/model.cppm:198`
 
-Definition: `extract/model.cppm:371`
+Definition: `src/extract/model.cppm:396`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-函数 `clore::extract::find_symbol` 是 `clore::extract::find_symbols` 的简化封装。它接收一个 `qualified_name` 并调用 `find_symbols` 来获取所有匹配的符号集合；若集合大小恰好为 1，则返回该符号的指针，否则返回空指针。该函数不涉及额外的算法或状态维护，完全依赖 `find_symbols` 的查找逻辑和结果过滤。
+Implementation: [Implementation](functions/find-symbol.md)
+
+当 `signature` 为空时，该函数直接委托给单参数重载 `clore::extract::find_symbol`，利用其基于 `qualified_name` 的查找逻辑。否则，它调用 `clore::extract::find_symbols` 获取所有匹配该限定名的符号列表，然后线性扫描列表中每个符号的 `signature` 字段，与传入的签名做相等比较。一旦找到匹配项即返回其指针；若遍历完毕仍未命中则返回 `nullptr`。此实现依赖 `clore::extract::find_symbols` 的集合检索能力，并依赖 `SymbolInfo::signature` 作为消歧依据。
 
 #### Side Effects
 
@@ -581,24 +641,28 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- model: `const ProjectModel &`
-- `qualified_name`: `std::string_view`
+- `model`
+- `qualified_name`
+- `signature`
+- the symbols returned by `clore::extract::find_symbols`
 
 #### Usage Patterns
 
-- single symbol lookup by qualified name
-- convenience wrapper around `clore::extract::find_symbols`
-- returns `nullptr` when no unique symbol is found
+- look up a symbol by qualified name only
+- look up a symbol by qualified name and signature
+- exact symbol resolution with optional signature matching
 
 ### `clore::extract::find_symbol`
 
-Declaration: `extract/model.cppm:181`
+Declaration: `src/extract/model.cppm:196`
 
-Definition: `extract/model.cppm:379`
+Definition: `src/extract/model.cppm:388`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-当 `signature` 非空时，该重载首先通过 `find_symbols` 获得与 `qualified_name` 匹配的所有 `SymbolInfo*` 的列表，然后遍历该列表，将每个符号的 `signature` 字段与传入的 `signature` 进行精确比较，一旦找到相同者即立即返回该指针；若遍历结束仍未匹配，则返回 `nullptr`。如果 `signature` 为空字符串，则直接委托给单参数的 `find_symbol` 重载完成查找。该函数依赖内部辅助函数 `find_symbols` 完成初步的名称‑符号映射，并依赖 `SymbolInfo` 的 `signature` 成员进行签名比对。
+Implementation: [Implementation](functions/find-symbol.md)
+
+函数 `clore::extract::find_symbol` 的实现首先调用 `clore::extract::find_symbols`，传入相同的 `model` 和 `qualified_name`。若返回的匹配集合 `matches` 长度恰好为 1，则函数返回集合中的第一个元素，否则返回 `nullptr`。此实现依赖 `clore::extract::find_symbols` 完成实际的符号查找与匹配逻辑，自身仅负责将多匹配或零匹配场景统一转换为单指针返回值，从而简化调用方的歧义处理。
 
 #### Side Effects
 
@@ -606,25 +670,25 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `model` (parameter of type `const ProjectModel&`)
-- `qualified_name` (parameter of type `std::string_view`)
-- `signature` (parameter of type `std::string_view`)
-- data accessed via `find_symbols` and `symbol->signature`
+- `model` (const `ProjectModel` reference)
+- `qualified_name` (`std::string_view`)
 
 #### Usage Patterns
 
-- Used to look up a symbol by both its qualified name and exact signature, typically to disambiguate overloaded names.
-- Called internally by other extraction logic that needs to identify a specific symbol instance.
+- Used as a convenience wrapper to retrieve a uniquely matching symbol by qualified name
+- Called by the overload `clore::extract::find_symbol` that takes an additional `std::string_view` parameter
 
 ### `clore::extract::find_symbols`
 
-Declaration: `extract/model.cppm:185`
+Declaration: `src/extract/model.cppm:202`
 
-Definition: `extract/model.cppm:354`
+Definition: `src/extract/model.cppm:371`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-函数`clore::extract::find_symbols`以有序查找的方式实现：首先在`model.symbol_ids_by_qualified_name`中搜索给定的`qualified_name`，若未命中则立即返回空向量；命中时预分配容量，然后遍历该键对应的每个`symbol_id`，通过`lookup_symbol(model, symbol_id)`获取指向`SymbolInfo`的指针（可能为空），有效的指针被收集到`matches`中。整个过程依赖`ProjectModel`内部的名称到ID映射结构以及`lookup_symbol`提供的符号解析服务，没有额外的排序或去重逻辑，输出顺序由映射中ID的存储顺序决定。
+该函数首先利用 `model.symbol_ids_by_qualified_name`（一个将限定名称映射到 `SymbolID` 向量的查找表）进行直接查找。如果 `qualified_name` 不存在，则立即返回空向量。否则，它会根据查找到的向量大小预分配结果空间，然后遍历每个 `symbol_id`，对每个 ID 调用 `lookup_symbol` 将标识符解析为指向 `SymbolInfo` 的指针。
+
+在遍历过程中，`lookup_symbol` 负责根据 `SymbolID` 在 `model.symbols` 或相关索引中检索实际的符号信息。只有非空指针（即成功解析的符号）才会被追加到结果向量中。这种设计利用了符号名称到 ID 的多对一映射（因为名称重载），并通过二次查找确保返回的指针始终指向有效的、已加载的符号实例。整个流程在常量时间内完成名称查找，总复杂度取决于重载数量。
 
 #### Side Effects
 
@@ -633,22 +697,22 @@ No observable side effects are evident from the extracted code.
 #### Reads From
 
 - `model.symbol_ids_by_qualified_name`
-- `lookup_symbol` 通过 `model` 和 `symbol_id` 读取符号信息
+- `lookup_symbol(model, symbol_id)` (indirectly reads model's symbol storage)
 
 #### Usage Patterns
 
-- 按限定名称查找所有符号实例
-- 供符号搜索或重命名等工具使用
+- retrieve all symbols with a given qualified name
+- find symbols for a qualified name in the project model
 
 ### `clore::extract::join_qualified_name_parts`
 
-Declaration: `extract/model.cppm:59`
+Declaration: `src/extract/model.cppm:76`
 
-Definition: `extract/model.cppm:328`
+Definition: `src/extract/model.cppm:345`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-函数 `clore::extract::join_qualified_name_parts` 负责将限定名称的各部分重新拼接为完整的限定名称字符串。它接受一个 `parts` 向量（包含名称的各个片段）和一个 `count` 参数，仅拼接前 `count` 个片段，但通过 `safe_count` 保证不超过 `parts` 的实际大小，从而避免越界。循环从索引 0 开始，对非首元素在拼接前插入 `"::"` 分隔符，最终将结果累积到 `joined` 字符串中并返回。整个实现仅依赖标准库的 `std::vector` 和 `std::string`，没有外部依赖，算法简单直接，专注于安全地截取并连接路径片段。
+函数 `clore::extract::join_qualified_name_parts` 实现了将限定名称各部分重新拼接为完整限定名的算法。它接收一个 `std::vector<std::string>` 类型的 `parts` 和一个 `std::size_t` 类型的 `count`，通过 `safe_count`（取 `count` 与 `parts` 大小中的最小值）确定实际参与拼接的元素个数。然后从索引 0 开始遍历至 `safe_count - 1`，在非首项前插入 `"::"` 分隔符，依次累加各部分组成最终字符串 `joined`。该函数依赖 `std::string` 的拼接操作，并内联处理边界安全，无需额外依赖其他内部函数或数据结构。
 
 #### Side Effects
 
@@ -656,24 +720,24 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `parts` 参数
-- `count` 参数
+- `parts` (the vector of strings)
+- `count` (the number of parts to join)
+- `parts.size()`
 
 #### Usage Patterns
 
-- 构建命名空间前缀或完全限定类型名称
+- Used to reconstruct qualified names from tokenized parts
+- Often called when building fully qualified symbol names or paths from a sequence of identifiers
 
 ### `clore::extract::lookup_symbol`
 
-Declaration: `extract/model.cppm:177`
+Declaration: `src/extract/model.cppm:194`
 
-Definition: `extract/model.cppm:349`
+Definition: `src/extract/model.cppm:366`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-函数 `clore::extract::lookup_symbol` 的实现基于直接查找 `ProjectModel` 中的 `symbols` 容器。它接受一个 `SymbolID` 参数，在 `model.symbols` 上调用 `find` 方法，若找到则返回指向对应 `SymbolInfo` 的指针，否则返回 `nullptr`。底层容器的查找性能取决于其类型（通常为平衡树或哈希表），因此该函数提供对数或期望常数时间的符号解析能力。
-
-该函数是整个提取结果中按标识符快速定位符号的核心入口，其依赖仅包括 `ProjectModel` 的 `symbols` 成员和 `SymbolID` 的相等比较操作。由于实现极为精简，它不涉及额外的状态检查或复合逻辑，仅执行一次容器查找并返回结果。
+函数 `clore::extract::lookup_symbol` 通过直接查询 `ProjectModel` 中的 `symbols` 容器完成查找。该容器是一个以 `SymbolID` 为键、`SymbolInfo` 为值的无序关联容器（依赖于 `SymbolID` 的哈希特性和相等比较）。函数内部调用容器的 `find` 方法，若迭代器未指向容器末尾，则返回对应元素的指针；否则返回 `nullptr`。整个流程不涉及额外的搜索或遍历，依赖关系仅限于 `ProjectModel` 的数据布局和 `SymbolID` 的哈希/等价操作。
 
 #### Side Effects
 
@@ -681,24 +745,24 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- model`.symbols`
-- id
+- `model.symbols`
+- `id`
 
 #### Usage Patterns
 
-- check if a symbol exists in the model
-- retrieve symbol info for a given ID
-- used in symbol resolution and caching logic
+- resolving symbol by identifier
+- fetching symbol details after obtaining ID
+- null-safe symbol access
 
 ### `clore::extract::namespace_prefix_from_qualified_name`
 
-Declaration: `extract/model.cppm:62`
+Declaration: `src/extract/model.cppm:79`
 
-Definition: `extract/model.cppm:341`
+Definition: `src/extract/model.cppm:358`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该函数通过委托给 `clore::extract::split_top_level_qualified_name` 将输入的 `qualified_name` 拆分为段。若结果段数不超过 1，则认为无前缀，直接返回空字符串。否则，调用 `clore::extract::join_qualified_name_parts` 将所有除最后一个段之外的段重新连接，从而提取出命名空间前缀部分。内部逻辑仅依赖这两个辅助函数，无直接复杂循环或容器操作，整体控制流清晰且线性。
+函数 `clore::extract::namespace_prefix_from_qualified_name` 先委托给内部函数 `split_top_level_qualified_name`，将输入的 `qualified_name` 拆分为各个作用域部分。如果拆分后 `parts` 的大小不超过 1（即限定名本身不含嵌套作用域），则直接返回空字符串。否则，它调用 `join_qualified_name_parts`，传入 `parts` 和 `parts.size() - 1` 作为连接的元素个数，从而拼接出除最后一个名字（即最内层标识符）之外的所有作用域前缀。整个过程完全依赖于同一内部实现单元（`(anonymous namespace)` 或同一模块内部）中的两个辅助函数，不涉及外部查询或状态变更。
 
 #### Side Effects
 
@@ -706,29 +770,28 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `qualified_name`
+- `qualified_name` parameter
 
 #### Usage Patterns
 
-- Extract namespace prefix before a symbol name
-- Check if a qualified name has a namespace prefix
-- Prepare namespace scope for name resolution
+- Extract namespace from a qualified name for semantic analysis
+- Prepare namespace context for symbol lookup or display
 
 ### `clore::extract::resolve_source_snippet`
 
-Declaration: `extract/model.cppm:200`
+Declaration: `src/extract/model.cppm:217`
 
-Definition: `extract/model.cppm:455`
+Definition: `src/extract/model.cppm:472`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该函数首先通过 `source_snippet_mutex_for` 获取与符号关联的互斥锁，确保线程安全。然后执行一系列快速短路检查：若 `sym.source_snippet` 已非空则直接返回 `true`；若 `sym.source_snippet_length` 为零或 `sym.declaration_location.file` 为空则返回 `false`。接着利用 `std::filesystem::file_size` 获取文件大小，若 `sym.source_snippet_file_size` 非零且与当前文件大小不一致、或读取偏移量与长度超出文件范围，均返回失败。成功通过边界验证后，以二进制模式打开文件，使用 `seekg` 定位到偏移量处并读取指定长度的字节。若读取失败或计算出的字节哈希与 `sym.source_snippet_hash` 不匹配（当该哈希非零时），仍返回 `false`。最后，将读出的原始字节中的 `\r\n` 序列标准化为 `\n`，并将结果存入 `sym.source_snippet` 并返回 `true`。该过程依赖 `std::filesystem`、`std::ifstream` 以及匿名命名空间中的辅助函数 `hash_source_snippet_bytes` 和 `source_snippet_mutex_for`。
+`clore::extract::resolve_source_snippet` 通过互斥锁（由 `source_snippet_mutex_for` 分配）保护，先检查 `sym.source_snippet` 是否已填充，若已填充则直接返回 `true`。若 `sym.source_snippet_length` 为零或 `sym.declaration_location.file` 为空则早期返回 `false`。随后获取文件大小，依次验证 `sym.source_snippet_file_size` 是否与当前文件大小一致（若已记录）、偏移量与长度是否越界，并尝试以二进制模式打开文件。如果文件无法打开、定位失败或读取字节数不够，则返回 `false`。若 `sym.source_snippet_hash` 非零，则用 `hash_source_snippet_bytes` 校验读取内容的哈希，不匹配则返回 `false`。通过所有检查后，将读取内容中的 `\r\n` 换行符标准化为 `\n`，存入 `sym.source_snippet`，最终返回 `true`。
 
 #### Side Effects
 
-- Modifies the `source_snippet` member of the passed `SymbolInfo`
-- Performs file I/O to read the source file
-- Allocates and manages memory for the snippet string
+- Modifies `sym.source_snippet`
+- Acquires a mutex (`source_snippet_mutex_for(sym)`)
+- Reads from the filesystem (file size and file content)
 
 #### Reads From
 
@@ -738,7 +801,8 @@ Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.m
 - `sym.source_snippet_offset`
 - `sym.source_snippet_file_size`
 - `sym.source_snippet_hash`
-- file system via `fs::file_size` and `ifstream` read
+- File system: file size and content of `sym.declaration_location.file`
+- `hash_source_snippet_bytes` (function call)
 
 #### Writes To
 
@@ -746,48 +810,46 @@ Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.m
 
 #### Usage Patterns
 
-- Populating source snippet for `SymbolInfo`
-- Used before accessing `sym.source_snippet`
-- Conditional resolution of snippet from disk
+- Resolve source snippet for a symbol after extraction
+- Lazy loading of source text for a symbol
+- Called during symbol resolution or lookup
 
 ### `clore::extract::split_top_level_qualified_name`
 
-Declaration: `extract/model.cppm:57`
+Declaration: `src/extract/model.cppm:74`
 
-Definition: `extract/model.cppm:265`
+Definition: `src/extract/model.cppm:282`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该函数首先通过调用 `split_qualified_name_cache()` 获取一个线程安全的静态缓存对象，并尝试以共享锁查找 `qualified_name` 的已存储结果；若缓存命中则直接返回。缓存未命中时，函数手动解析字符串：它遍历字符，维护一个 `template_depth` 计数器，在遇到 `<` 时递增，遇到 `>` 且深度大于零时递减；只有当 `template_depth` 为零且遇到连续两个冒号 `::` 时，才会将当前累积的片段压入结果向量并清空缓冲区。解析完成后，若结果的首片段为空字符串（例如输入以 `::` 开头时的前导空片段）则将其移除。最后，在获得结果向量后，函数以唯一锁更新缓存：若缓存条目数达到 `kSplitQualifiedNameCacheMaxEntries` 则清空整个缓存，然后插入或覆盖当前结果并返回。该实现依赖内部缓存来避免重复解析，同时利用 `template_depth` 正确跳过模板参数内部的嵌套作用域分隔符，确保仅在顶层作用域边界分割名称。
+实现核心是一个手工状态解析器：逐个字符扫描输入限定名，通过一个计数器 `template_depth` 跟踪当前是否处于模板参数层级（遇到 `<` 递增、遇到 `>` 递减），仅在 `template_depth == 0` 时将连续出现的 `::` 视为顶级作用域分隔符，从而正确分割类似 `std::vector<std::pair<int, int>>::iterator` 这样的名字。解析完成后会清理掉可能因前导 `::` 产生的空字符串元素。每次调用都会先通过 `split_qualified_name_cache` 获取线程级缓存（由 `static SplitQualifiedNameCache` 维护），用 `shared_lock` 尝试查找；若未命中则执行解析，并在写入缓存前用 `unique_lock` 临界区限制并发修改，当缓存条目数达到 `kSplitQualifiedNameCacheMaxEntries` 时直接清空以限制内存增长。整个流程不依赖其他外部函数，只依赖 `split_qualified_name_cache` 提供的单例缓存结构。
 
 #### Side Effects
 
-- Modifies global cache `split_qualified_name_cache` by inserting new entries or clearing it when size exceeds `kSplitQualifiedNameCacheMaxEntries`.
+- Updates the global cache `split_qualified_name_cache`
 
 #### Reads From
 
-- `qualified_name` parameter
-- global `split_qualified_name_cache` (read via find)
+- `qualified_name` parameter (`std::string_view`)
+- global cache `split_qualified_name_cache`
 
 #### Writes To
 
-- global `split_qualified_name_cache` (`insert_or_assign`, clear)
+- global cache `split_qualified_name_cache`
 
 #### Usage Patterns
 
-- Parsing qualified names during symbol extraction
-- Splitting names for namespace or module resolution
-- Caching parsed components to improve performance
+- Used to decompose qualified names into their top-level components for further processing like symbol lookup or name resolution.
 
 ### `clore::extract::symbol_kind_name`
 
-Declaration: `extract/model.cppm:26`
+Declaration: `src/extract/model.cppm:43`
 
-Definition: `extract/model.cppm:244`
+Definition: `src/extract/model.cppm:261`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-函数 `clore::extract::symbol_kind_name` 的实现基于一个直接覆盖 `SymbolKind` 所有枚举成员的 switch 语句，将每个枚举值映射到一个对应的 `std::string_view` 字面量。控制流完全线性：根据传入的 `kind` 决定返回值，每个 case 都显式处理，末尾的 default 分支返回 `"unknown"` 作为安全回退。该函数没有依赖任何外部数据结构或模型，其算法本质是一个全量的编译期映射表，保证了在任意有效输入下的常量时间查找。
+函数 `clore::extract::symbol_kind_name` 的实现是一个直接的 switch 语句，根据传入的 `SymbolKind` 枚举值返回对应的 `std::string_view` 字符串。它对每个已知的枚举成员（如 `SymbolKind::Namespace`、`SymbolKind::Class`、`SymbolKind::Struct`、`SymbolKind::Union`、`SymbolKind::Enum`、`SymbolKind::EnumMember`、`SymbolKind::Function`、`SymbolKind::Method`、`SymbolKind::Variable`、`SymbolKind::Field`、`SymbolKind::TypeAlias`、`SymbolKind::Macro`、`SymbolKind::Template` 和 `SymbolKind::Concept`）硬编码了一个明确的字符串字面量。对于任何未匹配的值（包括 `SymbolKind::Unknown` 或可能的非法值），函数会返回 `"unknown"` 作为默认结果。该函数不依赖其他代码或外部状态，所有字符串字面量在编译时确定，因此它的执行时间和控制流完全可预测。
 
 #### Side Effects
 
@@ -795,18 +857,17 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the `kind` parameter (`SymbolKind`)
+- kind
 
 #### Usage Patterns
 
-- used to obtain a string representation of a symbol kind for display or logging
-- used when serializing symbol information to human-readable formats
+- Converting `SymbolKind` values to human-readable strings for display or serialization
 
 ## Internal Structure
 
-`extract:model` 是提取子系统的核心数据模型模块，定义了整个分析流程中所有结构化信息的类型体系。它导入标准库和 `support` 工具模块，声明了 `ProjectModel`、`SymbolInfo`、`ModuleUnit`、`FileInfo` 以及相关的 `SymbolKind` 枚举、位置/范围类型和符号标识符等公共接口，同时也通过匿名命名空间封装内部实现细节。模块内部按职责划分为三层：最外层是外部可访问的数据结构与查询函数（如 `lookup_symbol`、`find_module_by_name`）；中间层是 `resolve_source_snippet` 等按需加载逻辑；内层则是线程安全的缓存机制（`SplitQualifiedNameCache`、条带状互斥体）与哈希辅助函数，用于优化限定名拆分和源片段解析的性能与内存占用。
+`extract:model` 模块定义了抽取流程的核心数据模型，将符号、文件、模块单元和项目组织为清晰的数据结构。它通过 `SymbolKind` 枚举、`SymbolID`（基于哈希的紧凑标识符）以及 `SymbolInfo`、`FileInfo`、`NamespaceInfo`、`ModuleUnit` 和 `ProjectModel` 等类型封装抽取结果。内部采用匿名命名空间隐藏实现细节，例如 `SplitQualifiedNameCache` 用于缓存限定名分割结果以减少重复字符串操作，以及源片段延迟加载机制（通过 `source_snippet_offset` / `source_snippet_length` 配合 `resolve_source_snippet` 函数按需从磁盘读取文本）。线程安全性通过细粒度互斥量（如 `source_snippet_mutex_for` 基于哈希条带分配）来保证，支持并发查找而不阻塞全局。
 
-在实现结构上，该模块采用延迟填充（lazy population）策略：符号的源片段（source snippet）不会在首次提取时全部读入内存，而是仅记录磁盘偏移与长度，仅在需要时才通过 `resolve_source_snippet` 从文件读取并缓存。为确保并发安全，源片段解析使用基于符号哈希模素数的条带状互斥锁进行细粒度保护。多数公共函数接受 `const ProjectModel &` 引用，以只读方式访问模型数据；内部缓存（如拆分后限定名的结果）被声明为函数静态变量，减少全局状态泄露。整体设计强调模型与索引分离，并依赖 `support` 模块提供的路径规范化、文本处理等底层能力。
+该模块仅依赖 `support` 模块（提供路径规范化、日志等通用工具），不直接引入外部解析器。其 API 主要包括查找函数（`find_symbol`、`lookup_symbol`、`find_module_by_name` 等）和辅助函数（`split_top_level_qualified_name`、`join_qualified_name_parts`、`symbol_kind_name`），调用方无需了解内部缓存与锁机制即可使用。这种分层设计将模型定义与持久化、并发控制隔离，使模型稳定且易于测试。
 
 ## Related Pages
 

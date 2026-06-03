@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:symbol'
-description: '模块 generate:symbol 负责将提取的符号信息渲染为文档页面，是文档生成管线中面向单个符号（如函数、类型、变量、命名空间等）的核心输出阶段。它定义了符号文档页面的布局结构（PageDocLayout）和符号文档计划（SymbolDocPlan），并公开了构建页面布局（build_page_doc_layout）、遍历文档组（for_each_symbol_doc_group）、追加符号文档页面（append_symbol_doc_pages）、添加类型成员节（append_type_member_sections）以及规范化前页标题（normalize_frontmatter_title）等入口。模块内部协调了符号摘要、代码片段生成、关系链接、子页面决策以及前页元数据构造等逻辑，最终将语义内容转化为 Markdown 输出。'
+description: '该模块负责将代码分析结果中的符号（symbol）渲染为可直接发布的文档页面，是文档生成管线中符号层面的核心渲染层。它定义了符号文档的页面布局（PageDocLayout）和文档计划（SymbolDocPlan）两类关键数据结构，并通过一系列公开函数完成从符号模型到 Markdown 页面的全流程转化：包括根据符号构建页面计划与索引路径（build_page_doc_layout、find_doc_index_path），将符号内容追加为文档页面（append_symbol_doc_pages），为页面添加类型成员章节（append_type_member_sections）以及符号间导航链接（add_symbol_doc_links）。同时，它提供元数据规范化（normalize_frontmatter_title）和子页面支持检测（page_supports_symbol_subpages）等辅助接口，并通过 for_each_symbol_doc_group 支持外部对符号文档分组的高阶遍历。该模块依赖于 generate:model 提供的符号分析模型，并利用 generate:common、generate:markdown、generate:diagram 等子模块完成实际的内容编排与格式化输出。'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-模块 `generate:symbol` 负责将提取的符号信息渲染为文档页面，是文档生成管线中面向单个符号（如函数、类型、变量、命名空间等）的核心输出阶段。它定义了符号文档页面的布局结构（`PageDocLayout`）和符号文档计划（`SymbolDocPlan`），并公开了构建页面布局（`build_page_doc_layout`）、遍历文档组（`for_each_symbol_doc_group`）、追加符号文档页面（`append_symbol_doc_pages`）、添加类型成员节（`append_type_member_sections`）以及规范化前页标题（`normalize_frontmatter_title`）等入口。模块内部协调了符号摘要、代码片段生成、关系链接、子页面决策以及前页元数据构造等逻辑，最终将语义内容转化为 Markdown 输出。
+该模块负责将代码分析结果中的符号（symbol）渲染为可直接发布的文档页面，是文档生成管线中符号层面的核心渲染层。它定义了符号文档的页面布局（`PageDocLayout`）和文档计划（`SymbolDocPlan`）两类关键数据结构，并通过一系列公开函数完成从符号模型到 Markdown 页面的全流程转化：包括根据符号构建页面计划与索引路径（`build_page_doc_layout`、`find_doc_index_path`），将符号内容追加为文档页面（`append_symbol_doc_pages`），为页面添加类型成员章节（`append_type_member_sections`）以及符号间导航链接（`add_symbol_doc_links`）。同时，它提供元数据规范化（`normalize_frontmatter_title`）和子页面支持检测（`page_supports_symbol_subpages`）等辅助接口，并通过 `for_each_symbol_doc_group` 支持外部对符号文档分组的高阶遍历。该模块依赖于 `generate:model` 提供的符号分析模型，并利用 `generate:common`、`generate:markdown`、`generate:diagram` 等子模块完成实际的内容编排与格式化输出。
 
 ## Imports
 
@@ -19,7 +19,6 @@ template: doc
 - [`generate:diagram`](diagram.md)
 - [`generate:markdown`](markdown.md)
 - [`generate:model`](model.md)
-- `std`
 
 ## Imported By
 
@@ -30,30 +29,46 @@ template: doc
 
 ### `clore::generate::PageDocLayout`
 
-Declaration: `generate/render/symbol.cppm:19`
+Declaration: `src/generate/render/symbol.cppm:37`
 
-Definition: `generate/render/symbol.cppm:19`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-结构体 `clore::generate::PageDocLayout` 将文档生成计划按符号类别划分为三个独立的向量：`type_docs`、`variable_docs` 和 `function_docs`，每个向量均为 `std::vector<SymbolDocPlan>`。同时，`index_paths` 是一个从字符串到字符串的无序映射，用于记录从文档标识符到输出索引文件路径的对应关系。
-
-这种分离使得渲染阶段能够按符号类型分别遍历对应的文档计划，并借助 `index_paths` 快速查找已生成的索引路径。该结构体本身不包含额外的方法或不变性约束，仅作为数据聚合容器使用。
-
-### `clore::generate::SymbolDocPlan`
-
-Declaration: `generate/render/symbol.cppm:13`
-
-Definition: `generate/render/symbol.cppm:13`
+Definition: `src/generate/render/symbol.cppm:37`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::SymbolDocPlan` 是一个递归数据结构，用于在文档生成过程中表示某个符号及其子符号的计划信息。其核心字段 `symbol` 是一个指向 `extract::SymbolInfo` 的常指针，通常指向解析阶段提取的符号元数据；`index_path` 是一个字符串，记录了该符号在最终文档索引中的路径标识；`children` 是一个 `std::vector<SymbolDocPlan>`，用于存储该符号的直接子符号的计划，从而构成整个符号树的层级结构。该结构的设计围绕“计划”的递归展开：每个 `SymbolDocPlan` 实例对应一个符号节点，通过 `children` 体现文档大纲的嵌套关系，而 `index_path` 确保了每个节点在索引中的唯一可寻址性。它不直接存储文档内容，而是作为后续生成阶段的输入骨架，其内部各字段共同维护了符号树与索引路径之间的映射不变式。
+该结构体将同一文档页面上所有符号文档计划按类别分组存储，是生成阶段与渲染阶段之间的数据传递单元。`type_docs`、`variable_docs` 和 `function_docs` 分别存放 `SymbolDocPlan` 向量，用于区分不同种类的符号；`index_paths` 是一个从索引键到目标文件路径的哈希映射，用于快速查找或去重建索引页条目。所有字段都通过默认初始化构造，没有引入额外的构造逻辑或自定义成员函数。内部不变量要求每个向量内的计划对象在语义上属于同一个文档页面，且 `index_paths` 中的键应是唯一的，以确保索引生成的确定性。
 
 #### Invariants
 
-- `symbol` 应指向一个有效的 `extract::SymbolInfo` 对象。
-- `children` 中的每个元素自身也满足相同的不变式。
+- 每个向量可包含零个或多个 `SymbolDocPlan` 对象
+- `index_paths` 的键和值均为字符串类型
+
+#### Key Members
+
+- `type_docs`
+- `variable_docs`
+- `function_docs`
+- `index_paths`
+
+#### Usage Patterns
+
+- 在文档生成流水线中各模块填充这些字段
+- 其他代码读取这些字段以渲染最终页面布局
+
+### `clore::generate::SymbolDocPlan`
+
+Declaration: `src/generate/render/symbol.cppm:31`
+
+Definition: `src/generate/render/symbol.cppm:31`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+`SymbolDocPlan` 是一个递归数据结构，通过其 `children` 成员形成树形层次。每个节点存储一个指向 `extract::SymbolInfo` 的指针 `symbol`，用于携带提取阶段获得的符号元数据，以及一个 `index_path` 字符串，该字符串标识该符号在文档输出中的索引路径。`children` 向量允许嵌套子计划，从而对应命名空间、类或函数内的嵌套符号结构。在实现中，`symbol` 指针由外部对象管理生命周期，且通常保证非空（除非节点作为纯容器占位存在）；`index_path` 在遍历树时累积构造，确保每个节点具有唯一的文档内定位标识。
+
+#### Invariants
+
+- `symbol` 可能为 `nullptr`
+- `children` 可能为空向量
+- 每个 `children` 元素自身是一个有效的 `SymbolDocPlan`
 
 #### Key Members
 
@@ -63,104 +78,127 @@ Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index
 
 #### Usage Patterns
 
-- 用于构建符号文档生成的树形结构。
-- 由渲染器遍历并生成最终的文档输出。
-- 作为递归数据结构，支持对符号及其子符号的分层处理。
-
-## Variables
-
-### `clore::generate::add_symbol_doc_links`
-
-Declaration: `generate/render/symbol.cppm:43`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The variable participates in the rendering logic of symbol pages, specifically to add cross-reference links within the generated documentation. It is read by `clore::generate::(anonymous namespace)::render_symbol_page` but no evidence indicates it is assigned or updated after initialization.
-
-#### Mutation
-
-No mutation is evident from the extracted code.
-
-#### Usage Patterns
-
-- consumed in `clore::generate::(anonymous namespace)::render_symbol_page`
-
-### `clore::generate::append_symbol_doc_pages`
-
-Declaration: `generate/render/symbol.cppm:60`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The evidence does not specify how `clore::generate::append_symbol_doc_pages` is read or used. It appears in the same local context as many other rendering-related variables, suggesting it participates in constructing documentation pages for symbols. Without further code, its exact role cannot be determined.
-
-#### Mutation
-
-No mutation is evident from the extracted code.
-
-### `clore::generate::append_type_member_sections`
-
-Declaration: `generate/render/symbol.cppm:49`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-The variable is declared as `auto append_type_member_sections`, implying it is a callable (likely a lambda or function pointer) that participates in the rendering of symbol documentation. No evidence indicates how it is initialized, read, or used in the surrounding logic.
-
-#### Mutation
-
-No mutation is evident from the extracted code.
+- 用于文档生成流水线中表示符号及其子符号的计划
+- 通过递归遍历 `children` 构建嵌套的文档结构
+- 由上层模块填充 `symbol` 和 `index_path` 后传递给渲染阶段
 
 ## Functions
 
-### `clore::generate::build_page_doc_layout`
+### `clore::generate::add_symbol_doc_links`
 
-Declaration: `generate/render/symbol.cppm:37`
+Declaration: `src/generate/render/symbol.cppm:61`
 
-Definition: `generate/render/symbol.cppm:897`
+Definition: `src/generate/render/symbol.cppm:828`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::build_page_doc_layout` 通过三步构造 `PageDocLayout`。首先，检查 `page_supports_symbol_subpages` 返回是否否，若否或 `page_directory_of` 返回空，则直接返回空布局。否则，根据 `plan.page_type` 是 `PageType::Namespace` 还是其他，分别调用 `collect_namespace_symbols` 或 `collect_implementation_symbols` 获取当前页面的符号列表。接着遍历该列表，按 `sym->kind` 是否属于类型、变量或函数分别投入 `type_symbols`、`variable_symbols`、`function_symbols` 三个临时向量。
-
-第二步，对三个分类向量分别调用 `build_symbol_doc_plans`，将结果赋值给 `layout` 的 `type_docs`、`variable_docs`、`function_docs` 字段。最后，通过 `for_each_symbol_doc_group` 遍历 `layout` 中所有 `SymbolDocPlan` 分组，为每个分组内的计划项调用 `register_symbol_doc_plan` 完成注册。整个流程依赖 `PagePlan` 的 `relative_path` 与 `owner_keys`，以及 `extract::ProjectModel` 提供的符号信息，核心决策由 `is_type_kind`、`is_variable_kind`、`is_function_kind` 三个谓词函数驱动。
+函数首先通过 `find_doc_index_path` 在给定的 `layout` 中查找与符号 `sym` 的 `qualified_name` 对应的索引路径。如果找到且该路径不等于 `current_page_path`，则调用 `make_link_target` 创建一个指向该索引的链接目标，其链接文本由 `doc_label(view)` 生成。最后，调用 `push_link_paragraph` 将前缀文本（`doc_label(view)` 后加冒号和空格）以及包含的链接目标追加到 `nodes` 向量中。内部控制流仅包含一个条件分支，依赖关系包括 `find_doc_index_path`、`make_link_target`、`doc_label` 和 `push_link_paragraph`。
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- appends a paragraph to the `nodes` vector containing a link to the documentation index page for the given symbol, if such a page exists and is different from the current page
 
 #### Reads From
 
-- `plan` parameter
-- `model` parameter
-- `page_supports_symbol_subpages(plan)`
-- `plan.relative_path`
-- `plan.page_type`
-- `plan.owner_keys`
-- `collect_namespace_symbols` (if namespace page)
-- `collect_implementation_symbols` (otherwise)
-- `is_type_kind`, `is_variable_kind`, `is_function_kind` predicates
-- `build_symbol_doc_plans` helper
-- `for_each_symbol_doc_group` function
+- reads `current_page_path` parameter
+- reads `layout` parameter via `find_doc_index_path`
+- reads `sym.qualified_name` parameter
+- reads `view` parameter via `doc_label`
 
 #### Writes To
 
-- returned `PageDocLayout` object
-- local `layout` variable (which becomes the return value)
-- internal structures of `layout` via `register_symbol_doc_plan`
+- appends a paragraph to the `nodes` vector reference
 
 #### Usage Patterns
 
-- Used during documentation page generation to organize subpages for symbols in a namespace or implementation context.
-- Called when building the layout for a page that may contain symbol-level documentation subpages.
+- called during documentation generation to add cross-reference links for symbols
+- inserts a link to the symbol's documentation index page from other pages
 
-### `clore::generate::find_doc_index_path`
+### `clore::generate::append_symbol_doc_pages`
 
-Declaration: `generate/render/symbol.cppm:40`
+Declaration: `src/generate/render/symbol.cppm:78`
 
-Definition: `generate/render/symbol.cppm:804`
+Definition: `src/generate/render/symbol.cppm:975`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数从 `PageDocLayout` 的 `index_paths` 映射中，根据传入的 `qualified_name` 快速定位对应的文档页面路径。它先将 `std::string_view` 类型的名称转换为 `std::string`，然后以该字符串为键在 `layout.index_paths` 中执行查找；若找到则返回存储路径字符串的指针，否则返回 `nullptr`。整个查找过程完全依赖 `std::map` 的 `find` 方法，不涉及其他控制流或外部函数调用，是一种高效的索引检索实现。
+该函数递归地为给定的符号文档计划集合生成分页文档。它遍历输入参数 `doc_plans` 中的每一个 `SymbolDocPlan` 对象：调用 `render_symbol_page` 渲染当前计划对应的页面，并将结果追加到输出容器 `pages` 中；随后对当前计划的子计划集合 `doc_plan.children` 进行递归调用 `append_symbol_doc_pages`，以生成嵌套的子页面。若任一渲染或递归步骤返回错误，函数立即提前返回对应的 `std::expected<void, RenderError>` 错误值；全部成功则返回空值。控制流表现为典型的前序深度优先遍历，依赖 `render_symbol_page` 完成单页生成，并依赖递归自身处理文档计划树中的嵌套结构。
+
+#### Side Effects
+
+- Appends `GeneratedPage` objects to the `pages` vector
+- Returns `std::unexpected<RenderError>` on failure
+
+#### Reads From
+
+- `doc_plans` (vector of `SymbolDocPlan`)
+- `owner_plan` (`PagePlan`)
+- `config` (`config::TaskConfig`)
+- `model` (`extract::ProjectModel`)
+- `outputs` (map of strings)
+- `analyses` (`SymbolAnalysisStore`)
+- `links` (`LinkResolver`)
+- `layout` (`PageDocLayout`)
+
+#### Writes To
+
+- `pages` vector (via `push_back`)
+- Error state via `std::unexpected`
+
+#### Usage Patterns
+
+- Recursive traversal of symbol document plans
+- Called during page generation to build symbol documentation pages
+- Used in `generate_pages` or similar page-building functions
+
+### `clore::generate::append_type_member_sections`
+
+Declaration: `src/generate/render/symbol.cppm:67`
+
+Definition: `src/generate/render/symbol.cppm:842`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+该函数首先检查传入的符号 `sym` 是否为类型；若 `is_type_kind(sym.kind)` 为 false 则立即返回。否则，它会连续三次调用 `append_member_section`，每次传入不同的标题字符串和通过 `collect_member_symbols` 收集到的子符号集合。每次收集时使用一个谓词 lambda 来筛选成员：分别筛选出 `is_type_kind`（成员类型）、`is_variable_kind`（成员变量）和 `is_function_kind`（成员函数）的子符号。这三次调用共享相同的 `nodes`、`config`、`model`、`analyses`、`plan`、`links`、`layout`、`current_page_path` 和 `level` 参数，从而在文档节点树中依次追加对应的类型成员、变量成员和函数成员段落。
+
+#### Side Effects
+
+- Appends `MarkdownNode` entries to the `nodes` vector
+
+#### Reads From
+
+- `nodes` (`std::vector<MarkdownNode>`&)
+- `sym` (const `extract::SymbolInfo`&)
+- `config` (const `config::TaskConfig`&)
+- `model` (const `extract::ProjectModel`&)
+- `analyses` (const `SymbolAnalysisStore`&)
+- `plan` (const `PagePlan`&)
+- `links` (const `LinkResolver`&)
+- `layout` (const `PageDocLayout`&)
+- `current_page_path` (`std::string_view`)
+- `level` (`std::uint8_t`)
+- `collect_member_symbols` (reads model and sym)
+- `is_type_kind`, `is_variable_kind`, `is_function_kind` (reads sym`.kind`)
+
+#### Writes To
+
+- `nodes` vector (via `append_member_section`)
+
+#### Usage Patterns
+
+- Called during page generation for a type symbol to add subsections listing its members
+- Used by higher‑level generation functions such as `append_symbol_doc_pages`
+- Invoked once per type symbol in documentation rendering
+
+### `clore::generate::build_page_doc_layout`
+
+Declaration: `src/generate/render/symbol.cppm:55`
+
+Definition: `src/generate/render/symbol.cppm:915`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+该函数按以下步骤构建 `PageDocLayout`：首先通过 `page_supports_symbol_subpages` 检查页面是否支持符号子页面，若不支持则返回空布局。接下来调用 `page_directory_of` 获取基础目录，若目录为空仍返回空布局。然后根据 `plan.page_type` 分别调用 `collect_namespace_symbols` 或 `collect_implementation_symbols` 收集该页面所有符号。接着遍历这些符号，依据 `is_type_kind`、`is_variable_kind`、`is_function_kind` 将其分类到 `type_symbols`、`variable_symbols`、`function_symbols` 三个向量中。最后为每类符号调用 `build_symbol_doc_plans` 生成对应的文档计划，并填充 `layout.type_docs`、`layout.variable_docs`、`layout.function_docs`；再通过 `for_each_symbol_doc_group` 迭代所有文档组，对每个计划调用 `register_symbol_doc_plan` 进行注册，最终返回完整布局。该函数依赖大量辅助函数和数据结构，如 `PagePlan`、`SymbolInfo`、`SymbolDocPlan` 以及收集、分类和注册操作。
 
 #### Side Effects
 
@@ -168,26 +206,49 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `layout.index_paths` (a map from `std::string` to `std::string`)
-- `qualified_name` (parameter of type `std::string_view`)
+- const `PagePlan` & plan (含 `relative_path`, `page_type`, `owner_keys`)
+- const `extract::ProjectModel` & model
 
 #### Usage Patterns
 
-- Locating the file path for a symbol's documentation index.
-- Checking whether a qualified name has an associated documentation page.
-- Retrieving an existing index path before generating or linking to a documentation page.
+- 在页面生成流程中用于构建符号文档布局
+- 根据页面类型和模型收集子符号并生成文档方案
 
-### `clore::generate::for_each_symbol_doc_group`
+### `clore::generate::find_doc_index_path`
 
-Declaration: `generate/render/symbol.cppm:27`
+Declaration: `src/generate/render/symbol.cppm:58`
 
-Definition: `generate/render/symbol.cppm:27`
+Definition: `src/generate/render/symbol.cppm:822`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数通过顺序访问 `PageDocLayout` 的三个预定义成员字段（`type_docs`、`variable_docs`、`function_docs`）来分发符号文档组。其内部控制流为线性序列：对每一个字段，直接以该字段为参数调用传入的 `visitor` 可调用对象，不涉及循环、分支或递归。这种设计将不同的符号类别（类型、变量、函数）的文档集合统一为可迭代的视图，使得调用方无需关心文档组的具体存储结构。
+函数 `clore::generate::find_doc_index_path` 实现了在给定的 `PageDocLayout` 对象的 `index_paths` 映射中查找符号文档索引路径的逻辑。它接受一个 `std::string_view` 表示的完全限定名称，构造一个临时的 `std::string` 键，并在 `layout.index_paths`（通常是一个 `std::unordered_map`）中执行哈希查找。若找到匹配项，则返回指向对应值（`std::string`）的指针；否则返回 `nullptr`。
 
-此实现依赖于 `PageDocLayout` 结构体的布局，其中 `type_docs`、`variable_docs` 和 `function_docs` 分别持有对应类别的文档组数据（通常为容器类型）。函数本身不执行任何数据转换或筛选，仅作为轻量级适配器，将这三个字段暴露给外部遍历逻辑。在调用链中，它通常配合 `build_page_doc_layout` 或 `register_symbol_doc_plan` 等上层函数使用，以统一触发页面生成流程中针对不同符号组的页面渲染或 `visitor` 回调。
+此函数是整个文档生成流程中符号到索引路径解析的关键环节，底层依赖 `PageDocLayout` 结构及其 `index_paths` 字段。算法复杂度为期望常数时间，主要由哈希映射的查找操作决定。函数不修改 `layout` 状态，仅执行只读查询。
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- layout`.index_paths`
+- `qualified_name`
+
+#### Usage Patterns
+
+- lookup doc index path for a qualified name
+- used during page rendering to map symbols to their index paths
+
+### `clore::generate::for_each_symbol_doc_group`
+
+Declaration: `src/generate/render/symbol.cppm:45`
+
+Definition: `src/generate/render/symbol.cppm:45`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+函数 `clore::generate::for_each_symbol_doc_group` 实现了一个简单的遍历机制，用于将传入的 `Visitor` 对象依次应用于 `PageDocLayout` 中按分类存储的符号文档组。其内部控制流由三个连续的 `visitor` 调用组成：首先处理 `layout.type_docs`，然后处理 `layout.variable_docs`，最后处理 `layout.function_docs`。该实现不包含分支或循环，完全依赖调用方提供的 `visitor` 来执行实际的文档生成或收集操作。依赖方面，函数仅依赖于 `PageDocLayout` 结构体的这些字段的存储布局，无其他外部函数或状态。
 
 #### Side Effects
 
@@ -198,22 +259,25 @@ No observable side effects are evident from the extracted code.
 - layout`.type_docs`
 - layout`.variable_docs`
 - layout`.function_docs`
-- visitor parameter
+- visitor callable
 
 #### Usage Patterns
 
-- Apply a callback to each symbol documentation group in a layout
-- Process type, variable, and function documentation groups sequentially
+- Iterate over symbol doc groups in a page layout
+- Apply a visitor to each doc group
+- Process type, variable, and function documentation groups
 
 ### `clore::generate::normalize_frontmatter_title`
 
-Declaration: `generate/render/symbol.cppm:33`
+Declaration: `src/generate/render/symbol.cppm:51`
 
-Definition: `generate/render/symbol.cppm:885`
+Definition: `src/generate/render/symbol.cppm:903`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数首先调用 `strip_inline_markdown` 从传入的 `page_title` 中移除内联 Markdown 格式，得到纯文本的 `plain`。如果 `plain` 非空，则直接返回该值；否则回退到调用 `trim_ascii` 对原始 `page_title` 进行空白字符修剪后使用 `std::string` 构造返回。该实现依赖于 `strip_inline_markdown` 和 `trim_ascii` 两个工具函数，前者用于提取有效的纯文本部分，后者用于在 Markdown 剥离后无剩余内容时提供一个干净的原始标题。
+Implementation: [Implementation](functions/normalize-frontmatter-title.md)
+
+该函数先调用 `strip_inline_markdown` 从 `page_title` 中去除内联 Markdown 标记（例如 `**bold**`、`` `code` ``），得到纯文本结果 `plain`。若 `plain` 非空，则直接将其返回，这是为了优先使用去除了格式后仍有实际内容的标题。若 `plain` 为空（即原字符串完全由 Markdown 标记构成或者本身就是空白），则回退到 `trim_ascii` 处理原始 `page_title`，去除首尾 ASCII 空白后返回。整个控制流以一次条件判断和两种清理策略为基础，依赖的两个辅助函数 `strip_inline_markdown` 和 `trim_ascii` 均在相同匿名命名空间内定义，前者负责 Markdown 语法解析，后者仅处理空白修剪。
 
 #### Side Effects
 
@@ -221,26 +285,25 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `page_title` parameter of type `std::string_view`
+- parameter `page_title`
 
 #### Writes To
 
-- return value of type `std::string`
+- returned `std::string` value
 
 #### Usage Patterns
 
-- Used to sanitize page titles for frontmatter in page generation
-- Called to ensure a clean, non-empty title string from potentially markdown-formatted input
+- used by `build_symbol_frontmatter` to produce a plain title for frontmatter
 
 ### `clore::generate::page_supports_symbol_subpages`
 
-Declaration: `generate/render/symbol.cppm:35`
+Declaration: `src/generate/render/symbol.cppm:53`
 
-Definition: `generate/render/symbol.cppm:893`
+Definition: `src/generate/render/symbol.cppm:911`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数通过检查传入的 `plan` 所引用的 `PagePlan` 对象中的 `page_type` 成员是否等于 `PageType::Namespace` 或 `PageType::Module` 来直接返回布尔结果。实现仅包含一个短路逻辑或表达式，无分支循环或额外控制流。唯一的外部依赖是 `PagePlan` 类型的定义及其 `page_type` 枚举值。
+该函数根据传入的 `PagePlan` 对象中的 `page_type` 字段判断页面是否支持子符号页面：如果 `page_type` 等于 `PageType::Namespace` 或 `PageType::Module`，则返回 `true`。它没有复杂的控制流或外部依赖，仅执行一次常量级比较，用于在调用方（如 `build_symbol_doc_plans` 或 `render_symbol_page` 等函数）中决定是否递归生成子符号文档页面。
 
 #### Side Effects
 
@@ -248,19 +311,15 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `plan`
-- `plan.page_type`
+- plan`.page_type`
 
 #### Usage Patterns
 
-- Used to conditionally generate symbol subpages for namespace and module pages during page planning or rendering.
-- Called as a quick predicate to filter page types that support additional subpage structures.
+- Check if a page plan is for a namespace or module to enable symbol subpages
 
 ## Internal Structure
 
-模块 `generate:symbol` 是文档生成管线中专用于生成符号页面（包括函数、类型、变量等）的核心渲染模块。它位于 `generate/render/symbol.cppm`，依赖六个模块：`std`、`config`、`extract`（负责源码提取）、`generate:common`（共享工具）、`generate:diagram`（图表渲染）、`generate:markdown`（Markdown 输出）和 `generate:model`（数据模型）。这些依赖体现了模块在数据、工具、输出格式三层面的协作关系。
-
-模块内部结构清晰分层：公共接口提供 `build_page_doc_layout`、`append_symbol_doc_pages`、`for_each_symbol_doc_group` 等高层入口，向外暴露 `SymbolDocPlan` 和 `PageDocLayout` 数据结构；而大部分渲染逻辑（如 `render_symbol_page`、`sanitize_doc_slug`、`declaration_snippet`、`build_symbol_doc_plans`）位于匿名命名空间中，实现细节封装良好。这种设计将符号文档计划的构建、布局的建立、页面内容的分段渲染解耦，并通过 `PageDocLayout` 和 `SymbolDocPlan` 传递状态，确保各辅助函数仅依赖明确的输入输出，便于测试和独立演进。
+该模块是文档生成管线的核心环节，专门负责为单个符号（类型、函数、变量等）渲染完整的文档页面。它作为 `generate:model` 与 `generate:markdown` 之间的桥梁，将符号分析结果与页面布局结构转换为实际的 Markdown 输出。通过导入 `config`、`extract` 及 `generate:common` 等模块，它获取配置、符号元数据以及通用渲染工具，并利用 `generate:diagram` 生成结构图。内部实现了多层次的分解：使用 `SymbolDocPlan` 和 `PageDocLayout` 数据结构组织符号的索引路径、子页面计划与文档组；通过匿名命名空间中的辅助函数（如文档计划构建、子页面渲染、成员章节追加、关系链接生成等）实现渲染流水线。调用方通过公共接口（如 `append_symbol_doc_pages`、`append_type_member_sections`）触发渲染，同时支持符号子页面与前端元数据规范化。整个实现遵循“计划‑构建‑渲染”的分阶段模式，保持内部层次清晰且各步骤可独立测试。
 
 ## Related Pages
 

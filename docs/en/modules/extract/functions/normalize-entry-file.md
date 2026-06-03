@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::normalizeentryfile'
-description: 'The function clore::extract::normalize_entry_file resolves a compile entry’s file path to a stable, normalized string. It first converts entry.file into a std::filesystem::path. If the path is relative, it is prefixed with entry.directory to form an absolute path; an explicit fs::absolute call is then attempted (falling back to the prefixed path on error). The path is then run through lexically_normal() to eliminate redundant separators and dot segments. To materialize symlinks and produce a fully resolved absolute path, fs::weakly_canonical is applied; if it fails (e.g., the file does not exist), the lexically normalized path is used as the final fallback. The result is returned as a generic string via generic_string(). The algorithm relies solely on std::filesystem operations and the fields of CompileEntry (file and directory).'
+description: 'The function first constructs a std::filesystem::path from entry.file. If the path is relative, it is joined with entry.directory to form an absolute path. The function then attempts to resolve the path using fs::absolute, capturing any std::error_code; if the operation succeeds, the absolute path replaces the intermediate value. Next, fs::weakly_canonical is tried—on success the result is returned as a generic string, providing a minimal, existing-path-normalized form. If weakly_canonical fails (e.g., the path does not exist on the filesystem), the function falls back to path.lexically_normal() to remove . and .. components without checking existence, and returns that generic string. The implementation relies entirely on std::filesystem primitives and the CompileEntry fields file and directory; no other project-specific functions or types are called directly.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module extract:compiler](../compiler.md)
 
-Declaration: `extract/compiler.cppm:56`
+Declaration: `src/extract/compiler.cppm:72`
 
-Definition: `extract/compiler.cppm:91`
+Definition: `src/extract/compiler.cppm:107`
 
 Declaration: [`Namespace clore::extract`](../../../namespaces/clore/extract/index.md)
 
@@ -38,7 +38,7 @@ auto normalize_entry_file(const CompileEntry& entry) -> std::string {
 }
 ```
 
-The function `clore::extract::normalize_entry_file` resolves a compile entry’s file path to a stable, normalized string. It first converts `entry.file` into a `std::filesystem::path`. If the path is relative, it is prefixed with `entry.directory` to form an absolute path; an explicit `fs::absolute` call is then attempted (falling back to the prefixed path on error). The path is then run through `lexically_normal()` to eliminate redundant separators and dot segments. To materialize symlinks and produce a fully resolved absolute path, `fs::weakly_canonical` is applied; if it fails (e.g., the file does not exist), the lexically normalized path is used as the final fallback. The result is returned as a generic string via `generic_string()`. The algorithm relies solely on `std::filesystem` operations and the fields of `CompileEntry` (`file` and `directory`).
+The function first constructs a `std::filesystem::path` from `entry.file`. If the path is relative, it is joined with `entry.directory` to form an absolute path. The function then attempts to resolve the path using `fs::absolute`, capturing any `std::error_code`; if the operation succeeds, the absolute path replaces the intermediate value. Next, `fs::weakly_canonical` is tried—on success the result is returned as a generic string, providing a minimal, existing-path-normalized form. If `weakly_canonical` fails (e.g., the path does not exist on the filesystem), the function falls back to `path.lexically_normal()` to remove `.` and `..` components without checking existence, and returns that generic string. The implementation relies entirely on `std::filesystem` primitives and the `CompileEntry` fields `file` and `directory`; no other project-specific functions or types are called directly.
 
 ## Side Effects
 
@@ -51,8 +51,9 @@ No observable side effects are evident from the extracted code.
 
 ## Usage Patterns
 
-- Used by `build_compile_signature` to normalize the entry file path before hashing
-- Used by `ensure_cache_key_impl` to produce a consistent file path representation
+- normalize file path for compile entries
+- used in `build_compile_signature`
+- used in `ensure_cache_key_impl`
 
 ## Called By
 

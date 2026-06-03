@@ -1,12 +1,27 @@
 module;
 
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <variant>
+#include <vector>
+
 #include "kota/codec/toml/toml.h"
 
 #include <toml++/toml.hpp>
 
 export module config:load;
-
-import std;
 import :schema;
 import support;
 
@@ -126,10 +141,10 @@ auto load_config_from_string(std::string_view toml_content)
     }
 
     RawTaskConfig raw{};
-    auto result = toml_codec::from_toml(table, raw);
+    auto result = toml_codec::from_toml(normalized_toml, raw);
     if(!result.has_value()) {
         return std::unexpected(
-            ConfigError{.message = std::format("TOML parse error: {}", result.error().message())});
+            ConfigError{.message = std::format("TOML parse error: {}", result.error().message)});
     }
 
     return to_config(std::move(raw));

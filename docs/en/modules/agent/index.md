@@ -1,6 +1,6 @@
 ---
 title: 'Module agent'
-description: 'The agent module orchestrates an interactive exploration of a source codebase through a loop of tool calls to a large language model (LLM), culminating in the generation of guide documents. Its public interface provides two entry points: run_agent, a synchronous function that drives the agent loop and returns the number of guides produced or an AgentError, and run_agent_async, an asynchronous variant designed for non‑blocking execution on a given event loop. Internally, the module manages agent state (conversation messages, tool definitions, cache keys, and output directory paths) and delegates to supporting operations such as serializing completion responses, hashing messages, and listing existing guide filenames. It relies on the config, extract, generate, network, std, and support modules for configuration, project metadata, documentation generation, LLM communication, standard utilities, and caching primitives.'
+description: 'The agent module is responsible for orchestrating the agent-based documentation generation loop. It drives an interactive process that uses tool calls to explore the codebase and produce guide documents, typically written under a specified output root. The module exposes two public entry points: run_agent and run_agent_async. The synchronous run_agent executes the loop directly and returns a result count or an AgentError, while run_agent_async performs the same work on a provided event loop for non‑blocking operation. Internally, the module manages model interaction, tool call dispatching, response parsing, caching, and guide file output, drawing on the config, extract, generate, network, and support modules for configuration, data extraction, page generation, LLM communication, and utility functions.'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-The `agent` module orchestrates an interactive exploration of a source codebase through a loop of tool calls to a large language model (LLM), culminating in the generation of guide documents. Its public interface provides two entry points: `run_agent`, a synchronous function that drives the agent loop and returns the number of guides produced or an `AgentError`, and `run_agent_async`, an asynchronous variant designed for non‑blocking execution on a given event loop. Internally, the module manages agent state (conversation messages, tool definitions, cache keys, and output directory paths) and delegates to supporting operations such as serializing completion responses, hashing messages, and listing existing guide filenames. It relies on the `config`, `extract`, `generate`, `network`, `std`, and `support` modules for configuration, project metadata, documentation generation, LLM communication, standard utilities, and caching primitives.
+The `agent` module is responsible for orchestrating the agent-based documentation generation loop. It drives an interactive process that uses tool calls to explore the codebase and produce guide documents, typically written under a specified output root. The module exposes two public entry points: `run_agent` and `run_agent_async`. The synchronous `run_agent` executes the loop directly and returns a result count or an `AgentError`, while `run_agent_async` performs the same work on a provided event loop for non‑blocking operation. Internally, the module manages model interaction, tool call dispatching, response parsing, caching, and guide file output, drawing on the `config`, `extract`, `generate`, `network`, and `support` modules for configuration, data extraction, page generation, LLM communication, and utility functions.
 
 ## Imports
 
@@ -17,7 +17,6 @@ The `agent` module orchestrates an interactive exploration of a source codebase 
 - [`extract`](../extract/index.md)
 - [`generate`](../generate/index.md)
 - [`network`](../network/index.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Dependency Diagram
@@ -41,108 +40,98 @@ graph LR
 
 ### `clore::agent::AgentError`
 
-Declaration: `agent/agent.cppm:21`
+Declaration: `src/agent/agent.cppm:35`
 
-Definition: `agent/agent.cppm:21`
+Definition: `src/agent/agent.cppm:35`
 
 Declaration: [`Namespace clore::agent`](../../namespaces/clore/agent/index.md)
 
-The struct `clore::agent::AgentError` is implemented as a simple wrapper around a single `std::string` field named `message`. No invariants are imposed beyond the validity of the underlying string; the struct does not define custom constructors, destructors, or assignment `operator`s, relying on the implicitly generated special members to manage the string's lifetime and content. Its purpose within the implementation is to hold a human-readable description of an error condition, but no additional metadata or error codes are stored.
+The struct `clore::agent::AgentError` is a trivial error type that contains a single data member, `message`, of type `std::string`. This field holds a human-readable description of the error. Because the struct has no user‑defined constructors, destructor, or assignment `operator`s, all special member functions are implicitly generated by the compiler, which is sufficient for correct copy, move, and destruction behavior. No additional invariants are required beyond those inherent to `std::string`; the string’s value is the sole state of the error.
 
 #### Invariants
 
-- The `message` member always contains a valid `std::string` object
-- The `message` string may be empty
+- `message` is a valid `std::string` object
 
 #### Key Members
 
-- `std::string message` — the error description
+- `message`
 
 #### Usage Patterns
 
-- Created with a descriptive string when an error occurs in agent operations
-- Likely used as a member of a `std::expected` or thrown as an exception
+- Returned from functions to indicate an error condition
+- Stores a human-readable error description
 
 ## Functions
 
 ### `clore::agent::run_agent`
 
-Declaration: `agent/agent.cppm:27`
+Declaration: `src/agent/agent.cppm:41`
 
-Definition: `agent/agent.cppm:524`
+Definition: `src/agent/agent.cppm:538`
 
 Declaration: [`Namespace clore::agent`](../../namespaces/clore/agent/index.md)
 
-`clore::agent::run_agent` acts as a synchronous entry point that delegates to the asynchronous `run_agent_async` function. It first constructs a `kota::event_loop` and invokes `run_agent_async` with the provided `config`, `model`, `llm_model`, and `output_root` arguments, forwarding the loop instance. The returned `task` is scheduled onto the loop via `loop.schedule` and executed by calling `loop.run`. After the loop completes, `task.result()` is queried; if it holds an `AgentError`, that error is wrapped in `std::unexpected` and returned, otherwise the contained `std::size_t` count of created guides is returned directly.
+The function creates a local `kota::event_loop` named `loop` and constructs an asynchronous task by invoking `run_agent_async` with the provided `config`, `model`, `llm_model` (converted to `std::string`), `output_root` (moved into the call), and the `loop` reference. The task is scheduled on the event loop via `loop.schedule(task)` and the loop is run to completion with `loop.run()`. After the event loop finishes, the function retrieves the task’s result; if the result contains an error (checked via `result.has_error()`), it returns `std::unexpected` with the moved error. Otherwise, the contained `std::size_t` value (the number of guides created) is returned.
 
-The function depends on `kota::event_loop` for running the coroutine-based agent loop and on `run_agent_async` for the actual multi-turn interaction with the LLM. All configuration, model data, LLM model name, and output path are passed through without transformation (aside from converting `output_root` to an owned `std::string`). The sole purpose of this layer is to provide a blocking interface over the asynchronous machinery, handling result extraction and error conversion.
+This function acts as a synchronous wrapper around the asynchronous `run_agent_async` core, which performs the actual agent loop over multiple turns. The dependency on `kota::event_loop` provides the single-threaded coroutine execution context, while `run_agent_async` handles message exchanges with the LLM, tool call dispatching, cache lookups, and guide file generation.
 
 #### Side Effects
 
-- Creates and runs a `kota::event_loop` to drive asynchronous execution
-- Delegates to `run_agent_async` which performs codebase exploration and writes guide documents under `${output_root}/guides/`
-- Transfers ownership of `output_root` via `std::move`
+- writes guide documents to `${output_root}/guides/`
+- executes tool calls that may perform I/O or modify files
+- synchronizes asynchronous operations via the event loop
 
 #### Reads From
 
-- `config` parameter (`config::TaskConfig`)
-- `model` parameter (`extract::ProjectModel`)
-- `llm_model` parameter (`std::string_view`)
-- `output_root` parameter (`std::string`)
-- Result of the scheduled task via `task.result()`
+- `config` parameter of type `const config::TaskConfig&`
+- `model` parameter of type `const extract::ProjectModel&`
+- `llm_model` parameter of type `std::string_view`
+- `output_root` parameter of type `std::string`
 
 #### Writes To
 
-- Local `kota::event_loop loop` state via `schedule` and `run`
-- Returned `std::expected<std::size_t, AgentError>` value
-- Guide documents under `${output_root}/guides/` (through `run_agent_async`)
+- output directory `${output_root}/guides/` (guide documents)
+- possibly other files or resources via tool calls
 
 #### Usage Patterns
 
-- Invoked as the synchronous top-level driver to execute the agent loop
-- Callers branch on the returned `std::expected` to handle `AgentError` or consume the produced guide count
+- called to start the agent from a synchronous context
+- used as a wrapper around the asynchronous `run_agent_async`
 
 ### `clore::agent::run_agent_async`
 
-Declaration: `agent/agent.cppm:34`
+Declaration: `src/agent/agent.cppm:48`
 
-Definition: `agent/agent.cppm:507`
+Definition: `src/agent/agent.cppm:521`
 
 Declaration: [`Namespace clore::agent`](../../namespaces/clore/agent/index.md)
 
-The implementation of `clore::agent::run_agent_async` begins by attempting to load a persistent cache index from disk via `clore::generate::cache::load_cache_index`, using the workspace root from the given `config::TaskConfig`. If the cache loads successfully, the resulting `clore::generate::cache::CacheIndex` is retained; otherwise a warning is logged with the error message from `AgentError::message`. After this initialization, the function delegates all further work to `clore::agent::(anonymous namespace)::run_agent_loop`, passing the `config`, `model`, `llm_model`, `output_root`, the (possibly empty) `cache_index`, and the `kota::event_loop`. The coroutine returns via `co_return co_await`, yielding a `kota::task<std::size_t, AgentError>` that must be scheduled on the provided loop. Dependencies include the agent cache subsystem, the `kota` coroutine runtime, and the internal `run_agent_loop` function.
+The function `clore::agent::run_agent_async` is a coroutine that initializes the agent’s persistent cache before delegating the main loop to `run_agent_loop`. It first calls `clore::generate::cache::load_cache_index` with the workspace root from the `config::TaskConfig` to load any existing cache index. If loading succeeds, the cache index is stored locally and a log message reports the number of entries; on failure, a warning is logged with the error message. After this initialization, it `co_await`s `run_agent_loop`, passing the original `config`, `model`, `llm_model`, `output_root`, the newly populated `cache_index`, and the event loop. The return type is `kota::task<std::size_t, AgentError>`, matching the coroutine interface required by the event loop.
 
 #### Side Effects
 
-- loads cache index from disk via `clore::generate::cache::load_cache_index`
-- logs cache load status via `clore::logging::info` and `clore::logging::warn`
-- calls `run_agent_loop` which may perform further I/O or mutation
+- File system read: loading cache index from disk
+- Logging: info or warn messages via `logging::info` and `logging::warn`
 
 #### Reads From
 
 - `config.workspace_root`
-- `config` (fields used by `load_cache_index` and `run_agent_loop`)
-- `model`
-- `llm_model`
-- `output_root`
-- `loop`
-- cache file on disk
+- Cache file system (via `clore::generate::cache::load_cache_index`)
 
 #### Writes To
 
-- `cache_index` (local, moved from cache result)
-- logging output via `clore::logging` functions
-- state mutated by `run_agent_loop` (e.g., output files, logs, cache updates)
+- Logging output (e.g., console or log file)
 
 #### Usage Patterns
 
-- Called to start an asynchronous agent session with caching
-- Callers schedule the returned task on the provided `kota::event_loop`
-- Used in higher-level agent orchestration code
+- Callers schedule the returned task on the event loop
+- Used to orchestrate the asynchronous agent workflow
 
 ## Internal Structure
 
-The `agent` module is decomposed into a public interface exposing two entry points—`run_agent` (synchronous) and `run_agent_async` (asynchronous)—and a private implementation confined to an anonymous namespace within `agent/agent.cppm`. Internally, the module layers an agent loop (`run_agent_loop`) that iterates up to `kMaxAgentTurns`, orchestrating tool calls via `run_tool_call`, caching conversation state through `hash_messages` and `make_agent_cache_key`, and persisting LLM responses with `serialize_completion_response` / `deserialize_completion_response`. Helper functions such as `list_existing_guide_filenames` enable the agent to track previously generated guide documents, while the `ToolCallResult` struct and `AgentError` struct provide uniform result and error types. The module imports `config`, `extract`, `generate`, `network`, `support`, and `std`; it relies on `network` for LLM interaction, `support` for hashing and caching primitives, and likely uses `extract` and `generate` during tool execution to explore the codebase and produce guide documents under the configured output root.
+The `agent` module is the top-level orchestration layer for the codebase exploration and guide generation workflow. Its public API exposes two entry points: `run_agent` (synchronous) and `run_agent_async` (asynchronous, requiring a `kota::event_loop`). Both functions accept project identifiers and output‑root paths and return either a count of produced guides or an `AgentError`. Internally, the module is decomposed into a set of anonymous‑namespace helpers that implement the core loop (`run_agent_loop`), tool‑call execution (`run_tool_call`), caching and serialization (`hash_messages`, `make_agent_cache_key`, `serialize_completion_response`, `deserialize_completion_response`), and file‑system scanning (`list_existing_guide_filenames`). The struct `ToolCallResult` captures the outcome of a single tool invocation.
+
+The module imports five supporting modules — `config`, `extract`, `generate`, `network`, and `support` — establishing a clear internal layering. Configuration is obtained from the `config` module, the `network` module handles asynchronous LLM completion requests, `support` provides caching primitives and string utilities, while `extract` and `generate` are used to gather project data and produce final guide documents, respectively. The implementation structure places the main loop and all helper functions within an anonymous namespace to limit visibility, exposing only the two `run_agent` entry points and the public error type. This design encapsulates the agent’s turn‑based reasoning, cache lookups, and output assembly behind a narrow, well‑defined interface.
 
 ## Related Pages
 

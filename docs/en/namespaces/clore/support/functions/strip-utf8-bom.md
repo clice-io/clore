@@ -1,6 +1,6 @@
 ---
 title: 'clore::support::striputf8bom'
-description: 'The function clore::support::strip_utf8_bom examines the beginning of a std::string_view input for the UTF-8 Byte Order Mark (BOM) sequence (U+FEFF encoded as EF BB BF in UTF-8). If the BOM is present, it returns a new std::string_view that points to the input data with the BOM skipped; otherwise, it returns the original view unchanged. The caller can rely on the result being a valid view into the same storage, and no heap allocation or data copying occurs. This function is typically used by file-reading utilities to cleanly expose UTF-8 content without the BOM prefix.'
+description: 'Strips the UTF-8 byte order mark (BOM) from the beginning of the given std::string_view and returns a view pointing to the remainder of the string. If the input does not start with a UTF-8 BOM, the returned view is identical to the input. The function does not modify the original string and operates purely by adjusting the view bounds.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Namespace clore::support](../index.md)
 
-Declaration: `support/logging.cppm:83`
+Declaration: `src/support/logging.cppm:106`
 
-Definition: `support/logging.cppm:470`
+Definition: `src/support/logging.cppm:493`
 
 Implementation: [`Module support`](../../../../modules/support/index.md)
 
@@ -21,11 +21,11 @@ Implementation: [`Module support`](../../../../modules/support/index.md)
 auto (std::string_view) -> std::string_view;
 ```
 
-The function `clore::support::strip_utf8_bom` examines the beginning of a `std::string_view` input for the UTF-8 Byte Order Mark (BOM) sequence (`U+FEFF` encoded as `EF BB BF` in UTF-8). If the BOM is present, it returns a new `std::string_view` that points to the input data with the BOM skipped; otherwise, it returns the original view unchanged. The caller can rely on the result being a valid view into the same storage, and no heap allocation or data copying occurs. This function is typically used by file-reading utilities to cleanly expose UTF-8 content without the BOM prefix.
+Strips the UTF-8 byte order mark (BOM) from the beginning of the given `std::string_view` and returns a view pointing to the remainder of the string. If the input does not start with a UTF-8 BOM, the returned view is identical to the input. The function does not modify the original string and operates purely by adjusting the view bounds.
 
 ## Usage Patterns
 
-- Stripping the UTF‑8 BOM from file contents before processing in `clore::support::read_utf8_text_file`
+- called by `read_utf8_text_file` to strip BOM
 
 ## Called By
 

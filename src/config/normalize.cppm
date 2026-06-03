@@ -1,8 +1,15 @@
 module;
 
-export module config:normalize;
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
-import std;
+export module config:normalize;
 import :schema;
 
 export namespace clore::config {

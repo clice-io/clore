@@ -1,6 +1,17 @@
+module;
+
+#include <algorithm>
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
 export module generate:common;
 
-import std;
 import :markdown;
 import :model;
 import config;

@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:markdown'
-description: '该模块负责将结构化的语义内容转换为符合 Markdown 语法的文档表示。它提供了一组工厂函数（如 make_text、make_code、make_blockquote、make_mermaid、make_section、make_raw_markdown、make_paragraph、make_code_fence、make_link 等）以及核心渲染入口 render_markdown，用于构建和输出包含代码片断、内联格式、引用、列表、围栏代码块、图表等元素的 Markdown 内容。'
+description: '该模块负责将结构化数据转换为 Markdown 格式的文档。它提供了一组工厂函数（如 make_paragraph、make_code_fence、make_link 等）用于构建文档树节点（MarkdownDocument、SemanticSection、InlineFragment 等），以及一个渲染函数 render_markdown 将树形结构输出为 Markdown 字符串。模块的公共 API 涵盖文档结构组装和输出生成，而内联代码跨度解析、围栏识别等细节则封装在内部实现中。'
 layout: doc
 template: doc
 ---
@@ -9,13 +9,7 @@ template: doc
 
 ## Summary
 
-该模块负责将结构化的语义内容转换为符合 Markdown 语法的文档表示。它提供了一组工厂函数（如 `make_text`、`make_code`、`make_blockquote`、`make_mermaid`、`make_section`、`make_raw_markdown`、`make_paragraph`、`make_code_fence`、`make_link` 等）以及核心渲染入口 `render_markdown`，用于构建和输出包含代码片断、内联格式、引用、列表、围栏代码块、图表等元素的 Markdown 内容。
-
-在公共实现范围内，模块定义了 `MarkdownDocument`、`MarkdownNode`、`SemanticSection`、`Frontmatter` 以及多种片段类型（`TextFragment`、`CodeFragment`、`LinkFragment`、`ListItem`、`CodeFence`、`MermaidDiagram`、`BlockQuote`、`BulletList`、`RawMarkdown`、`Paragraph`）等数据结构。同时提供了 `SemanticKind` 枚举（涵盖 `Type`、`Index`、`Namespace`、`Module`、`Function`、`Variable`、`File`、`Section`）以及一组用于处理代码跨度、行内渲染、块引用前缀、回调后缀等内部辅助函数。这些元素共同构成了从语义模型到最终 Markdown 输出的完整生成管线。
-
-## Imports
-
-- `std`
+该模块负责将结构化数据转换为 Markdown 格式的文档。它提供了一组工厂函数（如 `make_paragraph`、`make_code_fence`、`make_link` 等）用于构建文档树节点（`MarkdownDocument`、`SemanticSection`、`InlineFragment` 等），以及一个渲染函数 `render_markdown` 将树形结构输出为 Markdown 字符串。模块的公共 API 涵盖文档结构组装和输出生成，而内联代码跨度解析、围栏识别等细节则封装在内部实现中。
 
 ## Imported By
 
@@ -29,100 +23,119 @@ template: doc
 
 ### `clore::generate::BlockQuote`
 
-Declaration: `generate/markdown.cppm:62`
+Declaration: `src/generate/markdown.cppm:73`
 
-Definition: `generate/markdown.cppm:62`
+Definition: `src/generate/markdown.cppm:73`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-结构 `clore::generate::BlockQuote` 的内部状态完全由一个类型为 `std::vector<InlineFragment>` 的成员 `fragments` 表示，该向量存储了构成 Markdown 引用块的所有内联片段。其实现依赖于 `fragments` 的连续存储与元素顺序，在生成输出时按序迭代这些片段即可还原引用块内容；除此以外不维护任何额外的不变量或辅助状态。
+`clore::generate::BlockQuote` 的内部实现由一个单一的 `std::vector<InlineFragment> fragments` 字段构成。该向量以严格顺序存储块引用内的所有内联片段（例如文本、格式或链接），且不假定任何排序或重复约束——所有片段按文档中出现次序原样保留。该结构体本身不定义任何成员函数或特殊成员，其不变量仅依赖于外部构造逻辑：在生成阶段，先确定每个块引用的边界，再将解析后的内联片段依次压入 `fragments`，确保引用内容的完整性与可遍历性。
+
+#### Invariants
+
+- `fragments` 中的元素按文档顺序排列
+- 每个元素为有效的 `InlineFragment`
+
+#### Key Members
+
+- `fragments`：内联片段向量
+
+#### Usage Patterns
+
+- 构造 `BlockQuote` 对象时填充 `fragments`
+- 在生成 Markdown 输出时遍历 `fragments` 以渲染块引用内容
 
 ### `clore::generate::BulletList`
 
-Declaration: `generate/markdown.cppm:49`
+Declaration: `src/generate/markdown.cppm:60`
 
-Definition: `generate/markdown.cppm:49`
+Definition: `src/generate/markdown.cppm:60`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::BulletList` 是一个简单的聚合结构体，其唯一数据成员 `items` 类型为 `std::vector<ListItem>`。该结构体不维护额外的内部状态或不变式，直接依赖标准库容器管理元素的生命周期与顺序。所有关于条目内容的修改、遍历与生命周期控制均委托给 `items` 成员，因此该类型本身不实现任何自定义构造、析构或拷贝控制逻辑（除非编译器隐式生成）。它在实现中作为子弹列表数据的传输载体，供上游生成逻辑填充列表项后传递给输出阶段消费。
+`clore::generate::BulletList` 是一个简单的聚合体，其内部结构仅由一个 `items` 成员组成，类型为 `std::vector<ListItem>`。该结构体不包含任何用户定义的构造函数、析构函数或成员函数，也无额外的不变式约束——其正确性完全依赖于外部调用方对 `items` 向量内容的填充与管理。在实现层级，此结构体的主要作用是为 bullet list 的生成提供数据容器，它本身不执行任何操作，而是作为数据传递的中间类型。
 
 #### Invariants
 
-- 列表项的排列顺序反映了输出中的显示顺序
-- 每个 `ListItem` 应包含有效的列表内容
+- `items` 可以包含零个或多个 `ListItem` 对象。
+- 列表项的顺序由 `items` 中元素的顺序决定。
 
 #### Key Members
 
-- `items`：存储所有列表项的向量
+- `items`：存储所有列表项的 `std::vector<ListItem>` 容器。
 
 #### Usage Patterns
 
-- 由生成器函数填充 `items` 以构造列表
-- 消费者遍历 `items` 为每个项目生成子弹点格式
+- 在生成 Markdown 时，作为子弹列表的中间表示。
+- 可以通过 `items` 直接添加或遍历 `ListItem` 元素。
 
 ### `clore::generate::CodeFence`
 
-Declaration: `generate/markdown.cppm:53`
+Declaration: `src/generate/markdown.cppm:64`
 
-Definition: `generate/markdown.cppm:53`
+Definition: `src/generate/markdown.cppm:64`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::CodeFence` 是一个简单的数据持有者结构，用于表示 Markdown 代码围栏块的两个核心组成部分。其内部仅包含两个 `std::string` 成员：`language` 存储围栏声明中指定的语言标识符（例如 `cpp`、`python`），`code` 存储围栏中的原始代码文本。该结构体没有自定义构造函数或成员函数，因此其不变式完全由外部赋值逻辑维护：`language` 应仅包含小写字母数字字符（不含句点或空格），与常见的语法高亮规则一致，而 `code` 中的文本不应包括围栏定界符本身。由于两个成员都是普通字符串，复制或移动语义由 `std::string` 保证正确。此结构体的设计意图是将代码围栏的元数据与内容统一为一个轻量级传输对象，供下游渲染步骤直接使用。
+结构体 `clore::generate::CodeFence` 是一个纯数据聚合体，用于表示 Markdown 代码围栏的内容。其内部由两个 `std::string` 成员组成：`language` 记录代码块指定的语言标识（例如 `"cpp"`、`"python"`），`code` 存储围栏内的实际代码文本。该结构体不维护任何特殊的不变量——两个成员均可为空字符串，且不要求 `language` 必须匹配已知的语言名称。作为简单的值类型，它仅通过成员初始化器或隐式定义的构造函数和赋值运算符完成构造与拷贝，不提供任何额外成员函数或资源管理逻辑。
 
 #### Invariants
 
-- `language` 和 `code` 均为任意字符串，无格式约束
+- No explicit invariants; both fields are freely assignable `std::string` values.
+- Typically `language` is expected to be a valid language identifier when used in Markdown rendering.
 
 #### Key Members
 
-- `std::string language`: 代码语言标签
-- `std::string code`: 代码内容
+- `language` – the language label for syntax highlighting
+- `code` – the code content between the fences
 
 #### Usage Patterns
 
-- 在 Markdown 生成过程中用于构造代码块
-- 可被直接赋值或初始化以填充语言和代码信息
-- 通常作为数据载体传递给其他生成函数或序列化操作
+- Used as a data carrier between parsing and rendering phases in Markdown generation.
+- May be constructed directly or filled by a parser that recognizes fenced code blocks.
+- Accessed by code that serializes the struct back into Markdown fence syntax.
 
 ### `clore::generate::CodeFragment`
 
-Declaration: `generate/markdown.cppm:29`
+Declaration: `src/generate/markdown.cppm:40`
 
-Definition: `generate/markdown.cppm:29`
+Definition: `src/generate/markdown.cppm:40`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::CodeFragment` 的实现极其简单：其唯一数据成员 `code` 是一个 `std::string`，用于存储代码片段的文本内容。该结构没有自定义的构造函数、析构函数或拷贝/移动控制成员，完全依赖编译器生成的默认实现，因此核心不变式仅仅是 `code` 字符串的合法状态（即任何有效的 `std::string` 值均被允许）。内部不存在额外的缓存或预解析逻辑，所有对片段内容的操作均直接作用于该底层字符串。
+`clore::generate::CodeFragment` 是一个仅包含单个 `std::string` 数据成员 `code` 的简单值类型，其设计目标是为代码生成过程提供一个轻量的中间表示。该结构体不持有任何虚函数、自定义构造函数或赋值操作符，因此其行为遵循编译器生成的默认语义，可直接复制、移动或原地构造。
+
+该结构体的核心不变量在于 `code` 字段始终表示一个完整、有效的代码片段，且内容仅由调用者直接设置。由于没有额外的内部状态校验或转换逻辑，该类型纯粹作为代码文本的透明容器，在生成管道中用于传递格式化后的源码片段。任何对 `code` 内容的语义保证均需由使用者确保。
 
 #### Invariants
 
-- The `code` member is a plain string with no internal constraints.
+- `code` 可以是任意字符串，包括空字符串
+- 结构体无额外约束或不变量
 
 #### Key Members
 
-- `code` of type `std::string`
+- `clore::generate::CodeFragment::code`
 
 #### Usage Patterns
 
-- Used to encapsulate code text for markdown generation.
-- Likely constructed with a string and then passed to other functions.
+- 其他代码通过赋值或移动字符串来设置 `code`
+- 作为 `std::vector<CodeFragment>` 的一部分被收集
+- 生成器函数返回 `CodeFragment` 或将其添加到容器中
 
 ### `clore::generate::Frontmatter`
 
-Declaration: `generate/markdown.cppm:18`
+Declaration: `src/generate/markdown.cppm:29`
 
-Definition: `generate/markdown.cppm:18`
+Definition: `src/generate/markdown.cppm:29`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-结构体 `clore::generate::Frontmatter` 是一个简单的聚合类型，其所有四个成员 —— `title`、`description`、`layout` 和 `page_template` 均为 `std::string` 类型。两个可选字段 `layout` 和 `page_template` 各自提供了默认值 `"doc"`，这使得在大多数常见文档场景中可以省略显式赋值。该结构体不维护任何复杂的类不变式；所有成员均可独立设置并按原样存储，其作用纯粹是作为生成文档前置元数据（front matter）时的轻量数据传输对象，方便调用方以统一接口填充必要信息。
+struct `clore::generate::Frontmatter` 是一个简单的聚合类型，用于封装文档生成所需的 YAML 前置元数据。其四个 `std::string` 成员——`title`、`description`、`layout` 和 `page_template`——均采用默认初始化策略：`layout` 和 `page_template` 的默认值固定为 `"doc"`，而 `title` 与 `description` 则为空字符串。该结构不维护额外的不变式，其所有字段均允许在构造后自由赋值，且不依赖任何成员函数或约束来保证数据有效性，纯粹作为外部 YAML 内容与代码生成器之间的临时数据载体。
 
 #### Invariants
 
-- 所有成员均为 `std::string` 类型，无强制非空约束
-- `layout` 和 `page_template` 默认初始化为 `"doc"`
+- Fields are of type `std::string` with no additional constraints
+- `layout` and `page_template` default to `"doc"`
 
 #### Key Members
 
@@ -133,74 +146,79 @@ Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index
 
 #### Usage Patterns
 
-- 作为 Markdown 生成流程中的元数据输入结构
-- 在模块内部被填充并传递给下游渲染组件
+- Set fields before writing frontmatter to generated markdown files
+- Used as a component in larger generation contexts where YAML frontmatter is emitted
+
+### `clore::generate::InlineFragment`
+
+Declaration: `src/generate/markdown.cppm:50`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+`clore::generate::InlineFragment` 是 `std::variant<TextFragment, CodeFragment, LinkFragment>` 的类型别名。该变体是内联内容片段的三种具体类型的联合，通过变体的类型安全特性，确保实例在任何时刻只持有三者之一。实现依赖变体提供的标准访问和构造接口，没有附加的不变约束，因为变体本身保证了有效状态。
+
+#### Invariants
+
+- 始终持有且仅持有 `TextFragment`、`CodeFragment` 或 `LinkFragment` 之一的实例
+- 遵循 `std::variant` 的常规保证（非空、可默认构造为第一个类型等）
+
+#### Key Members
+
+- `TextFragment`
+- `CodeFragment`
+- `LinkFragment`
+
+#### Usage Patterns
+
+- 使用 `std::visit` 处理不同类型的分支逻辑
+- 通过 `std::get` 或 `std::get_if` 访问特定类型的片段
 
 ### `clore::generate::LinkFragment`
 
-Declaration: `generate/markdown.cppm:33`
+Declaration: `src/generate/markdown.cppm:44`
 
-Definition: `generate/markdown.cppm:33`
+Definition: `src/generate/markdown.cppm:44`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-结构体 `clore::generate::LinkFragment` 是一个公开的聚合类型，包含三个数据成员：`label`、`target` 和 `code_style`。`label` 和 `target` 均为 `std::string` 类型，分别存储链接的显示文本和指向的目标 URL；`code_style` 是一个 `bool` 标志，用于指示该片段是否应使用代码样式渲染，其默认值为 `false`。该结构体未定义任何用户提供的构造函数、析构函数或赋值运算符，完全依赖聚合初始化，因此其内部布局是平凡的，不维护显式的不变量——所有成员可以在创建后直接修改，不进行校验。
-该实现仅作为一组无关字段的简单容器，没有特殊成员函数或行为。由于缺少自定义构造逻辑，调用方必须自行确保 `label` 和 `target` 的内容符合上下游处理要求（例如非空或特定格式）。`code_style` 仅作为布尔标记，其使用由处理该片段的后续代码解释。
-
-#### Invariants
-
-- The struct is trivially copyable and movable due to its members.
-- `code_style` defaults to `false` if not explicitly initialized.
-
-#### Key Members
-
-- `label`: the display text of the link
-- `target`: the URL or anchor target of the link
-- `code_style`: whether to apply code font styling to the link
-
-#### Usage Patterns
-
-- Initialized using aggregate syntax, e.g., `LinkFragment{"text", "url", true}`.
-- Used as a data carrier for generating markdown link syntax in the `clore::generate` module.
+`LinkFragment` 是一个聚合结构体，直接暴露三个数据成员：`label`、`target` 和 `code_style`。其内部结构完全由这些成员的声明顺序决定，且未定义任何构造函数、析构函数或成员函数，因此对象通过花括号初始化或成员式赋值进行构造与修改。`code_style` 的默认成员初始化器将其初始化为 `false`，其余 `std::string` 成员则被默认构造为空字符串。该结构体不维护任何不变量——所有成员均可独立、自由地读写，不存在内部约束或依赖关系。作为纯数据容器，`LinkFragment` 不提供封装或访问控制，其设计意图是作为链接片段信息的轻量级传输单元，在生成流程中传递。
 
 ### `clore::generate::ListItem`
 
-Declaration: `generate/markdown.cppm:45`
+Declaration: `src/generate/markdown.cppm:56`
 
-Definition: `generate/markdown.cppm:45`
+Definition: `src/generate/markdown.cppm:56`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该结构体是一个简单的聚合类型，其唯一数据成员 `fragments` 是一个 `std::vector<InlineFragment>`，用于按顺序存储构成列表项的所有内联片段。内部不变量要求 `fragments` 中的片段按语义顺序排列，且每个片段完整地表示列表项的一部分内容。该结构体没有自定义构造函数或析构函数，完全依赖隐式生成的特殊成员函数来管理 `fragments` 的生命周期。
+`clore::generate::ListItem` 是一个用于表示文档列表中单个项目的内部聚合结构体。其唯一数据成员 `fragments` 是 `std::vector<InlineFragment>` 类型，存储构成该列表项的所有连续内联片段。该结构体不定义任何用户提供的构造函数、赋值运算符或析构函数，因此完全依赖编译器生成的默认语义进行初始化、复制和移动。其隐式不变式要求 `fragments` 中的片段序列在逻辑上构成一个完整的列表项——该约束由上游生成器代码保证，而非结构体自身执行。该实现使得列表项容器能够以最小的开销直接存储和管理片段序列。
 
 #### Invariants
 
-- `fragments` 保持有序，片段顺序决定最终渲染顺序
-- 每个 `InlineFragment` 对象在 `fragments` 中有效
+- fragments 中的 `InlineFragment` 实例按文档顺序排列
 
 #### Key Members
 
-- `fragments`
+- fragments
 
 #### Usage Patterns
 
-- 在生成 Markdown 列表时，向 `fragments` 添加 `InlineFragment` 对象来构建列表项内容
-- 作为 `clore::generate::List` 或其他列表相关类型的一部分被使用
+- 作为列表生成过程中的数据单元，由上层生成逻辑填充并传递给渲染函数
 
 ### `clore::generate::MarkdownDocument`
 
-Declaration: `generate/markdown.cppm:94`
+Declaration: `src/generate/markdown.cppm:105`
 
-Definition: `generate/markdown.cppm:94`
+Definition: `src/generate/markdown.cppm:105`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-结构体 `clore::generate::MarkdownDocument` 通过两个数据成员实现其内容表示：可选的 `Frontmatter` 实例 `frontmatter` 和 `MarkdownNode` 类型的动态数组 `children`。`frontmatter` 在文档缺少顶层元数据块时保持 `std::nullopt`，而 `children` 按文档顺序存储所有顶层内容节点。内部不变量要求 `children` 中节点的排列定义文档的线性结构，且每个 `MarkdownNode` 处于逻辑有效状态；除此之外没有额外的内部状态或约束。
+`clore::generate::MarkdownDocument` 将 Markdown 文档的内部表示聚合为两个独立字段：可选的 `frontmatter`（类型 `std::optional<Frontmatter>`）和按顺序排列的子节点向量 `children`（类型 `std::vector<MarkdownNode>`）。其设计意图在于将文档的元数据与前言的逻辑内容相分离：`frontmatter` 持有文档级元数据（如标题、日期），而 `children` 存储文档体中的结构元素（如标题、段落、列表等）。内部不维护显式不变式；两个字段均可独立为空或非空，且 `children` 中节点的顺序完全由构建过程决定。所有重要成员实现均依赖编译器生成的默认构造函数、析构函数及拷贝/移动操作，无需额外的自定义逻辑。
 
 #### Invariants
 
-- frontmatter 可选，为空时表示文档没有 YAML 头部
-- children 中的节点顺序反映文档内容结构
+- `frontmatter` may be absent (`std::nullopt`)
+- `children` is a possibly empty sequence of `MarkdownNode` elements
 
 #### Key Members
 
@@ -209,114 +227,124 @@ Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index
 
 #### Usage Patterns
 
-- 构造并填充该结构体以表示完整的 Markdown 文档
-- 遍历 `children` 以生成最终输出
+- Created to hold the structured representation of a parsed markdown document
+- Consumed by code that generates or transforms markdown content
 
 ### `clore::generate::MarkdownNode`
 
-Declaration: `generate/markdown.cppm:73`
+Declaration: `src/generate/markdown.cppm:84`
 
-Definition: `generate/markdown.cppm:73`
+Definition: `src/generate/markdown.cppm:84`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::MarkdownNode` 的核心是一个 `std::variant` 成员 `value`，它将七种不同的块级节点类型（`Paragraph`、`BulletList`、`CodeFence`、`MermaidDiagram`、`BlockQuote`、`RawMarkdown`、`SemanticSectionPtr`）统一为单一存储。每个 `MarkdownNode` 实例恰好容纳其中一种类型，利用 `std::variant` 的构造、赋值和访问机制保证类型安全，无需额外的不变式；通过 `std::visit` 或 `std::get_if` 等标准函数即可无歧义地操作其所含的具体节点。
+结构体 `clore::generate::MarkdownNode` 的核心实现是一个简单的聚合体，仅包含一个 `std::variant` 类型的数据成员 `value`。该 `value` 的定义将七个具体的 Markdown 内容类型——`Paragraph`、`BulletList`、`CodeFence`、`MermaidDiagram`、`BlockQuote`、`RawMarkdown` 和 `SemanticSectionPtr`——组合成类型安全的标签联合。在任意时刻，`value` 都必须恰好持有其中一种类型，不存在空状态或无效变体。该结构体未定义任何用户提供的构造函数、析构函数或赋值运算符，因此完全依赖编译器生成的特殊成员函数，其默认构造行为会令 `value` 默认构造为列表中的第一个替代类型（`Paragraph`）。这种实现确保了 `MarkdownNode` 具有平凡的值语义，可通过 `std::visit` 等泛型工具高效地按当前存储的类型进行分发，同时保持了紧凑的内存布局。
 
 ### `clore::generate::MermaidDiagram`
 
-Declaration: `generate/markdown.cppm:58`
+Declaration: `src/generate/markdown.cppm:69`
 
-Definition: `generate/markdown.cppm:58`
+Definition: `src/generate/markdown.cppm:69`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-结构体 `clore::generate::MermaidDiagram` 是一个仅含单个 `std::string code` 成员的简单聚合类型。该成员直接存储 Mermaid 图表的定义文本。结构体未定义任何构造函数或成员函数，因此完全依赖聚合初始化来设置 `code` 的值。其设计意图是作为 Mermaid 图表源代码的轻量级包装器，便于在生成流程的不同阶段间传递。由于不包含额外逻辑，该结构体不维护任何复杂不变式，`code` 字符串可容纳任意符合 Mermaid 语法的内容。
+结构体 `clore::generate::MermaidDiagram` 是一个简单的数据持有者，其唯一成员 `code` 为 `std::string` 类型，用于存储 Mermaid 图表的文本表示。该结构体不定义自定义构造函数、析构函数或赋值运算符，完全依赖编译器生成的默认成员函数，因此不维护任何运行时不变量。其设计意图是作为纯值类型，在生成流程中透明地传递图表代码，无需额外的资源管理或校验逻辑。
 
 #### Invariants
 
-- 成员 `code` 的内容应为有效的 Mermaid 语法字符串（由使用者维护）。
-- 结构体本身不维护任何额外状态或不变式。
+- `code` 成员包含 Mermaid 图表源代码
 
 #### Key Members
 
-- `code`：存储 Mermaid 图表源代码的字符串。
+- `code`：存储 Mermaid 图表定义的字符串
 
 #### Usage Patterns
 
-- 作为生成管道中的输出类型，保存图表的文本表示。
-- 可能被传递给渲染器或序列化函数以生成最终图表。
-- 通过直接赋值或移动语义进行构造和复制。
+- 其他代码创建 `MermaidDiagram` 对象并设置 `code` 来定义图表
+- 可被传递或复制以在生成流程中使用
 
 ### `clore::generate::Paragraph`
 
-Declaration: `generate/markdown.cppm:41`
+Declaration: `src/generate/markdown.cppm:52`
 
-Definition: `generate/markdown.cppm:41`
+Definition: `src/generate/markdown.cppm:52`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::Paragraph` 是一个聚合结构体，其唯一的数据成员 `fragments` 是一个 `std::vector<InlineFragment>`，用于按生成顺序储存构成段落的各个内联片段。该结构体不定义任何自定义构造函数、赋值运算符或析构函数，完全依赖编译器的隐式特殊成员函数，从而保持简单的值语义和可复制性。实现层面不维护超出向量自身容量与元素次序的额外不变式；调用方负责保证 `fragments` 中的片段在渲染上下文中具有语义一致性（例如无冲突的样式叠置或正确的文本顺序）。
+`clore::generate::Paragraph` 是一个仅包含单个数据成员 `std::vector<InlineFragment> fragments` 的聚合体。其内部结构直接表达了段落的构成：一个有序的内联片段序列，每个片段对应段落中的一个文本块或格式元素。实现上没有额外的不变量，`fragments` 的 size 与段落内容的实际长度无关，仅由调用方对外部输入序列的解析结果决定。该类型未定义任何特殊成员函数，因此依赖编译器提供的默认构造、析构及拷贝/移动语义，其资源管理完全委托给 `std::vector`。
 
 #### Invariants
 
-- `fragments` 中的元素顺序决定段落呈现顺序
-- 所有片段均属于 `InlineFragment` 类型
+- `fragments` is the only data member of `Paragraph`.
 
 #### Key Members
 
-- `fragments`：段落的内联片段容器
+- fragments
 
 #### Usage Patterns
 
-- 作为段落数据容器被文档生成过程填充或读取
-- 通过遍历 `fragments` 生成段落文本或格式
+- Code constructs `Paragraph` objects and populates `fragments` with `InlineFragment` instances.
+- Functions that process document structure iterate over `fragments` to emit or transform the paragraph content.
 
 ### `clore::generate::RawMarkdown`
 
-Declaration: `generate/markdown.cppm:66`
+Declaration: `src/generate/markdown.cppm:77`
 
-Definition: `generate/markdown.cppm:66`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-结构体 `clore::generate::RawMarkdown` 是一个简单的数据包装器，其唯一成员 `markdown` 为 `std::string` 类型，用于存储未经处理的原始 Markdown 文本。该结构体不维护任何额外的不变量或逻辑，仅作为将 Markdown 内容封装为类型安全实体的轻量级实现；其存在性暗示了在生成流程中需要以原始字符串形式传递 Markdown 数据，但内部不执行验证或转换。
-
-### `clore::generate::SemanticKind`
-
-Declaration: `generate/markdown.cppm:7`
-
-Definition: `generate/markdown.cppm:7`
+Definition: `src/generate/markdown.cppm:77`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-枚举 `clore::generate::SemanticKind` 提供了一组有限的语义分类符，用于标识文档生成过程中代码元素的逻辑角色。其底层类型为 `std::uint8_t`，使得实例紧凑且可序列化。成员列举了从 `Index` 到 `Section` 共计八个不同的值，顺序与常见概念层次相关但不强制要求严格排序。一个重要的不变量是 `SemanticKind` 的值域被限制为这些显式枚举成员，没有隐式溢出或未命名值；任何对底层整数的强制转换都应仅用于位标志或传输，而非直接逻辑判断。该枚举的设计平衡了可读性与存储效率，在生成管道中作为轻量型标签服务于格式化、排序和分组等操作。
+`clore::generate::RawMarkdown` 是一个仅包含一个 `std::string` 类型数据成员 `markdown` 的轻量结构体。内部实现完全依赖编译器生成的默认构造函数、析构函数和复制/移动操作，没有自定义逻辑或额外成员。该结构体的唯一不变性是 `markdown` 中存储的应为有效的 Markdown 文本，该约束由调用方在写入和读取过程中维护。其设计目标是为生成的 Markdown 内容提供简单的直接持有，避免不必要的间接开销。
 
 #### Invariants
 
-- Each enumerator value uniquely identifies a distinct semantic kind.
-- All enumerators are valid and stable across generation contexts.
+- `markdown` 成员始终是一个有效的 `std::string` 实例。
 
 #### Key Members
 
-- `clore::generate::SemanticKind::Index`
-- `clore::generate::SemanticKind::Namespace`
-- `clore::generate::SemanticKind::Module`
-- `clore::generate::SemanticKind::Type`
-- `clore::generate::SemanticKind::Function`
-- `clore::generate::SemanticKind::Variable`
-- `clore::generate::SemanticKind::File`
-- `clore::generate::SemanticKind::Section`
+- `markdown`：存储原始 Markdown 文本的字符串成员。
 
 #### Usage Patterns
 
-- Used as a parameter to dispatch or select code paths based on the semantic kind of a symbol.
-- Employed in the `clore::generate` module to tag or filter documentation generation tasks.
+- 作为参数传递原始 Markdown 内容给其他生成组件。
+- 作为结构化数据的载体，在内部模块间传递 Markdown 字符串。
+
+### `clore::generate::SemanticKind`
+
+Declaration: `src/generate/markdown.cppm:18`
+
+Definition: `src/generate/markdown.cppm:18`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+枚举 `clore::generate::SemanticKind` 被定义为 `enum class`，底层类型为 `std::uint8_t`，以保证紧凑的内存布局和适合按位操作或数组索引。其枚举成员按从泛化到具体的顺序隐式赋值：`Index`、`Namespace`、`Module`、`Type`、`Function`、`Variable`、`File`、`Section`。这一顺序被依赖为类别粒度的自然层次，例如 `Namespace` 覆盖范围大于 `Function`，而 `Section` 则对应文档内的局部锚点。枚举值本身不存储额外元数据，仅通过整数序号区分语义类别，实现中通过 `static_cast` 与底层整数类型互转，并用于索引查询表或作为 `std::array` 的键。
+
+#### Invariants
+
+- Each enumerator represents a distinct semantic kind.
+- The underlying type is `std::uint8_t`.
+
+#### Key Members
+
+- `SemanticKind::Index`
+- `SemanticKind::Namespace`
+- `SemanticKind::Module`
+- `SemanticKind::Type`
+- `SemanticKind::Function`
+- `SemanticKind::Variable`
+- `SemanticKind::File`
+- `SemanticKind::Section`
+
+#### Usage Patterns
+
+- Used as a parameter or return type to indicate the kind of a documentation entity.
+- Switched on in generation logic to apply kind-specific formatting or data retrieval.
 
 #### Member Variables
 
 ##### `clore::generate::SemanticKind::File`
 
-Declaration: `generate/markdown.cppm:14`
+Declaration: `src/generate/markdown.cppm:25`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -328,7 +356,7 @@ File
 
 ##### `clore::generate::SemanticKind::Function`
 
-Declaration: `generate/markdown.cppm:12`
+Declaration: `src/generate/markdown.cppm:23`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -340,7 +368,7 @@ Function
 
 ##### `clore::generate::SemanticKind::Index`
 
-Declaration: `generate/markdown.cppm:8`
+Declaration: `src/generate/markdown.cppm:19`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -352,7 +380,7 @@ Index
 
 ##### `clore::generate::SemanticKind::Module`
 
-Declaration: `generate/markdown.cppm:10`
+Declaration: `src/generate/markdown.cppm:21`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -364,7 +392,7 @@ Module
 
 ##### `clore::generate::SemanticKind::Namespace`
 
-Declaration: `generate/markdown.cppm:9`
+Declaration: `src/generate/markdown.cppm:20`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -376,7 +404,7 @@ Namespace
 
 ##### `clore::generate::SemanticKind::Section`
 
-Declaration: `generate/markdown.cppm:15`
+Declaration: `src/generate/markdown.cppm:26`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -388,7 +416,7 @@ Section
 
 ##### `clore::generate::SemanticKind::Type`
 
-Declaration: `generate/markdown.cppm:11`
+Declaration: `src/generate/markdown.cppm:22`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -400,7 +428,7 @@ Type
 
 ##### `clore::generate::SemanticKind::Variable`
 
-Declaration: `generate/markdown.cppm:13`
+Declaration: `src/generate/markdown.cppm:24`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -412,49 +440,107 @@ Variable
 
 ### `clore::generate::SemanticSection`
 
-Declaration: `generate/markdown.cppm:70`
+Declaration: `src/generate/markdown.cppm:81`
 
-Definition: `generate/markdown.cppm:84`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-结构体 `clore::generate::SemanticSection` 通过一组公有的标量字段与一个容器字段组合来描述一个语义节的内容与布局。`kind` 标记该节在文档中的语义类型（默认 `SemanticKind::Section`）；`subject_key` 用于关联外部主题标识；`heading` 存储节的标题文本；`level` 控制标题在文档层次中的级别（默认 2）；`omit_if_empty` 决定当子节点列表为空时是否跳过该节的输出（默认 `true`）；`code_style_heading` 指定标题是否以代码样式渲染（默认 `false`）。所有子节的内容存放在 `children`，这是一个 `std::vector<MarkdownNode>`，使得节可以递归地嵌套。这些字段的默认值确保在没有显式赋值的情况下，节表现为一个不省略的标准二级标题，不附加代码样式。`children` 的为空与否与 `omit_if_empty` 配合，在生成阶段可实现按需省略空节的逻辑，这是该结构体最重要的设计不变量。
-
-### `clore::generate::TextFragment`
-
-Declaration: `generate/markdown.cppm:25`
-
-Definition: `generate/markdown.cppm:25`
+Definition: `src/generate/markdown.cppm:95`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::TextFragment` 是一个简单的聚合结构体，其内部仅包含一个 `std::string` 类型的成员 `text`，用于存储生成的文本内容。该结构体没有自定义构造函数或成员函数，因此其不变量完全依赖于 `text` 自身的值语义——只要 `text` 保持有效，整个对象便是有效的。所有对文本内容的操作都委托给 `std::string` 的接口，使得该结构体在实现上极为轻量，适合作为管道中传递文本数据的载体。
+`clore::generate::SemanticSection` 是一个用于描述文档生成过程中结构化章节的内部表示。其字段 `kind` 和 `subject_key` 配合 `children` 向量构成了一棵文档树节点，`heading` 和 `code_style_heading` 控制标题的渲染方式，而 `level`（默认 2）决定标题在输出中的层级。设计上的一个重要不变式是当 `omit_if_empty` 为 `true`（默认值）时，实现会在递归展开过程中跳过该节点，除非其 `children` 非空；这一行为避免了生成空章节或无效嵌套。
+
+就成员实现而言，所有字段均采用直接初始化的默认值，其中 `level` 从 2 开始而不是 1，这反映了文档正文的起始缩进约定。`children` 向量使用 `std::vector<MarkdownNode>` 而非链表，以便于顺序访问和批量操作；`subject_key` 作为字符串可能用于跨章节引用或去重，但在结构体内部不做验证，是否为有效标识符由调用方保证。整体上，该结构体将语义元数据与子节点数据组合在一起，使生成器能够通过递归遍历 `children` 来构造最终的文档流。
 
 #### Invariants
 
-- text 成员可以包含任意字符串内容
-- 该结构体没有额外的约束条件
+- 默认 `level` 为 2
+- 默认 `omit_if_empty` 为 true
+- 默认 `code_style_heading` 为 false
+- 默认 `kind` 为 `SemanticKind::Section`
+- `children` 为 `MarkdownNode` 向量
 
 #### Key Members
 
-- text
+- `kind` 字段
+- `subject_key` 字段
+- `heading` 字段
+- `level` 字段
+- `omit_if_empty` 字段
+- `code_style_heading` 字段
+- `children` 字段
 
 #### Usage Patterns
 
-- 用于在生成流程中存储和传递文本片段
-- 作为生成的输出数据结构之一
+- 用于构建文档章节树
+- 在生成 Markdown 时填充章节内容
+- 支持嵌套子节点以形成层次结构
+
+### `clore::generate::SemanticSectionPtr`
+
+Declaration: `src/generate/markdown.cppm:82`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+`clore::generate::SemanticSectionPtr` 是 `std::unique_ptr<SemanticSection>` 的直接类型别名，因此其实现完全委托给标准库的独占所有权智能指针。内部结构即单一指针成员，不变量确保该指针在任意时刻要么为空，要么指向一个有效的 `SemanticSection` 对象，并且不存在其他所有者。重要的成员实现（如析构函数、移动赋值、`reset` 和 `release`）均来自 `std::unique_ptr`，不引入额外逻辑或自定义删除器，从而将资源管理开销降至最低。该别名本身不定义任何额外成员或特殊成员函数，所有行为由基类实现决定。
+
+#### Invariants
+
+- Each `SemanticSectionPtr` uniquely owns one `SemanticSection` object
+- The pointer is non-null when it has ownership
+- Ownership can be transferred via move operations only
+- No copy assignment or construction is allowed
+
+#### Key Members
+
+- `get()` to access the underlying raw pointer
+- `reset()` to release and optionally replace ownership
+- `operator->` and `operator*` for member access and dereference
+- Implicit conversion to bool for null checks
+
+#### Usage Patterns
+
+- Used as a return type or parameter to transfer ownership of a `SemanticSection` without copying
+- Likely employed in factory methods or resource management within the generation pipeline
+
+### `clore::generate::TextFragment`
+
+Declaration: `src/generate/markdown.cppm:36`
+
+Definition: `src/generate/markdown.cppm:36`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+`clore::generate::TextFragment` 的实现仅包含一个公有成员 `text`，其类型为 `std::string`。该结构体没有自定义构造函数、析构函数、拷贝或移动操作，因此所有特殊成员函数均由编译器隐式定义，并遵循 `std::string` 的对应语义。
+
+内部结构极为简单：`text` 是该类型唯一的非静态数据成员，且无显式的不变量约束——任何合法的 `std::string` 值均可被存放。由于缺少自定义拷贝控制或资源管理逻辑，`TextFragment` 的实例构造、赋值与析构完全委托给 `std::string` 实现，不引入额外的内存管理开销或状态检查。
+
+#### Invariants
+
+- The `text` member holds the complete content of the fragment.
+
+#### Key Members
+
+- `text`: the stored text content.
+
+#### Usage Patterns
+
+- Used to encapsulate generated text output or input for text‑processing steps.
+- Expected to be passed or stored as a value during fragment collection or composition.
 
 ## Functions
 
 ### `clore::generate::code_spanned_fragments`
 
-Declaration: `generate/markdown.cppm:124`
+Declaration: `src/generate/markdown.cppm:135`
 
-Definition: `generate/markdown.cppm:693`
+Definition: `src/generate/markdown.cppm:704`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::code_spanned_fragments` 的实现是一个轻量包装：它创建一个空的 `std::vector<InlineFragment>` 局部变量 `fragments`，然后调用 `clore::generate::(anonymous namespace)::append_code_spanned_fragments`（该函数接收 `fragments` 和输入 `text` 作为参数）来执行实际的片段拆分逻辑，最后返回填充后的 `fragments`。核心算法完全委托给 `append_code_spanned_fragments`，该函数迭代 `text` 中的字符，利用内部辅助函数（如 `read_backtick_span` 识别反引号代码跨度、`is_code_candidate` 判断潜在代码位置、以及 `append_text_fragment` 和 `append_existing_code_span` 等生成对应的 `InlineFragment`），将非代码文本与代码跨度正确分离并存储到 `fragments` 中。
+Implementation: [Implementation](functions/code-spanned-fragments.md)
+
+函数 `clore::generate::code_spanned_fragments` 是一个轻量级的包装入口，其实现仅创建空的 `std::vector<InlineFragment>` 并调用内部辅助函数 `append_code_spanned_fragments` 填充该容器，最后直接返回该向量。实际的代码跨度解析与片段生成逻辑完全委托给 `append_code_spanned_fragments`，该函数逐字符扫描输入文本，识别 backtick 引用的内联代码、代码样式候选（如标识符、运算符及复合符号），并依据边界规则生成对应的 `CodeFragment` 或 `TextFragment`，最终构成完整的 `InlineFragment` 序列。
+
+这种分离设计使 `code_spanned_fragments` 对外暴露为简洁的高级接口，而内部复杂的词法分析、跨度和候选判断细节（包括对 `read_backtick_span`、`read_code_candidate`、`read_operator_token` 等子函数的调用）都封装在 `append_code_spanned_fragments` 中，便于后续维护与单元测试。
 
 #### Side Effects
 
@@ -462,21 +548,22 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `text` parameter of type `std::string_view`
+- parameter `text` of type `std::string_view`
 
 #### Usage Patterns
 
-- Splitting text into inline code fragments for markdown generation
+- Called by `append_rendered_text` to convert text into inline fragments during rendering
+- Used to produce a sequence of `InlineFragment` objects from plain markdown text for further processing
 
 ### `clore::generate::code_spanned_markdown`
 
-Declaration: `generate/markdown.cppm:126`
+Declaration: `src/generate/markdown.cppm:137`
 
-Definition: `generate/markdown.cppm:699`
+Definition: `src/generate/markdown.cppm:710`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-实现首先遍历输入的 `markdown` 字符串，逐行扫描并维护一个布尔变量 `in_fence` 来跟踪当前是否处于代码围栏内。对于每一行，调用内部辅助函数 `is_fence_line` 判断是否为围栏标记行；若是则切换 `in_fence` 状态并将该行原文追加到结果中。若 `in_fence` 为真则直接追加该行。围栏外的行则委托给另一个内部辅助函数 `append_code_spanned_line` 进行处理，该函数负责解析行内可能出现的代码风格标识符并生成对应的内联代码 span。处理完所有行后返回拼接好的字符串。整个流程依赖 `is_fence_line` 和 `append_code_spanned_line` 这两个匿名命名空间中的辅助函数，其中后者还间接依赖一系列用于识别代码候选、读取链接 span、处理退格转义等更低层的辅助函数。
+函数`clore::generate::code_spanned_markdown`按行扫描输入`markdown`，通过`is_fence_line`检测围栏分隔符来维护`in_fence`状态。在围栏外部时，每行由`append_code_spanned_line`处理，该函数负责将行内的代码候选（如标识符或操作符）包裹成内联代码标记；在围栏内部时，文本按原样附加。行尾的换行符被显式保留，最终返回完整的`rendered`字符串。该实现依赖`is_fence_line`识别常规围栏边界，依赖`append_code_spanned_line`执行实际的代码标记替换逻辑。
 
 #### Side Effects
 
@@ -484,22 +571,26 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `markdown` parameter (a `std::string_view`)
+- input parameter `markdown`
+
+#### Writes To
+
+- returned `std::string`
 
 #### Usage Patterns
 
-- Used to convert markdown text into a form where non-fence content is wrapped with inline code, likely for rendering code documentation.
-- Called by other generation functions that need code‑spanned markdown fragments.
+- used to transform markdown content by adding inline code spans
+- called during documentation generation to process markdown fragments
 
 ### `clore::generate::make_blockquote`
 
-Declaration: `generate/markdown.cppm:113`
+Declaration: `src/generate/markdown.cppm:124`
 
-Definition: `generate/markdown.cppm:169`
+Definition: `src/generate/markdown.cppm:180`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::make_blockquote` 的实现仅通过一次构造调用来组装结果。它接受一个 `std::string text`，将其移动传递给 `clore::generate::make_text`，该函数将纯文本转换为 `MarkdownNode`。然后该节点被放入 `clore::generate::BlockQuote` 的 `fragments` 字段中，最后将整个块引用包装在 `MarkdownNode` 中返回。整个过程中无分支、无循环，所有依赖均来自 `make_text`、`BlockQuote` 和 `MarkdownNode` 的聚合初始化。
+该函数通过委托 `clore::generate::make_text` 创建一个内联片段，然后将其作为唯一条目放入 `BlockQuote` 的 `fragments` 容器中，最后将 `BlockQuote` 包装成 `MarkdownNode` 返回。不涉及复杂控制流或分支，完全依赖 `clore::generate::make_text` 完成单个文本片段的转换。
 
 #### Side Effects
 
@@ -507,26 +598,29 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `text` of type `std::string`
+- parameter `text`
 
 #### Writes To
 
-- returned `MarkdownNode`
+- returned `MarkdownNode` (constructed object)
 
 #### Usage Patterns
 
-- Used to generate blockquote nodes in markdown output.
-- Typically called when constructing markdown fragments for documentation pages.
+- Used to generate blockquote elements in markdown rendering.
 
 ### `clore::generate::make_code`
 
-Declaration: `generate/markdown.cppm:101`
+Declaration: `src/generate/markdown.cppm:112`
 
-Definition: `generate/markdown.cppm:136`
+Definition: `src/generate/markdown.cppm:147`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-实现上，`clore::generate::make_code` 仅仅构造一个 `CodeFragment` 对象，将传入的 `std::string` 参数通过 `std::move` 移动到其 `code` 字段中，然后直接返回该临时对象。此函数不涉及任何分支、循环或外部依赖，整个控制流是单步初始化并返回。
+Implementation: [Implementation](functions/make-code.md)
+
+函数 `clore::generate::make_code` 的实现直接创建一个 `CodeFragment` 对象，通过聚合初始化将传入的 `code` 字符串移动赋值到其 `code` 字段，然后返回该片段作为 `InlineFragment`。该函数不包含任何解析或验证逻辑，其全部行为委托给 `CodeFragment` 的构造过程，使用 `std::move` 避免不必要的字符串拷贝，确保零额外开销。
+
+该函数是内联代码片段生成的最小构建单元，依赖 `CodeFragment` 和 `InlineFragment` 的类型定义。它所创建的片段随后被 `render_inline` 等高层函数消费，用于将代码跨度渲染为最终输出（如反引号包裹或语法高亮形式）。
 
 #### Side Effects
 
@@ -534,28 +628,26 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `code` (by value)
+- parameter `code`
 
 #### Writes To
 
-- returned `InlineFragment` (constructed locally)
+- the `code` field of the returned `CodeFragment`
 
 #### Usage Patterns
 
-- wrapping code text into an `InlineFragment` for markdown rendering
-- used in markdown generation functions that produce code spans
+- used to wrap raw code strings as `InlineFragment` objects
+- called by `append_existing_code_span` and `append_code_aware_text` to produce code spans
 
 ### `clore::generate::make_code_fence`
 
-Declaration: `generate/markdown.cppm:109`
+Declaration: `src/generate/markdown.cppm:120`
 
-Definition: `generate/markdown.cppm:156`
+Definition: `src/generate/markdown.cppm:167`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::make_code_fence` 是一个简单的工厂函数，它接受两个 `std::string` 参数 `language` 和 `code`，通过指定的值构造一个 `CodeFence` 对象，并将其包装在返回的 `MarkdownNode` 中。实现直接使用成员初始化器 `.language` 和 `.code`，并调用 `std::move` 转移字符串所有权以避免不必要的复制。整个函数体仅包含一条 `return` 语句，不涉及条件分支、循环或异常处理，因此内部控制流是线性的。
-
-该函数的依赖仅限于 `MarkdownNode` 与 `CodeFence` 这两个类型的定义，它们均来自同一模块。由于 `make_code_fence` 本身不调用其他生成函数，也不访问全局状态，其行为完全由输入字符串决定，是一种纯构造器风格的辅助函数。
+该函数是一个直接构造器：它将 `language` 和 `code` 两个 `std::string` 通过移动语义存入一个 `CodeFence` 结构体，然后将其包装为 `MarkdownNode` 返回。整个实现没有分支或循环，仅依赖于 `MarkdownNode` 和 `CodeFence` 这两个数据类型的定义。
 
 #### Side Effects
 
@@ -563,8 +655,8 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `language`
-- `code`
+- parameter `language`
+- parameter `code`
 
 #### Writes To
 
@@ -572,18 +664,18 @@ No observable side effects are evident from the extracted code.
 
 #### Usage Patterns
 
-- Used to generate code blocks in documentation
-- Called when rendering code snippets in markdown output
+- create a fenced code block node for markdown rendering
+- used by higher-level page generation functions
 
 ### `clore::generate::make_link`
 
-Declaration: `generate/markdown.cppm:103`
+Declaration: `src/generate/markdown.cppm:114`
 
-Definition: `generate/markdown.cppm:140`
+Definition: `src/generate/markdown.cppm:151`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::make_link` 通过构造并返回一个 `LinkFragment` 实例来实现链接片段的创建。它直接将传入的 `label` 和 `target` 字符串参数通过 `std::move` 移动到对应的字段中，并将 `code_style` 布尔值原样赋给 `LinkFragment::code_style`。整个实现不包含分支或循环，完全依赖结构体聚合初始化完成。
+函数 `clore::generate::make_link` 的实现直接构造一个 `LinkFragment` 对象：它通过 `std::move` 将 `label` 和 `target` 字符串以及 `code_style` 布尔值转移到 `LinkFragment` 的对应字段（`label`、`target`、`code_style`）中，并返回该对象。该函数没有额外的算法或内部控制流，其唯一的依赖是 `LinkFragment` 结构体的定义。
 
 #### Side Effects
 
@@ -591,28 +683,24 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- Parameter `label` (moved from)
-- Parameter `target` (moved from)
-- Parameter `code_style` (copied)
-
-#### Writes To
-
-- Returned `LinkFragment` object (its `.label`, `.target`, `.code_style` fields)
+- `label` parameter
+- `target` parameter
+- `code_style` parameter
 
 #### Usage Patterns
 
-- Called to produce link fragments in markdown generation
-- Used where a hyperlink or cross-reference node is needed
+- Creates a `LinkFragment` from label, target, and `code_style` flag
+- Used in markdown rendering functions to construct link inline fragments
 
 ### `clore::generate::make_mermaid`
 
-Declaration: `generate/markdown.cppm:111`
+Declaration: `src/generate/markdown.cppm:122`
 
-Definition: `generate/markdown.cppm:165`
+Definition: `src/generate/markdown.cppm:176`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::make_mermaid` 的实现非常直接：它接受一个 `std::string code` 参数，然后构造一个 `MarkdownNode` 实例，该实例的 `value` 字段被设置为一个 `MermaidDiagram` 对象，该对象的 `code` 成员通过 `std::move` 从参数中取得。整个过程中没有引入额外的算法或内部控制流，也不依赖其他 `make_*` 工厂函数或复杂的 `render_*` 路径。该函数仅作为 `MermaidDiagram` 数据类型的薄包装器，将原始代码字符串直接嵌入到最终节点结构中。
+该函数创建一个 `MermaidDiagram` 实例，将其 `code` 字段初始化为输入的 `code` 字符串（通过 `std::move` 转移所有权），然后将该实例包装进 `MarkdownNode` 并返回。实现无分支、无循环，仅依赖 `MermaidDiagram` 与 `MarkdownNode` 的默认构造函数以及 `std::move` 语义。
 
 #### Side Effects
 
@@ -620,26 +708,25 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `code` parameter (the Mermaid source text)
+- parameter `code`
 
 #### Writes To
 
-- returns a `MarkdownNode` containing the `MermaidDiagram`
+- returns a new `MarkdownNode` containing a `MermaidDiagram` with the moved code
 
 #### Usage Patterns
 
-- called to generate Mermaid diagram nodes for documentation pages
-- used as part of render functions that produce Markdown output
+- creating Mermaid diagram nodes for inclusion in Markdown documents within the code generation pipeline
 
 ### `clore::generate::make_paragraph`
 
-Declaration: `generate/markdown.cppm:105`
+Declaration: `src/generate/markdown.cppm:116`
 
-Definition: `generate/markdown.cppm:148`
+Definition: `src/generate/markdown.cppm:159`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::make_paragraph` 的实现非常直接：它接受一个 `std::string` 参数，通过 `std::move` 将所有权转移给 `clore::generate::make_text`，后者将文本转换为一个 `TextFragment` 对象。随后，该片段被包装进一个 `Paragraph` 结构体的 `fragments` 字段中，最后整体构造一个 `MarkdownNode` 并返回。整个流程无分支、无循环，完全依赖 `make_text` 的底层文本解析逻辑以及 `Paragraph` 与 `MarkdownNode` 的数据布局。
+该函数创建一个 `MarkdownNode`，其值类型为 `Paragraph`。`Paragraph` 的 `fragments` 成员被初始化为仅包含一个元素：通过调用 `make_text` 并将输入文本移动进去得到的 `InlineFragment`。该实现依赖 `make_text` 将原始字符串转换为内联文本片段，整个构造过程无分支或循环。
 
 #### Side Effects
 
@@ -647,114 +734,75 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- input parameter `text` (moved)
-
-#### Writes To
-
-- returned `MarkdownNode` (allocated and moved into)
+- parameter `text`
 
 #### Usage Patterns
 
-- used as a factory function when building markdown structures that require a paragraph node
-- likely called from higher-level page generation functions
+- construct paragraph from plain text
+- helper for markdown generation
 
 ### `clore::generate::make_raw_markdown`
 
-Declaration: `generate/markdown.cppm:107`
+Declaration: `src/generate/markdown.cppm:118`
 
-Definition: `generate/markdown.cppm:152`
+Definition: `src/generate/markdown.cppm:163`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::make_raw_markdown` 直接构造并返回一个 `MarkdownNode`，其内部包含一个 `RawMarkdown` 实例，将传入的 `markdown` 字符串通过 `std::move` 移动到 `RawMarkdown::markdown` 字段中。该函数不进行任何解析或转换，仅作为原始 Markdown 文本的包装器使用，用于需要保持文本原样的场景（如前置元数据或已渲染的内容片段）。依赖关系仅涉及 `RawMarkdown` 和 `MarkdownNode` 这两个结构体。
+函数 `clore::generate::make_raw_markdown` 的实现极为简单：它将传入的 `std::string` 参数直接移动至 `RawMarkdown` 结构体的 `markdown` 成员，随后用该 `RawMarkdown` 对象构造并返回一个 `MarkdownNode`。整个过程中不涉及任何解析、扫描或条件分支，纯粹是一个包装器，用于将原始 Markdown 文本原封不动地转变为 `MarkdownNode` 的一种变体，以便在后续的文档生成流水线中与其他结构化节点（如段落、代码栅栏、语义节等）统一处理。该函数的依赖仅限于 `MarkdownNode` 和 `RawMarkdown` 两个类型，其设计意图是为无需进一步结构化解析的原始 Markdown 内容提供快速入口。
 
 #### Side Effects
 
-- allocates a `MarkdownNode`
-- moves ownership of the markdown string
+- Ownership transfer of the input string into the `RawMarkdown` struct
 
 #### Reads From
 
-- the markdown string parameter
+- Parameter `markdown` (moved from)
 
 #### Writes To
 
-- the returned `MarkdownNode` containing a `RawMarkdown`
-
-#### Usage Patterns
-
-- constructing a raw markdown node from a string
-- used as a helper to build markdown content
+- Returned `MarkdownNode` containing a `RawMarkdown` with the moved string
 
 ### `clore::generate::make_section`
 
-Declaration: `generate/markdown.cppm:115`
+Declaration: `src/generate/markdown.cppm:126`
 
-Definition: `generate/markdown.cppm:173`
+Definition: `src/generate/markdown.cppm:184`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::make_section` 直接构造一个 `SemanticSection` 实例，采用聚合初始化方式将传入的参数移动到对应的字段：`kind`、`subject_key`、`heading`、`level`、`omit_if_empty`、`code_style_heading`，并将 `children` 初始化为空。随后通过 `std::make_unique<SemanticSection>` 将生成的实例包装为 `SemanticSectionPtr` 返回。整个实现不涉及分支、循环或递归，完全依赖 `SemanticSection` 的结构布局和移动语义完成字段填充。
+函数 `clore::generate::make_section` 是 `SemanticSection` 对象的工厂函数。实现通过聚合初始化直接填充结构体所有字段：将传入的 `kind`、`subject_key`、`heading`、`level`、`omit_if_empty`、`code_style_heading` 逐一赋值，并将 `children` 初始化为空向量。随后使用 `std::make_unique` 将构造完成的 `SemanticSection` 实例包装为 `SemanticSectionPtr` 返回。整个过程无分支或循环，依赖仅在于 `SemanticSection` 的定义和标准库智能指针工具。
 
 #### Side Effects
 
-- Heap allocation of a `SemanticSection` object
+- Allocates a new `SemanticSection` object on the heap using `std::make_unique`.
+- Moves the `subject_key` and `heading` strings into the struct fields, consuming their original contents.
 
 #### Reads From
 
-- `SemanticKind kind` parameter
-- `std::string subject_key` parameter
-- `std::string heading` parameter
-- `std::uint8_t level` parameter
-- `bool omit_if_empty` parameter
-- `bool code_style_heading` parameter
+- All function parameters: `kind`, `subject_key`, `heading`, `level`, `omit_if_empty`, `code_style_heading` (read by value before move).
 
 #### Writes To
 
-- Heap memory for the newly created `SemanticSection`
-- The returned `SemanticSectionPtr` (ownership to caller)
+- Writes to the newly allocated `SemanticSection` object (its `.kind`, `.subject_key`, `.heading`, `.level`, `.omit_if_empty`, `.code_style_heading`, and `.children` members).
+- Writes to heap memory via the allocation.
 
 #### Usage Patterns
 
-- Called to build `SemanticSection` nodes in a documentation generation pipeline
-- Used within functions like `build_list_section` or `build_prompt_section` to construct document tree structures
+- Called to build individual sections that will be assembled into page markdown, e.g., within `add_symbol_analysis_sections`, `append_type_member_sections`, or `build_list_section`.
+- Used wherever a structured heading/content block is needed with a known heading level and semantic kind.
 
 ### `clore::generate::make_text`
 
-Declaration: `generate/markdown.cppm:99`
+Declaration: `src/generate/markdown.cppm:110`
 
-Definition: `generate/markdown.cppm:132`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-函数 `clore::generate::make_text` 是实现 `TextFragment` 工厂的简单构造器。它直接接收一个 `std::string` 参数，通过 `std::move` 将其所有权转移至新创建的 `TextFragment` 结构体中的 `text` 成员，然后返回该片段。该实现不涉及任何解析、格式化或条件分支，仅依赖 `TextFragment` 类型的定义及标准库的移动语义。
-
-#### Side Effects
-
-- moves the contents of the input string into the internally created `TextFragment`, transferring ownership of the string data
-
-#### Reads From
-
-- parameter `text` (`std::string`)
-
-#### Writes To
-
-- returned `InlineFragment` (specifically the `text` member of the `TextFragment`)
-
-#### Usage Patterns
-
-- creating inline text fragments for markdown generation
-- building `TextFragment` nodes from user-supplied or synthesized strings
-
-### `clore::generate::render_markdown`
-
-Declaration: `generate/markdown.cppm:122`
-
-Definition: `generate/markdown.cppm:730`
+Definition: `src/generate/markdown.cppm:143`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数依次处理一个 `MarkdownDocument`：首先检查其 `frontmatter` 字段，若存在则按顺序输出 YAML 分隔符和 `title`、`description`、`layout`、`page_template` 四个键值对，每个值通过 `yaml_quote` 转义（`layout` 和 `page_template` 字段除外）。随后遍历 `children` 列表，对每个 `MarkdownNode` 调用 `render_node`，将返回的字符串拼接至结果中。整个过程依赖 `yaml_quote` 和 `render_node` 两个辅助函数，后者内部递归处理节点树。
+Implementation: [Implementation](functions/make-text.md)
+
+函数 `clore::generate::make_text` 接收一个 `std::string` 类型的参数 `text`，并将其直接转移到一个 `TextFragment` 对象的 `text` 成员中，最终返回该对象作为 `InlineFragment`。该函数是创建纯文本内联片段的便捷方法，没有分支或循环，仅依赖 `std::move` 进行资源转移，以及 `TextFragment` 和 `InlineFragment` 类型的构造。
 
 #### Side Effects
 
@@ -762,16 +810,52 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `document` parameter
-- `document.frontmatter` (optional)
-- `document.children`
-- `fm.title`, `fm.description`, `fm.layout`, `fm.page_template`
+- the `text` parameter
+
+#### Writes To
+
+- the `text` member of the returned `TextFragment`
 
 #### Usage Patterns
 
-- Called to convert a `MarkdownDocument` into a plain text Markdown string for writing to files.
+- building text fragments for markdown nodes
+- creating inline fragments from plain strings
+
+### `clore::generate::render_markdown`
+
+Declaration: `src/generate/markdown.cppm:133`
+
+Definition: `src/generate/markdown.cppm:741`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+函数 `clore::generate::render_markdown` 首先检查 `document.frontmatter` 是否存在，若存在则使用 `yaml_quote` 对标题、描述等字段进行转义并拼接 YAML 前置元数据块。随后遍历 `document.children`，对每个 `MarkdownNode` 调用 `render_node` 进行递归渲染，将结果依次追加到 `rendered` 字符串中。整个实现依赖 `yaml_quote` 处理 YAML 字符串的引号转义，以及 `render_node` 完成各类节点（如段落、代码围栏、列表、语义章节等）的 Markdown 文本生成。
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- `document.frontmatter`
+- `document.frontmatter->title`
+- `document.frontmatter->description`
+- `document.frontmatter->layout`
+- `document.frontmatter->page_template`
+- `document.children`
+
+#### Writes To
+
+- local variable `rendered`
+
+#### Usage Patterns
+
+- Used as a pure transformation from `MarkdownDocument` to `std::string` for generating markdown output.
+- Likely called by page rendering or code generation functions within the `clore::generate` namespace.
 
 ## Internal Structure
 
-该模块提供了在 `clore::generate` 命名空间下构建和渲染 Markdown 文档的完整实现。内部结构清晰分为两层：一是数据层，定义了 `MarkdownDocument`、`Frontmatter` 以及多种 `MarkdownNode` 变体（包括 `Paragraph`、`BlockQuote`、`CodeFence`、`MermaidDiagram`、`RawMarkdown`、`SemanticSection` 等），每种变体均由对应的 `make_*` 工厂函数（如 `make_paragraph`、`make_code_fence`）构造，工厂函数接收整数句柄或直接内容参数，返回统一的 `MarkdownNode` 对象。二是渲染层，核心入口为 `render_markdown`，它接收 `MarkdownDocument` 并依次遍历子节点，调用 `render_node`、`render_section`、`render_inlines` 等内部函数，将结构转化为最终的 Markdown 字符串。匿名命名空间中聚集了大量辅助函数（如 `is_identifier_start`、`has_camel_case_boundary`、`read_backtick_span`、`append_code_spanned_line` 等），这些函数负责文本解析、标识符判断、代码跨度和链接的读取，支撑底层内联元素的渲染逻辑。整个模块仅导入标准库，未引入外部依赖，体现了清晰的关注点分离：数据结构与构建逻辑独立于渲染细节。
+该模块将 Markdown 生成职责分解为两个清晰的内部层次：**文档树构建**与**文本渲染**。文档树由公开的工厂函数（如 `make_paragraph`、`make_code_fence`、`make_section`）构建，这些函数创建 `MarkdownDocument` 或 `MarkdownNode` 等结构，并通过 `std::variant` 或字段（如 `SemanticSection::children`）组织层级关系。渲染层则包含一组匿名命名空间的辅助函数（如 `render_node`、`render_section`、`render_inlines`），它们递归遍历文档树并将节点转化为最终 Markdown 字符串。这种分离使得树结构易于扩展（例如新增 `MermaidDiagram` 或 `BlockQuote` 类型），而渲染逻辑则集中处理格式细节。
+
+在文本处理方面，模块进一步拆分为代码感知解析与普通文本处理。函数 `code_spanned_fragments` 将输入字符串解析为 `InlineFragment` 片段（`TextFragment`、`CodeFragment`、`LinkFragment` 的变体），而内部函数如 `read_backtick_span` 和 `read_code_candidate` 负责识别代码跨度。这一分解将原始字符串与渲染细节解耦：上层 `append_rendered_text` 或 `append_code_spanned_fragments` 等辅助函数组合片段，再经由 `render_inline` 生产出带反引号或链接的 Markdown 输出。整体实现结构以模块内的匿名命名空间隐藏具体算法，仅暴露少数公共工厂和渲染接口，保持了内部层析的封装性。
 

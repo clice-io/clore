@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::detail::selecteventloop'
-description: 'The function implements a simple fallback mechanism: it checks whether the provided loop pointer is non‑null, and if so, returns a reference to that object directly. If the pointer is null, it delegates to kota::event_loop::current(), which is expected to return a reference to the event loop active on the calling thread. The precondition is that a valid loop exists on the thread when the pointer is null; otherwise the behavior is undefined. The only external dependency is the kota::event_loop type and its static current() member.'
+description: 'The function first checks whether the incoming loop pointer is non-null. If it is, the function immediately dereferences it and returns that reference, preserving an explicitly provided loop. Otherwise, it falls back to kota::event_loop::current(), which returns a reference to the active event loop for the calling thread. The implementation relies on the precondition that this static method always yields a valid loop; if no loop is active on the thread, the behavior is undefined. This two‑step control flow allows callers to optionally supply a loop while ensuring that a valid reference is always obtained without dynamic allocation.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module client](../index.md)
 
-Declaration: `network/client.cppm:45`
+Declaration: `src/network/client.cppm:53`
 
-Definition: `network/client.cppm:45`
+Definition: `src/network/client.cppm:53`
 
 Declaration: [`Namespace clore::net::detail`](../../../namespaces/clore/net/detail/index.md)
 
@@ -28,7 +28,7 @@ auto select_event_loop(kota::event_loop* loop) -> kota::event_loop& {
 }
 ```
 
-The function implements a simple fallback mechanism: it checks whether the provided `loop` pointer is non‑null, and if so, returns a reference to that object directly. If the pointer is null, it delegates to `kota::event_loop::current()`, which is expected to return a reference to the event loop active on the calling thread. The precondition is that a valid loop exists on the thread when the pointer is null; otherwise the behavior is undefined. The only external dependency is the `kota::event_loop` type and its static `current()` member.
+The function first checks whether the incoming `loop` pointer is non-null. If it is, the function immediately dereferences it and returns that reference, preserving an explicitly provided loop. Otherwise, it falls back to `kota::event_loop::current()`, which returns a reference to the active event loop for the calling thread. The implementation relies on the precondition that this static method always yields a valid loop; if no loop is active on the thread, the behavior is undefined. This two‑step control flow allows callers to optionally supply a loop while ensuring that a valid reference is always obtained without dynamic allocation.
 
 ## Side Effects
 
@@ -36,13 +36,14 @@ No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- parameter `loop` (nullable pointer to `kota::event_loop`)
-- result of `kota::event_loop::current()`
+- parameter `loop`
+- current thread's event loop via `kota::event_loop::current()`
 
 ## Usage Patterns
 
-- Resolves an optional event loop pointer into a guaranteed-valid reference for downstream async operations
-- Allows callers to pass `nullptr` to request the current thread's event loop
+- used by `clore::net::call_llm_async` to resolve an event loop reference
+- used by `clore::net::call_completion_async` to resolve an event loop reference
+- provides fallback to current loop when caller passes null
 
 ## Called By
 

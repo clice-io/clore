@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::openai::schema::detail'
-description: '该命名空间是 clore::net::openai::schema 库的内部实现细节层，封装了 OpenAI 模式生成与验证所需的底层支持。它提供了一系列类型萃取工具（如 is_array、is_vector、is_optional 及其对应的内嵌类型提取器）来在编译期识别标准容器和可选类型，以便递归地提取出需要生成 schema 的底层元素类型；同时，它还包含了用于校验 JSON 对象、数组和值的验证函数（如 validate_openai_schema、validate_openai_schema_value、validate_schema_array_of_types），以及用于构建 schema 对象的辅助函数（如 make_schema_object、make_any_of_schema、populate_object_schema、sanitize_schema_name 等）。这些函数和类型特征协同工作，构成了 schema 生成管道的核心处理单元，支持从 C++ 类型到符合 OpenAI 规范的 JSON 模式描述的自动推导、构造与合规性检查。'
+description: '命名空间 clore::net::openai::schema::detail 是 OpenAI Schema 生成的内部实现层，专注于提供类型萃取、模式构建和验证等底层工具。其中类型萃取结构体（如 is_optional、is_vector、is_array、optional_inner、vector_inner、array_inner 及 schema_subject）用于在编译期解析 C++ 类型（std::optional、std::vector、std::array 等）的内部元素类型，为后续的模式映射奠定基础。构建函数（如 make_schema_object、make_scalar_type_schema、make_any_of_schema、make_schema_value）负责将特定类型或类型成分转换为 JSON Schema 片段的整数标识，而验证相关函数（如 validate_openai_schema、validate_openai_schema_value、validate_required_properties、validate_schema_array_of_types）则确保生成的 Schema 符合 OpenAI 规范。此外，sanitize_schema_name 和 populate_object_schema 等辅助函数提供了名称清洗和对象填充等基本操作。该命名空间承担了模式管线中所有关键的内部协调工作，是上层公共接口的支撑基石。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-该命名空间是 `clore::net::openai::schema` 库的内部实现细节层，封装了 `OpenAI` 模式生成与验证所需的底层支持。它提供了一系列类型萃取工具（如 `is_array`、`is_vector`、`is_optional` 及其对应的内嵌类型提取器）来在编译期识别标准容器和可选类型，以便递归地提取出需要生成 schema 的底层元素类型；同时，它还包含了用于校验 JSON 对象、数组和值的验证函数（如 `validate_openai_schema`、`validate_openai_schema_value`、`validate_schema_array_of_types`），以及用于构建 schema 对象的辅助函数（如 `make_schema_object`、`make_any_of_schema`、`populate_object_schema`、`sanitize_schema_name` 等）。这些函数和类型特征协同工作，构成了 schema 生成管道的核心处理单元，支持从 C++ 类型到符合 `OpenAI` 规范的 JSON 模式描述的自动推导、构造与合规性检查。
-
-在架构上，该命名空间扮演了“基础设施”角色，它不直接暴露给外部调用者，而是被高层 API 所依赖。内部的结构体、别名和函数通过模板元编程实现编译期决策和运行时构造的解耦，其返回值（通常为整数状态码）和参数约定（如使用 `std::string_view` 表示路径或名称）在实现层面统一了验证与构建的接口风格。任何需要根据 C++ 类型生成或验证 `OpenAI` 模式的操作，最终都会路由到此命名空间中的相应组件完成，从而保证了模式定义的一致性和可维护性。
+命名空间 `clore::net::openai::schema::detail` 是 `OpenAI` Schema 生成的内部实现层，专注于提供类型萃取、模式构建和验证等底层工具。其中类型萃取结构体（如 `is_optional`、`is_vector`、`is_array`、`optional_inner`、`vector_inner`、`array_inner` 及 `schema_subject`）用于在编译期解析 C++ 类型（`std::optional`、`std::vector`、`std::array` 等）的内部元素类型，为后续的模式映射奠定基础。构建函数（如 `make_schema_object`、`make_scalar_type_schema`、`make_any_of_schema`、`make_schema_value`）负责将特定类型或类型成分转换为 JSON Schema 片段的整数标识，而验证相关函数（如 `validate_openai_schema`、`validate_openai_schema_value`、`validate_required_properties`、`validate_schema_array_of_types`）则确保生成的 Schema 符合 `OpenAI` 规范。此外，`sanitize_schema_name` 和 `populate_object_schema` 等辅助函数提供了名称清洗和对象填充等基本操作。该命名空间承担了模式管线中所有关键的内部协调工作，是上层公共接口的支撑基石。
 
 ## Diagram
 
@@ -46,381 +44,375 @@ graph TD
 
 ### `clore::net::openai::schema::detail::array_inner`
 
-Declaration: `network/schema.cppm:72`
+Declaration: `src/network/schema.cppm:82`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-`clore::net::openai::schema::detail::array_inner` 是一个模板元函数（trait），用于提取 `std::array` 容器中存储的元素类型。其 `type` 成员别名表示数组的元素类型，例如 `array_inner<std::array<int, 5>>::type` 为 `int`。此结构体是 `OpenAI` schema 实现内部的类型萃取工具，与 `vector_inner`、`optional_inner` 等协同工作，在 schema 推导和生成流程中统一获取不同容器（如 `std::vector`、`std::optional`）的内部元素类型。
+结构体模板 `clore::net::openai::schema::detail::array_inner` 是一个类型萃取元函数，用于提取数组容器类型的内部元素类型。它配合其他同类元函数（如 `vector_inner` 和 `optional_inner`）使用，通过对 `std::array` 的特化暴露 `::type` 别名，指向数组的元素类型。该类型通常出现在模式（schema）推导路径中，为泛型算法（如 `schema_subject_t` 的选取）提供元素类型信息，从而支持对容器内元素进行递归的模式描述。
 
 ### `clore::net::openai::schema::detail::is_array`
 
-Declaration: `network/schema.cppm:63`
+Declaration: `src/network/schema.cppm:73`
 
-Definition: `network/schema.cppm:63`
+Definition: `src/network/schema.cppm:73`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-`clore::net::openai::schema::detail::is_array` 是一个模板结构体，用于在编译时判断给定类型 `T` 是否为数组类型（例如 `std::array`）。它属于该库内部 schema 生成流程的类型特征工具集，与 `is_vector`、`is_optional` 等一同用于区分不同的容器形态，从而正确抽取元素类型并生成对应的 JSON schema 描述。该特征通常通过特化或继承机制实现，并常与 `array_inner` 等内嵌类型别名配合使用，以获取数组元素的具体类型。
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- 对于任意类型 `T`，`is_array<T>::value` 恒为 `false`（基础模板）
-- 无其他约束或保证
+- 对于 primary template，`value` 始终为 `false`
+- 继承自 `std::false_type`，符合 C++ traits 惯例
+- 无运行时状态，仅在编译时使用
 
 #### Key Members
 
-- 继承的静态成员 `value`（类型 `bool`，值为 `false`）
+- 继承的 `value` 成员（`false`）
+- 继承的 `type` 类型别名（`std::false_type`）
 
 #### Usage Patterns
 
-- 作为编译时谓词用于类型检查或 SFINAE 上下文
-- 可被特化以区分数组类型与非数组类型
-- 其他特征或代码依赖其 `value` 进行条件编译
+- 用于编译时判断类型是否为数组，配合模板特化或 SFINAE
+- 可能作为其他 traits 的基础或默认实现
 
 ### `clore::net::openai::schema::detail::is_optional`
 
-Declaration: `network/schema.cppm:23`
+Declaration: `src/network/schema.cppm:33`
 
-Definition: `network/schema.cppm:23`
+Definition: `src/network/schema.cppm:33`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-`clore::net::openai::schema::detail::is_optional` 是一个模板元函数（traits），用于在编译期判断给定的模板类型参数 `T` 是否为 `std::optional` 的特化。它通常与 `is_array`、`is_vector` 等类型特征一同被定义，服务于 `OpenAI` Schema 库的序列化与类型反射机制。当需要对类型进行条件化处理（例如展开 optional 容器或提取其内部值类型）时，`is_optional` 会返回一个编译期布尔常量，从而让其他元编程组件（如 `optional_inner` 或 `schema_subject`）能够据此选择正确的类型转换路径。
+`clore::net::openai::schema::detail::is_optional` 是一个模板结构体，用作编译期类型特征。它接受一个模板参数 `T`，并继承自 `std::true_type` 或 `std::false_type`，用于检测 `T` 是否为 `std::optional` 的特化。该特征通常配合 `optional_inner` 等工具使用，在 `OpenAPI` 模式生成过程中识别可选字段，并据此控制后续的类型消去或模式组装逻辑。它与其他姊妹特征（如 `is_vector`、`is_array`）共同构成 schema 生成框架中对容器与包装器类型的辨识支持。
 
 #### Invariants
 
-- 对于任意未特化的类型 `T`，`is_optional<T>::value` 恒为 `false`。
-- 主模板不提供任何自定义成员或嵌套类型，仅继承 `std::false_type` 的接口。
+- Default value is `false` for all types unless a specialization overrides it
+- Inherits from `std::false_type`
+- Primary template itself provides no custom logic
 
 #### Key Members
 
-- 继承自 `std::false_type` 的静态常量 `value`
-- 继承自 `std::false_type` 的 `value_type` 和 `type` 别名
+- Implicit static constant `value` (from `std::false_type`)
+- Inherited `operator()` returning `false`
 
 #### Usage Patterns
 
-- 在其他模板元编程中用作类型约束或条件分支的基础，例如 `if constexpr (is_optional<T>::value)`。
-- 可作为特化模板（如针对 `std::optional`、`std::unique_ptr` 等）的基类，通过启用模板特化来标记特定类型为 optional。
+- Used in template metaprogramming to query if a type is optional
+- Expected to be specialized for actual optional types (e.g., `std::optional`)
+- Checked via `is_optional<T>::value` in conditional enable-if constructs
 
 ### `clore::net::openai::schema::detail::is_vector`
 
-Declaration: `network/schema.cppm:43`
+Declaration: `src/network/schema.cppm:53`
 
-Definition: `network/schema.cppm:43`
+Definition: `src/network/schema.cppm:53`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-`clore::net::openai::schema::detail::is_vector` 是一个模板元编程工具，用于在编译时判断给定类型 `T` 是否为 `std::vector` 的实例化。它属于 `detail` 命名空间下的内部实现，与 `vector_inner`、`is_array` 等类型 trait 协同工作，共同支撑 `OpenAI` schema 生成过程中对容器类型的静态识别和特性提取。通过 `is_vector`，代码可以在编译期分支处理向量类型与其他序列类型，从而实现正确的 schema 结构描述。
-
-#### Invariants
-
-- For any unspecialized type `T`, `is_vector<T>::value` is `false`.
-- Specializations for `std::vector` (or user-defined vector types) override `value` to `true`.
-- The trait is intended for use in compile-time type introspection and SFINAE contexts.
-
-#### Key Members
-
-- Inherited `value` (static constexpr bool) from `std::false_type`.
-- Inherited `type` (typedef for `std::false_type`) from `std::false_type`.
-
-#### Usage Patterns
-
-- Used as a base for type-disambiguation via partial or full specialization (e.g., `template<typename T> struct is_vector<std::vector<T>> : std::true_type {}`).
-- Leveraged in conditionals like `if constexpr` or `std::enable_if` to activate code paths only for vector types.
-- Expected to be queried by other traits or template metafunctions within the `clore::net::openai::schema` namespace.
+`clore::net::openai::schema::detail::is_vector` 是一个模板元函数（类型萃取），用于在编译时判断模板参数 `T` 是否为 `std::vector` 类型。它通常继承自 `std::true_type` 或 `std::false_type`，为后续的 SFINAE 重载或条件选择提供布尔常量。该结构体与 `detail::vector_inner` 等辅助工具配合，用于解析向量容器的内部元素类型，在 `OpenAI` 模式生成相关的 SFINAE 逻辑中起到类型分派的作用。
 
 ### `clore::net::openai::schema::detail::optional_inner`
 
-Declaration: `network/schema.cppm:32`
+Declaration: `src/network/schema.cppm:42`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-`clore::net::openai::schema::detail::optional_inner` 是一个辅助类型萃取模板，用于从 `std::optional` 中提取其包裹的值类型。当模板参数 `T` 为 `std::optional<U>` 时，其 `::type` 成员被定义为 `U`。该结构体常与 `is_optional` 等类型特征联合使用，在编译期判断并解析可选类型的内容，从而为 `OpenAI` API 的 JSON Schema 自动生成提供底层类型信息。
+`clore::net::openai::schema::detail::optional_inner` 是一个元函数，用于提取 `std::optional` 所包装的类型。当模板参数 `T` 为 `std::optional<U>` 的实例时，其 `type` 成员代表 `U`；否则该特化不适用。该类型常与辅助类型 `is_optional` 配合使用，在编译期检查类型是否为 optional，再通过 `optional_inner` 获取内部类型。在 `OpenAI` Schema 的 JSON 生成流程中，它被用于将可选的模式字段映射为其底层类型的 schema 描述。
+
+#### Invariants
+
+- 无已知不变性
+
+#### Key Members
+
+- 无公开成员
+
+#### Usage Patterns
+
+- 未在现有证据中明确描述
 
 ### `clore::net::openai::schema::detail::schema_subject`
 
-Declaration: `network/schema.cppm:83`
+Declaration: `src/network/schema.cppm:93`
 
-Definition: `network/schema.cppm:83`
+Definition: `src/network/schema.cppm:93`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-该结构体是 `OpenAPI` Schema 生成实现细节的一部分，用于为给定类型 `T` 确定其 Schema 描述的“主题”类型。它通常通过模板特化来处理容器（如 `std::vector`、`std::optional`、`std::array`）或简单类型，从这些类型中提取出需要为其生成 Schema 的内部元素类型，而非直接使用容器本身。该结构体不对外开放，而是通过别名 `schema_subject_t` 间接使用，以简化后续特征和转换代码的编写。
+`clore::net::openai::schema::detail::schema_subject` 是一个模板结构体，用于从给定的类型 `T` 中提取其“主题”类型。它通常与辅助 trait 如 `optional_inner`、`vector_inner` 和 `array_inner` 配合使用，以剥离 `std::optional`、`std::vector` 或 `std::array` 等包装，返回内部元素的类型。当 `T` 不是这些包装类型时，`schema_subject<T>` 会退化为其自身类型。该结构体的结果通过类型别名 `schema_subject_t` 暴露给外界，用作 `clore::net::openai::schema` 命名空间中类型推导和解构的核心工具。
 
 #### Invariants
 
-- `type` is always `std::remove_cvref_t<T>`
-- The struct has no runtime state or behavior
-- The alias is valid for any complete type `T`
+- `schema_subject<T>::type` 始终为移除 cv 限定符和引用后的类型
 
 #### Key Members
 
-- `using type = std::remove_cvref_t<T>`
+- 类型别名 `type`
 
 #### Usage Patterns
 
-- Used by other schema classes to normalize type arguments
-- May be instantiated as a base class or nested type for type erasure
-- Provides a consistent way to obtain a canonical type from `T`
+- 在 `clore::net::openai::schema` 内部用于获取模板参数的底层类型
+- 用于构建或推导模式定义中的实际类型
 
 ### `clore::net::openai::schema::detail::schema_subject_t`
 
-Declaration: `network/schema.cppm:95`
+Declaration: `src/network/schema.cppm:105`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-类型别名 `schema_subject_t` 是一个模板别名，用于递归地剥离给定类型 `T` 外层的标准库容器包装（如 `std::vector`、`std::optional`、`std::array`），以提取最终的基础“主题”类型。它位于 `detail` 命名空间内，是 `OpenAI` schema 生成机制的内部实现细节，供诸如 `schema_subject` 等元函数使用，以确定需要为其生成 JSON schema 的原始数据类型。
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- 必须存在 `schema_subject<T>::type` 定义
-- 别名的解析结果由 `schema_subject` 特化决定
-- 不保证对所有 `T` 均有效
+- `schema_subject<T>` 必须为每个使用到的 `T` 提供有效的 `type` 嵌套类型
+- 别名自身不引入任何约束或副作用
 
 #### Key Members
 
-- `schema_subject<T>::type` 成员类型
+- 别名 `schema_subject_t` 无成员，其作用依赖于 `schema_subject<T>::type`
 
 #### Usage Patterns
 
-- 作为便捷名称替代冗长的 `typename schema_subject<T>::type`
-- 在模板元编程中统一对外暴露类型
+- 其他模板代码通过 `schema_subject_t<T>` 获取关联的主题类型
+- 常用于元编程中简化类型提取
 
 ### `clore::net::openai::schema::detail::vector_inner`
 
-Declaration: `network/schema.cppm:52`
+Declaration: `src/network/schema.cppm:62`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-模板结构体 `clore::net::openai::schema::detail::vector_inner` 是一个类型萃取工具，用于从 `std::vector` 中提取其元素类型。其公开的 `type` 别名成员给出了向量中存储的元素类型。该结构体与 `clore::net::openai::schema::detail::optional_inner` 和 `clore::net::openai::schema::detail::array_inner` 等类似特质协同工作，作为 `OpenAPI` 模式生成机制的一部分，统一处理标准容器类型的内部元素推导。
+`clore::net::openai::schema::detail::vector_inner` 是一个模板元函数，用于提取 `std::vector` 容器所持有的元素类型。它接受一个模板类型参数 `T`，并通常通过特化来匹配形如 `std::vector<E, A>` 的类型，将其内部元素类型 `E` 暴露为 `::type`。该类型别名与其他类似的内萃取（如 `optional_inner`、`array_inner`）一同服务于 `OpenAI` schema 生成过程中的类型推导与映射，使得外部实现可以统一处理不同容器类型的内部元素类型。
 
 #### Invariants
 
-- 未从证据中提取到明确的不变性
+- No invariants are specified in the evidence.
 
 #### Key Members
 
-- 无已知的成员、嵌套类型或方法
+- No key members are documented in the evidence.
 
 #### Usage Patterns
 
-- 未从证据中提取到使用模式
+- The struct is intended for use within the `clore::net::openai::schema` detail implementation, but specific usage patterns are not provided.
 
 ## Variables
 
 ### `clore::net::openai::schema::detail::is_array_v`
 
-Declaration: `network/schema.cppm:69`
+Declaration: `src/network/schema.cppm:79`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-Template variable `clore::net::openai::schema::detail::is_array_v` is a `constexpr bool` constant that indicates whether a given type `T` is an array type.
+`clore::net::openai::schema::detail::is_array_v` 是一个编译期布尔常量模板变量，用于判断模板参数 `T` 是否为数组类型。
 
 ### `clore::net::openai::schema::detail::is_optional_v`
 
-Declaration: `network/schema.cppm:29`
+Declaration: `src/network/schema.cppm:39`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-A `constexpr bool` template variable that resolves to `true` when the type `T` is an optional type, as determined by the schema detail traits.
+A constexpr boolean variable template `clore::net::openai::schema::detail::is_optional_v` that evaluates to `true` for types that represent an optional field in the schema context.
 
 ### `clore::net::openai::schema::detail::is_vector_v`
 
-Declaration: `network/schema.cppm:49`
+Declaration: `src/network/schema.cppm:59`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-类型 `clore::net::openai::schema::detail::is_vector_v` 是一个 `constexpr` 布尔模板变量，用于在编译时判断模板参数 `T` 是否为 `std::vector` 类型。
-
-#### Usage Patterns
-
-- 作为编译时布尔常量用于判断类型是否为 `std::vector`
-- 参与模板特化或条件编译中的类型筛选
+变量 `clore::net::openai::schema::detail::is_vector_v` 是一个 `constexpr bool` 模板变量，用于在编译时判断给定类型 `T` 是否表示一个向量类型。
 
 ## Functions
 
 ### `clore::net::openai::schema::detail::make_any_of_schema`
 
-Declaration: `network/schema.cppm:156`
+Declaration: `src/network/schema.cppm:166`
 
-Definition: `network/schema.cppm:156`
+Definition: `src/network/schema.cppm:166`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-函数 `clore::net::openai::schema::detail::make_any_of_schema` 是一个模板函数，负责构造表示 `OpenAI` 模式中 `anyOf` 约束的 JSON 模式片段。调用方必须提供模板参数 `T`，该参数应满足特定内省要求（如具有成员或类型特征），函数根据该类型生成对应的 `anyOf` 模式定义。函数返回一个整数，用于指示操作结果或状态，但具体含义未在公开接口中明确；调用方应检查该返回值以判断模式构建是否成功。此函数是模式生成管道的一部分，通常在需要为联合类型或备选类型生成模式时由上层函数（如 `make_schema_value` 或 `populate_object_schema`）间接调用。
+函数 `clore::net::openai::schema::detail::make_any_of_schema` 是一个模板函数（模板参数 `typename T`），用于在 `OpenAI` 模式生成的内部分工中负责构造表示“`anyOf`”语义的 JSON Schema 片段。它接受一个 `int` 类型的参数并返回一个 `int`；调用方应确保传入的参数有效并依据返回值判断生成是否成功。该函数属于 `detail` 命名空间，作为内部实现组件，应与同一命名空间下的 `make_schema_object`、`make_scalar_type_schema` 等协同完成完整模式构建，外部代码通常通过上层接口间接调用。
 
 #### Usage Patterns
 
-- Used to assemble an `anyOf` schema from a list of sub-schemas
-- Called when generating `OpenAI`-compatible schema representations
+- Called to produce an `anyOf` schema from a collection of alternative schemas
+- Used to wrap multiple schema options into a single `json::Value` object
 
 ### `clore::net::openai::schema::detail::make_scalar_type_schema`
 
-Declaration: `network/schema.cppm:146`
+Declaration: `src/network/schema.cppm:156`
 
-Definition: `network/schema.cppm:146`
+Definition: `src/network/schema.cppm:156`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-函数模板 `clore::net::openai::schema::detail::make_scalar_type_schema` 为指定的 C++ 类型 `T` 生成一个 `OpenAPI` 标量类型 schema，并将结果写入当前 schema 对象中。调用者需提供一个字符串标识符（通常为 schema 的引用名称或路径），用于在最终输出的 schema 文档中标识该类型定义。函数返回一个 `int` 值，表示操作结果：零表示成功，非零表示失败或错误状态。该函数主要用于 schema 构建的内部流程，不应由外部代码直接调用。
+`clore::net::openai::schema::detail::make_scalar_type_schema` 为一个给定的标量类型名称生成对应的 `OpenAI` JSON Schema 片段。调用方需传入一个标识标量类型的 `std::string_view`（例如 `"string"`、`"number"`、`"boolean"` 等）；函数返回一个 `int` 值，表示操作的结果或生成的 schema 对象的标识。该函数是架构构建流程中的内部工具，预期由 `detail` 命名空间中的其他 schema 工厂函数调用，不应直接对外暴露。
 
 #### Usage Patterns
 
-- 被高层 schema 构建函数（如 `make_schema_object`、`make_schema_value`）调用，将基础 C++ 类型映射为 `OpenAI` 兼容的 schema 格式
+- Called when building JSON schemas for scalar types (e.g., string, number, boolean)
+- Part of the `OpenAI` schema generation utility functions
 
 ### `clore::net::openai::schema::detail::make_schema_object`
 
-Declaration: `network/schema.cppm:132`
+Declaration: `src/network/schema.cppm:142`
 
-Definition: `network/schema.cppm:132`
+Definition: `src/network/schema.cppm:142`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-`clore::net::openai::schema::detail::make_schema_object` 是一个模板函数，根据模板参数 `T` 创建一个用于 `OpenAI` 模式定义的 JSON 对象。它返回一个 `int` 值，用于指示操作是否成功完成。该函数属于 `detail` 命名空间，是内部 schema 构建流程的一部分，不应由用户直接调用；调用者需要确保 `T` 是一个合法类型，否则行为未定义或返回错误代码。
+函数 `clore::net::openai::schema::detail::make_schema_object` 是一个模板函数，负责为给定类型 `T` 生成一个 `OpenAI` schema 对象。它返回一个整数标识符，该标识符在后续的模式构建流程中代表所创建的对象 schema。
+
+调用者应确保 `T` 是受支持的类型，并且该函数在模式生成管线中与其他 `detail` 层函数（如 `populate_object_schema`、`validate_openai_schema` 等）协同工作。返回值仅用于内部协调，调用者不应假设其具体含义或持久性。
 
 #### Usage Patterns
 
-- called when generating a JSON schema object for a type `T`
-- used in schema construction pipeline alongside `make_schema_value` and `populate_object_schema`
+- Generating root schema object for a type `T`
+- Creating JSON object schema from a C++ type for `OpenAI` compatibility
 
 ### `clore::net::openai::schema::detail::make_schema_value`
 
-Declaration: `network/schema.cppm:129`
+Declaration: `src/network/schema.cppm:139`
 
-Definition: `network/schema.cppm:225`
+Definition: `src/network/schema.cppm:235`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-函数 `clore::net::openai::schema::detail::make_schema_value` 是一个模板函数，用于根据模板参数 `T` 生成并返回一个表示 `OpenAPI` schema 值的整数标识或状态码。调用者负责提供类型 `T`，该函数会为该类型构建一个对应的 schema value 描述（通常为 JSON schema 中的值子结构），返回的 `int` 可用于后续 schema 组装或验证流程（如 `populate_object_schema` 或 `validate_openai_schema_value`）。此函数是 schema 生成内部实现的一环，不应被外部代码直接依赖，其正确性依赖于类型 `T` 的元信息可被正确识别为 schema 中的合法值类型。
+该函数为给定的模板参数 `T` 生成一个 `OpenAPI` schema value 的整数表示。返回的整数标识符可被其他 schema 构建辅助函数（例如 `make_schema_object`、`make_any_of_schema`）直接引用，用于在复杂的 schema 组装过程中标识或索引该 value。调用者必须确保 `T` 是库支持的可映射类型，函数不会对无效类型进行运行时检查。该函数属于 `clore::net::openai::schema::detail` 内部实现细节，通常不应直接调用的外部接口，而是通过高级 schema 生成入口间接使用。
 
 #### Usage Patterns
 
-- Used internally by `OpenAI` schema generation to produce `json::Value` for a given C++ type
-- Called recursively for nested container and optional types
-- Expected to be consumed by higher-level schema assembly functions
+- Called during JSON schema generation for a type `T` as part of building prompt definitions or validation schemas.
+- Used in conjunction with `validate_openai_schema`, `populate_object_schema`, and other schema utilities to produce the final schema object.
 
 ### `clore::net::openai::schema::detail::populate_object_schema`
 
-Declaration: `network/schema.cppm:173`
+Declaration: `src/network/schema.cppm:183`
 
-Definition: `network/schema.cppm:173`
+Definition: `src/network/schema.cppm:183`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-该函数负责向传入的 `json::Object` 中填充模式（schema）描述，通常用于构造符合 `OpenAI` 规范的 JSON 模式对象。第一个参数为待填充的目标对象，第二个参数充当起始位置或计数指示符，返回值表示填充过程中使用的元素数量或下一次调用的起始偏移量。模板参数 `Object` 与 `Indices` 允许在编译期按索引序列展开，以适应不同的属性遍历策略。调用者应保证目标对象处于可写状态，并在调用后根据返回值决定后续处理（例如继续填充其他模式组件）。
+该函数用于填充一个 `json::Object`，使其成为符合 `OpenAI` Schema 规范的对象表示。调用者需提供一个可修改的 `json::Object` 引用和一个整数参数，函数会根据模板参数 `Object` 和 `Indices...` 所描述的内部结构，向该对象中添加属性定义。第二个整数参数通常用于指示当前处理的位置或索引，调用者应确保其值在合理范围内。函数返回一个整数，表示填充操作的执行结果（例如成功添加的属性数量或状态码）。
 
 #### Usage Patterns
 
-- 在自动生成 `OpenAI` schema 时用于处理结构体类型
-- 与 `make_schema_value` 一起为每个字段创建 schema
-- 通常在 `detail` 命名空间的更高层 schema 生成函数中被调用
+- Called when generating an `OpenAI`-compatible JSON schema for a structured type
+- Used in conjunction with `make_schema_value` and other schema utilities
+- Typically invoked for aggregate types with multiple fields
 
 ### `clore::net::openai::schema::detail::sanitize_schema_name`
 
-Declaration: `network/schema.cppm:97`
+Declaration: `src/network/schema.cppm:107`
 
-Definition: `network/schema.cppm:97`
+Definition: `src/network/schema.cppm:107`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-函数 `clore::net::openai::schema::detail::sanitize_schema_name` 接受一个 `std::string_view` 类型的输入，返回一个 `std::string`。它将输入字符串转换为一个符合 `OpenAI` Schema 命名规则的安全、有效的模式名称。调用者应提供一个原始名称，函数会负责移除或替换其中可能违反模式名称规范（如包含不适用的字符或空格）的部分。返回的字符串可以直接用于模式定义中的 `"name"` 字段或其他需要命名的地方。
+接受一个模式名称字符串视图，并返回一个清理后的标准字符串。该函数确保返回的字符串符合 `OpenAI` 模式命名约定，移除或替换任何无效字符，以便该名称可用作 JSON Schema 中的 `$ref` 或标题类属性的值。
+
+调用者应使用返回的清理后字符串，而不是原始输入。此函数不修改传入的`std::string_view`对象；它通过返回值提供一个新的`std::string`。如果不需要清理，返回的字符串可能与输入相同。
 
 #### Usage Patterns
 
-- 用于清理模式名称以符合标识符规则
-- 在生成模式对象时作为辅助函数调用
+- sanitize externally provided schema names for use as identifiers
+- called internally during schema object creation to ensure valid property names
 
 ### `clore::net::openai::schema::detail::schema_type_name`
 
-Declaration: `network/schema.cppm:120`
+Declaration: `src/network/schema.cppm:130`
 
-Definition: `network/schema.cppm:120`
+Definition: `src/network/schema.cppm:130`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-函数模板 `clore::net::openai::schema::detail::schema_type_name<T>` 返回一个整数，该整数标识类型 `T` 在 `OpenAI` Schema 系统中的类型名称。此函数供内部 schema 构造与验证设施使用，用于将 C++ 类型映射到对应的类型标识。调用者应确保 `T` 是一个受支持的、可映射的 schema 类型；否则，返回值的语义未定义或可能导致编译时错误。
+对于给定的模板类型 `T`，`clore::net::openai::schema::detail::schema_type_name` 返回一个整数标识符。该标识符对应于 `OpenAI` schema 规范中该类型对应的内部类型名称表示。调用者应使用此值来填充 schema 对象的 `type` 字段，或在需要类型区分的上下文中进行匹配。模板参数 `T` 必须是能够映射到已知 schema 类型集合中的类型，否则行为未定义。此函数是 schema 生成过程中的内部辅助工具，不应在公共 API 中使用。
 
 #### Usage Patterns
 
-- Generating schema type names for template types within the schema generation pipeline
+- Called by schema generation functions to obtain a validated type name
+- Used to convert a C++ type name into a sanitized `OpenAI` schema name
 
 ### `clore::net::openai::schema::detail::validate_openai_schema`
 
-Declaration: `network/schema.cppm:328`
+Declaration: `src/network/schema.cppm:338`
 
-Definition: `network/schema.cppm:373`
+Definition: `src/network/schema.cppm:383`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-该函数负责验证传入的 JSON 对象是否符合 `OpenAI` schema 规范，并返回一个整型值指示验证结果。调用者需提供待验证的 `const json::Object &`、一个 `std::string_view` 标识（通常表示 schema 名称或路径）以及一个 `bool` 标志（可能控制验证严格性或是否启用特殊模式）。返回的 `int` 值通常表示验证通过或错误码，具体含义由调用者根据函数契约解释。作为 `clore::net::openai::schema::detail` 命名空间中的内部接口，该函数主要用于 schema 处理管线中，其他 detail 函数会依赖其输出来决定后续步骤。
+`clore::net::openai::schema::detail::validate_openai_schema` 验证一个给定的 JSON 对象是否符合 `OpenAI` 语义架构的规范。它检查结构的完整性、必需属性以及类型的合法性，确保生成的架构能够被 `OpenAI` API 正确消费。
+
+调用者需要提供待验证的 `json::Object` 引用、一个标识该架构的 `std::string_view` 名称，以及一个 `bool` 标志指示是否启用严格校验。函数返回一个 `int` 值：0 表示验证通过，非零值对应特定的错误码，调用者可以据此诊断架构中的无效部分。
 
 #### Usage Patterns
 
-- Called recursively for nested schemas and sub-schemas
-- Invoked in the `OpenAI` schema validation pipeline
+- called from schema validation entry points
+- used recursively via `validate_openai_schema_value`
+- applied to both root and nested schemas
+- integral to ensure schema conforms to `OpenAI` restrictions
 
 ### `clore::net::openai::schema::detail::validate_openai_schema_value`
 
-Declaration: `network/schema.cppm:331`
+Declaration: `src/network/schema.cppm:350`
 
-Definition: `network/schema.cppm:331`
+Definition: `src/network/schema.cppm:350`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-该函数验证给定的 JSON 值是否符合 `OpenAI` schema 规范。它有两个重载：一个接受 `const json::Value &`，另一个接受 `json::Cursor`。两个重载都接受一个 `std::string_view`（通常表示被验证的 schema 名称或路径）和一个 `bool` 标志（可能控制验证严格性）。返回值是一个 `int`，通常 `0` 表示验证成功，非零值表示错误代码或失败原因。调用者负责提供格式正确的 JSON 值，并确保该值应遵循 `OpenAI` schema 的结构和约束。该函数仅检查值的结构和语义正确性，不修改传入的数据。
+`clore::net::openai::schema::detail::validate_openai_schema_value` 验证由 `json::Cursor` 指向的 JSON 值是否构成一个有效的 `OpenAI` 模式值。调用者需提供字符串上下文（通常为属性名称或路径）及布尔严格标志，函数返回整数表示验证结果（0 表示成功，非零值指示错误）。该函数用于校验单个模式值的结构正确性，是模式验证流程中的基础组件，通常被更高层验证函数（如 `validate_openai_schema`）依赖。
 
 #### Usage Patterns
 
-- used to validate a JSON value as an `OpenAI` schema object
-- called by overloads that take a `json::Cursor` instead of `json::Value`
+- 作为验证 `OpenAI` schema 值的外部入口
+- 在递归或迭代遍历 schema 时对单个值进行验证
 
 ### `clore::net::openai::schema::detail::validate_openai_schema_value`
 
-Declaration: `network/schema.cppm:340`
+Declaration: `src/network/schema.cppm:341`
 
-Definition: `network/schema.cppm:340`
+Definition: `src/network/schema.cppm:341`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-函数 `clore::net::openai::schema::detail::validate_openai_schema_value` 用于验证一个 JSON 值是否符合指定的 `OpenAI` schema 子模式。调用者需传入一个指向待验证值的 `json::Cursor`（或 `const json::Value &`）、一个标识 schema 名称的 `std::string_view`，以及一个 `bool` 参数控制是否启用宽松验证。函数返回一个整数状态码，指示验证通过或失败的具体原因。该函数专注于单个值的校验，与处理完整 schema 对象的 `validate_openai_schema` 相辅相成。
+验证给定的 JSON 值是否符合 `OpenAI` schema 规范。接受一个 `json::Value`（或 `json::Cursor`）作为待验证的值，一个 `std::string_view` 表示该值在其所在 schema 中的名称或路径，以及一个 `bool` 标志（可能控制严格性或是否允许额外字段）。返回一个 `int` 状态码，指示验证结果（通常返回 `0` 表示成功，非零值表示失败或错误）。该函数是 `OpenAI` schema 验证流程中用于值级别校验的内部组成部分，供所在 `detail` 命名空间中的其他验证函数调用。
 
 #### Usage Patterns
 
-- Wraps cursor-to-object conversion for schema validation
-- Delegates to `validate_openai_schema` after extracting the object
-- Used in the schema validation chain
-- Handles error propagation from `expect_object`
+- used in schema validation pipeline to validate that a JSON value is an `OpenAI` schema object
+- called by higher-level schema processing functions
+- invoked with top-level JSON values and nested schema values
 
 ### `clore::net::openai::schema::detail::validate_required_properties`
 
-Declaration: `network/schema.cppm:349`
+Declaration: `src/network/schema.cppm:359`
 
-Definition: `network/schema.cppm:349`
+Definition: `src/network/schema.cppm:359`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-该函数用于验证一组必需属性是否满足模式定义中的约束条件。调用者提供两个整数参数（可能描述属性数量或索引范围）以及一个 `std::string_view`（通常为当前模式名称或路径），函数返回一个 `int` 值以表示验证结果（例如成功或特定的错误码）。此函数是 `clore::net::openai::schema::detail` 内部实现的一部分，供上层验证流程（如 `validate_openai_schema` 或 `validate_openai_schema_value`）在检查对象模式时调用。
+`clore::net::openai::schema::detail::validate_required_properties` 负责校验 `OpenAI` Schema 对象中 `required` 属性列表的合法性。调用方需提供两个 `int` 参数（分别标识所属的 schema 上下文与 required 列表中的索引位置）以及一个 `std::string_view` 参数（描述当前校验路径）。函数返回一个 `int` 值，表示校验结果（通常为成功或特定错误码）。调用该函数前应确保传入的索引和路径有效，且该函数仅执行校验逻辑，不修改 schema 对象。
 
 #### Usage Patterns
 
-- called during schema validation to enforce strict mode requirement
-- ensures all properties are referenced in the required array
+- Validating that all object properties are listed in required array for strict structured output
 
 ### `clore::net::openai::schema::detail::validate_schema_array_of_types`
 
-Declaration: `network/schema.cppm:295`
+Declaration: `src/network/schema.cppm:305`
 
-Definition: `network/schema.cppm:295`
+Definition: `src/network/schema.cppm:305`
 
 Implementation: [`Module schema`](../../../../../../modules/schema/index.md)
 
-验证给定的 JSON 数组是否为有效的 `OpenAI` Schema 类型数组。该函数接受一个 `json::Array` 引用、一个描述上下文的 `std::string_view` 标识符，以及一个指示是否允许严格模式的布尔值。返回值为整数，零通常表示验证通过，非零值表示错误码或失败状态。调用者应确保传入的数组包含合法的类型表示，并根据返回值决定后续处理流程。
+该函数验证给定的 JSON 数组是否表示一组有效的 `OpenAI` schema 类型。它接受一个 `const json::Array &` 作为待检验的类型数组，一个 `std::string_view` 描述当前正在验证的 schema 路径（用于错误报告），以及一个 `bool` 标志指示是否以宽松模式进行验证。返回值是 `int`，零表示验证通过，非零值表示遇到了不符合规范的情况。调用者应当在构建或处理 schema 之前，使用此函数确保类型数组内容的合法性。
 
 #### Usage Patterns
 
-- Called when the `type` field of a schema is an array (e.g., `["string", "null"]`)
-- Used by higher-level validation functions like `clore::net::openai::schema::detail::validate_openai_schema`
-- Ensures compliance with `OpenAI` schema constraints on type unions
+- 在`schema`验证流程中被`validate_openai_schema`调用，用于处理`type`字段值为数组的情况。
 
 ## Related Pages
 

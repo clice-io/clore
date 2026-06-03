@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::ensurecachekeyimpl'
-description: 'The implementation of ensure_cache_key_impl populates a CompileEntry object with the data needed to derive its cache key. It first calls normalize_entry_file to resolve the entry’s source file path and stores the result in entry.normalized_file. Using that normalized path and the entry, it invokes build_compile_signature_impl to compute a signature representing the compilation’s effective arguments and stores it in entry.compile_signature. It then attempts to hash the normalized source file via try_hash_source_file, writing the result (if available) into entry.source_hash. Finally, it constructs the cache key by calling clore::support::build_cache_key with the normalized file path and the compile signature, and assigns it to entry.cache_key.'
+description: 'The function clore::extract::ensure_cache_key_impl computes and stores four cache-related fields into a CompileEntry. It first normalizes the entry’s file path via clore::extract::normalize_entry_file and writes the result into entry.normalized_file. Using that normalized path, it calls clore::extract::(anonymous namespace)::build_compile_signature_impl to produce a compile_signature. An optional source hash is computed by clore::extract::(anonymous namespace)::try_hash_source_file and stored in entry.source_hash. Finally, it assembles the final entry.cache_key by calling clore::support::build_cache_key with the normalized file and the compile signature.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module extract:compiler](../compiler.md)
 
-Declaration: `extract/compiler.cppm:119`
+Declaration: `src/extract/compiler.cppm:135`
 
-Definition: `extract/compiler.cppm:119`
+Definition: `src/extract/compiler.cppm:135`
 
 Declaration: [`Namespace clore::extract`](../../../namespaces/clore/extract/index.md)
 
@@ -27,32 +27,33 @@ auto ensure_cache_key_impl(CompileEntry& entry) -> void {
 }
 ```
 
-The implementation of `ensure_cache_key_impl` populates a `CompileEntry` object with the data needed to derive its cache key. It first calls `normalize_entry_file` to resolve the entry’s source file path and stores the result in `entry.normalized_file`. Using that normalized path and the `entry`, it invokes `build_compile_signature_impl` to compute a signature representing the compilation’s effective arguments and stores it in `entry.compile_signature`. It then attempts to hash the normalized source file via `try_hash_source_file`, writing the result (if available) into `entry.source_hash`. Finally, it constructs the cache key by calling `clore::support::build_cache_key` with the normalized file path and the compile signature, and assigns it to `entry.cache_key`.
+The function `clore::extract::ensure_cache_key_impl` computes and stores four cache-related fields into a `CompileEntry`. It first normalizes the entry’s file path via `clore::extract::normalize_entry_file` and writes the result into `entry.normalized_file`. Using that normalized path, it calls `clore::extract::(anonymous namespace)::build_compile_signature_impl` to produce a `compile_signature`. An optional source hash is computed by `clore::extract::(anonymous namespace)::try_hash_source_file` and stored in `entry.source_hash`. Finally, it assembles the final `entry.cache_key` by calling `clore::support::build_cache_key` with the normalized file and the compile signature.
 
-The function’s control flow is strictly sequential: each step depends on the preceding one, and the cache key is the combined output of the earlier computations. The dependencies `normalize_entry_file`, `build_compile_signature_impl`, and `try_hash_source_file` are called exactly once, and their results are stored directly into the entry’s fields.
+The algorithm is a serial data‑preparation process: each step depends on the results of the previous one. No branching or error handling is performed within this function; it relies on its callees to handle failures (e.g., `try_hash_source_file` may return `std::nullopt`, which is stored directly). The primary dependencies are the `normalize_entry_file` and `build_compile_signature_impl` functions, which respectively resolve the entry’s file to an absolute path and derive a hash from the compiler invocation arguments.
 
 ## Side Effects
 
-- Modifies the `CompileEntry` object by setting its `normalized_file`, `compile_signature`, `source_hash`, and `cache_key` fields.
-- Reads the source file via `try_hash_source_file`, which performs I/O.
-- Calls `normalize_entry_file` and `build_compile_signature_impl`, which may have their own side effects such as file access or computation.
+- Mutates `entry.normalized_file`
+- Mutates `entry.compile_signature`
+- Mutates `entry.source_hash`
+- Mutates `entry.cache_key`
+- May perform file I/O via `try_hash_source_file` to compute source hash
 
 ## Reads From
 
-- the `entry` parameter (its existing fields)
-- the source file identified by `entry.normalized_file` via `try_hash_source_file`
-- the compile entry data used by `build_compile_signature_impl`
+- `entry` parameter (reads fields used by `normalize_entry_file` and `build_compile_signature_impl`)
+- The source file referenced by `entry.normalized_file` (read by `try_hash_source_file`)
 
 ## Writes To
 
-- the `normalized_file` field of `entry`
-- the `compile_signature` field of `entry`
-- the `source_hash` field of `entry`
-- the `cache_key` field of `entry`
+- `entry.normalized_file`
+- `entry.compile_signature`
+- `entry.source_hash`
+- `entry.cache_key`
 
 ## Usage Patterns
 
-- Called by `clore::extract::ensure_cache_key` to populate cache-related fields on a `CompileEntry`.
+- Called by `clore::extract::ensure_cache_key` to ensure a compile entry's cache key is computed
 
 ## Calls
 

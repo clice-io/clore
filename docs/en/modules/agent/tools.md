@@ -1,6 +1,6 @@
 ---
 title: 'Module agent:tools'
-description: 'The agent:tools module encapsulates the implementation and dispatch logic for a suite of tools that an agent can use to inspect and manipulate the project''s source code and documentation. It defines concrete tool implementations — such as ProjectOverviewTool, ListFilesTool, ListModulesTool, SearchSymbolsTool, and CreateGuideTool — each with a run method that takes arguments and a ToolContext and returns a result or error. Supporting infrastructure includes ToolSpec, ToolContext, ToolResultCache, argument type aliases, and utility functions for formatting symbols, normalizing filenames, and building reflected tool definitions.'
+description: 'The agent:tools module implements the tool interface for the Clore agent, providing a collection of actionable tools that the agent can invoke to inspect and manipulate a C++ project’s metadata. It owns the definition, argument extraction, dispatch, and result caching for a set of around twelve concrete tools, including ProjectOverviewTool, ListModulesTool, ListNamespacesTool, ListFilesTool, GetModuleTool, GetNamespaceTool, GetSymbolTool, GetFileSymbolsTool, SearchSymbolsTool, GetDependenciesTool, ReadGuideTool, and CreateGuideTool. Each tool is backed by a function‑like implementation that operates on a shared ToolContext (providing the project root, output root, and model identifier) and returns either a string result or a ToolError.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-The `agent:tools` module encapsulates the implementation and dispatch logic for a suite of tools that an agent can use to inspect and manipulate the project's source code and documentation. It defines concrete tool implementations — such as `ProjectOverviewTool`, `ListFilesTool`, `ListModulesTool`, `SearchSymbolsTool`, and `CreateGuideTool` — each with a `run` method that takes arguments and a `ToolContext` and returns a result or error. Supporting infrastructure includes `ToolSpec`, `ToolContext`, `ToolResultCache`, argument type aliases, and utility functions for formatting symbols, normalizing filenames, and building reflected tool definitions.
+The `agent:tools` module implements the tool interface for the Clore agent, providing a collection of actionable tools that the agent can invoke to inspect and manipulate a C++ project’s metadata. It owns the definition, argument extraction, dispatch, and result caching for a set of around twelve concrete tools, including `ProjectOverviewTool`, `ListModulesTool`, `ListNamespacesTool`, `ListFilesTool`, `GetModuleTool`, `GetNamespaceTool`, `GetSymbolTool`, `GetFileSymbolsTool`, `SearchSymbolsTool`, `GetDependenciesTool`, `ReadGuideTool`, and `CreateGuideTool`. Each tool is backed by a function‑like implementation that operates on a shared `ToolContext` (providing the project root, output root, and model identifier) and returns either a string result or a `ToolError`.  
 
-The module's public interface provides `build_tool_definitions` to register all available tools, `dispatch_tool_call` to route a named tool invocation to its implementation, and `extract_string_arg` to safely extract string values from JSON arguments. It imports the `extract`, `generate`, `protocol`, `schema`, and `support` modules, relying on them for metadata extraction, page generation, API communication, and foundational utilities. The module owns the complete lifecycle of tool definition, caching, and dispatching, enabling the agent to perform queries and modifications on the codebase in a structured way.
+The module’s public interface consists of `build_tool_definitions()` (to register all tools), `dispatch_tool_call()` (to route a named tool call with JSON arguments to the correct implementation), and the utility function `extract_string_arg()` for safely extracting string parameters from JSON. Internally, it uses a static `tool_registry` array of `ToolSpec` records, a `ToolResultCache` for caching results of cache‑enabled tools, and several helper functions for formatting symbol details, sorting matches, and normalising guide filenames. The module depends on the `extract`, `generate`, `protocol`, `schema`, and `support` modules to perform its work.
 
 ## Imports
 
@@ -19,7 +19,6 @@ The module's public interface provides `build_tool_definitions` to register all 
 - [`generate`](../generate/index.md)
 - [`protocol`](../protocol/index.md)
 - [`schema`](../schema/index.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Dependency Diagram
@@ -43,36 +42,44 @@ graph LR
 
 ### `clore::agent::ToolError`
 
-Declaration: `agent/tools.cppm:16`
+Declaration: `src/agent/tools.cppm:28`
 
-Definition: `agent/tools.cppm:16`
+Definition: `src/agent/tools.cppm:28`
 
 Declaration: [`Namespace clore::agent`](../../namespaces/clore/agent/index.md)
 
-`clore::agent::ToolError` is implemented as a minimal aggregate struct holding a single `std::string message` member, declared at `agent/tools.cppm:16`. Since no constructors, destructors, or member functions are defined, it relies entirely on the compiler-generated defaults for construction, copy, move, and destruction.
-
-The sole invariant is carried by the `message` field, whose lifetime and validity are managed by `std::string`'s own RAII semantics. Aggregate initialization (e.g. `ToolError{"..."}`) is the expected construction path, keeping the type lightweight and trivially composable within tool-handling code paths.
+The struct `clore::agent::ToolError` is implemented as a thin wrapper around a `std::string` member named `message`. Its entire internal structure consists solely of this field, which stores a human‑readable description of the error. No additional invariants are enforced; any valid `std::string` is permitted, including the empty string. The type serves as a lightweight, value‑oriented error representation within the agent tool subsystem, and all meaningful behavior is delegated to the contained string.
 
 #### Invariants
 
-- holds an error description in `message`
-- aggregate-style struct with public data
+- The `message` string is not guaranteed to be non-empty.
 
 #### Key Members
 
-- `std::string message` field carrying the error text
+- `message`: stores the error description as a `std::string`.
 
 #### Usage Patterns
 
-- constructed to convey tool-related error details within `clore::agent`
+- Used to convey tool-level errors in the agent's error handling flow.
+- Likely returned or thrown when a tool operation fails.
 
 ## Variables
 
 ### `arguments`
 
-Declaration: `agent/tools.cppm:621`
+Declaration: `src/agent/tools.cppm:633`
 
-As a constant reference, `arguments` provides read-only access to a `json::Value` instance. It is intended to be used in surrounding logic without modification, likely to inspect or query the JSON data.
+The `const` qualifier ensures that `arguments` cannot be mutated through this reference. It is intended to be read-only, providing access to JSON argument data.
+
+#### Mutation
+
+No mutation is evident from the extracted code.
+
+### `context`
+
+Declaration: `src/agent/tools.cppm:633`
+
+As a `const` reference, `context` cannot be modified and is used to inspect or query properties of the `ToolContext` without copying. It participates in surrounding logic by supplying contextual data for tool execution.
 
 #### Mutation
 
@@ -80,90 +87,20 @@ No mutation is evident from the extracted code.
 
 #### Usage Patterns
 
-- Read-only access via `const` reference to `json::Value`
-
-### `context`
-
-Declaration: `agent/tools.cppm:621`
-
-As a constant reference, `context` provides read-only access to the underlying `ToolContext` object, ensuring that the referenced object is not modified through this variable.
-
-#### Mutation
-
-No mutation is evident from the extracted code.
+- function parameter
+- read-only access to `ToolContext`
 
 ## Functions
 
 ### `clore::agent::build_tool_definitions`
 
-Declaration: `agent/tools.cppm:23`
+Declaration: `src/agent/tools.cppm:35`
 
-Definition: `agent/tools.cppm:887`
-
-Declaration: [`Namespace clore::agent`](../../namespaces/clore/agent/index.md)
-
-The implementation of `clore::agent::build_tool_definitions` first retrieves the static tool registry via the function `tool_registry()`, which returns a `const std::array<ToolSpec, 12>&`. It pre-allocates a `std::vector<clore::net::FunctionToolDefinition>` and iterates over every `ToolSpec` in the registry, invoking `tool.build_definition()`. If any call to `build_definition()` returns an error (`std::unexpected<ToolError>`), the function short-circuits and returns that error immediately. Otherwise, the successfully constructed `FunctionToolDefinition` is moved into the result vector. The final vector is returned wrapped in a `std::expected` as the success value. Dependencies are limited to the anonymous namespace’s `tool_registry()` function and the `ToolSpec` type’s `build_definition` method; no external I/O or complex branching occurs outside this iteration.
-
-#### Side Effects
-
-- Allocates dynamic memory for the output vector and moves each tool definition into it
-
-#### Reads From
-
-- the static array of `ToolSpec` objects returned by `tool_registry()`
-- each `ToolSpec` visited during iteration
-
-#### Usage Patterns
-
-- Called during agent initialization to obtain tool definitions for network interactions
-
-### `clore::agent::dispatch_tool_call`
-
-Declaration: `agent/tools.cppm:26`
-
-Definition: `agent/tools.cppm:902`
+Definition: `src/agent/tools.cppm:899`
 
 Declaration: [`Namespace clore::agent`](../../namespaces/clore/agent/index.md)
 
-The function first serializes the `arguments` to a JSON string; if serialization fails, it returns a `ToolError`. A cache key is formed by concatenating `tool_name` with the serialized arguments. Using `tool_result_cache()`, it acquires a shared lock and checks whether a result already exists for that key; if so, the cached result is returned immediately, avoiding redundant tool execution.
-
-Otherwise, a `ToolContext` is constructed from the `model`, `project_root`, and `output_root`. The function then iterates over the static `tool_registry()`—an array of `ToolSpec` entries—and locates the tool whose `name` matches `tool_name`. It invokes the `dispatch` function of that `ToolSpec`, passing the parsed `arguments` and the context. If the tool is marked as `cacheable` and the dispatch succeeds, the function acquires a unique lock on the cache and stores the result under the cache key. The dispatch result is returned. If no matching tool is found, an "unknown tool" `ToolError` is returned.
-
-#### Side Effects
-
-- acquires shared lock on the global tool result cache mutex
-- acquires unique lock on the global tool result cache mutex
-- inserts or assigns a result into the global tool result cache when the tool is cacheable and dispatch succeeds
-
-#### Reads From
-
-- `tool_name` parameter
-- `arguments` parameter (serialized to string)
-- `model` parameter
-- `project_root` parameter
-- `output_root` parameter
-- global `tool_result_cache()` map
-- global `tool_registry()` collection
-- result of `tool.dispatch` call
-
-#### Writes To
-
-- global `tool_result_cache()` map (inserts or assigns key-value pairs when tool is cacheable and dispatch succeeds)
-
-#### Usage Patterns
-
-- called by agent execution functions like `run_agent_async` or `run_agent`
-- used to invoke named tools with automatic caching of successful results
-
-### `clore::agent::extract_string_arg`
-
-Declaration: `agent/tools.cppm:20`
-
-Definition: `agent/tools.cppm:865`
-
-Declaration: [`Namespace clore::agent`](../../namespaces/clore/agent/index.md)
-
-The implementation of `clore::agent::extract_string_arg` performs a linear scan over the JSON object entries to locate the field matching the given `field_name`. It first validates that the input `arguments` is a JSON object, returning `std::unexpected(ToolError{.message = "arguments is not an object"})` if the check fails. After obtaining a pointer to the underlying object (returning an error if the pointer is null), it iterates through each entry comparing `entry.key` to `field_name`. On a matching key, it attempts to retrieve the value as a string via `entry.value.get_string()`; if that succeeds, the string is returned. If the value is not a string, an error is returned stating that the field is not a string. If no entry with the given key is found, the function returns a missing‑field error. The entire control flow relies on the `json::Value`, `json::Object`, `std::expected`, and `ToolError` types, with error messages formatted via `std::format`. No recursion or external caching is used; the search is purely sequential.
+The function `clore::agent::build_tool_definitions` iterates over the static registry returned by `tool_registry()`, which contains twelve `ToolSpec` entries. For each entry, it invokes the stored `build_definition` callback (of type `auto () -> std::expected<std::string, ToolError>`) and collects the successfully built definitions into a `std::vector<clore::net::FunctionToolDefinition>`. If any individual `build_definition` call fails, the error is immediately propagated by returning `std::unexpected` containing the moved `ToolError`. The function reserves capacity equal to the registry size to avoid reallocation during the loop. Its only direct dependency is the `tool_registry()` function that provides the ordered set of tool specifications.
 
 #### Side Effects
 
@@ -171,20 +108,72 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- Parameter `arguments` of type `const json::Value&`
-- Parameter `field_name` of type `std::string_view`
-- Internal JSON object entries via `get_object()`
+- `tool_registry()` (returns `const std::array<ToolSpec, 12>&`)
 
 #### Usage Patterns
 
-- Called by `clore::agent::dispatch_tool_call` to extract a required string argument from a tool call's JSON parameters
-- Used within the tool‑call dispatch flow to parse individual fields of the argument object
+- called to collect all tool definitions for agent use
+- used during initialization of `run_agent` and similar orchestration functions
+
+### `clore::agent::dispatch_tool_call`
+
+Declaration: `src/agent/tools.cppm:38`
+
+Definition: `src/agent/tools.cppm:914`
+
+Declaration: [`Namespace clore::agent`](../../namespaces/clore/agent/index.md)
+
+The function first serializes the incoming `arguments` to a JSON string via `json::to_string`; if serialization fails, it returns an unexpected `ToolError` describing the failure. It then constructs a `cache_key` from the `tool_name` and the serialized arguments and consults the process-wide singleton returned by `tool_result_cache()`. Under a shared lock it checks the `result_by_key` map; if a cached result exists, it is returned immediately. Otherwise, a `ToolContext` is built from the provided `model`, `project_root`, and `output_root`, and the function iterates over the entries from `tool_registry()`. Each entry is a `ToolSpec` whose `name` is compared to the requested `tool_name`; upon a match, the corresponding `dispatch` function is invoked with the `arguments` and `context`. If the tool is `cacheable` and the dispatch succeeds, the result is stored in the cache under an exclusive lock for subsequent calls. If no matching tool is found, the function returns an unexpected `ToolError` indicating an unknown tool.
+
+#### Side Effects
+
+- Updates tool result cache under mutex protection
+
+#### Reads From
+
+- `tool_name` parameter
+- arguments parameter
+- model parameter
+- `project_root` parameter
+- `output_root` parameter
+- `tool_result_cache()` global cache (`shared_lock` read)
+- `tool_registry()` global registry
+
+#### Writes To
+
+- `tool_result_cache()` cache via `unique_lock` `insert_or_assign`
+
+#### Usage Patterns
+
+- Used to dispatch tool calls with caching
+- Called from agent execution loops like `run_agent` or `run_agent_async`
+
+### `clore::agent::extract_string_arg`
+
+Declaration: `src/agent/tools.cppm:32`
+
+Definition: `src/agent/tools.cppm:877`
+
+Declaration: [`Namespace clore::agent`](../../namespaces/clore/agent/index.md)
+
+The function first validates that the provided `arguments` JSON value is an object; if not, it returns a `ToolError` with an appropriate message. It then obtains the underlying object representation via `get_object()` and iterates over its entries. For each entry, it compares the key (`entry.first`) against the requested `field_name`. When a match is found, it attempts to extract a string from the value using `get_string()`. If the extraction succeeds, the string is returned; otherwise, a `ToolError` is returned indicating the field is not a string. If no matching key is found after the iteration completes, the function returns a `ToolError` stating the field is missing. This routine depends on the JSON library’s object iteration and string extraction, `std::format` for error messages, and the `ToolError` type for error reporting.
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- `arguments` parameter
+- `field_name` parameter
+
+#### Usage Patterns
+
+- Extract required string field from tool call arguments
 
 ## Internal Structure
 
-The `agent:tools` module (`agent/tools.cppm`) implements the tool dispatch system for the agent, structuring each tool as a stateless struct with a `run` method, a `name`, a `cacheable` flag, and a `description`. Twelve such tools are defined in an anonymous namespace, covering project overview, file listing, symbol search, module discovery, dependency inspection, namespace exploration, symbol detail retrieval, and guide creation/reading. A `ToolSpec` struct holds the name, cacheability, a `build_definition` function, and a `dispatch` function; the tools are registered into a static `std::array<ToolSpec, 12>` via the `tool_registry` function. Internal layering separates tool implementations from dispatch: a generic template `dispatch_reflected_tool` deserialises JSON arguments into the tool’s `Args` type and invokes `run`, while `build_reflected_tool_definition` generates the JSON schema for the tool’s arguments. A `ToolResultCache` (with a mutex and a `result_by_key` map) enables caching of results for cacheable tools, and a dedicated `ToolContext` struct bundles the project root, output root, and a model pointer to pass contextual data to each tool.
-
-The module imports five core submodules: `protocol`, `schema`, `extract`, `generate`, and `support`. This allows tools to construct response strings using the protocol’s types, validate arguments against generated schemas, query extracted project metadata, trigger page generation, and leverage support utilities for path normalisation and logging. The public API consists of `build_tool_definitions` (which returns an integer success code and must be called before any dispatch) and `dispatch_tool_call` (which takes a tool name, JSON arguments, a session identifier, and two ID strings, and returns either a tool output string or a `ToolError`). Internal helpers such as `extract_string_arg`, `normalize_guide_filename`, and the `tool_*` functions encapsulate argument parsing and core logic, keeping each tool’s `run` method focused on orchestration.
+The `agent:tools` module is decomposed into a minimal public API — `dispatch_tool_call`, `build_tool_definitions`, and `extract_string_arg` — and an internal implementation layer within an anonymous namespace. The internal layer defines a family of tool structs (e.g., `ListFilesTool`, `GetSymbolTool`, `ReadGuideTool`), each with a static `name`, `description`, `cacheable` flag, and a `run` method that accepts the tool’s arguments and a `ToolContext`. These common properties are captured in the `ToolSpec` structure, which is built from each tool via the template `make_tool_spec`. The dispatch mechanism leverages `dispatch_reflected_tool` to route a JSON arguments object to the appropriate tool’s `run` method without manual switch logic, and `ToolResultCache` provides thread-safe caching keyed on tool-specific arguments. The module imports `extract`, `generate`, `protocol`, `schema`, and `support`; these provide the underlying project data, output generation, LLM communication, JSON schema support, and utility functions that the tools rely on. This layered structure keeps the public interface simple while allowing new tools to be added by defining a struct and including it in the static registry.
 
 ## Related Pages
 

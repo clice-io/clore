@@ -1,6 +1,6 @@
 ---
 title: 'clore::support::ensureutf8'
-description: '该函数的核心实现是一个逐字节扫描的修正循环。它从输入 text 的起始偏移量开始，每次调用 clore::support::(anonymous namespace)::valid_utf8_sequence_length 判断当前偏移处能否解析为一个合法的 UTF‑8 序列。若返回非零长度，则通过 std::string::append 将对应的子串原样拷贝至结果 normalized 中，并将偏移量前进该长度；否则（返回 0）表示该字节无效，此时向结果中追加一个替换字符（通过常量 clore::support::(anonymous namespace)::kUtf8Replacement 获取），并将偏移量仅向前移动一个字节，继续扫描。'
+description: '该函数遍历输入的 text 字符串，在每个偏移位置调用 valid_utf8_sequence_length 确定当前字节序列的 UTF-8 编码长度。若返回零，说明该字节不是一个有效序列的起始字节，此时向结果 normalized 追加替换字符 kUtf8Replacement 并将偏移量前进一个字节；否则将有效序列直接追加到 normalized 中，偏移量前进相应的序列长度。整个过程仅依赖于辅助函数 valid_utf8_sequence_length，通过逐字节检查来替换无效字节，从而保证输出始终是合法的 UTF-8 字符串。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module support](../index.md)
 
-Declaration: `support/logging.cppm:75`
+Declaration: `src/support/logging.cppm:98`
 
-Definition: `support/logging.cppm:405`
+Definition: `src/support/logging.cppm:428`
 
 Declaration: [`Namespace clore::support`](../../../namespaces/clore/support/index.md)
 
@@ -38,23 +38,26 @@ auto ensure_utf8(std::string_view text) -> std::string {
 }
 ```
 
-该函数的核心实现是一个逐字节扫描的修正循环。它从输入 `text` 的起始偏移量开始，每次调用 `clore::support::(anonymous namespace)::valid_utf8_sequence_length` 判断当前偏移处能否解析为一个合法的 UTF‑8 序列。若返回非零长度，则通过 `std::string::append` 将对应的子串原样拷贝至结果 `normalized` 中，并将偏移量前进该长度；否则（返回 0）表示该字节无效，此时向结果中追加一个替换字符（通过常量 `clore::support::(anonymous namespace)::kUtf8Replacement` 获取），并将偏移量仅向前移动一个字节，继续扫描。
-
-该算法的控制流仅依赖循环与条件分支，无递归或外部 I/O。所有 UTF‑8 合法性判断委托给 `valid_utf8_sequence_length`，该函数负责处理单字节、多字节序列的边界检测以及过长的编码、孤立续字节等非法情况。结果字符串通过 `reserve` 预先分配与输入等长的容量，避免重复扩容。
+该函数遍历输入的 `text` 字符串，在每个偏移位置调用 `valid_utf8_sequence_length` 确定当前字节序列的 UTF-8 编码长度。若返回零，说明该字节不是一个有效序列的起始字节，此时向结果 `normalized` 追加替换字符 `kUtf8Replacement` 并将偏移量前进一个字节；否则将有效序列直接追加到 `normalized` 中，偏移量前进相应的序列长度。整个过程仅依赖于辅助函数 `valid_utf8_sequence_length`，通过逐字节检查来替换无效字节，从而保证输出始终是合法的 UTF-8 字符串。
 
 ## Side Effects
 
-- 分配并构造一个新的 `std::string`
+No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- `text` 参数（`std::string_view`）
-- 内部常量 `kUtf8Replacement`
+- `text` parameter
+- `kUtf8Replacement` constant
+
+## Writes To
+
+- local variable `normalized` (returned)
 
 ## Usage Patterns
 
-- 在输出或进一步处理前清理字符串
-- 被 `write_utf8_text_file` 和 `truncate_utf8` 调用
+- Normalizing input strings to ensure valid UTF-8 encoding
+- Used by `write_utf8_text_file` to guarantee valid UTF-8 before writing
+- Used by `truncate_utf8` to ensure truncated string ends at a valid boundary
 
 ## Calls
 

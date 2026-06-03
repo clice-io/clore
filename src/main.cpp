@@ -1,9 +1,27 @@
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
+
 #include "kota/async/async.h"
 #include "kota/deco/deco.h"
 
 #include "spdlog/spdlog.h"
 
-import std;
 import agent;
 import config;
 import extract;

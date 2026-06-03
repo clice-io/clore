@@ -1,6 +1,6 @@
 ---
 title: 'clore::logging::log'
-description: 'The function clore::logging::log accepts a severity level of type spdlog::level::level_enum together with a std::string_view message. It is the central logging sink in the clore::logging module, responsible for emitting the formatted message at the given severity. Callers must supply a valid level enumerator and a non-null message; the function guarantees that the message is dispatched to the configured logging backend (e.g., stderr, file, or other sinks) without further transformation. No special ownership of the string view is required—the function consumes the data synchronously before returning.'
+description: 'The function clore::logging::log accepts an spdlog::level::level_enum severity level and a std::string_view message, then dispatches the message to the configured logging sink(s) at that severity. The caller is responsible for providing a valid level enumerator and a non‑null message (the string view is expected to remain valid for the duration of the call). The logging framework respects the threshold and formatting set by the application; the function itself does not modify the message or add extra structure.'
 layout: doc
 template: doc
 ---
@@ -9,18 +9,18 @@ template: doc
 
 Owner: [Namespace clore::logging](../index.md)
 
-Declaration: `support/logging.cppm:104`
+Declaration: `src/support/logging.cppm:127`
 
-Definition: `support/logging.cppm:104`
+Definition: `src/support/logging.cppm:127`
 
 Implementation: [`Module support`](../../../../modules/support/index.md)
 
-The function `clore::logging::log` accepts a severity level of type `spdlog::level::level_enum` together with a `std::string_view` message. It is the central logging sink in the `clore::logging` module, responsible for emitting the formatted message at the given severity. Callers must supply a valid level enumerator and a non-null message; the function guarantees that the message is dispatched to the configured logging backend (e.g., stderr, file, or other sinks) without further transformation. No special ownership of the string view is required—the function consumes the data synchronously before returning.
+The function `clore::logging::log` accepts an `spdlog::level::level_enum` severity level and a `std::string_view` message, then dispatches the message to the configured logging sink(s) at that severity. The caller is responsible for providing a valid level enumerator and a non‑null message (the string view is expected to remain valid for the duration of the call). The logging framework respects the threshold and formatting set by the application; the function itself does not modify the message or add extra structure.
 
 ## Usage Patterns
 
-- Invoked by `clore::logging::LogProxy::operator()(std::string_view)` to route formatted messages to `spdlog`
-- Used as the underlying logging primitive that respects the `g_log_level` threshold
+- Called by `LogProxy::operator()` to dispatch logging
+- Used for conditional logging with level filtering
 
 ## Called By
 

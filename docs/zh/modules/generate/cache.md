@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:cache'
-description: 'generate:cache 模块提供 LLM 生成响应的持久化缓存功能，负责缓存键的构造、存储与检索。它公开了索引加载（load_cache_index 及其异步版本）、条目查找（find_cached_response）、条目保存（save_cache_entry 及其异步版本），以及缓存键生成（make_prompt_response_cache_key）和文本规范化（normalize_text_for_hashing）等核心接口。模块内部通过 JSON Lines 文件实现缓存的物理存储，并依赖 CacheIndex 和 CacheError 等自定义类型来表示索引状态与错误信息。'
+description: 'clore::generate::cache 模块负责为 LLM 生成请求的响应提供持久化缓存机制。它公开了生成缓存键、同步/异步加载与存储缓存索引、查找已缓存响应以及规范化文本用于散列的接口，使得调用方可以避免重复的请求处理。该模块依赖于 protocol 和 support 模块，通过 CacheIndex 结构体管理条目，并使用 CacheError 报告操作中的错误。公共实现范围包括 make_prompt_response_cache_key、save_cache_entry、save_cache_entry_async、load_cache_index、load_cache_index_async、find_cached_response 和 normalize_text_for_hashing 等函数。'
 layout: doc
 template: doc
 ---
@@ -9,12 +9,11 @@ template: doc
 
 ## Summary
 
-`generate:cache` 模块提供 LLM 生成响应的持久化缓存功能，负责缓存键的构造、存储与检索。它公开了索引加载（`load_cache_index` 及其异步版本）、条目查找（`find_cached_response`）、条目保存（`save_cache_entry` 及其异步版本），以及缓存键生成（`make_prompt_response_cache_key`）和文本规范化（`normalize_text_for_hashing`）等核心接口。模块内部通过 JSON Lines 文件实现缓存的物理存储，并依赖 `CacheIndex` 和 `CacheError` 等自定义类型来表示索引状态与错误信息。
+`clore::generate::cache` 模块负责为 LLM 生成请求的响应提供持久化缓存机制。它公开了生成缓存键、同步/异步加载与存储缓存索引、查找已缓存响应以及规范化文本用于散列的接口，使得调用方可以避免重复的请求处理。该模块依赖于 `protocol` 和 `support` 模块，通过 `CacheIndex` 结构体管理条目，并使用 `CacheError` 报告操作中的错误。公共实现范围包括 `make_prompt_response_cache_key`、`save_cache_entry`、`save_cache_entry_async`、`load_cache_index`、`load_cache_index_async`、`find_cached_response` 和 `normalize_text_for_hashing` 等函数。
 
 ## Imports
 
 - [`protocol`](../protocol/index.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Imported By
@@ -25,63 +24,55 @@ template: doc
 
 ### `clore::generate::cache::CacheError`
 
-Declaration: `generate/cache.cppm:16`
+Declaration: `src/generate/cache.cppm:35`
 
-Definition: `generate/cache.cppm:16`
+Definition: `src/generate/cache.cppm:35`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-`CacheError` 内部仅包含一个 `std::string message` 成员，用于存储错误描述信息。该结构体的所有构造、赋值与析构行为完全委托给 `message` 的相应操作，因此它是一个轻量且可复制的错误类型，没有额外的内部不变量或验证逻辑。
-
-#### Invariants
-
-- `message` 可以是任意字符串，包括空字符串
-- 没有额外的不变约束
+`clore::generate::cache::CacheError` 仅包含一个 `std::string message` 成员，用于存储与缓存操作相关的错误描述。结构体未定义任何构造函数或赋值操作符，完全依赖于编译器生成的默认实现，因此 `message` 的初始状态为空字符串，且在复制或移动时遵循 `std::string` 的常规语义。不变量方面，`message` 的内容在构造后既可保持为空（表示未指定错误）也可被赋值为具体文本，但结构体本身不对其进行约束或验证。
 
 #### Key Members
 
-- `message`：错误消息字符串
-
-#### Usage Patterns
-
-- 可能作为异常对象或函数返回结果中的错误信息载体
-- 被其他代码直接读取 `message` 以获取错误描述
+- 成员 `message`：存储错误描述文本。
 
 ### `clore::generate::cache::CacheIndex`
 
-Declaration: `generate/cache.cppm:20`
+Declaration: `src/generate/cache.cppm:39`
 
-Definition: `generate/cache.cppm:20`
+Definition: `src/generate/cache.cppm:39`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-结构体 `clore::generate::cache::CacheIndex` 直接暴露一个 `std::unordered_map<std::string, std::string>` 类型的 `entries` 字段作为唯一数据成员。内部不维护任何额外的不变量或元数据；所有缓存键值对的存储和查找完全由该映射管理。由于没有封装或辅助方法，类型的正确性完全依赖于调用方对 `entries` 的直接操作，例如确保键的唯一性以及值的一致更新。该设计将缓存索引简化为一个纯数据容器，避免了间接层。
+`clore::generate::cache::CacheIndex` 结构体内部完全由一个 `std::unordered_map<std::string, std::string>` 类型的字段 `entries` 构成，实现了一个轻量级的键‑值缓存索引。其核心不变量是 `entries` 中的每个键唯一，且键和值均为有效的 `std::string` 实例，借此将缓存键直接映射到对应的缓存条目（例如文件路径或序列化内容）。该结构体不引入额外开销或生命周期管理，完全依赖标准库的哈希映射提供快速的插入与查找操作，并作为缓存系统的核心索引结构。
 
 #### Invariants
 
-- `entries` 映射中的键和值均为字符串类型，无其他约束。
-- 映射的键唯一，符合 `std::unordered_map` 的语义。
+- Keys in `entries` are unique per instance.
+- No ordering of elements is guaranteed.
+- Both keys and values are mutable after construction.
 
 #### Key Members
 
-- `entries`
+- `entries` member of type `std::unordered_map<std::string, std::string>`
 
 #### Usage Patterns
 
-- 其他代码通过访问 `entries` 成员来查询或更新缓存映射。
-- 可能用于缓存查找、插入或删除操作。
+- Accessed and modified via the `entries` member.
+- Likely used as a cache container for generated output or intermediate data.
+- No special methods or inheritance observed.
 
 ## Functions
 
 ### `clore::generate::cache::find_cached_response`
 
-Declaration: `generate/cache.cppm:35`
+Declaration: `src/generate/cache.cppm:54`
 
-Definition: `generate/cache.cppm:347`
+Definition: `src/generate/cache.cppm:366`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-该实现直接将传入的 `cache_key`（`std::string_view`）转换为 `std::string` 后，在 `index` 的 `entries` 成员（一个关联容器，其键类型为 `std::string`）上调用 `find`。若迭代器 `it` 到达 `index.entries.end()`，则表示无匹配响应，函数返回 `std::nullopt`；否则返回 `it->second`，即缓存中存储的 `std::optional<std::string_view>`。整个算法为单次映射查找，无额外控制流或副作用。核心依赖为 `CacheIndex` 中 `entries` 的数据结构（预期为基于哈希或红黑树的关联容器）和标准库的 `std::string`、`std::optional`。
+该函数通过在 `CacheIndex` 结构的 `entries` 映射中以 `cache_key` 转换后的 `std::string` 进行查找来检索缓存响应。若映射中包含该键，则返回其对应的 `std::string_view` 值；否则返回 `std::nullopt`。整个流程仅依赖 `CacheIndex` 类型中 `entries` 成员的数据结构（预期为关联容器）以及 `std::string` 从 `cache_key` 的隐式转换，无需额外 I/O 或异步操作。
 
 #### Side Effects
 
@@ -89,110 +80,118 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `index.entries` (the underlying map)
-- `cache_key` parameter
+- the `CacheIndex` parameter `index` (specifically its `entries` member)
+- the `cache_key` parameter
 
 #### Usage Patterns
 
-- Check if a cached response exists for a given key
-- Retrieve a cached response string by its cache key
+- lookup cached response by key
+- check if response exists in cache
+- used before generation to avoid redundant computation
 
 ### `clore::generate::cache::load_cache_index`
 
-Declaration: `generate/cache.cppm:29`
+Declaration: `src/generate/cache.cppm:48`
 
-Definition: `generate/cache.cppm:252`
+Definition: `src/generate/cache.cppm:271`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-函数 `clore::generate::cache::load_cache_index` 通过扫描工作区根目录下所有 JSONL 文件来构建内存中的缓存索引。它首先调用 `all_jsonl_files` 获取文件路径列表，若失败则直接返回 `CacheError`。随后遍历每个文件，使用 `clore::support::read_utf8_text_file` 读取其 UTF-8 文本内容（读取失败则跳过该文件）。对于每个有效文件，逐行解析为 `kota::codec::json::Object`：如果某行解析失败或缺少非空字符串字段 `"key"` 和 `"resp"`，则静默跳过该行；否则将键值对插入到 `CacheIndex::entries` 中，已存在的键会被覆盖。处理完所有文件后返回最终的索引。
+函数首先通过调用 `all_jsonl_files` 获取指定工作空间根目录下所有 JSONL 文件的路径列表，若此调用失败则直接返回错误。接着遍历每个文件，使用 `clore::support::read_utf8_text_file` 读取完整文本内容；若读取失败则跳过该文件。成功读取后，将文本按行分割，对每一非空行调用 `kota::codec::json::parse` 解析为 JSON 对象。从每个解析成功的对象中依次提取 `"key"` 和 `"resp"` 字段，验证它们存在且为有效字符串后，将键值对插入到 `CacheIndex` 结构体的 `entries` 映射中。所有处理步骤中遇到的任何错误（文件缺失、JSON 格式错误、字段缺失等）均被忽略，函数继续处理后续内容。
 
-该函数的控制流完全依赖 `all_jsonl_files` 的成功执行，且对文件读取和 JSON 解析错误均采取“容忍并跳过”策略，不会让单个损坏文件阻塞整个索引加载过程。底层依赖 `kota::codec::json` 的解析能力、文件 I/O 函数以及匿名命名空间中的辅助函数 `all_jsonl_files`。最终输出的 `CacheIndex` 对象仅包含 `entries` 映射，不持有外部资源。
+内部控制流完全由循环和提前返回组成：`all_jsonl_files` 的结果是第一个错误抑点；随后两层 `for` 循环（外层遍历文件，内层遍历行）中的每个失败步骤均使用 `continue` 跳过当前条目或文件，确保单点失败不影响整体。函数不依赖外部可变状态，仅依赖文件系统中按约定放置的 JSONL 文件；关键依赖包括 `clore::support::read_utf8_text_file`（文本读取）、`kota::codec::json::parse`（JSON 解析）以及 `all_jsonl_files`（目录扫描）。最终返回的 `CacheIndex` 包含了所有有效缓存条目的键值映射。
 
 #### Side Effects
 
-- 读取文件系统中的 JSONL 文件
-- 为 `CacheIndex` 内部的字符串和映射分配动态内存
+- Reads files from the filesystem via `all_jsonl_files` and `read_utf8_text_file`
+- Allocates memory for the constructed `CacheIndex` and its entries
 
 #### Reads From
 
-- `workspace_root` 参数
-- 由 `all_jsonl_files` 查找到的 JSONL 文件内容
+- Parameter `workspace_root`
+- JSONL files discovered in the workspace root directory
+- File contents read by `clore::support::read_utf8_text_file`
 
 #### Writes To
 
-- 返回的 `clore::generate::cache::CacheIndex` 对象
+- The `CacheIndex` object returned (specifically its `entries` member)
 
 #### Usage Patterns
 
-- 用于同步加载缓存索引，通常与其他缓存操作（如 `find_cached_response`）配合使用
-- 在需要一次性加载所有缓存条目以进行后续查找的场景中调用
+- Called to load the cache index before performing cache lookups
+- Typically invoked once at startup or when a cache reload is needed
+- Used in conjunction with `find_cached_response` to query cached results
 
 ### `clore::generate::cache::load_cache_index_async`
 
-Declaration: `generate/cache.cppm:38`
+Declaration: `src/generate/cache.cppm:57`
 
-Definition: `generate/cache.cppm:356`
+Definition: `src/generate/cache.cppm:375`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-函数 `clore::generate::cache::load_cache_index_async` 通过协程将同步函数 `clore::generate::cache::load_cache_index` 异步化。它接收一个 `workspace_root` 字符串和 `kota::event_loop` 的引用，返回 `kota::task<CacheIndex, CacheError>`。实现内部，调用 `kota::queue` 将一个 lambda 封闭 `load_cache_index` 调用并调度到指定的 `loop` 上执行；该 lambda 捕获移动后的 `workspace_root`，在后台线程中运行 `load_cache_index(workspace_root)` 并返回其结果。
-
-等待 `kota::queue` 的结果后，函数检查是否因取消或其他错误导致 `queued_result` 本身含有错误（`has_error()`），若有则将错误消息包装为新的 `CacheError` 并通过 `kota::fail` 返回。若队列执行成功，但 `load_cache_index` 内部返回了 `std::expected` 的错误（`queued_result->has_value()` 为假），则将该错误值移动并传递给 `kota::fail`。最终，若两者均成功，则移动出底层的 `CacheIndex` 值并 `co_return`。该函数不重复实现缓存索引的解析逻辑，完全依赖同步版本，仅添加异常处理与异步调度。
+`load_cache_index_async` 是一个基于 `kota::task` 的协程,它通过内部使用 `kota::queue` 将对同步函数 `load_cache_index` 的调用派发到给定的 `kota::event_loop` 上异步执行。首先将 `load_cache_index(workspace_root)` 包装为一个无参数 lambda 并通过 `kota::queue` 提交到事件循环,然后 `co_await` 其结果。如果队列任务本身失败(即 `queued_result.has_error()` 为真),则构造一个包含格式化错误消息的 `CacheError` 并调用 `co_await kota::fail` 抛出该错误。若队列任务成功返回 `std::expected<CacheIndex, CacheError>`,则检查其是否含有错误值:若 `queued_result->has_value()` 为假,则通过 `kota::fail` 传播内部错误。否则正常返回内部的 `CacheIndex` 值。整个函数实质上是对同步版本 `load_cache_index` 的异步封装,其错误处理链完整覆盖了调用调度的异常和 `load_cache_index` 自身的错误。
 
 #### Side Effects
 
-- Reads cache index file from `workspace_root` on disk
+- 通过 `kota::queue` 提交同步函数到事件循环，可能触发文件 I/O 读取缓存索引文件
+- 使用 `kota::fail` 可能修改异步任务状态以报告错误
 
 #### Reads From
 
-- `workspace_root` parameter
-- cache index file on disk
+- `clore::generate::cache::load_cache_index_async` 的 `workspace_root` 参数
+- 通过 `clore::generate::cache::load_cache_index` 读取的文件系统资源（如缓存索引文件）
 
 #### Usage Patterns
 
-- Called asynchronously to obtain the prompt response cache index
-- Used by higher‑level async cache operations
+- 在需要异步获取缓存索引的场景中调用，例如初始化或需要索引时
+- 调用者通常使用 `co_await` 等待返回的 `kota::task` 以获取 `CacheIndex` 或处理 `CacheError`
 
 ### `clore::generate::cache::make_prompt_response_cache_key`
 
-Declaration: `generate/cache.cppm:24`
+Declaration: `src/generate/cache.cppm:43`
 
-Definition: `generate/cache.cppm:219`
+Definition: `src/generate/cache.cppm:238`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-函数首先计算请求的响应格式指纹和工具选择指纹，分别通过`response_format_fingerprint`和`tool_choice_fingerprint`完成，这两个调用可能返回错误，如果任一失败则直接传递错误。随后对原始`prompt`和`system_prompt`分别调用`normalize_text_for_hashing`进行规范化，再用`llvm::xxh3_64bits`计算64位哈希值。缓存键由制表符分隔的五部分拼接而成：原样的`request_key`、提示词哈希、系统提示词哈希、响应格式指纹和工具选择指纹，最后附加一个表示`output_contract`的字符。此算法确保相同语义的请求（经过规范化）生成相同的键，同时支持通过`response_format`和`tool_choice`等字段进行细粒度区分。整个过程中依赖`normalize_text_for_hashing`进行文本预处理，而指纹函数则封装了对应的对象序列化逻辑。
+该函数首先从 `request.response_format` 和 `request.tool_choice` 中分别提取指纹，其中 `response_format_fingerprint` 可能失败并直接返回 `CacheError`。随后调用 `normalize_text_for_hashing` 对 `request.prompt` 和 `system_prompt` 进行规范化，并使用 `llvm::xxh3_64bits` 计算各自的 64 位哈希值，作为后续缓存匹配的摘要部分。
+
+缓存键的核心构造通过一个预分配容量的 `std::string` 完成：依次追加 `request_key`、制表符、`prompt_hash` 的十进制字符串、制表符、`system_prompt_hash` 的十进制字符串、制表符、`response_format` 指纹、制表符、`tool_choice` 指纹，最后附加一个表示 `request.output_contract` 枚举值的字符（通过将枚举值偏移到 `'0'` 获得）。组合后的字符串即为最终缓存键。该过程依赖 `normalize_text_for_hashing` 保证输入文本的一致性，并依赖 `response_format_fingerprint` 和 `tool_choice_fingerprint` 对复杂类型序列化，从而使不同表示下语义相同的请求生成相同的缓存键。
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- Allocates memory for the returned cache key string (internal `std::string` allocation and ownership transfer to the caller)
 
 #### Reads From
 
-- `request_key`
-- `system_prompt`
-- `request.response_format`
-- `request.prompt`
-- `request.tool_choice`
-- `request.output_contract`
+- `request_key` parameter
+- `system_prompt` parameter
+- `request.prompt` field
+- `request.response_format` field
+- `request.tool_choice` field
+- `request.output_contract` field
+- `clore::generate::cache::normalize_text_for_hashing` (reads its input string)
+
+#### Writes To
+
+- Local `std::string key` (built and returned)
 
 #### Usage Patterns
 
-- Generate a cache key for storing or retrieving prompt responses
-- Used internally by `save_cache_entry` and `find_cached_response` like functions
+- Called to generate a composite cache key for prompt-response pairs before caching or retrieval
 
 ### `clore::generate::cache::normalize_text_for_hashing`
 
-Declaration: `generate/cache.cppm:192`
+Declaration: `src/generate/cache.cppm:211`
 
-Definition: `generate/cache.cppm:192`
+Definition: `src/generate/cache.cppm:211`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
 Implementation: [Implementation](functions/normalize-text-for-hashing.md)
 
-函数 `clore::generate::cache::normalize_text_for_hashing` 实现了对输入文本的标准化，旨在为后续哈希计算提供一致、可比较的字符串。算法通过两步完成：首先跳过所有前导空白字符，然后遍历剩余字符，使用一个 `prev_space` 标志记录是否遇到了空白；每当遇到非空白字符时，如果之前有空白且结果字符串非空，则插入一个空格，再添加该字符，从而将任意连续的空白序列（包括换行、制表等）压缩为单个标准空格，同时自动消除尾部空白。控制流基于单次线性扫描与条件判断，依赖标准库的 `std::isspace` 检测空白字符，不涉及外部系统或复杂数据结构，保证了轻量且确定性的规范化效果。
+函数 `clore::generate::cache::normalize_text_for_hashing` 实现了一个简单的文本规范化流程，其核心目的是为后续哈希计算生成一个格式一致的键。算法分两步：首先跳过输入字符串 `text` 开头的所有空白字符（使用 `std::isspace` 并以 `unsigned char` 避免符号扩展问题）；然后从第一个非空白字符起遍历剩余部分，维护一个 `prev_space` 布尔标志。当遇到空白字符时，仅将 `prev_space` 置为 `true`；遇到非空白字符时，若 `prev_space` 为 `true` 且结果字符串 `result` 非空，则在添加当前字符前先插入一个空格，并重置 `prev_space`。整个过程将任意连续的空白序列压缩为单个空格，同时去除首尾空白，最终返回规范化后的字符串。该函数的全部控制流仅依赖标准库的 `std::isspace` 和 `std::string` 的内存管理，无外部依赖，时间复杂度为 O(n)。
 
 #### Side Effects
 
@@ -200,86 +199,87 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `text` parameter (`std::string_view`)
+- parameter `text` (`std::string_view`)
+
+#### Writes To
+
+- local `result` string (returned by value)
 
 #### Usage Patterns
 
-- Called by `make_prompt_response_cache_key` to normalize input strings before combining into a cache key.
+- Called by `make_prompt_response_cache_key` to normalize text before hashing.
 
 ### `clore::generate::cache::save_cache_entry`
 
-Declaration: `generate/cache.cppm:31`
+Declaration: `src/generate/cache.cppm:50`
 
-Definition: `generate/cache.cppm:303`
+Definition: `src/generate/cache.cppm:322`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-该函数通过一个静态的 `std::mutex` 实现线程安全的序列化写入，保护对缓存文件的并发访问。首先调用 `clore::generate::cache::(anonymous namespace)::cache_directory` 获取缓存根目录，若失败则直接返回对应的 `CacheError`；否则使用 `fs::create_directories` 确保目录存在。接着拼接当前日期对应的 JSONL 文件名（通过 `current_jsonl_filename` 获得），并借助 `clore::generate::cache::(anonymous namespace)::build_jsonl_line` 将 `cache_key` 和 `response` 格式化为一行 JSON 文本。最后以二进制追加模式打开文件，写入该行并刷新，任何 I/O 失败均返回包含描述信息的 `CacheError`。
+函数 `save_cache_entry` 首先获取全局静态 `std::mutex cache_file_mutex` 上的独占锁，确保同一工作空间内的所有写入操作互斥。接着调用 `cache_directory(workspace_root)` 获取缓存根目录，若失败则立即返回对应的 `CacheError`。成功获得目录路径后，使用 `fs::create_directories` 确保目录存在；任何创建错误都会包装为 `CacheError` 返回。然后通过与 `current_jsonl_filename()` 返回的文件名拼接得到 `jsonl_path`，再调用 `build_jsonl_line(cache_key, response)` 生成完整的 JSONL 行。最后以二进制追加模式打开文件，执行写入和刷新；若文件打开或写入失败，均以 `CacheError` 报告失败，否则返回代表成功的 `std::expected<void, CacheError>`。核心依赖为匿名命名空间中的 `cache_directory`、`current_jsonl_filename` 和 `build_jsonl_line`，它们分别处理目录解析、日期滚动的文件名生成以及缓存行的格式化。
 
 #### Side Effects
 
-- Acquires a static mutex for synchronization
-- Creates cache directories if they do not exist
-- Appends a JSONL line to the cache file
-- Flushes the output stream
+- Acquires and releases a static mutex (`cache_file_mutex`), synchronizing access.
+- Creates directories on the file system via `fs::create_directories`.
+- Appends data to a JSONL file on disk, writing the line to the file and flushing it.
 
 #### Reads From
 
-- `workspace_root`
-- `cache_key`
-- `response`
-- Result of `cache_directory(workspace_root)`
-- Result of `current_jsonl_filename()`
-- Result of `build_jsonl_line(cache_key, response)`
+- `workspace_root` (`string_view` parameter)
+- `cache_key` (`string_view` parameter)
+- `response` (`string_view` parameter)
+- `current_jsonl_filename()` (returns a path that may depend on current time or other state)
+- `cache_directory(workspace_root)` (function returning a path or error)
 
 #### Writes To
 
-- Cache directory structure via `fs::create_directories`
-- Cache file via `std::ofstream` append write
+- The file system: a JSONL file located at `*dir / current_jsonl_filename()` (where `dir` is derived from `workspace_root`)
+- The directories created by `fs::create_directories`
 
 #### Usage Patterns
 
-- Synchronous caching of prompt-response pairs
-- Called when immediate persistence is required
-- Complemented by `save_cache_entry_async` for non-blocking usage
+- Called by synchronous cache-saving code paths after a response has been generated.
+- Used to persist a cache entry keyed by `cache_key` for later retrieval via cached response lookup.
 
 ### `clore::generate::cache::save_cache_entry_async`
 
-Declaration: `generate/cache.cppm:41`
+Declaration: `src/generate/cache.cppm:60`
 
-Definition: `generate/cache.cppm:376`
+Definition: `src/generate/cache.cppm:395`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-该函数通过将同步核心 `save_cache_entry` 的调用提交至给定的 `kota::event_loop` `loop` 来实现异步缓存写入。它捕获 `workspace_root`、`cache_key` 和 `response` 的所有权到 `kota::queue` 的闭包中，等待执行完成。若队列任务因取消或内部错误而失败，则通过 `kota::fail` 构造一个带有描述性消息的 `CacheError` 并结束协程；若 `save_cache_entry` 本身返回 `std::expected` 中的错误，则直接传播该 `CacheError`。正常完成时协程无值返回。
+`save_cache_entry_async` 将同步的 `save_cache_entry` 包装为异步协程。它通过 `kota::queue` 在给定的 `kota::event_loop` 上调度工作项，该工作项捕获传入的 `workspace_root`、`cache_key` 和 `response` 并调用 `save_cache_entry`。如果队列调度本身因取消而失败，则生成一个描述队列失败的 `CacheError`；否则，如果 `save_cache_entry` 返回错误，则将该错误转发给调用者。若一切成功，协程无值返回。该函数依赖 `save_cache_entry` 完成实际的缓存写入（包括 JSONL 行构建、索引加载与更新等步骤），并通过 `kota::event_loop` 确保所有操作在正确的异步上下文中执行。
 
 #### Side Effects
 
-- writes cache entry to persistent storage via `save_cache_entry`
-- may propagate `CacheError` from underlying save operation
+- Writes a cache entry to the filesystem via `save_cache_entry`
+- Schedules a task on the given `kota::event_loop` via `kota::queue`
 
 #### Reads From
 
-- `workspace_root` (by move)
-- `cache_key` (by move)
-- `response` (by move)
-- `loop` (reference to `kota::event_loop`)
+- Parameter `workspace_root`
+- Parameter `cache_key`
+- Parameter `response`
+- Parameter `loop` (event loop reference)
 
 #### Writes To
 
-- persistent cache storage via `save_cache_entry`
-- returned `kota::task<void, CacheError>` object
+- Filesystem cache entry at the location derived from `workspace_root` and `cache_key` (by `save_cache_entry`)
 
 #### Usage Patterns
 
-- called after generating a response to asynchronously persist the cache entry
-- used in coroutine-based asynchronous workflows with `kota::event_loop`
+- Called when a new prompt‑response pair needs to be stored in the cache asynchronously
+- Typically awaited by the caller to receive completion or error
+- Used in conjunction with `load_cache_index_async` for full async cache workflows
 
 ## Internal Structure
 
-`generate:cache` 模块为 LLM 生成请求提供持久化缓存机制，其公共接口包括 `CacheIndex` 索引结构、`CacheError` 错误类型以及一组同步/异步 API（如 `load_cache_index`、`save_cache_entry`、`find_cached_response`、`make_prompt_response_cache_key`）。内部实现按职责分解为一个匿名命名空间，封装了 JSONL 文件扫描、缓存键指纹计算（例如 `tool_choice_fingerprint`、`response_format_fingerprint`）、文本规范化（`normalize_text_for_hashing`）以及 ISO 时间戳生成等底层工具函数。模块导入 `protocol` 以复用 LLM 请求/响应的核心数据模型，并依赖 `support` 模块提供的跨切面文本处理与文件 I/O 辅助功能。
+该模块负责为 LLM 生成的响应提供持久化缓存，其核心分解为三个职责层：键生成、索引管理与异步 I/O。键生成层通过 `normalize_text_for_hashing` 对系统提示与用户请求进行规范化，并利用 `tool_choice_fingerprint` 与 `response_format_fingerprint` 计算工具选择与响应格式的特征值，最终由 `make_prompt_response_cache_key` 组装出稳定的复合缓存键。索引管理层的 `load_cache_index` 与 `load_cache_index_async` 从 JSONL 文件中读入 `CacheIndex`，而 `find_cached_response` 在此索引上执行只读查找；`save_cache_entry` 与 `save_cache_entry_async` 负责将新的响应记录序列化为 JSONL 行（借助 `build_jsonl_line`、`escape_json_string`）并追加到当日文件。异步 I/O 层基于 `kota::event_loop` 调度缓存写入与索引加载，内部使用 `cache_file_mutex` 保护对同一缓存文件的并发访问。
 
-在实现结构上，同步函数直接操作文件系统与 `std::expected` 返回结果，而异步版本（`load_cache_index_async`、`save_cache_entry_async`）通过 `kota::event_loop` 调度非阻塞 I/O。缓存条目以 JSONL 格式按日期分片存储（`current_jsonl_filename` 生成每日文件名），并由 `CacheIndex` 在内存中维护所有键到位置的映射。整个模块围绕着两条核心路径组织：写入时先构建键、规范化并序列化；读取时通过索引快速定位并反序列化响应，同时利用匿名函数隔离了 JSON 转义、哈希归一化等与业务无关的细节，保持了公共接口的清晰性。
+模块内部依赖 `protocol` 与 `support` 两个公共模块：前者提供请求/响应的结构化类型（如 `ResponseFormat`、`ToolChoice`），后者提供文件路径规范化、UTF-8 文本处理等工具。实现上采用匿名命名空间隔离辅助函数（如 `cache_directory`、`current_jsonl_filename`、`format_iso_timestamp`、`all_jsonl_files`），避免污染外部命名空间。整个模块以同步与异步两种接口衔接上层调用，并在 `CacheError` 中通过 `message` 记录失败原因，确保错误信息可追溯。
 
 ## Related Pages
 

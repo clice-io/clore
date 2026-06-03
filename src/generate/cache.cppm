@@ -1,5 +1,25 @@
 module;
 
+#include <array>
+#include <chrono>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <ios>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <unordered_map>
+#include <utility>
+#include <variant>
+#include <vector>
+
 #include "kota/async/async.h"
 #include "kota/codec/json/json.h"
 
@@ -7,7 +27,6 @@ module;
 
 export module generate:cache;
 
-import std;
 import protocol;
 import support;
 

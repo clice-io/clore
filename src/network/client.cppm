@@ -1,10 +1,18 @@
 module;
 
+#include <expected>
+#include <format>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+
 #include "kota/async/async.h"
 
 export module client;
-
-import std;
 import http;
 import protocol;
 import schema;

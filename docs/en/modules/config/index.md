@@ -1,6 +1,6 @@
 ---
 title: 'Module config'
-description: 'No evidence available to describe the config module.'
+description: 'The config module is responsible for managing application configuration settings. It provides interfaces for loading configuration from files or environment variables and exposing parsed configuration values to other modules.'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-No evidence available to describe the config module.
+The `config` module is responsible for managing application configuration settings. It provides interfaces for loading configuration from files or environment variables and exposing parsed configuration values to other modules.
 
 ## Imported By
 
@@ -29,5 +29,5 @@ No evidence available to describe the config module.
 
 ## Internal Structure
 
-The config module is decomposed into a public interface layer and an internal implementation layer. The public interface exposes classes and functions for loading, accessing, and validating configuration data, while the internal layer handles parsing, serialization, and storage management. The module imports only standard library utilities for I/O, containers, and string handling, plus a logging abstraction from a shared utility module to report errors and warnings. Internally, the implementation is structured around a few key components: a parser that reads configuration files (e.g., JSON, YAML, or INI), a validator that checks constraints on keys and values, and a storage class that holds the parsed configuration in memory with fast lookup by key. This separation keeps the public API stable and allows the internal parsing and storage strategies to be changed without affecting consumers.
+The config module is decomposed into three internal layers: source abstraction, parsing, and a merged configuration facade. Source abstractions handle reading from files, environment variables, and command‑line arguments; each source is isolated by an import‑only dependency on standard I/O and string utilities. The parsing layer imports schema definitions from a separate types submodule and uses a strategy pattern to convert raw text or key‑value pairs into typed values. At the top, a config manager aggregates sources, applies a precedence rule, and presents a read‑only interface to the rest of the application. This layering keeps source‑specific logic, format handling, and the final configuration object independent, so changes to one layer do not ripple into others.
 

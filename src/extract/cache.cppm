@@ -1,5 +1,22 @@
 module;
 
+#include <charconv>
+#include <chrono>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <thread>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 #include "kota/codec/json/json.h"
 
 #include "llvm/Support/FileSystem.h"
@@ -9,7 +26,6 @@ module;
 
 export module extract:cache;
 
-import std;
 import :ast;
 import :compiler;
 import :scan;

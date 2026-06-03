@@ -1,6 +1,12 @@
-export module config:schema;
+module;
 
-import std;
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+export module config:schema;
 
 export namespace clore::config {
 

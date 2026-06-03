@@ -1,6 +1,6 @@
 ---
 title: 'Module generate'
-description: 'The generate module owns the documentation page generation pipeline. It provides four public entry points: generate_dry_run for simulating the generation outcome without side effects, generate_pages as the synchronous orchestrator that processes resource identifiers, a concurrency limit, and an output directory, write_pages to commit the rendered pages to a specified location, and generate_pages_async which returns a task to be scheduled on an event loop for asynchronous execution. The module internally manages configuration, rate limiting, output paths, and LLM models, and depends on the config and extract modules for compilation settings and project metadata.'
+description: 'The generate module is responsible for producing the final documentation pages from previously extracted project data. It acts as the orchestration layer that transforms an analysis store and a page plan into rendered output files, applying configuration settings, concurrency limits, and model parameters as needed. The module depends on the config module for runtime settings and on the extract module for the data that feeds page generation.'
 layout: doc
 template: doc
 ---
@@ -9,13 +9,14 @@ template: doc
 
 ## Summary
 
-The `generate` module owns the documentation page generation pipeline. It provides four public entry points: `generate_dry_run` for simulating the generation outcome without side effects, `generate_pages` as the synchronous orchestrator that processes resource identifiers, a concurrency limit, and an output directory, `write_pages` to commit the rendered pages to a specified location, and `generate_pages_async` which returns a task to be scheduled on an event loop for asynchronous execution. The module internally manages configuration, rate limiting, output paths, and LLM models, and depends on the `config` and `extract` modules for compilation settings and project metadata.
+The `generate` module is responsible for producing the final documentation pages from previously extracted project data. It acts as the orchestration layer that transforms an analysis store and a page plan into rendered output files, applying configuration settings, concurrency limits, and model parameters as needed. The module depends on the `config` module for runtime settings and on the `extract` module for the data that feeds page generation.
+
+The public API consists of four functions. `generate_dry_run` validates the page plan and generation pipeline without writing any files, returning a status code. `generate_pages` is the primary synchronous entry point that renders all pages and writes them to a specified output directory. `generate_pages_async` provides the same capability but operates asynchronously on a caller‑provided event loop, returning a task that must be scheduled and executed. Finally, `write_pages` writes an already‑constructed page set to a destination, assuming the page structures have been built beforehand. Collectively, these functions expose the full life‑cycle of page generation, from validation through to output, while keeping internal details such as model‑specific logic and loop management private.
 
 ## Imports
 
 - [`config`](../config/index.md)
 - [`extract`](../extract/index.md)
-- `std`
 
 ## Imported By
 
@@ -26,13 +27,15 @@ The `generate` module owns the documentation page generation pipeline. It provid
 
 ### `clore::generate::generate_dry_run`
 
-Declaration: `generate/generate.cppm:25`
+Declaration: `src/generate/generate.cppm:42`
 
-Definition: `generate/scheduler.cppm:1932`
+Definition: `src/generate/scheduler.cppm:1957`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The implementation of `clore::generate::generate_dry_run` orchestrates a complete simulation of the page generation pipeline without persisting any rendered output. It begins by constructing a `PreparedGenerationContext` via `prepare_generation_context` and then calls `prepare_symbol_analyses_for_dry_run` to set up the required symbol analyses. A `PageGenerationScheduler` is created with the `dry_run` flag set to `true`, which causes the internal `PageRenderer` to skip file emission and instead accumulate generated page data in memory via its `dry_run_pages_` field. The scheduler then executes its `run` method, which drives the full workflow: it submits prompts, performs symbol analysis tasks, handles dependency tracking through the `DependencyTracker`, enqueues work in the `WorkQueue`, and manages LLM requests via `request_llm_async`. All prompt outputs are parsed and cached, but the `PageRenderer` never writes to disk because its `dry_run_` flag suppresses I/O. The function ultimately returns the number of pages that would have been generated, as reported by `PageRenderer::dry_run_pages`.
+The function `clore::generate::generate_dry_run` orchestrates a simulation of the full generation pipeline without issuing any LLM requests or writing output files. It first constructs a `PreparedGenerationContext` via `prepare_generation_context`, then creates a `PageGenerationScheduler` with the `dry_run` flag set to `true` and a `PageRenderer` also configured for dry-run mode. The scheduler’s `run` method is invoked, which drives the entire workflow through its internal `WorkQueue`, `DependencyTracker`, and worker tasks.
+
+Internally, the scheduler iterates over generation plans, deduplicates prompt requests with `deduplicate_prompt_requests`, and submits symbol analysis work via `submit_after_symbol_analysis`. A worker loop dequeues tasks (both prompt and analysis work) and processes them; in dry-run mode, `perform_prompt_request` and `request_llm_async` are bypassed, and page rendering via `PageRenderer::emit_pages` skips actual file writes. The `DependencyTracker` tracks page state (`PageState`), marks symbol prompts as ready, and releases dependents. After all work is completed or failures are detected, the function returns an aggregated result indicating success or failure counts.
 
 #### Side Effects
 
@@ -40,92 +43,88 @@ No observable side effects are evident from the extracted code.
 
 ### `clore::generate::generate_pages`
 
-Declaration: `generate/generate.cppm:28`
+Declaration: `src/generate/generate.cppm:45`
 
-Definition: `generate/scheduler.cppm:1991`
+Definition: `src/generate/scheduler.cppm:2016`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::generate_pages` orchestrates the entire page generation pipeline. It begins by invoking `prepare_generation_context` to produce a `PreparedGenerationContext` from the given configuration and model settings. A `PageGenerationScheduler` is then constructed with the context, LLM model identifier, rate limit, output root path, event loop, and optional dry-run flag. The scheduler coordinates symbol analysis and page prompt work through its internal `DependencyTracker`, `WorkQueue`, and `PageRenderer`. It first prepares symbol analyses (including a dry-run variant via `prepare_symbol_analyses_for_dry_run`), then schedules and executes symbol analysis tasks, managing dependencies and caching via `prompt_cache_identity_for_page_request` and persistent cache keys. After symbol dependencies are satisfied, the scheduler submits page prompt work, limiting concurrency with a semaphore from the `WorkQueue` and respecting the rate limit for LLM requests.
+The function `clore::generate::generate_pages` orchestrates the end‑to‑end page generation pipeline. It first calls `prepare_generation_context` to transform the imported `config` and `model` into a `PreparedGenerationContext` that contains all plan metadata, symbol analysis targets, and prompt request descriptors. Using this context, it constructs a `DependencyTracker` to track per‑page and per‑symbol dependency states, and a `PageGenerationScheduler` that owns a `WorkQueue`, a `PageRenderer`, and counters for LLM requests and cache activity. The scheduler is initialized with the `output_root` directory, the LLM model identifier (`llm_model`), a per‑second `rate_limit`, and a `dry_run` flag.
 
-Inside the scheduler’s worker task loop, each worker dequeues work items (either symbol analysis or page prompt tasks), performs LLM requests via `request_llm_async`, handles retries and failures through `record_consecutive_failure` and `retry_limit_exceeded`, and caches results. Once a page’s prompts are completed, its output is rendered using `PageRenderer::emit_pages_async` or `emit_pages`, and summaries are updated via `update_page_summaries`. The pipeline also handles directory index page generation through `build_directory_index_pages`, deduplication of prompt requests via `deduplicate_prompt_requests`, and final rendering of all generated pages. The function returns an integral result indicating success or the number of generated pages.
+The control flow proceeds by discovering all documentable symbols via `collect_documentable_symbols`, then submitting `SymbolAnalysisWork` items to the work queue. Each analysis task is executed by `run_symbol_analysis_task`, which may issue an LLM request or use cached results. When a symbol analysis finishes, `DependencyTracker::mark_symbol_ready` releases dependent pages, and `try_submit_ready_pages` enqueues `PagePromptWork` for pages whose symbolic dependencies are satisfied. Page prompts are processed by `run_page_prompt_task`, which deduplicates requests via `deduplicate_prompt_requests` and performs the LLM call through `perform_prompt_request`. After obtaining the prompt output, `finish_page_prompt_work` parses the response, updates page summaries, and marks the page for rendering. The scheduler then submits `RenderPageWork` via `render_ready_page`, which calls `PageRenderer::emit_pages` to write the final HTML files. Throughout execution, the scheduler respects rate limits, tracks consecutive failures with `record_consecutive_failure`, and stops workers if `retry_limit_exceeded`. Once all work completes, directory index pages are built by `build_directory_index_pages`, and the function returns a status code indicating success or the nature of any failure.
 
 #### Side Effects
 
-- Writes documentation pages to the filesystem via `write_pages` and `write_page`
+- writes generated page files to the output path specified by the `string_view` parameter
+- may modify internal cache or state passed via reference parameters
 
 #### Reads From
 
-- the two `const int &` context parameters (analysis state and plan set)
-- the first `std::string_view` parameter (output directory or base path)
-- the `std::uint32_t` parameter (seed for reproducibility)
-- the second `std::string_view` parameter (identifier for the generation run)
+- the two `const int &` parameters (likely representing analysis stores or page plans)
+- the `std::string_view` parameter for output directory
+- the `std::string_view` parameter for additional configuration
+- the `std::uint32_t` parameter for concurrency or mode
 
 #### Writes To
 
-- output files under the provided `std::string_view` path (written through `write_pages` and `write_page`)
+- output files via `write_page` or `write_pages` calls
+- the referenced integer parameters if they are output or in-out arguments
 
 #### Usage Patterns
 
-- Primary invocation point for generating all documentation pages after analysis is complete
-- Called by higher-level generation orchestration code, possibly `generate_pages_async` for asynchronous execution
+- main driver for documentation generation
+- called from the top-level CLI or build system entry point
 
 ### `clore::generate::generate_pages_async`
 
-Declaration: `generate/generate.cppm:37`
+Declaration: `src/generate/generate.cppm:54`
 
-Definition: `generate/scheduler.cppm:1969`
+Definition: `src/generate/scheduler.cppm:1994`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function constructs a `PreparedGenerationContext` from its parameters by calling `prepare_generation_context`, then creates a `PageGenerationScheduler` that owns a `DependencyTracker`, a `WorkQueue`, and a `PageRenderer`. It invokes the scheduler's `run` method, which starts a fixed number of background worker tasks on the provided `kota::event_loop`. Each worker loops, dequeues `ScheduledWork` from the `WorkQueue`, and dispatches either symbol‑analysis or page‑prompt tasks. Symbol analyses call `request_llm_async`, record results in the `DependencyTracker`, and release dependent pages when a symbol becomes ready. Page‑prompt tasks use the prepared template, check a persistent cache via `prompt_cache_identity_for_page_request`, and on completion call `finish_page_prompt_work` to update the page state and trigger rendering. The scheduler respects retry limits, tracks consecutive failures, and flushes deferred work as dependencies resolve. Once all work is done or stopped, `run` returns an aggregate result indicating success, failure, or cancellation.
+The function builds a `PreparedGenerationContext` from the input configuration, model, and other parameters, then constructs a `PageGenerationScheduler` that owns a `DependencyTracker`, `WorkQueue`, and `PageRenderer`. The scheduler’s `run` method orchestrates the entire pipeline: it first initializes all page states and ready candidates, spawns worker tasks via `WorkerActivity` that repeatedly dequeue work items from the queue, and processes them until completion or failure. Workers handle three kinds of work: symbol analysis (collecting documentable symbols and issuing LLM requests to enrich symbol metadata), page prompts (generating prompt requests for each page plan, with caching via `prompt_cache_identity_for_page_request` and dependency resolution through the `DependencyTracker`), and page rendering (invoking `PageRenderer::emit_pages_async` after all prompts for a page are finished). The `DependencyTracker` maintains per-page state (unsatisfied deps, pending prompts, failure flags) and releases dependents when symbols or prompts complete. The `WorkQueue` manages concurrency with a semaphore, deferred enqueueing for symbol analysis, and flush logic to pace work. The event loop drives all asynchronous LLM requests via `request_llm_async`, and the scheduler tracks consecutive failures and retry limits. Upon completion, the function returns an integer indicating success or an error code propagated through `make_generate_error`.
 
 #### Side Effects
 
-- schedules asynchronous tasks on the provided event loop
-- likely performs file I/O to write generated pages
+- Schedules tasks on the provided `kota::event_loop`.
 
 #### Reads From
 
-- all parameters: const int references, `string_view` arguments, `uint32_t`, event loop reference
+- `int` parameters (page identifiers or sizes)
+- `std::string_view` parameters (output path or content)
+- `std::uint32_t` parameter (seed or options)
+- `kota::event_loop&` (event loop to schedule tasks)
 
 #### Writes To
 
-- external filesystem via generated pages
-- event loop task queue
+- The `kota::event_loop` (by scheduling tasks)
 
 #### Usage Patterns
 
-- callers must schedule the returned task on the loop and run it
-- used to run page generation asynchronously in a cooperating event loop
+- Callers schedule the returned task on the event loop and run it.
+- Used for asynchronous documentation generation.
 
 ### `clore::generate::write_pages`
 
-Declaration: `generate/generate.cppm:44`
+Declaration: `src/generate/generate.cppm:61`
 
-Definition: `generate/scheduler.cppm:2010`
+Definition: `src/generate/scheduler.cppm:2035`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::write_pages` orchestrates the end-to-end generation pipeline by first preparing the generation context via `prepare_generation_context`, which builds a `PreparedGenerationContext` containing plan sets, symbol analysis targets, prompt requests, and page structures. It then constructs a `PageGenerationScheduler` with the provided config, model, `PreparedGenerationContext`, LLM model identifier, rate limit, output root, event loop, and dry-run flag. The scheduler coordinates concurrent work through its `run` method: symbol analysis tasks are submitted via `schedule_symbol_analysis` and executed by `run_symbol_analysis_task`, while page prompt tasks are dispatched through `run_page_prompt_task`. A `DependencyTracker` instance inside the scheduler manages state per page, tracking pending symbol analyses, unsatisfied dependencies, and ready candidates via `pop_ready_candidate`. The `WorkQueue` handles deferred symbol analysis work and worker synchronization using `available_` semaphore and `stopped_` flag. LLM requests are issued asynchronously through `request_llm_async` on the event loop, with caching via `prompt_cache_identity_for_page_request`. After all prompts complete, the scheduler calls `render_generated_pages` to produce final Markdown output through the `PageRenderer`, including building directory index pages via `build_directory_index_pages`. Error handling records consecutive failures via `record_consecutive_failure` and respects retry limits; upon completion, the function returns the total written page count from `written_page_count`.
+The implementation of `clore::generate::write_pages` orchestrates a multi-stage pipeline for generating documentation pages. It constructs a `PreparedGenerationContext` via `prepare_generation_context`, then instantiates a `PageGenerationScheduler` that owns a `PageRenderer`, a `DependencyTracker`, and a `WorkQueue`. The scheduler iterates over ready candidates from the `DependencyTracker`, submitting symbol‑analysis work (`SymbolAnalysisWork`) to the `WorkQueue`. Workers dequeue tasks, run LLM prompts (with caching via `prompt_cache_identity_for_page_request` and `deduplicate_prompt_requests`), and update page state through `DependencyTracker::mark_symbol_ready` and `DependencyTracker::finish_symbol_prompt`. When all dependencies for a page are satisfied, `render_ready_page` is called to write output through `PageRenderer::emit_pages`.
 
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
+Control flow depends on the `DependencyTracker` to maintain `PageState` entries and a set of `ready_candidates_`. The `WorkQueue` uses a semaphore (`available_`) and deferred queue to manage concurrency. Failure handling is tracked via `consecutive_failures_` and `retry_limit_exceeded_`. The loop terminates when `WorkQueue::stopped` returns true or all pages are written, after which `maybe_flush_deferred` finalizes any remaining deferred work.
 
 #### Reads From
 
-- `const int &` parameter
-- `std::string_view` parameter
-
-#### Usage Patterns
-
-- likely invoked during the page generation pipeline
-- probably called from higher-level generators such as `clore::generate::generate_pages`
+- const int & parameter (likely a state or context identifier)
+- `std::string_view` parameter (likely a path or content direction)
 
 ## Internal Structure
 
-The `generate` module provides the documentation page generation pipeline within the `clore` project. It is decomposed into several public entry points: `generate_dry_run` for previewing results without output, `generate_pages` as the synchronous generation command, `write_pages` to commit rendered pages to disk, and `generate_pages_async` for non‑blocking generation on an external event loop. Internally, the module manages shared generation state via module‑level variables such as `config`, `model`, `llm_model`, `rate_limit`, `output_root`, `pages`, and a `loop` reference, which together control model selection, concurrency limits, output location, and the asynchronous execution context. The module imports `config` for configuration parameters and `extract` for the extraction data model, forming a clear internal layering where generation relies on pre‑extracted metadata and user‑supplied settings. Asynchronous support is separated from the synchronous path: `generate_pages_async` returns a task object that must be explicitly scheduled on the provided `kota::event_loop`, while the synchronous functions handle blocking execution directly.
+The `generate` module is the top‑level orchestration layer for the documentation generation pipeline. It imports `config` for application settings and `extract` for preprocessed analysis data, and it exposes four public entry points: `generate_dry_run` for validation without side effects, `generate_pages` for the synchronous generation workflow, `generate_pages_async` for an asynchronous variant that runs on a `kota::event_loop`, and `write_pages` for persisting the fully built page set. Internally, the module is decomposed into a synchronous path and an async path, with shared helper functionality for page plan construction, LLM invocation, and rendering. The internal state comprises handles for pages, model, LLM model, config, rate limit, output root, and a loop reference, which together support the generation process and are wired through the public functions.
 
 ## Related Pages
 

@@ -1,6 +1,6 @@
 ---
 title: 'clore::support::ensureutf8'
-description: 'The function clore::support::ensure_utf8 accepts a std::string_view and returns a std::string. It is responsible for ensuring that the returned string is a valid UTF-8 encoding of the input. The caller can rely on the result being a correctly encoded UTF-8 string, suitable for further processing or output. This function is used by other utilities such as clore::support::write_utf8_text_file and clore::support::truncate_utf8 to guarantee UTF-8 validity before performing operations that require correct encoding.'
+description: 'The function clore::support::ensure_utf8 accepts a std::string_view and returns a std::string that is guaranteed to be valid UTF-8. It is the caller’s responsibility to provide any std::string_view; the function handles any ill-formed byte sequences and produces a properly encoded UTF-8 result, suitable for further processing or output by callers such as clore::support::write_utf8_text_file and clore::support::truncate_utf8.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Namespace clore::support](../index.md)
 
-Declaration: `support/logging.cppm:75`
+Declaration: `src/support/logging.cppm:98`
 
-Definition: `support/logging.cppm:405`
+Definition: `src/support/logging.cppm:428`
 
 Implementation: [`Module support`](../../../../modules/support/index.md)
 
@@ -21,12 +21,12 @@ Implementation: [`Module support`](../../../../modules/support/index.md)
 auto (std::string_view) -> std::string;
 ```
 
-The function `clore::support::ensure_utf8` accepts a `std::string_view` and returns a `std::string`. It is responsible for ensuring that the returned string is a valid UTF-8 encoding of the input. The caller can rely on the result being a correctly encoded UTF-8 string, suitable for further processing or output. This function is used by other utilities such as `clore::support::write_utf8_text_file` and `clore::support::truncate_utf8` to guarantee UTF-8 validity before performing operations that require correct encoding.
+The function `clore::support::ensure_utf8` accepts a `std::string_view` and returns a `std::string` that is guaranteed to be valid UTF-8. It is the caller’s responsibility to provide any `std::string_view`; the function handles any ill-formed byte sequences and produces a properly encoded UTF-8 result, suitable for further processing or output by callers such as `clore::support::write_utf8_text_file` and `clore::support::truncate_utf8`.
 
 ## Usage Patterns
 
-- Used by `write_utf8_text_file` to sanitize input before writing
-- Used by `truncate_utf8` to ensure truncated result is valid UTF-8
+- Ensuring text is valid UTF-8 before passing to `write_utf8_text_file`
+- Sanitizing input before truncation in `truncate_utf8`
 
 ## Calls
 

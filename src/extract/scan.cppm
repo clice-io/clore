@@ -1,5 +1,24 @@
 module;
 
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
 #include "kota/async/async.h"
 
 #include "llvm/Support/Error.h"
@@ -11,7 +30,6 @@ module;
 
 export module extract:scan;
 
-import std;
 import :compiler;
 import support;
 

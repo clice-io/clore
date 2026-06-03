@@ -1,6 +1,14 @@
+module;
+
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 module generate:evidence_builder;
 
-import std;
 import :evidence;
 import :model;
 import extract;

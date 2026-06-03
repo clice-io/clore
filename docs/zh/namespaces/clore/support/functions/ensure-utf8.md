@@ -1,6 +1,6 @@
 ---
 title: 'clore::support::ensureutf8'
-description: '接受一个 std::string_view，返回一个 std::string。该函数保证输出字符串是有效的 UTF-8 编码，无论输入是否已符合该编码。它内部会验证输入序列的合法性，并在必要时进行规范化或修复，确保调用者获得一个可以安全用于任何期望 UTF-8 文本的上下文的字符串。'
+description: 'clore::support::ensure_utf8 接受一个 std::string_view 并返回一个 std::string，该结果保证是有效的 UTF‑8 编码。调用者可将此函数用作一个适配层，确保无论输入数据的编码状态如何，下游处理都能接收到一个符合 UTF‑8 规范的字符串。函数内部会处理任何无效的字节序列，生成语义上可用的输出。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Namespace clore::support](../index.md)
 
-Declaration: `support/logging.cppm:75`
+Declaration: `src/support/logging.cppm:98`
 
-Definition: `support/logging.cppm:405`
+Definition: `src/support/logging.cppm:428`
 
 Implementation: [`Module support`](../../../../modules/support/index.md)
 
@@ -21,12 +21,13 @@ Implementation: [`Module support`](../../../../modules/support/index.md)
 auto (std::string_view) -> std::string;
 ```
 
-接受一个 `std::string_view`，返回一个 `std::string`。该函数保证输出字符串是有效的 UTF-8 编码，无论输入是否已符合该编码。它内部会验证输入序列的合法性，并在必要时进行规范化或修复，确保调用者获得一个可以安全用于任何期望 UTF-8 文本的上下文的字符串。
+`clore::support::ensure_utf8` 接受一个 `std::string_view` 并返回一个 `std::string`，该结果保证是有效的 UTF‑8 编码。调用者可将此函数用作一个适配层，确保无论输入数据的编码状态如何，下游处理都能接收到一个符合 UTF‑8 规范的字符串。函数内部会处理任何无效的字节序列，生成语义上可用的输出。
 
 ## Usage Patterns
 
-- 在输出或进一步处理前清理字符串
-- 被 `write_utf8_text_file` 和 `truncate_utf8` 调用
+- Normalizing input strings to ensure valid UTF-8 encoding
+- Used by `write_utf8_text_file` to guarantee valid UTF-8 before writing
+- Used by `truncate_utf8` to ensure truncated string ends at a valid boundary
 
 ## Calls
 

@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::protocol'
-description: 'clore::net::protocol 命名空间封装了与网络通信协议相关的核心数据处理逻辑，主要负责请求构造、响应解析以及格式验证。该命名空间提供了一系列函数，例如使用 build_request_json 从配置参数构建 JSON 请求、通过 parse_response 和 parse_response_text 解析服务器返回的完成响应（CompletionResponse），并提取其中的文本内容或工具调用结果。此外，它还包含 validate_json_output 和 validate_markdown_fragment_output 等验证函数，用于确保协议数据的格式符合预期规范，从而保证上下游模块间的数据一致性。在架构上，该命名空间作为网络层与业务逻辑层之间的桥梁，将原始通信数据转换为结构化表示，并处理工具参数解析（如 parse_tool_arguments）与输出追加（如 append_tool_outputs），是 Clore 网络协议栈中实现可扩展交互的重要组件。'
+description: '命名空间 clore::net::protocol 提供了一组用于处理 LLM 网络通信协议的工具函数，专注于消息的解析、验证和请求构建。其核心职责包括：从 CompletionResponse 响应中提取文本或结构化内容（如工具调用）、将工具输出追加到会话上下文、验证 JSON 和 Markdown 片段输出是否符合预期格式，以及构建请求的 JSON 负载。该命名空间抽象了协议层的序列化与反序列化细节，使得上层模块可以专注于业务逻辑，而无需直接处理底层数据结构。'
 layout: doc
 template: doc
 ---
@@ -9,129 +9,133 @@ template: doc
 
 ## Summary
 
-`clore::net::protocol` 命名空间封装了与网络通信协议相关的核心数据处理逻辑，主要负责请求构造、响应解析以及格式验证。该命名空间提供了一系列函数，例如使用 `build_request_json` 从配置参数构建 JSON 请求、通过 `parse_response` 和 `parse_response_text` 解析服务器返回的完成响应（`CompletionResponse`），并提取其中的文本内容或工具调用结果。此外，它还包含 `validate_json_output` 和 `validate_markdown_fragment_output` 等验证函数，用于确保协议数据的格式符合预期规范，从而保证上下游模块间的数据一致性。在架构上，该命名空间作为网络层与业务逻辑层之间的桥梁，将原始通信数据转换为结构化表示，并处理工具参数解析（如 `parse_tool_arguments`）与输出追加（如 `append_tool_outputs`），是 Clore 网络协议栈中实现可扩展交互的重要组件。
+命名空间 `clore::net::protocol` 提供了一组用于处理 LLM 网络通信协议的工具函数，专注于消息的解析、验证和请求构建。其核心职责包括：从 `CompletionResponse` 响应中提取文本或结构化内容（如工具调用）、将工具输出追加到会话上下文、验证 JSON 和 Markdown 片段输出是否符合预期格式，以及构建请求的 JSON 负载。该命名空间抽象了协议层的序列化与反序列化细节，使得上层模块可以专注于业务逻辑，而无需直接处理底层数据结构。
+
+从架构上看，`clore::net::protocol` 位于网络层和业务逻辑层之间，扮演适配器角色。它利用 `parse_tool_arguments`、`append_tool_outputs`、`parse_response` 和 `text_from_response` 等函数，将原始的字符串响应转换为一组内部状态码（通常以 `int` 返回），从而统一了错误处理和验证流程。这些函数通常与消息历史、工具调用 ID 和完成理由等变量配合工作，确保整个协议处理链路的数据一致性。该命名空间通过提供标准化的验证入口（如 `validate_json_output` 和 `validate_markdown_fragment_output`），增强了对外部输入的健壮性。
 
 ## Functions
 
 ### `clore::net::protocol::append_tool_outputs`
 
-Declaration: `network/protocol.cppm:473`
+Declaration: `src/network/protocol.cppm:485`
 
-Definition: `network/protocol.cppm:544`
+Definition: `src/network/protocol.cppm:556`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::protocol::append_tool_outputs` 将指定 `CompletionResponse` 中的工具执行结果追加到由前两个整数参数标识的请求上下文中。调用者需确保传入的 `CompletionResponse` 包含有效的工具输出，且整数参数正确对应目标会话或阶段。函数返回一个整数值表示操作是否成功，调用者应根据返回值判断处理是否完成。
+函数 `clore::net::protocol::append_tool_outputs` 负责将一次工具调用的输出追加到由整数标识的上下文（如会话或消息序列）中。调用方提供一个会话的句柄（第一个 `int`）、一个描述完成响应的 `CompletionResponse` 对象，以及一个表示待附加输出数或起始位置的整数（第三个 `int`）；函数执行后返回一个 `int` 以指示操作结果（例如实际追加的数量或成功/失败状态）。该函数通常配合解析或构建响应流的其他协议函数使用，是调用方在接收工具输出后将其整合到协议状态中的关键步骤。
 
 #### Usage Patterns
 
-- Used to incorporate tool execution results back into the conversation history
-- Called after a `CompletionResponse` with non‑empty `tool_calls` is received
-- Replaces manual construction of assistant and tool result messages
+- 在完成响应包含工具调用时，将工具输出合并到对话历史中
+- 作为构建请求或响应处理流程的一部分
 
 ### `clore::net::protocol::build_request_json`
 
-Declaration: `network/openai.cppm:457`
+Declaration: `src/network/openai.cppm:467`
 
-Definition: `network/openai.cppm:465`
+Definition: `src/network/openai.cppm:475`
 
 Implementation: [`Module openai`](../../../../modules/openai/index.md)
 
-`clore::net::protocol::build_request_json` 负责构造请求的 JSON 表示。调用者提供 `const int &` 类型的参数，该参数代表与请求相关联的标识符或配置；函数返回一个 `int` 值，表示构建操作的结果。调用者应确保传入的引用有效，并依据返回值判断请求是否成功构建。
+函数 `clore::net::protocol::build_request_json` 接受一个 `const int &` 参数（表示请求标识符）并返回一个 `int` 值，该值指示构建 JSON 请求的结果。调用者负责提供有效的请求标识符，并检查返回的整数状态以确认 JSON 是否成功构建。该函数不修改其参数，且调用者应当根据返回代码处理可能的错误情况。
 
 #### Usage Patterns
 
-- 通过 `build_request_json(request)` 将业务请求对象序列化为 JSON 字符串
-- 用于构造发送给 LLM 的 HTTP 请求体
+- 作为构造 API 请求 JSON 的核心函数被 `clore::net::protocol` 中的请求发送逻辑调用
+- 调用方通常先构建 `CompletionRequest`，然后调用此函数获取 JSON 负载
 
 ### `clore::net::protocol::parse_response`
 
-Declaration: `network/openai.cppm:459`
+Declaration: `src/network/openai.cppm:469`
 
-Definition: `network/openai.cppm:532`
+Definition: `src/network/openai.cppm:542`
 
 Implementation: [`Module openai`](../../../../modules/openai/index.md)
 
-调用 `clore::net::protocol::parse_response` 以解析以 `std::string_view` 形式提供的协议响应。该函数返回一个 `int` 值，表示解析结果或状态码。调用者应确保传入的字符串视图中包含格式正确的响应数据，并依据返回的整数判断解析是否成功或进一步处理。
+函数 `clore::net::protocol::parse_response` 接受一个 `std::string_view` 类型的响应数据，并返回一个 `int` 值。该值是解析过程的直接结果，供调用者判断响应是否有效或进行后续处理。调用者应确保传入的字符串包含完整且格式正确的响应内容；返回的非零值通常指示解析失败或需要特殊处理的特定条件。
 
 #### Usage Patterns
 
-- parse LLM API JSON response into `CompletionResponse`
-- validate and convert raw response text from an AI provider
+- 用于解析 LLM API 返回的 JSON 响应
+- 通常由上层通信或协议处理模块调用
 
 ### `clore::net::protocol::parse_response_text`
 
-Declaration: `network/protocol.cppm:479`
+Declaration: `src/network/protocol.cppm:491`
 
-Definition: `network/protocol.cppm:592`
+Definition: `src/network/protocol.cppm:604`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::protocol::parse_response_text` 是一个模板函数，接受一个 `CompletionResponse` 类型的常量引用并返回 `int`。调用方使用此函数来解析完成响应中的文本部分。返回的整数值指示解析操作的结果或状态，调用方应检查该值以确定解析是否成功。
+`clore::net::protocol::parse_response_text` 是一个模板函数，接受一个 `CompletionResponse` 常引用并返回 `int`。调用方应提供一个有效的 `CompletionResponse` 对象；函数会从该响应中解析文本部分，并返回一个指示处理结果的状态码（通常 0 表示成功，非零表示错误）。作为模板函数，它可针对不同的 `T` 类型实例化，但调用方通常无需显式指定模板参数，除非需要特定特化行为。
 
 #### Usage Patterns
 
-- parse structured LLM response into type `T`
-- convert `CompletionResponse` to `std::expected<T, LLMError>`
+- 将 LLM 的 JSON 结构化响应转换为特定类型 `T`
+- 在协议解析链中处理结构化输出
+- 与 `build_request_json`、`parse_tool_arguments` 等函数配合使用
 
 ### `clore::net::protocol::parse_tool_arguments`
 
-Declaration: `network/protocol.cppm:482`
+Declaration: `src/network/protocol.cppm:494`
 
-Definition: `network/protocol.cppm:607`
+Definition: `src/network/protocol.cppm:619`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-The `clore::net::protocol::parse_tool_arguments` template function processes a `ToolCall` object to extract and validate its tool‑specific arguments. Its primary responsibility is to interpret the raw call data and produce a normalized representation suitable for downstream protocol handling. The function returns an `int` status code: zero signals successful parsing, while a non‑zero value indicates an error condition that the caller should handle.
+`clore::net::protocol::parse_tool_arguments` 是一个函数模板，负责解析给定的 `ToolCall` 中的参数。它返回一个 `int` 值，该值向调用方传达解析结果的状态（例如成功或错误条件）。调用方应根据返回的整数值判断参数是否有效或是否需要进一步处理。
 
 #### Usage Patterns
 
-- Invoked to deserialize tool call arguments into a concrete type for further processing
-- Commonly used in tool execution or validation pipelines
+- Used to extract typed tool arguments from a `ToolCall` object
+- Commonly called in tool invocation handling code
 
 ### `clore::net::protocol::text_from_response`
 
-Declaration: `network/protocol.cppm:471`
+Declaration: `src/network/protocol.cppm:483`
 
-Definition: `network/protocol.cppm:528`
+Definition: `src/network/protocol.cppm:540`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-函数 `clore::net::protocol::text_from_response` 接受一个 `const CompletionResponse &` 对象，并返回一个 `int` 值。调用者应当检查该返回值：一个非零值通常表示处理过程中发生的错误，而零值则代表成功。该函数旨在从响应对象中提取文本内容，但实际写入或获取文本的具体机制由调用者根据返回值进行后续处理。这是协议解析流程中的一个步骤，常与其他返回 `int` 的解析函数（如 `parse_response_text`）配合使用，以构成完整的响应处理管线。
+函数 `clore::net::protocol::text_from_response` 从给定的 `CompletionResponse` 中提取文本信息，并将结果以 `int` 形式返回给调用者。调用者应当确保传入的 `CompletionResponse` 对象已经过正确构造且包含有效的响应数据；返回值的语义遵循协议模块内同类解析函数所使用的约定，通常用于表示操作成功与否或具体的错误状态。
 
 #### Usage Patterns
 
-- extracting text output from a `CompletionResponse`
-- validating that a response is a text completion before further processing
-- used in conjunction with error handling via `std::expected`
+- Extracting text from a completion response after validating no refusal or tool calls
 
 ### `clore::net::protocol::validate_json_output`
 
-Declaration: `network/protocol.cppm:467`
+Declaration: `src/network/protocol.cppm:479`
 
-Definition: `network/protocol.cppm:488`
+Definition: `src/network/protocol.cppm:500`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-`clore::net::protocol::validate_json_output` 接受一个 `std::string_view` 类型的 JSON 文本，并返回一个 `int` 值。调用者应传入预期为合法 JSON 的字符串；函数的职责是验证该输入是否符合 JSON 格式规范。返回值为 0 表示验证通过，非零值表示存在格式错误或其它无效情形，具体错误码的含义由协议内部约定。此函数不修改输入字符串，且不解析 JSON 的语义内容，仅执行格式层面的校验。
+函数 `clore::net::protocol::validate_json_output` 验证所提供的 JSON 输出是否符合预期格式与契约。它接受一个 `std::string_view` 参数，并返回一个 `int` 值，调用者可根据该值判断验证是否通过。
+
+调用者应确保传入的字符串为有效的 JSON 格式；函数的行为在输入为非标准 JSON 时未定义。返回值的具体含义由调用者依据上下文约定的状态码解释（通常 `0` 表示验证成功，非零表示验证失败）。
 
 #### Usage Patterns
 
-- 用于校验 LLM 输出格式是否为合法 JSON
+- Called after receiving an LLM response to ensure its content is valid JSON before further processing
+- Likely used in conjunction with other protocol functions like `parse_response` or `validate_markdown_fragment_output`
 
 ### `clore::net::protocol::validate_markdown_fragment_output`
 
-Declaration: `network/protocol.cppm:469`
+Declaration: `src/network/protocol.cppm:481`
 
-Definition: `network/protocol.cppm:497`
+Definition: `src/network/protocol.cppm:509`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
-接受一个 Markdown 片段字符串（`std::string_view`），并返回一个 `int` 表示验证结果。调用者负责提供要验证的 Markdown 文本，该函数检查其格式是否符合协议规定的 Markdown 片段输出规范。返回值为零通常表示验证通过，非零值表示特定错误类型或失败原因；调用者应依赖返回码判断后续处理是否继续。
+函数 `clore::net::protocol::validate_markdown_fragment_output` 负责验证给定的 Markdown 片段输出是否符合协议约定。它接受一个 `std::string_view` 类型参数表示待验证的片段，并返回一个 `int` 值指示验证结果。调用者应确保传入的内容为预期的 Markdown 格式表达，并根据返回值判断验证是否通过，从而决定是否继续后续的协议处理流程。
 
 #### Usage Patterns
 
-- Called during LLM response validation to ensure output is a valid markdown fragment
+- Validation of markdown fragments from LLM responses
+- Rejecting JSON when markdown fragment is expected
 
 ## Related Pages
 

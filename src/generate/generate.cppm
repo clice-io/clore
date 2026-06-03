@@ -1,5 +1,23 @@
 module;
 
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
+
 #include "kota/async/async.h"
 
 export module generate;
@@ -16,7 +34,6 @@ export import :page;
 export import :symbol;
 export import :dryrun;
 
-import std;
 import config;
 import extract;
 

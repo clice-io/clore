@@ -1,6 +1,6 @@
 ---
 title: 'Module agent:tools'
-description: 'agent:tools 模块负责定义并实现智能体可调用的全部工具，职责涵盖工具注册、调度执行、参数验证与结果缓存。它公开了三个核心函数：dispatch_tool_call 根据工具名称和 JSON 参数执行对应工具，build_tool_definitions 返回注册的工具规格数量，extract_string_arg 安全地从参数对象中提取字符串值。模块内部维护了一个包含十二种工具（如 ProjectOverviewTool、ListFilesTool、SearchSymbolsTool、ReadGuideTool 等）的注册表，并通过 ToolSpec 描述每个工具的名称、可缓存性及构建/调度逻辑。工具实现依赖 ToolContext（提供项目路径、输出路径和模型标识）以及 ToolResultCache 以避免重复计算。该模块与 extract（代码结构提取）、generate（文档生成）等模块协作，共同支撑智能体的代码分析能力。'
+description: '该模块负责定义并实现一组由 AI 代理调用的工具，用于与 Clore 代码项目进行交互。它提供了统一的工具注册、参数提取、分派执行以及结果缓存机制，将每个具体工具（如列出文件、搜索符号、查询模块或命名空间、读写开发指南等）封装为独立的 ToolImpl 结构，每个结构通过其 run 方法接收 Args 和 ToolContext，并返回成功或错误的字符串结果。模块对外暴露 build_tool_definitions（生成工具元数据）和 dispatch_tool_call（根据工具名称和 JSON 参数分派执行）作为主要入口，同时定义了 ToolSpec、ToolContext、ToolError、ToolResultCache 等支撑类型，并与 extract、generate、protocol、schema、support 模块协作，从而实现从项目提取到工具执行的完整链路。'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,7 @@ template: doc
 
 ## Summary
 
-`agent:tools` 模块负责定义并实现智能体可调用的全部工具，职责涵盖工具注册、调度执行、参数验证与结果缓存。它公开了三个核心函数：`dispatch_tool_call` 根据工具名称和 JSON 参数执行对应工具，`build_tool_definitions` 返回注册的工具规格数量，`extract_string_arg` 安全地从参数对象中提取字符串值。模块内部维护了一个包含十二种工具（如 `ProjectOverviewTool`、`ListFilesTool`、`SearchSymbolsTool`、`ReadGuideTool` 等）的注册表，并通过 `ToolSpec` 描述每个工具的名称、可缓存性及构建/调度逻辑。工具实现依赖 `ToolContext`（提供项目路径、输出路径和模型标识）以及 `ToolResultCache` 以避免重复计算。该模块与 `extract`（代码结构提取）、`generate`（文档生成）等模块协作，共同支撑智能体的代码分析能力。
+该模块负责定义并实现一组由 AI 代理调用的工具，用于与 Clore 代码项目进行交互。它提供了统一的工具注册、参数提取、分派执行以及结果缓存机制，将每个具体工具（如列出文件、搜索符号、查询模块或命名空间、读写开发指南等）封装为独立的 `ToolImpl` 结构，每个结构通过其 `run` 方法接收 `Args` 和 `ToolContext`，并返回成功或错误的字符串结果。模块对外暴露 `build_tool_definitions`（生成工具元数据）和 `dispatch_tool_call`（根据工具名称和 JSON 参数分派执行）作为主要入口，同时定义了 `ToolSpec`、`ToolContext`、`ToolError`、`ToolResultCache` 等支撑类型，并与 `extract`、`generate`、`protocol`、`schema`、`support` 模块协作，从而实现从项目提取到工具执行的完整链路。
 
 ## Imports
 
@@ -17,7 +17,6 @@ template: doc
 - [`generate`](../generate/index.md)
 - [`protocol`](../protocol/index.md)
 - [`schema`](../schema/index.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Dependency Diagram
@@ -41,101 +40,128 @@ graph LR
 
 ### `clore::agent::ToolError`
 
-Declaration: `agent/tools.cppm:16`
+Declaration: `src/agent/tools.cppm:28`
 
-Definition: `agent/tools.cppm:16`
+Definition: `src/agent/tools.cppm:28`
 
 Declaration: [`Namespace clore::agent`](../../namespaces/clore/agent/index.md)
 
-结构体 `clore::agent::ToolError` 仅包含一个公开数据成员 `std::string message`，用于存储错误描述文本。该设计将错误信息直接封装为字符串，不引入额外状态或验证逻辑，其内部不变量可以认为 `message` 接受任意非空或空字符串（由使用者保证语义有效性）。没有自定义构造函数、析构函数或成员函数，完全依赖编译器生成的默认实现，因此不存在特殊构造、复制或移动的额外开销。该结构体的实现简化为一个轻量级错误承载类型，便于在工具调用失败时传递可读的描述信息。
+`clore::agent::ToolError` 的内部结构仅包含一个 `std::string` 成员 `message`，用于携带错误描述文本。该成员是整个结构体的唯一数据载体，没有引入额外的标志位或状态域，因此其复制、移动及析构行为完全由 `std::string` 的相应操作隐式完成。由于 `message` 允许为空字符串，从实现角度看，该结构体不存在特殊的内部不变式；但在常规使用中，通过构造函数或赋值操作设置非空 `message` 是构造有效错误对象的预期方式。
+
+#### Invariants
+
+- `message` 不为空时表示发生了具体错误
+- 类型仅包含一个字符串成员，无额外状态
+
+#### Key Members
+
+- `clore::agent::ToolError::message` 存储错误描述
+
+#### Usage Patterns
+
+- 作为工具执行失败时的返回类型或异常抛出对象
+- 可通过读取 `message` 获取错误详情
 
 ## Variables
 
 ### `arguments`
 
-Declaration: `agent/tools.cppm:621`
+Declaration: `src/agent/tools.cppm:633`
 
-As a constant reference, `arguments` cannot be mutated through this variable. Its usage is not demonstrated in the provided evidence, so no specific consumption patterns are available.
+作为 `const` 引用，`arguments` 提供对底层 `json::Value` 的只读访问，在函数或代码块中用于读取 JSON 数据而不进行修改。
 
 #### Mutation
 
 No mutation is evident from the extracted code.
+
+#### Usage Patterns
+
+- 通过 `const` 引用读取 JSON 值
 
 ### `context`
 
-Declaration: `agent/tools.cppm:621`
+Declaration: `src/agent/tools.cppm:633`
 
-作为常量引用，`context` 在其作用域内不可被修改，只能通过 `ToolContext` 的常量接口读取上下文数据。
+As a `const` reference, `context` cannot be mutated after initialization. It is intended to be passed to other functions or used within the current scope without the risk of modification. The evidence does not show any specific read operations or surrounding logic.
 
 #### Mutation
 
 No mutation is evident from the extracted code.
+
+#### Usage Patterns
+
+- no explicit usage shown in evidence
 
 ## Functions
 
 ### `clore::agent::build_tool_definitions`
 
-Declaration: `agent/tools.cppm:23`
+Declaration: `src/agent/tools.cppm:35`
 
-Definition: `agent/tools.cppm:887`
+Definition: `src/agent/tools.cppm:899`
 
 Declaration: [`Namespace clore::agent`](../../namespaces/clore/agent/index.md)
 
-函数 `clore::agent::build_tool_definitions` 通过遍历由 `clore::agent::(anonymous namespace)::tool_registry` 返回的常量引用 `std::array<clore::agent::(anonymous namespace)::ToolSpec, 12>` 来组装工具定义列表。它首先预分配一个 `std::vector<clore::net::FunctionToolDefinition>`，然后对数组中的每个 `ToolSpec` 调用其 `build_definition` 方法。若任意一个 `build_definition` 返回一个无值的结果（即 `std::unexpected`），函数会立即停止并将该 `clore::agent::ToolError` 错误向上传播；否则，将成功构造的定义移动到结果向量中。整个过程具有短路语义：只要有一个工具定义构建失败，整个调用就会失败。该函数的内部控制流完全依赖于 `tool_registry` 提供的工具规范集合，并且不涉及其他外部依赖。
+函数 `clore::agent::build_tool_definitions` 的核心算法是通过调用 `tool_registry()` 获取包含 12 个 `ToolSpec` 的预定义工具规范数组，然后对每个 `ToolSpec` 依次执行其 `build_definition` 成员（类型为返回 `std::expected<clore::net::FunctionToolDefinition, ToolError>` 的可调用对象）。如果任何一个 `build_definition` 返回错误，函数会立即将 `ToolError` 包装为 `std::unexpected` 并提前返回；否则将所有成功构建的 `FunctionToolDefinition` 收集到一个 `std::vector` 中。整个过程依赖 `ToolSpec` 中封装的构建逻辑，并利用 `std::expected` 进行错误传播，最终将内部工具定义统一转换为对外可用的格式。
+
+内部控制流是一个简单的 range-for 循环，每次迭代调用 `tool.build_definition()` 并检查其 `has_value()` 以决定继续或终止。该函数不直接处理参数或上下文，其行为完全由 `tool_registry()` 返回的静态数组内容驱动，故调用方可在编译期枚举所有支持的工具定义。
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- Dynamic memory allocation for the returned `std::vector`
 
 #### Reads From
 
-- `tool_registry()` (static array of `ToolSpec`)
-- `ToolSpec::build_definition()` for each tool
+- `clore::agent::(anonymous namespace)::tool_registry()`
 
 #### Usage Patterns
 
-- Called to generate a complete set of tool definitions for network requests
-- Used to prepare tool definitions before dispatching agent calls
+- Called to obtain tool definitions for an AI agent interaction
 
 ### `clore::agent::dispatch_tool_call`
 
-Declaration: `agent/tools.cppm:26`
+Declaration: `src/agent/tools.cppm:38`
 
-Definition: `agent/tools.cppm:902`
+Definition: `src/agent/tools.cppm:914`
 
 Declaration: [`Namespace clore::agent`](../../namespaces/clore/agent/index.md)
 
-函数 `clore::agent::dispatch_tool_call` 首先将 `arguments` 序列化为字符串以构造缓存键，并检查 `tool_result_cache` 中是否已有结果；若命中则直接返回。否则，它构造一个 `ToolContext`，遍历 `tool_registry` 中的每个 `ToolSpec`，查找与 `tool_name` 匹配的条目，然后调用其 `dispatch` 成员。若该工具标记为 `cacheable` 且调用成功，则结果被存入缓存；之后返回调度结果。若遍历结束后未找到匹配的工具，则返回一个包含未知工具消息的 `ToolError`。
+函数 `clore::agent::dispatch_tool_call` 首先对传入的 `arguments` 进行 JSON 序列化得到 `encoded_arguments`，然后构造 `cache_key`（格式为 `"{tool_name}:{encoded_arguments}"`）。它使用全局单例 `tool_result_cache` 中的共享锁尝试查找缓存：若命中则直接返回缓存结果，避免重复执行相同工具调用。未命中时，构造 `ToolContext`（包含 `model`、`project_root`、`output_root`）并遍历 `tool_registry()` 返回的 `ToolSpec` 数组，匹配 `tool.name` 与 `tool_name`。匹配成功后调用 `tool.dispatch(arguments, context)` 执行具体工具；若该工具 `cacheable` 为 `true` 且执行成功，则用独享锁将结果存入缓存。若整个遍历未找到匹配的工具，则返回 `ToolError`，错误信息标记为未知工具。整个算法依赖 `tool_result_cache` 和静态的 `tool_registry` 来解耦工具查找与缓存管理。
 
 #### Side Effects
 
-- writes to `tool_result_cache` result cache under a unique lock when tool is cacheable and dispatch succeeds
+- modifies `tool_result_cache()` by inserting or updating cache entries
 
 #### Reads From
 
-- `tool_result_cache()` global cache (under shared lock)
-- `tool_registry()` global tool registry
-- `tool_name`, `arguments`, `model`, `project_root`, `output_root` parameters
-- `json::to_string(arguments)` result for cache key
+- `tool_name`
+- `arguments`
+- `model`
+- `project_root`
+- `output_root`
+- `tool_result_cache()`
+- `tool_registry()`
+- `cache_key` derived from `tool_name` and `arguments`
 
 #### Writes To
 
-- `tool_result_cache().result_by_key` (under unique lock for cacheable tools)
+- `tool_result_cache()`
 
 #### Usage Patterns
 
-- invoked during agent execution to handle a tool call from an LLM
-- used with caching to avoid duplicate tool executions with identical arguments
+- used by `run_agent` or `run_agent_async` to execute a tool call
+- called with tool name and arguments extracted from LLM response
+- return result string or error
 
 ### `clore::agent::extract_string_arg`
 
-Declaration: `agent/tools.cppm:20`
+Declaration: `src/agent/tools.cppm:32`
 
-Definition: `agent/tools.cppm:865`
+Definition: `src/agent/tools.cppm:877`
 
 Declaration: [`Namespace clore::agent`](../../namespaces/clore/agent/index.md)
 
-函数 `clore::agent::extract_string_arg` 实现了一个基于线性扫描的字段查找算法，用于从一个 `json::Value` 对象中提取指定名称的字符串参数。首先验证输入参数 `arguments` 是否为对象（调用 `arguments.is_object()`），若不是则立即返回包含 `ToolError` 的 `std::unexpected`。然后通过 `arguments.get_object()` 获取底层对象指针，若指针为空也返回错误。接着遍历对象的所有条目，将每个条目的 `entry.key` 与目标 `field_name` 进行比较。当匹配成功时，尝试通过 `entry.value.get_string()` 获取值；若得到有效字符串则直接返回，否则返回一个指出该字段类型非字符串的错误（消息通过 `std::format` 构造）。若遍历完所有条目均未找到匹配键，则返回一个指出缺失字段的错误。整个函数依赖 `json::Value` 的接口、`std::expected` 的错误处理机制以及 `std::format` 进行字符串格式化。
+该函数首先验证参数是否为 JSON 对象：若 `arguments` 不是对象则直接返回包含 `ToolError` 的 `std::unexpected`，其中错误消息为 `"arguments is not an object"`。通过 `get_object` 获取内部对象指针，若指针为空则返回类似错误。随后遍历对象的每个键值对，对每个 `entry.first` 与目标 `field_name` 进行相等比较。一旦匹配，尝试调用 `entry.second.get_string()` 以提取字符串值；若成功则返回该字符串，否则返回错误指明该字段不是字符串类型。若遍历完所有字段仍未找到匹配项，则返回 `std::unexpected` 报告缺少指定字段。此实现依赖 `json::Value` 的泛型对象迭代接口及 `ToolError` 结构体，并使用 `std::format` 构造描述性错误消息。
 
 #### Side Effects
 
@@ -143,19 +169,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `arguments` parameter of type `json::Value`
-- `field_name` parameter of type `std::string_view`
-- object entries retrieved via `get_object()`
+- 参数 `arguments` 的 JSON 对象内容
+- 参数 `field_name` 作为键
 
 #### Usage Patterns
 
-- extract string field from tool call arguments
-- validate and retrieve string-typed JSON field
-- used in `dispatch_tool_call` to parse tool arguments
+- 在 `dispatch_tool_call` 中用于从工具调用参数中提取字符串字段
 
 ## Internal Structure
 
-该模块实现了供 LLM agent 调用的代码库探查工具集，依赖 `extract`、`generate`、`protocol`、`schema`、`support` 及标准库。内部按职责分为三层：工具实现层（如 `ListFilesTool`、`SearchSymbolsTool` 等，均匿名封装）、注册与调度层（通过 `tool_registry` 静态数组维护 `ToolSpec`，利用模板函数 `dispatch_reflected_tool` 和 `build_reflected_tool_definition` 实现元编程驱动的执行与定义生成）以及缓存层（`ToolResultCache` 使用 `mutex` 保护 `result_by_key` 映射）。对外仅暴露 `dispatch_tool_call`、`build_tool_definitions` 和 `extract_string_arg` 三个接口，所有工具均通过统一签名 `run(const Args&, const ToolContext&)` 运行，`ToolContext` 携带项目根、输出根与模型标识等上下文，确保调度器可按名称精确路由。
+`agent:tools` 模块为大型语言模型提供一组可调用的工具，用于查询代码库和生成文档。它导入 `extract`、`generate`、`protocol`、`schema` 和 `support` 模块，分别负责代码提取、文档生成、LLM 协议、JSON Schema 映射及通用支持。内部按功能分层：公共入口 `dispatch_tool_call` 根据工具名称从静态注册表（`tool_registry` 中的 `ToolSpec` 数组）分发调用；单个工具实现（如 `SearchSymbolsTool`、`GetNamespaceTool`）位于匿名命名空间，通过模板反射（`dispatch_reflected_tool`、`build_reflected_tool_definition`）统一处理参数解析和结果缓存；`ToolContext` 提供项目根目录、输出目录和模型配置；`ToolResultCache` 管理可缓存工具的结果以减少重复计算。
 
 ## Related Pages
 

@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore'
-description: 'The clore namespace defines a configuration and orchestration framework for task-based optimization, focusing on the Options struct and its internal _DecoOptStruct types. These internal types form a nested DSL that exposes fields such as deco_field_ty, Step, Action, result_type, _deco_base_t, and _deco_callback_base_t, which together allow fine-grained control over solver behavior, including per-field customization of steps, callbacks, and result types. The Options struct itself acts as a centralized specification object that encapsulates all tuning parameters for an optimization run.'
+description: 'The clore namespace provides the core functionality for a task-oriented generation framework. It exposes two primary free functions: await_task_result for synchronously awaiting a task’s completion and obtaining its success or error result, and log_generation_summary for recording a high-level summary of a completed generation cycle. The namespace also contains the Options class, which internally defines a large number of nested decorator‑option structures (_DecoOptStruct_0 through _DecoOptStruct_10) to support a flexible, declarative configuration system. These internal types are implementation details that likely implement a policy‑based or decorator‑based pattern for customizing generation or task behavior. Architecturally, clore serves as the top‑level library namespace, encapsulating both the public API for task management and the complex option‑handling machinery behind a single coherent interface.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-The `clore` namespace defines a configuration and orchestration framework for task-based optimization, focusing on the `Options` struct and its internal `_DecoOptStruct` types. These internal types form a nested DSL that exposes fields such as `deco_field_ty`, `Step`, `Action`, `result_type`, `_deco_base_t`, and `_deco_callback_base_t`, which together allow fine-grained control over solver behavior, including per-field customization of steps, callbacks, and result types. The `Options` struct itself acts as a centralized specification object that encapsulates all tuning parameters for an optimization run.
-
-Beyond configuration, the namespace provides two key free functions. `log_generation_summary` records a diagnostic summary for a given generation identifier, enabling post-hoc analysis of generation-level state. `await_task_result` is a blocking utility that waits for a task to complete and returns its result or error via `std::expected`, streamlining synchronous task orchestration within the optimization pipeline. Together, these elements position `clore` as a modular, type-rich library for defining, configuring, and executing iterative optimization processes.
+The `clore` namespace provides the core functionality for a task-oriented generation framework. It exposes two primary free functions: `await_task_result` for synchronously awaiting a task’s completion and obtaining its success or error result, and `log_generation_summary` for recording a high-level summary of a completed generation cycle. The namespace also contains the `Options` class, which internally defines a large number of nested decorator‑option structures (`_DecoOptStruct_0` through `_DecoOptStruct_10`) to support a flexible, declarative configuration system. These internal types are implementation details that likely implement a policy‑based or decorator‑based pattern for customizing generation or task behavior. Architecturally, `clore` serves as the top‑level library namespace, encapsulating both the public API for task management and the complex option‑handling machinery behind a single coherent interface.
 
 ## Diagram
 
@@ -194,19 +192,17 @@ graph TD
 
 ### `clore::Options`
 
-Declaration: `main.cpp:18`
+Declaration: `src/main.cpp:36`
 
-Definition: `main.cpp:18`
+Definition: `src/main.cpp:36`
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- all options declared with `required = false`
-- key/value options use `KVStyle::JoinedOrSeparate`
-- `rate_limit` is a `std::uint32_t`
-- string options use `std::string`
-- each option carries a `help` description
+- All fields are optional; required is false
+- Default values are handled by the decoration system
+- Flags are declared with `DecoFlag` and key-value options with `DecoKV`
 
 #### Key Members
 
@@ -221,61 +217,58 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 - `agent_mode`
 - `help`
 - `version`
-- nested `_DecoOptStruct_0` through `_DecoOptStruct_10`
 
 #### Usage Patterns
 
-- parsed from command-line arguments at program entry
-- used to drive LLM generation parameters via `--model` and `--rate-limit`
-- controls dry-run prompt assembly via `--dry-run`
-- enables experimental agent mode via `--experimental-agent-mode`
-- provides `-h`/`--help` and `-v`/`--version` reporting
+- Populated by a command-line parser generated from the decoration macros
+- Checked in `main()` to configure logging, I/O paths, and execution mode
+- Used to decide whether to show help, version, or perform dry-run
 
 #### Member Types
 
 ##### `clore::Options::_DecoOptStruct_0`
 
-Declaration: `main.cpp:19`
+Declaration: `src/main.cpp:37`
 
-Definition: `main.cpp:19`
+Definition: `src/main.cpp:37`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_0::__deco_field_ty`
 
-Declaration: `main.cpp:19`
+Declaration: `src/main.cpp:37`
 
-Definition: `main.cpp:19`
+Definition: `src/main.cpp:37`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_0::__deco_field_ty::Action`
 
-Declaration: `main.cpp:19`
+Declaration: `src/main.cpp:37`
 
 ###### `clore::Options::_DecoOptStruct_0::__deco_field_ty::Step`
 
-Declaration: `main.cpp:19`
+Declaration: `src/main.cpp:37`
 
 ###### `clore::Options::_DecoOptStruct_0::__deco_field_ty::_deco_base_t`
 
-Declaration: `main.cpp:19`
+Declaration: `src/main.cpp:37`
 
 ###### `clore::Options::_DecoOptStruct_0::__deco_field_ty::_deco_callback_base_t`
 
-Declaration: `main.cpp:19`
+Declaration: `src/main.cpp:37`
 
 ###### `clore::Options::_DecoOptStruct_0::__deco_field_ty::result_type`
 
-Declaration: `main.cpp:19`
+Declaration: `src/main.cpp:37`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_0::__deco_field_ty::__deco_field_ty`
 
-Declaration: `main.cpp:19`
+Declaration: `src/main.cpp:37`
 
-Definition: `main.cpp:19`
+Definition: `src/main.cpp:37`
 
 ###### Declaration
 
@@ -285,21 +278,21 @@ clore::Options::_DecoOptStruct_0::__deco_field_ty::__deco_field_ty();
 
 ###### `clore::Options::_DecoOptStruct_0::_deco_base_t`
 
-Declaration: `main.cpp:19`
+Declaration: `src/main.cpp:37`
 
 ###### Member Variables
 
 ###### `clore::Options::_DecoOptStruct_0::deco_field_ty`
 
-Declaration: `main.cpp:19`
+Declaration: `src/main.cpp:37`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_0::~_DecoOptStruct_0<ResTy>`
 
-Declaration: `main.cpp:19`
+Declaration: `src/main.cpp:37`
 
-Definition: `main.cpp:19`
+Definition: `src/main.cpp:37`
 
 ###### Declaration
 
@@ -309,47 +302,47 @@ clore::Options::_DecoOptStruct_0::~_DecoOptStruct_0<ResTy>();
 
 ##### `clore::Options::_DecoOptStruct_1`
 
-Declaration: `main.cpp:24`
+Declaration: `src/main.cpp:42`
 
-Definition: `main.cpp:24`
+Definition: `src/main.cpp:42`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_1::__deco_field_ty`
 
-Declaration: `main.cpp:24`
+Declaration: `src/main.cpp:42`
 
-Definition: `main.cpp:24`
+Definition: `src/main.cpp:42`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_1::__deco_field_ty::Action`
 
-Declaration: `main.cpp:24`
+Declaration: `src/main.cpp:42`
 
 ###### `clore::Options::_DecoOptStruct_1::__deco_field_ty::Step`
 
-Declaration: `main.cpp:24`
+Declaration: `src/main.cpp:42`
 
 ###### `clore::Options::_DecoOptStruct_1::__deco_field_ty::_deco_base_t`
 
-Declaration: `main.cpp:24`
+Declaration: `src/main.cpp:42`
 
 ###### `clore::Options::_DecoOptStruct_1::__deco_field_ty::_deco_callback_base_t`
 
-Declaration: `main.cpp:24`
+Declaration: `src/main.cpp:42`
 
 ###### `clore::Options::_DecoOptStruct_1::__deco_field_ty::result_type`
 
-Declaration: `main.cpp:24`
+Declaration: `src/main.cpp:42`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_1::__deco_field_ty::__deco_field_ty`
 
-Declaration: `main.cpp:24`
+Declaration: `src/main.cpp:42`
 
-Definition: `main.cpp:24`
+Definition: `src/main.cpp:42`
 
 ###### Declaration
 
@@ -359,21 +352,21 @@ clore::Options::_DecoOptStruct_1::__deco_field_ty::__deco_field_ty();
 
 ###### `clore::Options::_DecoOptStruct_1::_deco_base_t`
 
-Declaration: `main.cpp:24`
+Declaration: `src/main.cpp:42`
 
 ###### Member Variables
 
 ###### `clore::Options::_DecoOptStruct_1::deco_field_ty`
 
-Declaration: `main.cpp:24`
+Declaration: `src/main.cpp:42`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_1::~_DecoOptStruct_1<ResTy>`
 
-Declaration: `main.cpp:24`
+Declaration: `src/main.cpp:42`
 
-Definition: `main.cpp:24`
+Definition: `src/main.cpp:42`
 
 ###### Declaration
 
@@ -383,31 +376,31 @@ clore::Options::_DecoOptStruct_1::~_DecoOptStruct_1<ResTy>();
 
 ##### `clore::Options::_DecoOptStruct_10`
 
-Declaration: `main.cpp:69`
+Declaration: `src/main.cpp:87`
 
-Definition: `main.cpp:69`
+Definition: `src/main.cpp:87`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_10::__deco_field_ty`
 
-Declaration: `main.cpp:69`
+Declaration: `src/main.cpp:87`
 
-Definition: `main.cpp:69`
+Definition: `src/main.cpp:87`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_10::__deco_field_ty::_deco_base_t`
 
-Declaration: `main.cpp:69`
+Declaration: `src/main.cpp:87`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_10::__deco_field_ty::__deco_field_ty`
 
-Declaration: `main.cpp:69`
+Declaration: `src/main.cpp:87`
 
-Definition: `main.cpp:69`
+Definition: `src/main.cpp:87`
 
 ###### Declaration
 
@@ -417,15 +410,15 @@ clore::Options::_DecoOptStruct_10::__deco_field_ty::__deco_field_ty();
 
 ###### `clore::Options::_DecoOptStruct_10::_deco_base_t`
 
-Declaration: `main.cpp:69`
+Declaration: `src/main.cpp:87`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_10::~_DecoOptStruct_10`
 
-Declaration: `main.cpp:69`
+Declaration: `src/main.cpp:87`
 
-Definition: `main.cpp:69`
+Definition: `src/main.cpp:87`
 
 ###### Declaration
 
@@ -435,47 +428,47 @@ clore::Options::_DecoOptStruct_10::~_DecoOptStruct_10();
 
 ##### `clore::Options::_DecoOptStruct_2`
 
-Declaration: `main.cpp:29`
+Declaration: `src/main.cpp:47`
 
-Definition: `main.cpp:29`
+Definition: `src/main.cpp:47`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_2::__deco_field_ty`
 
-Declaration: `main.cpp:29`
+Declaration: `src/main.cpp:47`
 
-Definition: `main.cpp:29`
+Definition: `src/main.cpp:47`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_2::__deco_field_ty::Action`
 
-Declaration: `main.cpp:29`
+Declaration: `src/main.cpp:47`
 
 ###### `clore::Options::_DecoOptStruct_2::__deco_field_ty::Step`
 
-Declaration: `main.cpp:29`
+Declaration: `src/main.cpp:47`
 
 ###### `clore::Options::_DecoOptStruct_2::__deco_field_ty::_deco_base_t`
 
-Declaration: `main.cpp:29`
+Declaration: `src/main.cpp:47`
 
 ###### `clore::Options::_DecoOptStruct_2::__deco_field_ty::_deco_callback_base_t`
 
-Declaration: `main.cpp:29`
+Declaration: `src/main.cpp:47`
 
 ###### `clore::Options::_DecoOptStruct_2::__deco_field_ty::result_type`
 
-Declaration: `main.cpp:29`
+Declaration: `src/main.cpp:47`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_2::__deco_field_ty::__deco_field_ty`
 
-Declaration: `main.cpp:29`
+Declaration: `src/main.cpp:47`
 
-Definition: `main.cpp:29`
+Definition: `src/main.cpp:47`
 
 ###### Declaration
 
@@ -485,21 +478,21 @@ clore::Options::_DecoOptStruct_2::__deco_field_ty::__deco_field_ty();
 
 ###### `clore::Options::_DecoOptStruct_2::_deco_base_t`
 
-Declaration: `main.cpp:29`
+Declaration: `src/main.cpp:47`
 
 ###### Member Variables
 
 ###### `clore::Options::_DecoOptStruct_2::deco_field_ty`
 
-Declaration: `main.cpp:29`
+Declaration: `src/main.cpp:47`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_2::~_DecoOptStruct_2<ResTy>`
 
-Declaration: `main.cpp:29`
+Declaration: `src/main.cpp:47`
 
-Definition: `main.cpp:29`
+Definition: `src/main.cpp:47`
 
 ###### Declaration
 
@@ -509,47 +502,47 @@ clore::Options::_DecoOptStruct_2::~_DecoOptStruct_2<ResTy>();
 
 ##### `clore::Options::_DecoOptStruct_3`
 
-Declaration: `main.cpp:34`
+Declaration: `src/main.cpp:52`
 
-Definition: `main.cpp:34`
+Definition: `src/main.cpp:52`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_3::__deco_field_ty`
 
-Declaration: `main.cpp:34`
+Declaration: `src/main.cpp:52`
 
-Definition: `main.cpp:34`
+Definition: `src/main.cpp:52`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_3::__deco_field_ty::Action`
 
-Declaration: `main.cpp:34`
+Declaration: `src/main.cpp:52`
 
 ###### `clore::Options::_DecoOptStruct_3::__deco_field_ty::Step`
 
-Declaration: `main.cpp:34`
+Declaration: `src/main.cpp:52`
 
 ###### `clore::Options::_DecoOptStruct_3::__deco_field_ty::_deco_base_t`
 
-Declaration: `main.cpp:34`
+Declaration: `src/main.cpp:52`
 
 ###### `clore::Options::_DecoOptStruct_3::__deco_field_ty::_deco_callback_base_t`
 
-Declaration: `main.cpp:34`
+Declaration: `src/main.cpp:52`
 
 ###### `clore::Options::_DecoOptStruct_3::__deco_field_ty::result_type`
 
-Declaration: `main.cpp:34`
+Declaration: `src/main.cpp:52`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_3::__deco_field_ty::__deco_field_ty`
 
-Declaration: `main.cpp:34`
+Declaration: `src/main.cpp:52`
 
-Definition: `main.cpp:34`
+Definition: `src/main.cpp:52`
 
 ###### Declaration
 
@@ -559,21 +552,21 @@ clore::Options::_DecoOptStruct_3::__deco_field_ty::__deco_field_ty();
 
 ###### `clore::Options::_DecoOptStruct_3::_deco_base_t`
 
-Declaration: `main.cpp:34`
+Declaration: `src/main.cpp:52`
 
 ###### Member Variables
 
 ###### `clore::Options::_DecoOptStruct_3::deco_field_ty`
 
-Declaration: `main.cpp:34`
+Declaration: `src/main.cpp:52`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_3::~_DecoOptStruct_3<ResTy>`
 
-Declaration: `main.cpp:34`
+Declaration: `src/main.cpp:52`
 
-Definition: `main.cpp:34`
+Definition: `src/main.cpp:52`
 
 ###### Declaration
 
@@ -583,47 +576,47 @@ clore::Options::_DecoOptStruct_3::~_DecoOptStruct_3<ResTy>();
 
 ##### `clore::Options::_DecoOptStruct_4`
 
-Declaration: `main.cpp:37`
+Declaration: `src/main.cpp:55`
 
-Definition: `main.cpp:37`
+Definition: `src/main.cpp:55`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_4::__deco_field_ty`
 
-Declaration: `main.cpp:37`
+Declaration: `src/main.cpp:55`
 
-Definition: `main.cpp:37`
+Definition: `src/main.cpp:55`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_4::__deco_field_ty::Action`
 
-Declaration: `main.cpp:37`
+Declaration: `src/main.cpp:55`
 
 ###### `clore::Options::_DecoOptStruct_4::__deco_field_ty::Step`
 
-Declaration: `main.cpp:37`
+Declaration: `src/main.cpp:55`
 
 ###### `clore::Options::_DecoOptStruct_4::__deco_field_ty::_deco_base_t`
 
-Declaration: `main.cpp:37`
+Declaration: `src/main.cpp:55`
 
 ###### `clore::Options::_DecoOptStruct_4::__deco_field_ty::_deco_callback_base_t`
 
-Declaration: `main.cpp:37`
+Declaration: `src/main.cpp:55`
 
 ###### `clore::Options::_DecoOptStruct_4::__deco_field_ty::result_type`
 
-Declaration: `main.cpp:37`
+Declaration: `src/main.cpp:55`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_4::__deco_field_ty::__deco_field_ty`
 
-Declaration: `main.cpp:37`
+Declaration: `src/main.cpp:55`
 
-Definition: `main.cpp:37`
+Definition: `src/main.cpp:55`
 
 ###### Declaration
 
@@ -633,21 +626,21 @@ clore::Options::_DecoOptStruct_4::__deco_field_ty::__deco_field_ty();
 
 ###### `clore::Options::_DecoOptStruct_4::_deco_base_t`
 
-Declaration: `main.cpp:37`
+Declaration: `src/main.cpp:55`
 
 ###### Member Variables
 
 ###### `clore::Options::_DecoOptStruct_4::deco_field_ty`
 
-Declaration: `main.cpp:37`
+Declaration: `src/main.cpp:55`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_4::~_DecoOptStruct_4<ResTy>`
 
-Declaration: `main.cpp:37`
+Declaration: `src/main.cpp:55`
 
-Definition: `main.cpp:37`
+Definition: `src/main.cpp:55`
 
 ###### Declaration
 
@@ -657,47 +650,47 @@ clore::Options::_DecoOptStruct_4::~_DecoOptStruct_4<ResTy>();
 
 ##### `clore::Options::_DecoOptStruct_5`
 
-Declaration: `main.cpp:43`
+Declaration: `src/main.cpp:61`
 
-Definition: `main.cpp:43`
+Definition: `src/main.cpp:61`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_5::__deco_field_ty`
 
-Declaration: `main.cpp:43`
+Declaration: `src/main.cpp:61`
 
-Definition: `main.cpp:43`
+Definition: `src/main.cpp:61`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_5::__deco_field_ty::Action`
 
-Declaration: `main.cpp:43`
+Declaration: `src/main.cpp:61`
 
 ###### `clore::Options::_DecoOptStruct_5::__deco_field_ty::Step`
 
-Declaration: `main.cpp:43`
+Declaration: `src/main.cpp:61`
 
 ###### `clore::Options::_DecoOptStruct_5::__deco_field_ty::_deco_base_t`
 
-Declaration: `main.cpp:43`
+Declaration: `src/main.cpp:61`
 
 ###### `clore::Options::_DecoOptStruct_5::__deco_field_ty::_deco_callback_base_t`
 
-Declaration: `main.cpp:43`
+Declaration: `src/main.cpp:61`
 
 ###### `clore::Options::_DecoOptStruct_5::__deco_field_ty::result_type`
 
-Declaration: `main.cpp:43`
+Declaration: `src/main.cpp:61`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_5::__deco_field_ty::__deco_field_ty`
 
-Declaration: `main.cpp:43`
+Declaration: `src/main.cpp:61`
 
-Definition: `main.cpp:43`
+Definition: `src/main.cpp:61`
 
 ###### Declaration
 
@@ -707,21 +700,21 @@ clore::Options::_DecoOptStruct_5::__deco_field_ty::__deco_field_ty();
 
 ###### `clore::Options::_DecoOptStruct_5::_deco_base_t`
 
-Declaration: `main.cpp:43`
+Declaration: `src/main.cpp:61`
 
 ###### Member Variables
 
 ###### `clore::Options::_DecoOptStruct_5::deco_field_ty`
 
-Declaration: `main.cpp:43`
+Declaration: `src/main.cpp:61`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_5::~_DecoOptStruct_5<ResTy>`
 
-Declaration: `main.cpp:43`
+Declaration: `src/main.cpp:61`
 
-Definition: `main.cpp:43`
+Definition: `src/main.cpp:61`
 
 ###### Declaration
 
@@ -731,47 +724,47 @@ clore::Options::_DecoOptStruct_5::~_DecoOptStruct_5<ResTy>();
 
 ##### `clore::Options::_DecoOptStruct_6`
 
-Declaration: `main.cpp:49`
+Declaration: `src/main.cpp:67`
 
-Definition: `main.cpp:49`
+Definition: `src/main.cpp:67`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_6::__deco_field_ty`
 
-Declaration: `main.cpp:49`
+Declaration: `src/main.cpp:67`
 
-Definition: `main.cpp:49`
+Definition: `src/main.cpp:67`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_6::__deco_field_ty::Action`
 
-Declaration: `main.cpp:49`
+Declaration: `src/main.cpp:67`
 
 ###### `clore::Options::_DecoOptStruct_6::__deco_field_ty::Step`
 
-Declaration: `main.cpp:49`
+Declaration: `src/main.cpp:67`
 
 ###### `clore::Options::_DecoOptStruct_6::__deco_field_ty::_deco_base_t`
 
-Declaration: `main.cpp:49`
+Declaration: `src/main.cpp:67`
 
 ###### `clore::Options::_DecoOptStruct_6::__deco_field_ty::_deco_callback_base_t`
 
-Declaration: `main.cpp:49`
+Declaration: `src/main.cpp:67`
 
 ###### `clore::Options::_DecoOptStruct_6::__deco_field_ty::result_type`
 
-Declaration: `main.cpp:49`
+Declaration: `src/main.cpp:67`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_6::__deco_field_ty::__deco_field_ty`
 
-Declaration: `main.cpp:49`
+Declaration: `src/main.cpp:67`
 
-Definition: `main.cpp:49`
+Definition: `src/main.cpp:67`
 
 ###### Declaration
 
@@ -781,21 +774,21 @@ clore::Options::_DecoOptStruct_6::__deco_field_ty::__deco_field_ty();
 
 ###### `clore::Options::_DecoOptStruct_6::_deco_base_t`
 
-Declaration: `main.cpp:49`
+Declaration: `src/main.cpp:67`
 
 ###### Member Variables
 
 ###### `clore::Options::_DecoOptStruct_6::deco_field_ty`
 
-Declaration: `main.cpp:49`
+Declaration: `src/main.cpp:67`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_6::~_DecoOptStruct_6<ResTy>`
 
-Declaration: `main.cpp:49`
+Declaration: `src/main.cpp:67`
 
-Definition: `main.cpp:49`
+Definition: `src/main.cpp:67`
 
 ###### Declaration
 
@@ -805,31 +798,31 @@ clore::Options::_DecoOptStruct_6::~_DecoOptStruct_6<ResTy>();
 
 ##### `clore::Options::_DecoOptStruct_7`
 
-Declaration: `main.cpp:55`
+Declaration: `src/main.cpp:73`
 
-Definition: `main.cpp:55`
+Definition: `src/main.cpp:73`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_7::__deco_field_ty`
 
-Declaration: `main.cpp:55`
+Declaration: `src/main.cpp:73`
 
-Definition: `main.cpp:55`
+Definition: `src/main.cpp:73`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_7::__deco_field_ty::_deco_base_t`
 
-Declaration: `main.cpp:55`
+Declaration: `src/main.cpp:73`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_7::__deco_field_ty::__deco_field_ty`
 
-Declaration: `main.cpp:55`
+Declaration: `src/main.cpp:73`
 
-Definition: `main.cpp:55`
+Definition: `src/main.cpp:73`
 
 ###### Declaration
 
@@ -839,15 +832,15 @@ clore::Options::_DecoOptStruct_7::__deco_field_ty::__deco_field_ty();
 
 ###### `clore::Options::_DecoOptStruct_7::_deco_base_t`
 
-Declaration: `main.cpp:55`
+Declaration: `src/main.cpp:73`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_7::~_DecoOptStruct_7`
 
-Declaration: `main.cpp:55`
+Declaration: `src/main.cpp:73`
 
-Definition: `main.cpp:55`
+Definition: `src/main.cpp:73`
 
 ###### Declaration
 
@@ -857,31 +850,31 @@ clore::Options::_DecoOptStruct_7::~_DecoOptStruct_7();
 
 ##### `clore::Options::_DecoOptStruct_8`
 
-Declaration: `main.cpp:60`
+Declaration: `src/main.cpp:78`
 
-Definition: `main.cpp:60`
+Definition: `src/main.cpp:78`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_8::__deco_field_ty`
 
-Declaration: `main.cpp:60`
+Declaration: `src/main.cpp:78`
 
-Definition: `main.cpp:60`
+Definition: `src/main.cpp:78`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_8::__deco_field_ty::_deco_base_t`
 
-Declaration: `main.cpp:60`
+Declaration: `src/main.cpp:78`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_8::__deco_field_ty::__deco_field_ty`
 
-Declaration: `main.cpp:60`
+Declaration: `src/main.cpp:78`
 
-Definition: `main.cpp:60`
+Definition: `src/main.cpp:78`
 
 ###### Declaration
 
@@ -891,15 +884,15 @@ clore::Options::_DecoOptStruct_8::__deco_field_ty::__deco_field_ty();
 
 ###### `clore::Options::_DecoOptStruct_8::_deco_base_t`
 
-Declaration: `main.cpp:60`
+Declaration: `src/main.cpp:78`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_8::~_DecoOptStruct_8`
 
-Declaration: `main.cpp:60`
+Declaration: `src/main.cpp:78`
 
-Definition: `main.cpp:60`
+Definition: `src/main.cpp:78`
 
 ###### Declaration
 
@@ -909,31 +902,31 @@ clore::Options::_DecoOptStruct_8::~_DecoOptStruct_8();
 
 ##### `clore::Options::_DecoOptStruct_9`
 
-Declaration: `main.cpp:66`
+Declaration: `src/main.cpp:84`
 
-Definition: `main.cpp:66`
+Definition: `src/main.cpp:84`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_9::__deco_field_ty`
 
-Declaration: `main.cpp:66`
+Declaration: `src/main.cpp:84`
 
-Definition: `main.cpp:66`
+Definition: `src/main.cpp:84`
 
 ###### Member Types
 
 ###### `clore::Options::_DecoOptStruct_9::__deco_field_ty::_deco_base_t`
 
-Declaration: `main.cpp:66`
+Declaration: `src/main.cpp:84`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_9::__deco_field_ty::__deco_field_ty`
 
-Declaration: `main.cpp:66`
+Declaration: `src/main.cpp:84`
 
-Definition: `main.cpp:66`
+Definition: `src/main.cpp:84`
 
 ###### Declaration
 
@@ -943,15 +936,15 @@ clore::Options::_DecoOptStruct_9::__deco_field_ty::__deco_field_ty();
 
 ###### `clore::Options::_DecoOptStruct_9::_deco_base_t`
 
-Declaration: `main.cpp:66`
+Declaration: `src/main.cpp:84`
 
 ###### Member Functions
 
 ###### `clore::Options::_DecoOptStruct_9::~_DecoOptStruct_9`
 
-Declaration: `main.cpp:66`
+Declaration: `src/main.cpp:84`
 
-Definition: `main.cpp:66`
+Definition: `src/main.cpp:84`
 
 ###### Declaration
 
@@ -963,30 +956,30 @@ clore::Options::_DecoOptStruct_9::~_DecoOptStruct_9();
 
 ### `clore::await_task_result`
 
-Declaration: `main.cpp:92`
+Declaration: `src/main.cpp:110`
 
-Definition: `main.cpp:92`
+Definition: `src/main.cpp:110`
 
-The function `clore::await_task_result` accepts a reference to a `Task` and a `std::string_view` identifier, then blocks until that task completes. It returns a `std::expected<Value, Error>`, where `Value` defaults to `Task::value_type` and `Error` defaults to `Task::error_type`. On success the expected holds the task’s result value; on failure it contains the task’s error type. The caller must ensure the task is valid for blocking and that the string view remains valid for the duration of the call.
+The function `clore::await_task_result` synchronously waits for the completion of a given task and returns its outcome. It accepts a `Task` object by reference and a `std::string_view` argument, which typically serves as a descriptive label or context for logging or error reporting. The call blocks until the task finishes, then yields a `std::expected<Value, Error>`: on success, the expected contains the task’s `value_type` result; on failure, it holds the `error_type`. The template parameters `Value` and `Error` default to `Task::value_type` and `Task::error_type` respectively, so the caller can often omit them as long as the task type provides these member types. The contract requires that `Task` satisfies these type aliases and is awaitable; the caller is responsible for ensuring the task is not already consumed or moved.
 
 #### Usage Patterns
 
-- Awaiting task completion and extracting result
-- Checking task cancellation and errors
-- Wrapping task outcome into `std::expected`
+- safely extract result from a task
+- handle incomplete or cancelled tasks
+- convert exceptions to expected errors
 
 ### `clore::log_generation_summary`
 
-Declaration: `main.cpp:73`
+Declaration: `src/main.cpp:91`
 
-Definition: `main.cpp:73`
+Definition: `src/main.cpp:91`
 
-The function `clore::log_generation_summary` accepts a `const int &` representing a generation identifier and records a summary of that generation's state or results. Callers use this function to produce a diagnostic output for a specific generation, typically after its processing is complete, for auditing or analysis purposes. The function returns `void` and is expected to be called once per generation when a summary is needed.
+The `clore::log_generation_summary` function logs a high‑level summary of a completed generation cycle associated with the given integer identifier. Callers provide a constant reference to an integer value that identifies which generation’s summary should be recorded. The function does not return a value; its sole responsibility is to output the summary (typically to a log or console). It should be invoked after the corresponding generation work has finished to capture the result.
 
 #### Usage Patterns
 
-- Called after generation to output statistics.
-- Used in the generation pipeline to provide feedback on cache performance and output count.
+- Called after a generation phase to log results and cache performance
+- Used to report summary metrics to the user or log file
 
 ## Related Pages
 

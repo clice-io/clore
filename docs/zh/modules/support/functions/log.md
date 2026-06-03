@@ -1,6 +1,6 @@
 ---
 title: 'clore::logging::log'
-description: '函数 clore::logging::log 的实现首先检查可选的全局日志级别 clore::logging::g_log_level：若该级别已设置且传入的 lvl 低于阈值，则立即返回，避免不必要的格式化开销。否则，直接委托给 spdlog::default_logger_raw() 的 log 方法，使用 "{}" 格式字符串将消息输出。该函数依赖 spdlog 库实现底层日志记录，并通过 g_log_level 提供静态的日志等级过滤控制。'
+description: 'clore::logging::log 的实现首先检查静态可选变量 g_log_level 是否已设置，并比较传入的 lvl 参数是否低于该阈值；如果低于，函数立即返回，不执行任何日志输出。否则，函数调用 spdlog::default_logger_raw()->log(lvl, "{}", msg)，将原始格式化字符串 msg 传递给 spdlog 的默认日志记录器进行输出。该实现完全依赖于 spdlog 库的日志基础设施，并在调用前执行一次快速的优先级过滤。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module support](../index.md)
 
-Declaration: `support/logging.cppm:104`
+Declaration: `src/support/logging.cppm:127`
 
-Definition: `support/logging.cppm:104`
+Definition: `src/support/logging.cppm:127`
 
 Declaration: [`Namespace clore::logging`](../../../namespaces/clore/logging/index.md)
 
@@ -26,26 +26,27 @@ inline void log(spdlog::level::level_enum lvl, std::string_view msg) {
 }
 ```
 
-函数 `clore::logging::log` 的实现首先检查可选的全局日志级别 `clore::logging::g_log_level`：若该级别已设置且传入的 `lvl` 低于阈值，则立即返回，避免不必要的格式化开销。否则，直接委托给 `spdlog::default_logger_raw()` 的 `log` 方法，使用 `"{}"` 格式字符串将消息输出。该函数依赖 `spdlog` 库实现底层日志记录，并通过 `g_log_level` 提供静态的日志等级过滤控制。
+`clore::logging::log` 的实现首先检查静态可选变量 `g_log_level` 是否已设置，并比较传入的 `lvl` 参数是否低于该阈值；如果低于，函数立即返回，不执行任何日志输出。否则，函数调用 `spdlog::default_logger_raw()->log(lvl, "{}", msg)`，将原始格式化字符串 `msg` 传递给 spdlog 的默认日志记录器进行输出。该实现完全依赖于 spdlog 库的日志基础设施，并在调用前执行一次快速的优先级过滤。
 
 ## Side Effects
 
-- Logs a message via `spdlog::default_logger_raw()->log()`
+- 写入日志输出（通过 spdlog）
+- 读取并比对全局日志级别 `g_log_level`
 
 ## Reads From
 
-- global variable `g_log_level`
-- function parameter `lvl`
-- function parameter `msg`
+- `g_log_level` 全局变量
+- `lvl` 参数
+- `msg` 参数
 
 ## Writes To
 
-- spdlog's default logger (log output)
+- 日志输出（由 spdlog 管理）
 
 ## Usage Patterns
 
-- Called by `clore::logging::LogProxy::operator()(std::string_view)` to perform the actual logging after constructing the message
-- Used directly by other components that need to log with an explicit severity level
+- 被 `clore::logging::LogProxy::operator()` 重载调用
+- 用于在代理对象中转发日志消息并执行级别过滤
 
 ## Called By
 

@@ -1,6 +1,22 @@
+module;
+
+#include <charconv>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <mutex>
+#include <optional>
+#include <shared_mutex>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <variant>
+#include <vector>
+
 export module generate:model;
 
-import std;
 import extract;
 import support;
 

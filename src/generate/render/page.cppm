@@ -1,6 +1,25 @@
+module;
+
+#include <algorithm>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <functional>
+#include <map>
+#include <memory>
+#include <optional>
+#include <set>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <unordered_set>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 export module generate:page;
 
-import std;
 import :markdown;
 import :model;
 import :common;

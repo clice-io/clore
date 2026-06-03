@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:model'
-description: '该模块定义了文档生成管线核心的数据模型与查询函数。它公开了页面计划（PagePlan、PagePlanSet）、符号分析（FunctionAnalysis、TypeAnalysis、VariableAnalysis、SymbolAnalysisStore）、页面标识（PageIdentity、GeneratedPage）、链接解析器（LinkResolver）以及提示请求（PromptRequest、PromptKind）等一整套结构体，同时提供错误类型（GenerateError、RenderError、PathError）用于报告生成过程中的故障。公开的函数涵盖了页面类型与提示种类的名称映射、符号分析的查找与报告生成、符号目标键的构造与解析、页面路径的计算与冲突检测，以及链接解析器的构建，从而将 extract 阶段的原始信息组织为后续渲染步骤可直接使用的结构化表示。'
+description: 'clore::generate 的模型模块定义了文档生成管线中的核心数据结构与算法。它承担着将代码提取分析结果（来自 extract 模块）转换为页面计划和符号分析表示的职责，并提供路径计算、链接解析、提示请求管理等功能。公开的实现包括 PageType 与 PromptKind 枚举、PagePlan、PagePlanSet、SymbolAnalysisStore、TypeAnalysis、FunctionAnalysis、VariableAnalysis 等结构体，以及一系列用于查询、转换和验证的辅助函数（如 compute_page_path、make_symbol_target_key、build_link_resolver、find_*_analysis、analysis_markdown 等）。这些类型和函数共同构成了生成过程的中间层，确保后续渲染阶段能基于已解析的模型数据输出一致的文档页面。'
 layout: doc
 template: doc
 ---
@@ -9,12 +9,11 @@ template: doc
 
 ## Summary
 
-该模块定义了文档生成管线核心的数据模型与查询函数。它公开了页面计划（`PagePlan`、`PagePlanSet`）、符号分析（`FunctionAnalysis`、`TypeAnalysis`、`VariableAnalysis`、`SymbolAnalysisStore`）、页面标识（`PageIdentity`、`GeneratedPage`）、链接解析器（`LinkResolver`）以及提示请求（`PromptRequest`、`PromptKind`）等一整套结构体，同时提供错误类型（`GenerateError`、`RenderError`、`PathError`）用于报告生成过程中的故障。公开的函数涵盖了页面类型与提示种类的名称映射、符号分析的查找与报告生成、符号目标键的构造与解析、页面路径的计算与冲突检测，以及链接解析器的构建，从而将 `extract` 阶段的原始信息组织为后续渲染步骤可直接使用的结构化表示。
+`clore::generate` 的模型模块定义了文档生成管线中的核心数据结构与算法。它承担着将代码提取分析结果（来自 `extract` 模块）转换为页面计划和符号分析表示的职责，并提供路径计算、链接解析、提示请求管理等功能。公开的实现包括 `PageType` 与 `PromptKind` 枚举、`PagePlan`、`PagePlanSet`、`SymbolAnalysisStore`、`TypeAnalysis`、`FunctionAnalysis`、`VariableAnalysis` 等结构体，以及一系列用于查询、转换和验证的辅助函数（如 `compute_page_path`、`make_symbol_target_key`、`build_link_resolver`、`find_*_analysis`、`analysis_markdown` 等）。这些类型和函数共同构成了生成过程的中间层，确保后续渲染阶段能基于已解析的模型数据输出一致的文档页面。
 
 ## Imports
 
 - [`extract`](../extract/index.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Imported By
@@ -34,19 +33,19 @@ template: doc
 
 ### `clore::generate::FunctionAnalysis`
 
-Declaration: `generate/model.cppm:81`
+Declaration: `src/generate/model.cppm:97`
 
-Definition: `generate/model.cppm:81`
+Definition: `src/generate/model.cppm:97`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::FunctionAnalysis` 结构体封装了对一个函数进行静态分析后得出的结构化结果。它的成员分为三组：概要性描述（`overview_markdown` 与 `details_markdown`），副作用与数据流信息（`has_side_effects`、`side_effects`、`reads_from`、`writes_to`），以及调用模式归纳（`usage_patterns`）。其中 `has_side_effects` 默认为 `false`，与 `side_effects` 的空向量状态一致，共同表达“无副作用”的初始不变性；与之对应，`reads_from` 与 `writes_to` 同样以空向量表示无数据依赖。`usage_patterns` 虽无默认值，但按惯例应在构造时初始化，以便下游组件查询典型调用方式。所有成员均为公有且无特殊约束，使得该结构体主要承担纯数据聚合的角色，其不变性主要由外部构建逻辑维护。
+结构体 `clore::generate::FunctionAnalysis` 内部由七个数据成员组织，用于封装函数分析的结果。两个字符串成员 `overview_markdown` 和 `details_markdown` 分别存储高层摘要和详细说明；布尔成员 `has_side_effects` 提供了一个快速指示器，默认初始化为 `false`。四个 `std::vector<std::string>` 类型成员——`side_effects`、`reads_from`、`writes_to` 和 `usage_patterns`——各自维护独立的列表。该结构体没有显式的不变式检查，但设计上依赖调用方维护成员间的一致性：例如，当 `has_side_effects` 为 `true` 时，`side_effects` 应包含至少一个条目。所有向量成员在默认构造后都是空状态，允许逐步填充分析结果。
 
 #### Invariants
 
-- `has_side_effects` 为 `true` 时，`side_effects` 通常不为空（语义隐含但未强制）
-- 字段内容由分析过程填充，不保证交叉引用的一致性
-- 结构体无自定义构造或赋值操作，使用默认成员初始化
+- `has_side_effects` defaults to `false` unless explicitly set.
+- All vector fields default to empty.
+- The struct is a plain aggregate; no implicit constraints between fields are enforced by the type itself.
 
 #### Key Members
 
@@ -60,45 +59,74 @@ Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index
 
 #### Usage Patterns
 
-- 作为函数分析结果的记录类型被缓存
-- 其他代码通过读取这些字段来生成文档内容
-- 被用于命名空间、模块、文件或符号文档页面的重用
+- Cached and reused across namespace, module, file, and symbol documentation pages.
+- Populated by analysis passes that inspect function behavior.
+- Read by documentation generation templates to render sections.
 
 ### `clore::generate::GenerateError`
 
-Declaration: `generate/model.cppm:69`
+Declaration: `src/generate/model.cppm:85`
 
-Definition: `generate/model.cppm:69`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-`clore::generate::GenerateError` 是一个极其简单的错误表示类型，内部仅包含一个 `std::string` 成员 `message`，用于存储描述性错误信息。该结构体没有自定义的构造函数、析构函数或成员函数，所有特殊成员函数均由编译器隐式生成，因此其不变量仅依赖于 `std::string` 自身的合法状态——`message` 可以为空，但不应包含无效字符序列。该类型在设计上仅作为轻量级的错误载体，不承担任何资源管理或额外逻辑，其唯一的实现意图就是提供一种直接、可复用的方式将错误文本传递给调用方。
-
-### `clore::generate::GeneratedPage`
-
-Declaration: `generate/model.cppm:55`
-
-Definition: `generate/model.cppm:55`
+Definition: `src/generate/model.cppm:85`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::GeneratedPage` 是一个纯聚合类型，直接持有三个 `std::string` 数据成员：`title`、`relative_path` 和 `content`。每个成员通过默认成员初始化器被安全地初始化为空字符串，因此该结构没有定义任何用户提供的构造函数、析构函数或赋值运算符。由于不包含自定语义，它不维护任何跨字段的不变量，所有字段均可公开写入。实现上，该结构仅作为输出数据的扁平容器，不进行校验、转换或延迟计算，调用者被期望直接对每个成员赋值来填充页面信息。
-
-### `clore::generate::GenerationSummary`
-
-Declaration: `generate/model.cppm:61`
-
-Definition: `generate/model.cppm:61`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-`clore::generate::GenerationSummary` 是一个仅由五个 `std::size_t` 类型的公有数据成员组成的聚合结构体。其所有字段——`written_output_count`、`symbol_analysis_cache_hits`、`symbol_analysis_cache_misses`、`page_prompt_cache_hits` 和 `page_prompt_cache_misses`——均被显式初始化为零。该结构体不包含任何构造函数、赋值运算符或其他成员函数，因此其唯一的不变量是每个计数器的值在任意时刻保持非负（由无符号类型天然保证）。
+该结构体内部仅包含一个 `std::string message` 成员，用于存储错误描述文本。所有特殊成员函数（默认构造函数、析构函数、复制/移动操作）均由编译器隐式生成，因此该类型是平凡可构造、可复制和可移动的。不变量方面，`message` 可以表示任何字符串，预期由调用者在构造时赋予描述性内容；未定义任何对 `message` 内容的额外约束。该结构体本身没有提供自定义构造函数或访问器，完全依赖公有数据成员直接暴露错误信息。
 
 #### Invariants
 
-- 所有计数均为非负整数
-- 默认初始化为0
-- 只能通过直接成员赋值修改
+- No documented invariants; the struct is an aggregate with a single `std::string` member.
+
+#### Key Members
+
+- `message`
+
+#### Usage Patterns
+
+- No usage patterns are documented in the provided evidence.
+
+### `clore::generate::GeneratedPage`
+
+Declaration: `src/generate/model.cppm:71`
+
+Definition: `src/generate/model.cppm:71`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+`clore::generate::GeneratedPage` 是一个平凡的聚合体，用于容纳生成过程中产生的单页结果。其内部由三个 `std::string` 字段构成：`title` 存储页面标题，`relative_path` 记录相对于输出根的路径，`content` 包含完整的渲染内容。所有字段均通过默认成员初始化器初始化为空字符串，确保对象构造后处于一致的空状态。
+
+作为纯数据载体，该结构不定义任何构造函数、析构函数或成员函数，依赖编译器生成的默认特殊成员函数。其核心不变性在于三个字符串的语义隔离：修改任意字段不影响其他字段，且没有隐藏的校验或转换逻辑。这种简洁的设计使得它适合作为生成流水线各阶段之间的数据传输对象。
+
+#### Invariants
+
+- No invariants are specified or implied by the evidence.
+
+#### Key Members
+
+- `title`
+- `relative_path`
+- `content`
+
+#### Usage Patterns
+
+- Constructed with brace initialization or default values.
+- Used as a return type or output element in page generation pipelines.
+
+### `clore::generate::GenerationSummary`
+
+Declaration: `src/generate/model.cppm:77`
+
+Definition: `src/generate/model.cppm:77`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+该结构体包含五个 `std::size_t` 计数器字段，均默认初始化为 0，用于在生成过程中汇总性能与统计信息。`written_output_count` 记录实际写入的输出数量；`symbol_analysis_cache_hits` 与 `symbol_analysis_cache_misses` 分别记录符号分析缓存命中与未命中次数；`page_prompt_cache_hits` 与 `page_prompt_cache_misses` 则对应页面提示缓存的命中与未命中次数。所有字段的初始值为 0 是唯一的不变量，调用方应保证只通过加法或赋值更新各计数器，维持非负语义。结构体本身不包含方法或校验逻辑，仅作为纯数据聚合体被传递和累加。
+
+#### Invariants
+
+- All fields are initialized to zero by default
+- Counters are expected to be non‑negative (using `std::size_t`)
+- The sum of cache hits and misses for each cache type can be compared to total operations
 
 #### Key Members
 
@@ -110,52 +138,27 @@ Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index
 
 #### Usage Patterns
 
-- 在生成过程的最后阶段填充这些字段
-- 用于日志记录或性能报告
-- 可被外部代码读取以获取统计信息
+- Accumulated during generation by incrementing individual fields
+- Passed as a mutable reference to functions that populate the counters
+- Read after generation to report or log summary statistics
 
 ### `clore::generate::LinkResolver`
 
-Declaration: `generate/model.cppm:174`
+Declaration: `src/generate/model.cppm:190`
 
-Definition: `generate/model.cppm:174`
+Definition: `src/generate/model.cppm:190`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::LinkResolver` 内部维护四个 `std::unordered_map<std::string, std::string>` 作为核心数据结构：`name_to_path` 将实体名称映射到页面相对路径，`namespace_to_path` 和 `module_to_path` 分别存储命名空间和模块名称到路径的映射，`page_id_to_title` 记录页面 ID 到页面标题的映射。每个映射在构造后应被视为只读：所有查询方法（`resolve`、`resolve_namespace`、`resolve_module`、`resolve_page_title`）均为 `const` 限定，它们通过 `find` 查找并直接返回指向映射值的指针，若键不存在则返回 `nullptr`。该设计将不同维度的名称解析职责拆分到独立映射中，避免了单表膨胀，并在查找失败时以空指针表示缺失，调用方负责检查返回值。
-
-#### Invariants
-
-- The maps are populated before use and not modified during link resolution.
-- Each accessor returns a valid pointer if the key exists, `nullptr` otherwise.
-- Keys in each map are unique per map.
-- The returned pointers remain valid as long as the `LinkResolver` object exists.
-
-#### Key Members
-
-- `name_to_path`
-- `namespace_to_path`
-- `module_to_path`
-- `page_id_to_title`
-- `resolve`
-- `resolve_namespace`
-- `resolve_module`
-- `resolve_page_title`
-
-#### Usage Patterns
-
-- Used when generating Markdown output to convert entity names into hyperlink targets.
-- Queried for each entity appearance that requires a cross-reference.
-- The `resolve` family of methods is called with entity identifiers to obtain the relative page path.
-- Typically filled before the linking phase and then accessed read-only.
+`clore::generate::LinkResolver` 内部依赖四个哈希映射（`name_to_path`、`namespace_to_path`、`module_to_path`、`page_id_to_title`）分别存储实体全名、命名空间、模块到输出相对路径的映射，以及页面标识符到页面标题的映射。所有 `resolve` 系列成员（`resolve`、`resolve_namespace`、`resolve_module`、`resolve_page_title`）的实现在逻辑上一致：通过 `std::unordered_map::find` 查找对应键，若命中则返回指向值的指针，否则返回 `nullptr`。这种设计保持只读查询的高效性（平均常数时间），并明确区分“找到”与“未找到”两种结果。映射内容在构造后应保证不变，且路径均为相对于输出目录的正斜杠分隔路径，从而在生成 markdown 链接时无需额外转换。
 
 #### Member Functions
 
 ##### `clore::generate::LinkResolver::resolve`
 
-Declaration: `generate/model.cppm:180`
+Declaration: `src/generate/model.cppm:196`
 
-Definition: `generate/model.cppm:180`
+Definition: `src/generate/model.cppm:196`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -170,9 +173,9 @@ Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index
 
 ##### `clore::generate::LinkResolver::resolve_module`
 
-Declaration: `generate/model.cppm:190`
+Declaration: `src/generate/model.cppm:206`
 
-Definition: `generate/model.cppm:190`
+Definition: `src/generate/model.cppm:206`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -187,9 +190,9 @@ Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index
 
 ##### `clore::generate::LinkResolver::resolve_namespace`
 
-Declaration: `generate/model.cppm:185`
+Declaration: `src/generate/model.cppm:201`
 
-Definition: `generate/model.cppm:185`
+Definition: `src/generate/model.cppm:201`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -204,9 +207,9 @@ Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index
 
 ##### `clore::generate::LinkResolver::resolve_page_title`
 
-Declaration: `generate/model.cppm:195`
+Declaration: `src/generate/model.cppm:211`
 
-Definition: `generate/model.cppm:195`
+Definition: `src/generate/model.cppm:211`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -221,19 +224,20 @@ Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index
 
 ### `clore::generate::MarkdownFragmentResponse`
 
-Declaration: `generate/model.cppm:77`
+Declaration: `src/generate/model.cppm:93`
 
-Definition: `generate/model.cppm:77`
+Definition: `src/generate/model.cppm:93`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该结构体是一个简单的聚合类型，内部仅包含一个公有数据成员 `markdown`，其类型为 `std::string`。由于没有声明显式构造函数、析构函数、复制或移动操作符，也未定义任何虚函数或私有部分，编译器会自动生成全部特殊成员函数，使得 `clore::generate::MarkdownFragmentResponse` 满足平凡可复制和标准布局的特性。整个对象的状态完全由 `markdown` 成员存储的字符串决定，不存在额外的内部约束或校验逻辑。
+`clore::generate::MarkdownFragmentResponse` 是一个简单的聚合体，仅包含一个 `std::string` 类型的 `markdown` 字段。该结构体没有自定义构造函数、析构函数或赋值运算符，完全依赖编译器生成的默认实现，因此它是平凡可复制且可进行聚合初始化的。内部不存在额外的原子性、线程安全或资源管理约束——所有数据所有权均通过 `std::string` 的内置移动语义管理。
 
-在实现层面，所有对该结构体实例的构造、复制、移动和析构均交由编译器的默认实现处理，因此 `markdown` 成员直接利用 `std::string` 的资源管理行为（如深拷贝或移动转移）。该结构体本身不添加任何数据或行为上的包装，仅作为一个直接暴露字符串内容的纯数据容器，在生成流程中承载最终的Markdown片段结果。
+作为返回类型，该结构体的唯一不变量是 `markdown` 成员始终包含一个格式正确的 Markdown 片段（尽管标准并未强制校验）。其实现仅提供直接的数据承载能力，不附带任何业务逻辑、缓存或延迟计算；所有对 `markdown` 内容的修改均由外部代码通过直接成员访问完成。
 
 #### Invariants
 
-- No documented invariants beyond the type being a plain data holder.
+- `markdown` 成员可以存储任意合法的字符串，没有格式或内容的约束
+- 对象仅由该字符串组成，不维护其他状态
 
 #### Key Members
 
@@ -241,94 +245,88 @@ Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index
 
 #### Usage Patterns
 
-- The struct is intended to be used as a return type in the `clore::generate` namespace, likely from functions that generate markdown fragments. Concrete usage is not shown in the provided evidence.
+- 作为生成结果从生成器函数返回
+- 作为响应数据类型在生成流程中传递
 
 ### `clore::generate::PageIdentity`
 
-Declaration: `generate/model.cppm:207`
+Declaration: `src/generate/model.cppm:223`
 
-Definition: `generate/model.cppm:207`
+Definition: `src/generate/model.cppm:223`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::PageIdentity` 是一个简单的数据聚合结构体，负责在代码生成过程中唯一标识一个页面。其四个数据成员——`page_type`、`normalized_owner_key`、`qualified_name` 和 `source_relative_path`——共同构成了页面的完整身份描述。这些字段被设计为协同工作：`qualified_name` 给出了页面的逻辑全限定名称，`source_relative_path` 提供了其在源码树中的相对路径，而 `normalized_owner_key` 进一步限定了拥有该页面的模块或命名空间上下文。`page_type` 则区分页面是来自常规文件还是其他来源（如隐式生成页面）。该结构体不包含任何显式实现的成员函数或构造函数，完全依赖编译器生成的默认操作；内部不变量主要由构造时传入的字段值保证，例如 `qualified_name` 和 `source_relative_path` 通常应当与 `normalized_owner_key` 的逻辑前缀保持一致，但结构体本身并不强制执行这些约束，而是交由调用方维护。
+`PageIdentity` 结构体包含四个公开成员：`page_type` 默认为 `PageType::File`，`normalized_owner_key`、`qualified_name` 和 `source_relative_path` 均初始化为空字符串。所有成员均为直接可访问的聚合数据，不定义自定义构造、析构或赋值操作，依赖编译器生成的默认实现。
+
+内部不变量仅限于 `page_type` 保持为 `PageType` 枚举的有效值，三个 `std::string` 成员在构造后为空，之后可自由赋值。这些字段共同构成了页面在生成管线中的身份描述，结构本身不提供一致性检查或额外行为，调用方需确保赋值数据符合上下文语义。
 
 ### `clore::generate::PagePlan`
 
-Declaration: `generate/model.cppm:39`
+Declaration: `src/generate/model.cppm:55`
 
-Definition: `generate/model.cppm:39`
+Definition: `src/generate/model.cppm:55`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::PagePlan` 是一个纯数据聚合结构体，用于承载生成单个页面所需的所有配置信息。其成员包括唯一标识符 `page_id`、页面类型 `page_type`、标题 `title` 和相对路径 `relative_path`，以及表示关联页面的集合 `depends_on_pages`、`linked_pages` 和页面所有者键 `owner_keys`。此外，`prompt_requests` 存储生成该页面所需的所有提示请求。
-
-结构体没有额外的不变量或内部实现逻辑；所有字段均可直接访问，其生命周期由 `std::string` 和 `std::vector` 的默认构造函数管理。设计上，它仅作为传递页面计划的中间数据结构，不包含验证或约束检查。
-
-#### Invariants
-
-- The `page_id` field is a string that uniquely identifies the page.
-- The `page_type` field defaults to `PageType::File`.
-- The `depends_on_pages` and `linked_pages` fields store strings representing identifiers of other pages.
-- The `prompt_requests` field holds `PromptRequest` objects.
-
-#### Key Members
-
-- `page_id`
-- `page_type`
-- `title`
-- `relative_path`
-- `owner_keys`
-- `depends_on_pages`
-- `linked_pages`
-- `prompt_requests`
-
-#### Usage Patterns
-
-- Used as a blueprint for generating a page in the `clore::generate` pipeline.
-- Populated by other components and consumed by the generation engine.
+`clore::generate::PagePlan` 是一个纯数据聚合体，其所有成员均为公开字段，旨在作为生成管道中页面计划的扁平容器。内部结构由一组基本类型和向量组成：`page_id` 作为唯一标识符，`page_type` 默认初始化为 `PageType::File`，`title` 和 `relative_path` 为字符串，`owner_keys`、`depends_on_pages` 和 `linked_pages` 存储字符串列表，`prompt_requests` 则持有 `PromptRequest` 对象序列。该结构不维护显式不变量——所有向量和字符串均通过默认构造初始化为空状态，依赖关系（例如 `depends_on_pages` 中的页面 ID 是否实际存在）完全由调用者保证。`prompt_requests` 的顺序直接对应生成时提示的处理次序，而 `linked_pages` 与 `owner_keys` 仅作为引用列表，不进行去重或循环引用检查。这种简单的值语义设计使得实例的创建与拷贝成本较低，但要求使用者正确协调各字段之间的关系。
 
 ### `clore::generate::PagePlanSet`
 
-Declaration: `generate/model.cppm:50`
+Declaration: `src/generate/model.cppm:66`
 
-Definition: `generate/model.cppm:50`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-`clore::generate::PagePlanSet` 的内部结构由两个公开数据成员构成：`plans`（`std::vector<PagePlan>`）和 `generation_order`（`std::vector<std::string>`），均采用空列表的默认初始化。作为纯粹的数据聚合体，该类不定义任何自定义构造函数或成员函数，所有字段均可直接访问。核心不变量在于这两个向量在逻辑上紧密耦合：`generation_order` 中的每个字符串标识了某个 `PagePlan` 的名称或标识符，而 `plans` 中的对应元素则存储了该页面的生成计划内容；实际使用中要求两个向量的长度始终一致，且 `generation_order` 的索引顺序反映了计划在生成流程中的执行顺序。任何修改都必须同步维护这一对应关系，以保证集合的语义完整性。
-
-### `clore::generate::PageType`
-
-Declaration: `generate/model.cppm:9`
-
-Definition: `generate/model.cppm:9`
+Definition: `src/generate/model.cppm:66`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::PageType` 是一个强类型枚举，底层存储为 `std::uint8_t`，用于表示四种页面类别。其枚举值按顺序定义为 `Index`、`Module`、`Namespace`、`File`，对应的隐式整数值依次为 0 至 3。紧凑的底层类型使枚举实例能够以较小的内存开销参与生成流程中的分发或索引操作。该枚举无额外运行时不变式：每个枚举成员都是合法的独立状态，但值的定义顺序可能隐含了某种处理优先级或类别分组意图（例如 `Index` 作为最先定义的成员，常被视作默认值）。
+`clore::generate::PagePlanSet` 是一个简单的聚合结构体，将一组页面计划与一个显式的生成顺序关联起来。其内部状态由两个 `std::vector` 构成：`plans` 存放 `PagePlan` 实例，`generation_order` 存放字符串标识符。设计上假定这两个向量在逻辑上协同工作——`generation_order` 中的每个标识符对应 `plans` 中相同索引位置的一个计划，从而允许按标识符顺序遍历计划。结构体本身不维护这种对应性作为不变式，而是依赖调用方在填充两个成员时保持同步；若违反此约定，则排序语义将变得不可靠。该结构体没有自定义构造函数或成员函数，其全部行为等同于一个结构化的键-计划对列表。
 
 #### Invariants
 
-- The enumerator values are distinct.
-- The enum class scoping prevents unintended implicit conversions.
+- 无显式不变量，两个成员都是独立的标准容器
+- 成员均为公有且可直接修改
 
 #### Key Members
 
-- `Index`
-- `Module`
-- `Namespace`
-- `File`
+- `plans`
+- `generation_order`
 
 #### Usage Patterns
 
-- Defines the set of page categories supported by the generation system.
+- 由生成逻辑填充 `plans` 和 `generation_order`
+- 可能作为输出参数传递给其他组件或通过结构化绑定访问
+
+### `clore::generate::PageType`
+
+Declaration: `src/generate/model.cppm:25`
+
+Definition: `src/generate/model.cppm:25`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+枚举 `clore::generate::PageType` 以 `std::uint8_t` 作为底层类型，紧凑地存储四种页面类别：`Index`、`Module`、`Namespace` 和 `File`。该成员顺序隐式表达了代码生成流水线中页面处理或排序的优先级倾向。作为内部实现类型，它用于在生成阶段区分不同的页面逻辑分支，并借助显式底层类型保证跨平台的内存布局一致性。
+
+#### Invariants
+
+- The set of enumerators is fixed and not extended at runtime.
+- Each enumerator maps to a unique integral value of type `std::uint8_t`.
+
+#### Key Members
+
+- `clore::generate::PageType::Index`
+- `clore::generate::PageType::Module`
+- `clore::generate::PageType::Namespace`
+- `clore::generate::PageType::File`
+
+#### Usage Patterns
+
+- Used as a discriminator to select or configure page generation logic.
+- Referenced in switch statements or dispatch to handle different page types.
 
 #### Member Variables
 
 ##### `clore::generate::PageType::File`
 
-Declaration: `generate/model.cppm:13`
+Declaration: `src/generate/model.cppm:29`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -340,7 +338,7 @@ File
 
 ##### `clore::generate::PageType::Index`
 
-Declaration: `generate/model.cppm:10`
+Declaration: `src/generate/model.cppm:26`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -352,7 +350,7 @@ Index
 
 ##### `clore::generate::PageType::Module`
 
-Declaration: `generate/model.cppm:11`
+Declaration: `src/generate/model.cppm:27`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -364,7 +362,7 @@ Module
 
 ##### `clore::generate::PageType::Namespace`
 
-Declaration: `generate/model.cppm:12`
+Declaration: `src/generate/model.cppm:28`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -376,42 +374,67 @@ Namespace
 
 ### `clore::generate::PathError`
 
-Declaration: `generate/model.cppm:203`
+Declaration: `src/generate/model.cppm:219`
 
-Definition: `generate/model.cppm:203`
+Definition: `src/generate/model.cppm:219`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::PathError` 是一个朴素的聚合体，其唯一的数据成员 `message` 的类型为 `std::string`，用于承载与路径生成相关的错误描述。该结构体未定义任何构造函数、析构函数、拷贝/移动操作或赋值运算符，因此完全依赖编译器生成的默认实现，其生命周期和拷贝行为遵循 `std::string` 的相应规则。作为轻量级的错误值类型，`PathError` 在设计上假定 `message` 应包含有意义的错误说明，但不对其内容施加额外的不变量约束。
+结构体 `clore::generate::PathError` 是一个非常简单的错误类型，其唯一的成员是 `message`，一个 `std::string` 实例。该类型没有额外的不变量或复杂的内部结构；`message` 可以存储任意文本，用于描述路径相关错误的细节。整个实现完全依赖于 `std::string` 的默认行为，没有自定义构造函数、析构函数或特殊成员函数，因此资源管理由标准库自动处理。
 
 #### Invariants
 
-- The `message` member is a string; its content is set by error-reporting code.
+- `message` is a valid `std::string` object
+- No additional invariants are implied by the evidence
 
 #### Key Members
 
-- `message`: a `std::string` describing the error.
+- `std::string message`
 
 #### Usage Patterns
 
-- Returned from functions in `clore::generate` to convey error details.
-- May be inspected or logged by callers to understand the cause of failure.
+- Used as an error type in functions that may fail during path generation
+- Likely returned or thrown to convey error information via its `message` field
 
 ### `clore::generate::PromptKind`
 
-Declaration: `generate/model.cppm:18`
+Declaration: `src/generate/model.cppm:34`
 
-Definition: `generate/model.cppm:18`
+Definition: `src/generate/model.cppm:34`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-枚举 `clore::generate::PromptKind` 基于 `std::uint8_t` 的底层类型，将代码分析任务分类为 11 个不同的提示种类，涵盖粒度从命名空间、模块到单个变量、函数和类型的声明与实现摘要。所有枚举值（如 `NamespaceSummary`、`ModuleArchitecture`、`FunctionImplementationSummary`）在生成器内部用于选择对应的提示模板，其紧凑的底层类型便于序列化或按位存储。该枚举本身不包含运行时不变式，但要求所有枚举值均唯一且显式赋值（由编译器按默认顺序生成），以保证与提示模板选择逻辑的严格对应。
+枚举 `clore::generate::PromptKind` 采用 `std::uint8_t` 作为底层类型，从而在类定义中实现紧凑存储。其成员系统地覆盖了代码元素的不同分析维度：从命名空间、模块、索引等粗粒度范围，到函数、类型、变量等细粒度实体，并进一步区分为声明摘要（如 `FunctionDeclarationSummary`）与实现摘要（如 `FunctionImplementationSummary`）。这种划分在设计上各成员互斥且完备，允许在生成提示时根据所需分析粒度精确选择枚举值，而不引入额外的状态或分支。
+
+#### Invariants
+
+- Each enumerator is a distinct prompt kind.
+- The underlying type is `std::uint8_t`.
+- The enum is scoped to avoid name collisions.
+
+#### Key Members
+
+- `NamespaceSummary`
+- `ModuleSummary`
+- `ModuleArchitecture`
+- `IndexOverview`
+- `FunctionAnalysis`
+- `TypeAnalysis`
+- `VariableAnalysis`
+- `FunctionDeclarationSummary`
+- `FunctionImplementationSummary`
+- `TypeDeclarationSummary`
+- `TypeImplementationSummary`
+
+#### Usage Patterns
+
+- Used to select the appropriate prompt template for generating documentation or analysis for code elements.
 
 #### Member Variables
 
 ##### `clore::generate::PromptKind::FunctionAnalysis`
 
-Declaration: `generate/model.cppm:23`
+Declaration: `src/generate/model.cppm:39`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -423,7 +446,7 @@ FunctionAnalysis
 
 ##### `clore::generate::PromptKind::FunctionDeclarationSummary`
 
-Declaration: `generate/model.cppm:26`
+Declaration: `src/generate/model.cppm:42`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -435,7 +458,7 @@ FunctionDeclarationSummary
 
 ##### `clore::generate::PromptKind::FunctionImplementationSummary`
 
-Declaration: `generate/model.cppm:27`
+Declaration: `src/generate/model.cppm:43`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -447,7 +470,7 @@ FunctionImplementationSummary
 
 ##### `clore::generate::PromptKind::IndexOverview`
 
-Declaration: `generate/model.cppm:22`
+Declaration: `src/generate/model.cppm:38`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -459,7 +482,7 @@ IndexOverview
 
 ##### `clore::generate::PromptKind::ModuleArchitecture`
 
-Declaration: `generate/model.cppm:21`
+Declaration: `src/generate/model.cppm:37`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -471,7 +494,7 @@ ModuleArchitecture
 
 ##### `clore::generate::PromptKind::ModuleSummary`
 
-Declaration: `generate/model.cppm:20`
+Declaration: `src/generate/model.cppm:36`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -483,7 +506,7 @@ ModuleSummary
 
 ##### `clore::generate::PromptKind::NamespaceSummary`
 
-Declaration: `generate/model.cppm:19`
+Declaration: `src/generate/model.cppm:35`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -495,7 +518,7 @@ NamespaceSummary
 
 ##### `clore::generate::PromptKind::TypeAnalysis`
 
-Declaration: `generate/model.cppm:24`
+Declaration: `src/generate/model.cppm:40`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -507,7 +530,7 @@ TypeAnalysis
 
 ##### `clore::generate::PromptKind::TypeDeclarationSummary`
 
-Declaration: `generate/model.cppm:28`
+Declaration: `src/generate/model.cppm:44`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -519,7 +542,7 @@ TypeDeclarationSummary
 
 ##### `clore::generate::PromptKind::TypeImplementationSummary`
 
-Declaration: `generate/model.cppm:29`
+Declaration: `src/generate/model.cppm:45`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -531,7 +554,7 @@ TypeImplementationSummary
 
 ##### `clore::generate::PromptKind::VariableAnalysis`
 
-Declaration: `generate/model.cppm:25`
+Declaration: `src/generate/model.cppm:41`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
@@ -543,121 +566,120 @@ VariableAnalysis
 
 ### `clore::generate::PromptRequest`
 
-Declaration: `generate/model.cppm:34`
+Declaration: `src/generate/model.cppm:50`
 
-Definition: `generate/model.cppm:34`
+Definition: `src/generate/model.cppm:50`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::PromptRequest` 是一个简单的聚合体，其内部结构由两个公有成员组成：`kind` 和 `target_key`。成员 `kind` 的类型为 `PromptKind`，默认初始化为 `PromptKind::NamespaceSummary`；`target_key` 的类型为 `std::string`，默认初始化为空字符串。该结构体没有用户定义的构造函数、析构函数或任何特殊成员函数，因此它保持平凡布局且支持聚合初始化。成员均直接暴露，使得对象可以通过大括号初始化列表构造，无需额外接口。主要的实现复杂性由 `PromptKind` 枚举定义承担，而 `PromptRequest` 自身仅作为轻量级的数据容器。
+实现上，`clore::generate::PromptRequest` 是一个简单的聚合类型，包含两个数据成员 `kind` 和 `target_key`。默认初始化将 `kind` 指定为 `PromptKind::NamespaceSummary`，并将 `target_key` 置为空字符串，从而建立起一个一致的初始状态。结构体不涉及自定义构造函数或复制/移动操作，成员均被公开直接访问，因此唯一的状态变更方式是通过成员赋值。不变量仅由 `PromptKind` 枚举的有效性保证（即 `kind` 的值必须来自该枚举），而 `target_key` 可以自由取任意字符串值——设计上没有对键的格式或非空性施加约束。该结构体的轻量特性使其适合作为请求参数的简单容器，在 `clore::generate` 命名空间内被用于携带提示生成的基础信息。
 
 #### Invariants
 
-- `target_key` may be an empty string
-- `kind` defaults to `PromptKind::NamespaceSummary`
-- Both fields are publicly accessible for direct assignment
+- `kind` 的默认值为 `PromptKind::NamespaceSummary`
+- `target_key` 可为空字符串
 
 #### Key Members
 
-- `kind` member
-- `target_key` member
+- `kind`
+- `target_key`
 
 #### Usage Patterns
 
-- Constructed with a specific `target_key` and optional `kind`
-- Passed to generator functions to specify what to document
-- Frequently created as a temporary object for generation invocations
+- 用于携带提示生成请求的上下文信息
+- 可能根据 `kind` 和 `target_key` 生成不同的提示文本
 
 ### `clore::generate::RenderError`
 
-Declaration: `generate/model.cppm:73`
+Declaration: `src/generate/model.cppm:89`
 
-Definition: `generate/model.cppm:73`
+Definition: `src/generate/model.cppm:89`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-实现层面，`clore::generate::RenderError` 是一个非多态聚合类型，仅包含一个 `std::string` 成员 `message`。该成员通过默认的成员初始化、复制或移动语义直接持有错误描述文本，不维护附加不变量或资源状态。整个结构体体积仅由 `std::string` 的动态存储开销决定，未重载任何特殊成员函数，因此其构造、赋值与析构完全依赖编译器生成的默认实现。
+该结构体仅包含一个 `std::string` 成员 `message`，用于承载错误描述文本。它是一个朴素聚合类型，无自定义构造函数、析构函数或赋值运算符，所有特殊成员函数均为编译器隐式生成。唯一的不变式是 `message` 在任意合法状态下存储一个可构造的字符串值（可包含空字符串），该值由用户直接通过列表初始化或成员赋值设定。由于未提供校验逻辑，该结构体本身不保证字符串内容的格式或语义有效性。
 
 #### Invariants
 
-- `message` 成员应包含有意义的错误描述
-- 无其他明确不变量
+- The `message` member can hold any string, including an empty string.
+- No implicit constraints on the content or format of the error message.
 
 #### Key Members
 
-- `message` 成员：存储错误信息的字符串
+- `message` - a `std::string` that stores a human-readable error description.
 
 #### Usage Patterns
 
-- 其他代码可以构造 `RenderError` 对象并设置 `message` 以传递错误信息
-- 通常作为渲染操作的错误指示或异常类型使用
+- Other code constructs an instance of `clore::generate::RenderError` with an error string.
+- The `message` field is read to retrieve error details, typically in error-handling paths.
 
 ### `clore::generate::SymbolAnalysisStore`
 
-Declaration: `generate/model.cppm:125`
+Declaration: `src/generate/model.cppm:141`
 
-Definition: `generate/model.cppm:125`
+Definition: `src/generate/model.cppm:141`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该结构是一个轻量级聚合体，包含三个公开成员：`functions`、`types` 和 `variables`，其类型分别为 `FunctionAnalysisCache`、`TypeAnalysisCache` 和 `VariableAnalysisCache`。这三个成员分别作为对应符号类别的持久化分析缓存，彼此之间不存在运行时依赖或同步约束；结构体本身不引入额外行为或不变性校验，其设计意图是将不同种类符号的分析结果集中存放在一个可移动、可复制的扁平容器中，供 `clore::generate` 模块内的其他组件按类别直接存取。
+`clore::generate::SymbolAnalysisStore` 是一个仅包含三个公共数据成员的聚合结构体：`FunctionAnalysisCache functions`、`TypeAnalysisCache types` 和 `VariableAnalysisCache variables`。这三个字段分别存储函数、类型和变量的符号分析缓存，共同构成符号分析结果的统一容器。结构体本身不提供任何方法，所有对分析数据的访问都直接通过这些成员进行。其关键设计在于将不同类别的分析缓存置于同一所有权下，从而简化数据传递与生命周期管理，并确保在代码生成阶段能够按需获取任意符号的分析信息。不变量仅由每个缓存字段的内部实现保证——例如同一符号在不同缓存中的结果可能通过符号标识相关联——但结构体本身不施加额外的跨缓存约束。
 
 #### Invariants
 
-- 每个字段对应一种特定的符号类别（函数、类型、变量）
-- 结构体不包含自己的逻辑，仅作为缓存数据的集合
-- 所有成员均为公用，可直接访问
+- 每个成员独立管理对应符号类别的分析缓存
+- 缓存内容在填充后保持不变直至被显式更新或失效
 
 #### Key Members
 
-- `clore::generate::SymbolAnalysisStore::functions`
-- `clore::generate::SymbolAnalysisStore::types`
-- `clore::generate::SymbolAnalysisStore::variables`
+- `functions`
+- `types`
+- `variables`
 
 #### Usage Patterns
 
-- 作为分析阶段的结果被填充并在文档生成过程中被读取
-- 在多个文档页面之间传递以共享符号分析信息
-- 作为 `clore::generate` 命名空间的一部分，供其他生成工具消费
+- 分析和文档生成过程会填充这些缓存以供后续查询
+- 其他组件通过读取这些缓存来获取已分析的符号信息
 
 ### `clore::generate::SymbolTargetKeyView`
 
-Declaration: `generate/model.cppm:136`
+Declaration: `src/generate/model.cppm:152`
 
-Definition: `generate/model.cppm:136`
+Definition: `src/generate/model.cppm:152`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该结构体是一个轻量聚合类型，内部仅包含 `qualified_name` 和 `signature` 两个 `std::string_view` 成员。其关键不变量在于这两个字符串视图所引用的底层字符数组的生命周期必须长于该视图对象本身——通常由调用方在创建时保证，且视图不拥有或管理这些内存。由于未定义任何显式构造函数、赋值运算符或析构函数，所有特殊成员函数均由编译器隐式生成，使其可以作为平凡可复制的键类型在关联容器或查找表中使用。该类型不提供任何修改内部状态的方法，仅通过成员直接暴露对符号全限定名与签名的只读访问。
+`clore::generate::SymbolTargetKeyView` 结构体仅包含两个 `std::string_view` 字段：`qualified_name` 和 `signature`。它被设计为一个非拥有视图，用于表示符号目标的唯一键。核心不变式是这两个字符串视图所指向的底层字符缓冲区必须在视图的整个生命周期内保持有效——通常由调用方管理的持久存储（例如内部字符串池或外部分配的缓冲区）来保证。该结构体支持平凡拷贝和赋值，常用于关联容器的键类型，其中键的相等性比较同时依赖于 `qualified_name` 和 `signature` 的内容。
 
 #### Invariants
 
-- `qualified_name` 和 `signature` 所指向的字符串必须由调用方保证在视图生命周期内有效
-- 两个成员之间不存在隐含的关联或一致性约束
+- `qualified_name` 必须指向有效的、在视图生命周期内不变的字符串数据
+- `signature` 必须指向有效的、在视图生命周期内不变的字符串数据
+- 成员通过聚合初始化直接赋值，不进行所有权转移或复制
 
 #### Key Members
 
-- `qualified_name`
-- `signature`
+- `clore::generate::SymbolTargetKeyView::qualified_name`
+- `clore::generate::SymbolTargetKeyView::signature`
 
 #### Usage Patterns
 
-- 作为符号目标键的轻量级视图，可能用于映射查找或比较操作
-- 被其他代码用来传递符号的限定名称和签名信息，而无需拷贝底层字符串
+- 作为符号目标键的轻量表示，在需要比较或查找符号时传递视图而非拷贝字符串
+- 可能用于哈希或映射结构（如 `std::unordered_map`）的键类型，前提是提供了适当的哈希和相等比较器
+- 由生成器或解析器创建，用于传递符号标识信息而不复制底层数据
 
 ### `clore::generate::TypeAnalysis`
 
-Declaration: `generate/model.cppm:91`
+Declaration: `src/generate/model.cppm:107`
 
-Definition: `generate/model.cppm:91`
+Definition: `src/generate/model.cppm:107`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-结构体 `clore::generate::TypeAnalysis` 是一个纯数据聚合，其所有公有成员直接暴露，用于携带类型分析的结果。内部通过五个字段组织信息：`overview_markdown` 与 `details_markdown` 分别为概述和详情 Markdown 文本，`invariants`、`key_members` 与 `usage_patterns` 则为各自对应的字符串列表。该结构体未定义任何构造函数或成员函数，依赖外部以 direct member access 填充数据，并无隐式不变量的强制检查，因此使用者需保证各字段在语义上的一致性。这种扁平化的成员布局使该类型仅作为无逻辑的传输容器，衔接分析生成与下游消费（如文档渲染或序列化）。
+`clore::generate::TypeAnalysis` 是一个纯数据聚合体，用于封装对某个类型进行静态分析后得到的结果。它的五个公开字段协同描述该类型的核心信息：`overview_markdown` 与 `details_markdown` 分别存放概述和详细说明的 Markdown 文本；`key_members` 列出类型中的关键成员名称；`usage_patterns` 记录常见的用法模式；`invariants` 则保存类型必须维护的不变条件。这些字段均由标准库容器组成（`std::string` 或 `std::vector<std::string>`），且预期在构造或填充后内容保持稳定，即除了被显式赋值外，不承担额外的运行时不变式检查。在实现内部，该结构体通常作为数据传输对象在分析流水线的各个阶段之间传递，其字段直接反映生成文档时所需的信息层次。
 
 #### Invariants
 
-- No inherent invariants; fields are independently assignable.
+- 字段类型与声明一致
+- 各字段内容由外部分析过程填充，结构体本身不施加额外约束
 
 #### Key Members
 
@@ -669,24 +691,24 @@ Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index
 
 #### Usage Patterns
 
-- Populated during documentation generation and cached for reuse across documentation pages.
-- Accessed by consuming code to retrieve analysis components.
+- 由类型分析过程生成并填充各字段
+- 在生成文档页面时读取字段内容并嵌入到相应上下文中
+- 支持缓存以避免重复分析
 
 ### `clore::generate::VariableAnalysis`
 
-Declaration: `generate/model.cppm:99`
+Declaration: `src/generate/model.cppm:115`
 
-Definition: `generate/model.cppm:99`
+Definition: `src/generate/model.cppm:115`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-`clore::generate::VariableAnalysis` 是一个纯数据聚合结构体，用于封装对单个变量进行的静态分析结果。其内部结构由五个直接字段组成：`overview_markdown` 和 `details_markdown` 分别存储分析的总览与详细描述；`is_mutated` 标记变量是否被修改；`mutation_sources` 列出所有导致修改的来源；`usage_patterns` 记录变量的使用模式。这些字段均为标准库或基础类型，不依赖外部状态，且没有用户自定义的构造函数或成员函数，因此结构体本身不维护复杂的不变量——所有字段的初始值由默认初始化或用户提供的值决定。调用方在填充这些字段时需自行保证 `overview_markdown` 和 `details_markdown` 的 Markdown 格式一致性，以及 `mutation_sources` 与 `is_mutated` 间的逻辑一致性（例如当 `is_mutated` 为 `false` 时，`mutation_sources` 应为空）。
+该结构体聚合了针对单个变量的静态分析结果。字段 `overview_markdown` 与 `details_markdown` 分别存储高层摘要与详细说明，二者共同构成分析的文本呈现层。布尔字段 `is_mutated` 标明变量是否在作用域内发生写操作，当其为 `true` 时，`mutation_sources` 列出引发该写操作的具体源代码位置（如赋值表达式、传递非常量引用等）。`usage_patterns` 以字符串向量形式记录变量被引用的方式（例如“作为实参传递”、“被取址”、“用于初始化”等），为调用方提供除变异外的其他使用信息。这些字段共同保证了调用方既能获得判断变量是否可变的决策依据，又能回溯到具体的变异源与使用上下文。
 
 #### Invariants
 
 - `is_mutated` 默认初始化为 `false`
 - `mutation_sources` 和 `usage_patterns` 默认初始化为空向量
-- 所有成员均为标准库类型，无特殊所有权或生命周期约束
 
 #### Key Members
 
@@ -698,22 +720,20 @@ Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index
 
 #### Usage Patterns
 
-- 由变量分析算法创建并填充各字段
-- 作为纯数据容器，被其他代码读取以获取变量分析结果
+- 该结构体作为聚合容器，用于记录变量分析的文本描述和突变相关标志
+- 其他代码可以通过直接成员赋值来填充分析结果
 
 ## Functions
 
 ### `clore::generate::analysis_details_markdown`
 
-Declaration: `generate/model.cppm:157`
+Declaration: `src/generate/model.cppm:173`
 
-Definition: `generate/model.cppm:373`
+Definition: `src/generate/model.cppm:389`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::analysis_details_markdown` 是 `clore::generate::analysis_markdown` 的一个特化封装，用于高效获取特定符号的详细分析描述。其核心逻辑将传入的符号信息与 `SymbolAnalysisStore` 中的分析记录进行匹配：内部通过分析 `PageType`（如 `PageType::File`、`PageType::Namespace`）及 `symbol` 的 `qualified_name`、`signature` 等属性构造出 `SymbolTargetKeyView`，随后利用 `clore::generate::is_type_kind`、`clore::generate::is_function_kind`、`clore::generate::is_variable_kind` 等判定辅助函数分别在 `analyses.types`、`analyses.functions`、`analyses.variables` 等集合中定位对应的 `TypeAnalysis`、`FunctionAnalysis` 或 `VariableAnalysis` 对象。定位后，它会提取这些对象中的 `details_markdown` 字段并返回其指针。
-
-该函数依赖的底层机制包括 `clore::generate::(anonymous namespace)::parse_length_prefixed_symbol_target_key` 和 `clore::generate::parse_symbol_target_key` 来解析符号标识符，以及 `clore::generate::find_type_analysis`、`clore::generate::find_function_analysis`、`clore::generate::find_variable_analysis` 等查找函数。整个流程未产生额外 IO 或副作用，仅在缓存命中缺失时可能影响 `GenerationSummary::symbol_analysis_cache_hits` 与 `symbol_analysis_cache_misses` 计数。
+该函数通过委托给 `analysis_markdown` 来工作，传入一个 lambda 作为字段访问器，该 lambda 返回每个分析对象对应 `details_markdown` 字段的指针。内部控制流完全由 `analysis_markdown` 处理：它根据 `symbol` 的类型（通过 `is_type_kind`、`is_function_kind`、`is_variable_kind` 等判断）在 `analyses` 中查找对应的 `TypeAnalysis`、`FunctionAnalysis` 或 `VariableAnalysis` 条目，并应用访问器提取 `details_markdown`。依赖项包括 `SymbolAnalysisStore` 数据结构本身、`analysis_markdown` 的通用实现，以及各个分析结构体（如 `TypeAnalysis`、`FunctionAnalysis`、`VariableAnalysis`）中的 `details_markdown` 字段。
 
 #### Side Effects
 
@@ -721,40 +741,52 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `analyses` (const `SymbolAnalysisStore&`)
-- `symbol` (const `extract::SymbolInfo&`)
-- `analysis.details_markdown` via accessor
+- `analyses` of type `const SymbolAnalysisStore &`
+- `symbol` of type `const extract::SymbolInfo &` (or `const int &` per declaration)
 
 #### Usage Patterns
 
-- Retrieve a symbol's details markdown for inclusion in documentation pages
-- Used in contexts where analysis detail markdown is required, such as `render_page_markdown`
+- Called by documentation generation utilities to obtain the detailed analysis text for a symbol.
+- Used in page rendering to populate the `details_markdown` section of symbol documentation.
 
 ### `clore::generate::analysis_markdown`
 
-Declaration: `generate/model.cppm:342`
+Declaration: `src/generate/model.cppm:358`
 
-Definition: `generate/model.cppm:342`
+Definition: `src/generate/model.cppm:358`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::analysis_markdown` 根据符号的 `kind` 依次尝试从 `SymbolAnalysisStore` 中提取对应的分析对象，并通过传入的 `FieldAccessor` 可调用对象获取该分析对象中特定字段（如 `overview_markdown`）的 `const std::string*` 指针。其内部控制流按函数、类型、变量三种 `kind` 顺序搜索：首先通过 `make_symbol_target_key` 将符号转换为关键键值，然后分别调用 `find_function_analysis`、`find_type_analysis` 或 `find_variable_analysis` 在 `analyses` 中定位分析对象，若找到则返回 `field_accessor(*analysis)`，否则继续后续种类尝试；若所有种类均未命中则返回 `nullptr`。该函数依赖 `is_function_kind`、`is_type_kind`、`is_variable_kind` 辅助判断符号种类，并依赖对应的查找函数获取分析对象，最终由调用方提供 `FieldAccessor` 以实现字段级别的灵活访问。
+函数 `clore::generate::analysis_markdown` 实现了一种基于符号种类（函数、类型或变量）的分发机制，以从相应的分析对象中提取指定字段。内部流程首先通过 `make_symbol_target_key` 构造符号目标键，然后依次检查 `is_function_kind`、`is_type_kind` 和 `is_variable_kind` 的结果。对于每种已识别的种类，它调用对应的查找函数（`find_function_analysis`、`find_type_analysis` 或 `find_variable_analysis`）在 `analyses` 仓库中进行搜索。若找到有效的分析对象，则应用传入的 `field_accessor` 可调用体来访问该对象的指定成员（例如 `overview_markdown` 或 `details_markdown`），并返回指向该字段的指针。若符号种类未被识别或对应分析不存在，则返回 `nullptr`。
+
+核心依赖包括一组 `is_*_kind` 谓词、`find_*_analysis` 查找函数以及 `field_accessor`——一种用于从分析对象中提取特定成员的泛型 lambda 或函数对象。整个流程不涉及复杂的迭代或缓存，仅依靠直接的分支查找和成员访问。
 
 #### Side Effects
 
 No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- `const SymbolAnalysisStore& analyses`
+- `const extract::SymbolInfo& symbol`
+- 通过 `make_symbol_target_key(symbol)` 读取符号信息
+- 通过查找函数读取分析存储
+
+#### Usage Patterns
+
+- 用于获取函数分析的概述或详情字段
+- 用于类型分析的概述或详情字段
+- 用于变量分析的概述或详情字段
 
 ### `clore::generate::analysis_overview_markdown`
 
-Declaration: `generate/model.cppm:154`
+Declaration: `src/generate/model.cppm:170`
 
-Definition: `generate/model.cppm:366`
+Definition: `src/generate/model.cppm:382`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::analysis_overview_markdown` 的实现直接委托给泛型辅助函数 `clore::generate::analysis_markdown`。该辅助函数接受 `analyses` 和 `symbol`，以及一个字段访问器 lambda；这里的 lambda 从对应的分析结构（例如 `TypeAnalysis`、`FunctionAnalysis` 或 `VariableAnalysis`）中提取 `overview_markdown` 字段。内部流程首先通过 `symbol` 的键值（借助 `clore::generate::make_symbol_target_key` 和 `clore::generate::is_type_kind` 等分支）在 `SymbolAnalysisStore` 中查找正确的分析条目，定位后返回该字段的指针。
-
-其依赖链主要涉及 `clore::generate::find_type_analysis`、`clore::generate::find_function_analysis` 和 `clore::generate::find_variable_analysis` 等查找函数，以及 `clore::generate::analysis_markdown` 的内部路由逻辑。该函数不处理具体的 markdown 渲染，仅作为访问器包装器，确保返回的字符串指针指向分析实例中的 `overview_markdown` 成员（如 `TypeAnalysis::overview_markdown` 或 `VariableAnalysis::overview_markdown`）。
+`clore::generate::analysis_overview_markdown` 是一个轻量封装，它将调用委托给 `clore::generate::analysis_markdown`，并传入一个将抽象分析对象映射到其 `overview_markdown` 字段的字段访问器。该访问器是一个 lambda 表达式，它通过 `auto` 占位符捕获任意分析类型（例如 `FunctionAnalysis`、`TypeAnalysis` 或 `VariableAnalysis`），并返回指向该字段的 `const std::string*`。在 `analysis_markdown` 内部，根据给定的 `symbol` 索引及缓存状态，从 `SymbolAnalysisStore` 中查找对应的符号分析（如 `find_function_analysis`、`find_type_analysis` 或 `find_variable_analysis`），然后通过该访问器直接提取预先计算好的概览 Markdown 内容。整个过程依赖于 `analysis_markdown` 内部的多态调度和缓存机制，而本函数仅负责提供正确的字段访问策略，不涉及任何新的控制流或算法逻辑。
 
 #### Side Effects
 
@@ -762,24 +794,23 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- 参数 `analyses`
-- 参数 `symbol`
-- 分析中的 `overview_markdown` 字段
+- The `analyses` parameter of type `const SymbolAnalysisStore&`
+- The `symbol` parameter of type `const extract::SymbolInfo&`
 
 #### Usage Patterns
 
-- 从符号分析存储中获取概述文本
-- 作为文档生成管道的一部分被多次调用
+- Used in documentation generation to obtain the overview markdown for a symbol's analysis result
+- Employed as a thin wrapper over `clore::generate::analysis_markdown` to select a specific field
 
 ### `clore::generate::build_link_resolver`
 
-Declaration: `generate/model.cppm:201`
+Declaration: `src/generate/model.cppm:217`
 
-Definition: `generate/model.cppm:471`
+Definition: `src/generate/model.cppm:487`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::build_link_resolver` 遍历 `plan_set.plans` 中的每个 `PagePlan`，以填充返回的 `LinkResolver` 实例。它为每个 `plan` 执行两个主要操作：首先，将 `plan.page_id` 映射到 `plan.title` 存入 `resolver.page_id_to_title`；其次，遍历 `plan.owner_keys`，将每个键（以及从 `plan.page_id` 中冒号后提取的后缀）与 `plan.relative_path` 关联，分别存入通用的 `resolver.name_to_path`，并根据 `plan.page_type` 的类型（`PageType::Namespace` 或 `PageType::Module`）同步更新对应的 `resolver.namespace_to_path` 或 `resolver.module_to_path`。使用 `emplace` 确保在键冲突时首次注册的条目优先，为后续通过专用方法（如 `resolve_module` 或 `resolve_namespace`）的消歧提供基础。该函数不执行递归或外部依赖，其逻辑完全基于 `PagePlanSet` 中提供的生成顺序和页面属性。
+函数 `clore::generate::build_link_resolver` 遍历传入的 `PagePlanSet` 中的所有 `PagePlan`，为每个计划填充 `LinkResolver` 的内部映射。它先将计划的 `page_id` 与 `title` 存入 `resolver.page_id_to_title`，然后对 `owner_keys` 中的每个 `key`，使用 `emplace` 将 `key` 映射到 `plan.relative_path`，从而构建通用名称到路径的映射。若该计划的 `page_type` 为 `PageType::Namespace` 或 `PageType::Module`，则同时更新专用映射 `resolver.namespace_to_path` 或 `resolver.module_to_path`。接着，从 `plan.page_id` 中提取冒号 `:` 之后的后缀，并将该后缀以相同方式注册到通用映射和对应的专用映射中。`emplace` 保证了当多个计划共享同一名称时，第一个注册的路径胜出，而专用映射则为后续模块与命名空间的消歧提供了独立查找路径。
 
 #### Side Effects
 
@@ -787,34 +818,34 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `plan_set``.plans`
-- plan`.page_id`
-- plan`.title`
-- plan`.owner_keys`
-- plan`.relative_path`
-- plan`.page_type`
+- `plan_set.plans`
+- `plan.page_id`
+- `plan.title`
+- `plan.owner_keys`
+- `plan.page_type`
+- `plan.relative_path`
 
 #### Writes To
 
-- returned `LinkResolver``.page_id_to_title`
-- returned `LinkResolver``.name_to_path`
-- returned `LinkResolver``.namespace_to_path`
-- returned `LinkResolver``.module_to_path`
+- `resolver.page_id_to_title`
+- `resolver.name_to_path`
+- `resolver.namespace_to_path`
+- `resolver.module_to_path`
 
 #### Usage Patterns
 
-- Constructing a link resolver from page plans before generating page output
-- Used in page rendering pipeline to resolve page references
+- Constructed from `PagePlanSet` to enable symbol-to-page resolution
+- Used as a prerequisite for page generation functions like `build_page_root`
 
 ### `clore::generate::compute_page_path`
 
-Declaration: `generate/model.cppm:214`
+Declaration: `src/generate/model.cppm:230`
 
-Definition: `generate/model.cppm:576`
+Definition: `src/generate/model.cppm:592`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The implementation dispatches on the `identity.page_type` enumeration member. For `PageType::Index`, the path is set to the constant `kIndexPath`. For `PageType::Module`, the qualified name is split on `'.'` and a possible partition suffix (delimited by `':'`) is extracted; the resulting components are prefixed with `kModulePrefix`, normalized via `normalize_name`, and joined with `join_path`; if no partition exists, the terminal component becomes `"index.md"`, otherwise the partition name is used. For `PageType::Namespace`, the qualified name is split on `"::"`, prefixed with `kNamespacePrefix`, and always terminated with `"index.md"`. For `PageType::File`, the `source_relative_path` is stripped of its last extension and prefixed with `kFilePrefix` plus `"/"`. After construction, the path undergoes `sanitize_path_chars` for character cleanup and is validated by `validate_path_component`; failure at that step returns a `PathError`. Internal helpers such as `split_qualified`, `normalize_name`, and `join_path` (each likely defined in an anonymous namespace) supply the core string‑processing logic.
+函数 `clore::generate::compute_page_path` 通过 `identity.page_type` 的分支 (`PageType::Index`、`PageType::Module`、`PageType::Namespace`、`PageType::File`) 来决定路径构造算法。对于 `PageType::Module`，将 `identity.qualified_name` 以 `.` 分割，解析可能的分区标记 `:`，并依次使用 `normalize_name` 规范化每个组件，再以 `kModulePrefix` 为前缀通过 `join_path` 拼接，最后视分区存在与否附加 `"index.md"` 或分区名 + `".md"`。对于 `PageType::Namespace` 类似地以 `::` 分割，使用 `kNamespacePrefix` 前缀并固定附加 `"index.md"`。对于 `PageType::File` 则从 `identity.source_relative_path` 中移除扩展名并替换为 `.md`，以 `kFilePrefix` 为前缀直接拼接。最终对结果字符串先后应用 `sanitize_path_chars` 和 `validate_path_component`，若验证失败则返回 `std::unexpected(PathError)`。该实现依赖匿名命名空间中的 `normalize_name`、`sanitize_path_chars`、`split_qualified` 和 `join_path` 等辅助函数。
 
 #### Side Effects
 
@@ -822,33 +853,29 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `PageIdentity` parameter `identity`
-- member `identity.page_type`
-- member `identity.qualified_name`
-- member `identity.source_relative_path`
-- constants: `kIndexPath`, `kModulePrefix`, `kNamespacePrefix`, `kFilePrefix`
-- functions: `split_qualified`, `normalize_name`, `join_path`, `sanitize_path_chars`, `validate_path_component`
-
-#### Writes To
-
-- local variable `result`
-- returned `std::expected<std::string, PathError>`
+- `identity.page_type`
+- `identity.qualified_name`
+- `identity.source_relative_path`
+- `kIndexPath` (global constant)
+- `kModulePrefix` (global constant)
+- `kNamespacePrefix` (global constant)
+- `kFilePrefix` (global constant)
 
 #### Usage Patterns
 
-- Called by page rendering functions to determine output file path
-- Used in `build_page_root`, `build_index_page_root`, `render_page_bundle`
-- Part of the page generation pipeline for mapping `PageIdentity` to filesystem path
+- Used during page generation to derive output file paths
+- Called by `clore::generate::validate_no_path_conflicts` to check paths
+- Likely called by `clore::generate::build_page_root` and related page builders
 
 ### `clore::generate::find_function_analysis`
 
-Declaration: `generate/model.cppm:145`
+Declaration: `src/generate/model.cppm:161`
 
-Definition: `generate/model.cppm:323`
+Definition: `src/generate/model.cppm:339`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::find_function_analysis` 实现一个基于键的查找，将给定的 `symbol_target_key` 作为搜索条件，直接委托给 `SymbolAnalysisStore::functions` 容器的 `find` 方法。内部控制流仅包含一次线性查找和条件返回值：若迭代器 `it` 不等于容器的 `end`，则返回指向 `it->second` 的指针，否则返回 `nullptr`。该函数不执行任何预处理或错误处理，完全依赖于外部提供的 `SymbolAnalysisStore` 实例中 `functions` 成员（通常为 `std::unordered_map` 或等效关联容器）的查找语义。依赖关系限于 `SymbolAnalysisStore` 与 `FunctionAnalysis` 类型的定义，以及 `std::string_view` 作为查找键类型的兼容性。
+`find_function_analysis` 在 `SymbolAnalysisStore::functions`（一个基于 `std::string_view` 键的关联容器）上执行单次查找。它使用 `analyses.functions.find(symbol_target_key)` 在哈希表中定位目标条目，若找到则返回指向 `FunctionAnalysis` 对象的指针，否则返回 `nullptr`。该函数不修改任何状态，其控制流仅由查找结果决定。依赖包括 `SymbolAnalysisStore` 中的 `functions` 数据成员以及 `FunctionAnalysis` 类型，后者通过 `symbol_target_key` 键值映射。
 
 #### Side Effects
 
@@ -856,23 +883,26 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the `functions` member of `SymbolAnalysisStore`
-- the `symbol_target_key` parameter
+- `analyses` (the `SymbolAnalysisStore` parameter)
+- `symbol_target_key` (the lookup key parameter)
+- `analyses.functions` (the internal map of `FunctionAnalysis` objects)
 
 #### Usage Patterns
 
-- Retrieving function analysis for a given symbol target key
-- Used to access cached function analysis data
+- Used as a lookup helper for function symbolic analysis within the generation pipeline
+- Called during documentation generation to find a cached analysis for a function
 
 ### `clore::generate::find_type_analysis`
 
-Declaration: `generate/model.cppm:148`
+Declaration: `src/generate/model.cppm:164`
 
-Definition: `generate/model.cppm:329`
+Definition: `src/generate/model.cppm:345`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::find_type_analysis` 的实现执行一次映射查找。它先在 `analyses.types`（一个以符号目标键为键的 `std::unordered_map`）上调用 `find` 方法。如果返回的迭代器不等于 `end`，则返回指向对应 `TypeAnalysis` 实例的指针；否则返回 `nullptr`。该函数依赖 `SymbolAnalysisStore` 的 `types` 成员的类型，该成员关联了 `std::string_view` 键与 `TypeAnalysis` 值。没有其他控制流或算法步骤，是纯粹的查找操作。
+该函数直接对传入的 `SymbolAnalysisStore` 实例的 `types` 成员（一个关联容器）执行键查找。它构造一个迭代器 `it`，通过 `std::string_view` 类型的 `symbol_target_key` 在容器中搜索，随后判断迭代器是否到达末尾。如果找到，则返回对应 `TypeAnalysis` 的地址；否则返回 `nullptr`。控制流仅包含一次查找和一次条件分支，无额外逻辑或副作用。
+
+其唯一的外部依赖是 `SymbolAnalysisStore::types` 的查找操作，以及 `TypeAnalysis` 类型的定义。该查找依赖标准库容器的 `find` 方法，时间复杂度为平摊常数或对数（取决于底层容器实现，但预期为无序关联容器）。函数本身不涉及任何缓存、锁或其他同步机制。
 
 #### Side Effects
 
@@ -880,23 +910,24 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `analyses` (the `clore::generate::SymbolAnalysisStore`)
-- `analyses.types` (the container of cached type analyses)
+- `analyses.types`
+- `symbol_target_key`
 
 #### Usage Patterns
 
-- Called by other generation pipeline functions to obtain cached type analysis for a symbol.
-- Used after analysis has been performed and stored in the `SymbolAnalysisStore`.
+- lookup type analysis by symbol key
+- used by evidence-building routines
+- supports page generation for type symbols
 
 ### `clore::generate::find_variable_analysis`
 
-Declaration: `generate/model.cppm:151`
+Declaration: `src/generate/model.cppm:167`
 
-Definition: `generate/model.cppm:335`
+Definition: `src/generate/model.cppm:351`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数在 `analyses.variables` 中查找给定 `symbol_target_key`，查找操作通过 `std::unordered_map` 的 `find` 方法执行。若找到对应条目，函数返回指向该 `VariableAnalysis` 对象的指针；否则返回 `nullptr`。整个过程不涉及任何迭代或分支以外的逻辑，完全依赖容器内部的哈希检索，时间复杂度为平均常数。
+函数 `clore::generate::find_variable_analysis` 通过一次直接查找操作在 `SymbolAnalysisStore` 的 `variables` 成员（一个关联容器）中搜索给定的 `symbol_target_key`。核心流程是调用容器的 `find` 方法，若找到则返回对应 `VariableAnalysis` 对象的指针，否则返回 `nullptr`；整个过程无额外分支或预处理步骤。该函数直接依赖于 `SymbolAnalysisStore` 类型的 `variables` 字段的查找语义，不涉及文件 I/O 或复杂内存管理，因此其运行时间完全取决于底层容器的查找复杂度（预期常数或对数级）。
 
 #### Side Effects
 
@@ -904,25 +935,23 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `analyses.variables` map
-- `symbol_target_key` parameter
+- `analyses.variables` 映射
+- 参数 `symbol_target_key`
 
 #### Usage Patterns
 
-- looking up variable analysis by key from the store
-- retrieving analysis data for rendering or processing
+- 从 `SymbolAnalysisStore` 中获取指定变量的分析结果
+- 被需要变量分析的其他生成函数（如 `build_evidence_for_variable_analysis`）调用
 
 ### `clore::generate::is_function_kind`
 
-Declaration: `generate/model.cppm:162`
+Declaration: `src/generate/model.cppm:178`
 
-Definition: `generate/model.cppm:393`
+Definition: `src/generate/model.cppm:409`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::is_function_kind` 通过一个 `switch` 语句直接对 `extract::SymbolKind` 枚举进行模式匹配，将 `extract::SymbolKind::Function` 和 `extract::SymbolKind::Method` 两个枚举值映射为 `true`，其余值（由 `default` 分支捕获）映射为 `false`。该实现不依赖任何外部状态或复杂控制流，仅依赖于 `extract::SymbolKind` 枚举的定义，是一种纯布尔分类逻辑。
-
-内部控制流简洁明确：仅在枚举值匹配到特定成员时提前返回 `true`，否则返回 `false`。此函数无分支嵌套、无循环调用，也无对类或全局变量的访问，其唯一依赖是调用方传入的 `kind` 参数的类型定义。
+`clore::generate::is_function_kind` 的实现基于一个 `switch` 语句，将输入的 `extract::SymbolKind` 枚举值与两种特定类别进行比较：`extract::SymbolKind::Function` 和 `extract::SymbolKind::Method`。当 `kind` 匹配其中任何一个时，函数立即返回 `true`；对于所有其他枚举成员，默认分支返回 `false`。该函数不依赖外部状态或复杂算法，仅直接利用 `extract::SymbolKind` 枚举的底层整型表示进行控制流分支。
 
 #### Side Effects
 
@@ -930,24 +959,25 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- 参数 `kind`
+- parameter `kind`
 
 #### Usage Patterns
 
-- 用于过滤符号分析中的函数或方法
-- 作为 `is_function_kind` 谓词传递给算法
+- filtering symbol kinds to identify functions or methods
+- used in conjunction with similar predicates like `is_type_kind` and `is_variable_kind`
+- likely employed during symbol traversal or documentation generation logic
 
 ### `clore::generate::is_page_level_symbol`
 
-Declaration: `generate/model.cppm:166`
+Declaration: `src/generate/model.cppm:182`
 
-Definition: `generate/model.cppm:405`
+Definition: `src/generate/model.cppm:421`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::is_page_level_symbol` 通过一组依次进行的快速失败检查来判断给定的 `extract::SymbolInfo` 是否应被视为页面级别的公开 API 符号。它首先检查 `sym.lexical_parent_kind`：只有当该值等于 `extract::SymbolKind::Unknown` 或 `extract::SymbolKind::Namespace` 时才会继续，否则立即返回 `false`。随后，它检查 `sym.enclosing_namespace` 和 `sym.lexical_parent_name` 是否包含子字符串 `"(anonymous namespace)"`，若包含则说明符号属于匿名命名空间内部实现细节，同样返回 `false`。最后，如果 `sym.parent` 有值，则通过 `extract::lookup_symbol` 查找父级符号，并调用 `clore::generate::is_type_kind` 和 `clore::generate::is_function_kind` 判断父级种类；若父级是类型或函数，则符号作为嵌套实现被拒绝，返回 `false`。仅当所有条件均不满足时，函数返回 `true`。
+该函数通过一系列递归排除规则判断给定符号是否为页面级的公共API入口点。内部首先检查符号的 `lexical_parent_kind`：若其非 `Unknown` 且非 `Namespace`，则立即返回 `false`。接着检测符号的 `enclosing_namespace` 或 `lexical_parent_name` 是否包含 `(anonymous namespace)`，若命中则视作实现细节并排除。最后，当符号存在父级时，通过 `extract::lookup_symbol` 查找其父符号，若父符号为类型或函数（通过 `is_type_kind` 或 `is_function_kind` 判定），则返回 `false`。仅当所有条件均通过时返回 `true`。
 
-该函数依赖 `extract::lookup_symbol` 解析父级符号，并依赖 `clore::generate::is_type_kind` 和 `clore::generate::is_function_kind` 这两个种类判定辅助函数。这些检查共同确保只有那些位于顶层命名空间（或全局作用域）、非匿名、且不被类型或函数符号包含的符号才会被识别为独立页面级别的符号，从而为后续页面生成和路由决策提供基础。
+该实现依赖 `extract::lookup_symbol` 从 `extract::ProjectModel` 中按 ID 查询符号，并依赖 `clore::generate` 中的俩种 kind 判断辅助函数。逻辑是 O(1) 到 O(父查找) 的短路检查，常用于决定是否为该符号生成独立页面，避免为嵌套的非顶层实体创建冗余文档。
 
 #### Side Effects
 
@@ -955,52 +985,25 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `model` (the `extract::ProjectModel`)
-- `sym.lexical_parent_kind`
-- `sym.enclosing_namespace`
-- `sym.lexical_parent_name`
-- `sym.parent` (optional `SymbolID`)
-- the parent symbol obtained via `extract::lookup_symbol(model, *sym.parent)`
-- `parent->kind` (via `is_type_kind` and `is_function_kind`)
+- parameter `model` of type `const extract::ProjectModel&`
+- parameter `sym` of type `const extract::SymbolInfo&`
+- call to `extract::lookup_symbol(model, *sym.parent)`
 
 #### Usage Patterns
 
-- called during page plan construction to filter symbols that get dedicated pages
-- used in `build_page_plan_set` and similar top-level generation logic
-- likely called for each symbol in the model to decide page creation
+- Used as a filter predicate in page generation logic
+- Called when building page plans for symbols
+- Checked before assigning a dedicated page to a symbol
 
 ### `clore::generate::is_page_summary_prompt`
 
-Declaration: `generate/model.cppm:133`
+Declaration: `src/generate/model.cppm:149`
 
-Definition: `generate/model.cppm:297`
-
-Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
-
-该函数的实现仅包含一条返回语句，通过直接比较传入的 `kind` 与两个枚举值 `PromptKind::NamespaceSummary` 和 `PromptKind::ModuleSummary` 来决定结果。它充当一个直观的分类器，用于在生成管线中快速判定给定的提示请求是否属于页面级摘要（即命名空间或模块的概述），从而决定后续是否需要调用对应的高层级分析流程。不依赖任何外部状态或复杂数据结构，仅依赖 `PromptKind` 枚举本身及其固定等价关系。
-
-#### Side Effects
-
-No observable side effects are evident from the extracted code.
-
-#### Reads From
-
-- 参数 `kind`
-
-#### Usage Patterns
-
-- 用于条件判断是否需要生成命名空间或模块的页面摘要
-- 在提示构建流程中筛选提示类型
-
-### `clore::generate::is_symbol_analysis_prompt`
-
-Declaration: `generate/model.cppm:134`
-
-Definition: `generate/model.cppm:301`
+Definition: `src/generate/model.cppm:313`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数接受一个 `PromptKind` 参数，通过三个相等比较的组合判断它是否属于符号分析类别。内部控制流是一条直接返回逻辑或结果的语句，没有循环、分支或递归。它依赖于 `PromptKind` 枚举及其成员 `PromptKind::FunctionAnalysis`、`PromptKind::TypeAnalysis`、`PromptKind::VariableAnalysis`，无其他运行时分发或外部状态。
+函数 `clore::generate::is_page_summary_prompt` 通过简单的等式比较来判断给定的 `PromptKind` 是否代表页面级别摘要。它检查 `kind` 是否等于 `PromptKind::NamespaceSummary` 或 `PromptKind::ModuleSummary`，返回 `true` 若任一匹配，否则返回 `false`。该函数没有内部控制流分支，仅依赖枚举常量 `PromptKind::NamespaceSummary` 和 `PromptKind::ModuleSummary` 的定义，这些常量的具体值决定了分类行为。由于逻辑完全内联，它不引入额外依赖，适用于需要快速区分摘要类型与细粒度分析提示的调用点。
 
 #### Side Effects
 
@@ -1012,17 +1015,41 @@ No observable side effects are evident from the extracted code.
 
 #### Usage Patterns
 
-- Used to classify a `PromptKind` as a symbol analysis prompt in conditional logic
+- Classifying prompt kinds to select page summary generation
+- Branching logic in page building or caching code
+
+### `clore::generate::is_symbol_analysis_prompt`
+
+Declaration: `src/generate/model.cppm:150`
+
+Definition: `src/generate/model.cppm:317`
+
+Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
+
+该函数的实现是一个简单的分支判定：它接收一个 `clore::generate::PromptKind` 枚举值，并将其与三个特定的枚举成员——`clore::generate::PromptKind::FunctionAnalysis`、`clore::generate::PromptKind::TypeAnalysis` 和 `clore::generate::PromptKind::VariableAnalysis`——逐次比较。内部控制流仅包含一个由逻辑或运算符连接的表达式，没有循环、递归或复杂条件。该函数不依赖任何外部状态或数据结构，仅依赖枚举 `clore::generate::PromptKind` 本身的定义。
+
+#### Side Effects
+
+No observable side effects are evident from the extracted code.
+
+#### Reads From
+
+- `kind` parameter
+
+#### Usage Patterns
+
+- Classify prompt kinds as symbol analysis prompts
+- Used in conditional logic to dispatch symbol-specific processing
 
 ### `clore::generate::is_type_kind`
 
-Declaration: `generate/model.cppm:160`
+Declaration: `src/generate/model.cppm:176`
 
-Definition: `generate/model.cppm:380`
+Definition: `src/generate/model.cppm:396`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数使用 `switch` 语句检查输入的 `extract::SymbolKind` 是否属于类型相关的符号类别。它依次匹配 `extract::SymbolKind::Class`、`extract::SymbolKind::Struct`、`extract::SymbolKind::Enum`、`extract::SymbolKind::Union`、`extract::SymbolKind::Concept`、`extract::SymbolKind::Template` 和 `extract::SymbolKind::TypeAlias`，对这些情况返回 `true`，并通过 `default` 分支对其他所有枚举值返回 `false`。其唯一的外部依赖是 `extract::SymbolKind` 枚举的定义，不涉及其他数据结构或函数调用，控制流为简单的分支选择。
+函数 `clore::generate::is_type_kind` 通过一个 `switch` 语句对传入的 `extract::SymbolKind` 枚举值进行匹配。当参数为 `extract::SymbolKind::Class`、`extract::SymbolKind::Struct`、`extract::SymbolKind::Enum`、`extract::SymbolKind::Union`、`extract::SymbolKind::Concept`、`extract::SymbolKind::Template` 或 `extract::SymbolKind::TypeAlias` 时返回 `true`，否则返回 `false`。该函数没有其他控制流或外部依赖，仅依赖于 `extract::SymbolKind` 枚举的定义。
 
 #### Side Effects
 
@@ -1030,22 +1057,22 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the parameter `kind` of type `extract::SymbolKind`
+- `extract::SymbolKind kind` parameter
 
 #### Usage Patterns
 
-- used to filter or categorize symbol kinds as type related
-- called when determining if a symbol is a type for analysis or page building
+- classifying symbol kinds during page generation
+- filtering type symbols in analysis code
 
 ### `clore::generate::is_variable_kind`
 
-Declaration: `generate/model.cppm:164`
+Declaration: `src/generate/model.cppm:180`
 
-Definition: `generate/model.cppm:401`
+Definition: `src/generate/model.cppm:417`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::is_variable_kind` 实现了一种直接的分类检查：它接受一个 `extract::SymbolKind` 枚举值，并返回 `true` 当且仅当该值等于 `extract::SymbolKind::Variable` 或 `extract::SymbolKind::EnumMember`。该实现不依赖复杂的控制流或外部状态，仅借助 `extract::SymbolKind` 枚举的相等性比较，从而高效完成符号种类的变量性判定。在生成管道的上下文中，此函数通常被用于筛选出需要以变量分析形式处理的符号，避免对其他种类符号误触发相应的处理逻辑。
+`clore::generate::is_variable_kind` 的实现直接根据参数 `kind` 进行简单的相等性判断。该函数将传入的 `extract::SymbolKind` 枚举值与 `extract::SymbolKind::Variable` 和 `extract::SymbolKind::EnumMember` 逐一比较，并通过逻辑或组合结果，返回 `true` 当且仅当 `kind` 匹配其中任意一个。内部控制流仅包含单条返回语句，无分支、循环或递归。函数依赖仅限于 `extract::SymbolKind` 类型及其两个枚举值，未涉及其他数据结构或外部调用。该实现作为符号分类的轻量谓词，为后续生成流程（如路径计算、分析选取）提供快速的种类判定支持。
 
 #### Side Effects
 
@@ -1053,53 +1080,53 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the parameter `kind` of type `extract::SymbolKind`
-- the enumerators `extract::SymbolKind::Variable` and `extract::SymbolKind::EnumMember`
+- `kind` parameter
 
 #### Usage Patterns
 
-- used as a predicate to filter variable-like symbols in collections
-- paired with other `is_*_kind` functions like `is_function_kind` and `is_type_kind`
-- passed to functions that accept a predicate over `SymbolKind`, such as `collect_namespace_symbols`
+- used to predicate symbol kinds in symbol analysis and page generation functions
 
 ### `clore::generate::make_source_relative`
 
-Declaration: `generate/model.cppm:169`
+Declaration: `src/generate/model.cppm:185`
 
-Definition: `generate/model.cppm:432`
+Definition: `src/generate/model.cppm:448`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::make_source_relative` 将给定路径转换为相对于项目根目录的表示形式，同时利用一个全局线程安全缓存来避免重复计算。实现首先验证输入是否为空，若为空则直接返回原始路径。随后构造一个由 `project_root` 和 `path` 以换行符 `'\n'` 拼接而成的缓存键，并通过 `source_relative_cache()` 获取缓存对象。在读锁保护下查找该键，若命中则直接返回缓存的相对路径。否则使用 `std::filesystem::lexically_normal` 规范化两个路径，再调用 `lexically_relative` 计算相对关系；若相对路径为空或起始为 `".."`（表示路径不在项目根下），则保持原始 `path`，否则使用通用格式的相对字符串。最后在写锁保护下更新缓存并返回结果。该函数依赖于匿名命名空间中的 `source_relative_cache` 函数以及 `std::filesystem` 库，没有其他明显的模块依赖。
+函数通过调用 `source_relative_cache` 获取一个线程安全的单例缓存对象。首先构造一个由 `project_root` 和 `path` 组合的键字符串，并在 `shared_lock` 保护下尝试从 `cache.relative_by_key` 中查找；若命中则直接返回缓存值。否则，将两个路径分别通过 `std::filesystem::path::lexically_normal` 规范化，然后使用 `lexically_relative` 计算相对路径。如果结果为空或以 `".."` 开头（表明原始 `path` 不在 `project_root` 之下），则退回原始 `path`；否则将相对路径转换为通用格式字符串。最后，在 `unique_lock` 保护下将键值对插入缓存并返回结果。
 
 #### Side Effects
 
-- Writes to the `relative_by_key` map in `source_relative_cache`
+- reads from and writes to the global `source_relative_cache`
+- mutex locks and unlocks (shared and unique) for thread-safe cache access
 
 #### Reads From
 
 - `path` parameter
 - `project_root` parameter
-- `source_relative_cache.relative_by_key` map (read under shared lock)
+- `source_relative_cache()::relative_by_key` (cache map)
+- `source_relative_cache()::mutex`
 
 #### Writes To
 
-- `source_relative_cache.relative_by_key` map (written under unique lock)
+- `source_relative_cache()::relative_by_key` (cache map)
 
 #### Usage Patterns
 
-- Computing relative paths for source files
-- Caching path computations for performance
+- used to convert absolute file paths to relative paths for documentation output
+- called when building page roots or symbol source locations
+- likely employed in `build_symbol_source_locations` or similar functions to produce relative paths
 
 ### `clore::generate::make_symbol_target_key`
 
-Declaration: `generate/model.cppm:141`
+Declaration: `src/generate/model.cppm:157`
 
-Definition: `generate/model.cppm:306`
+Definition: `src/generate/model.cppm:322`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数通过依次拼接三个部分生成唯一标识符号的键。首先获取 `symbol.qualified_name` 的字符长度，将其与 `symbol.qualified_name` 本身使用冒号分隔并格式化，得到一个带长度前缀形式的字符串；接着在该字符串末尾直接追加 `symbol.signature`。整个流程线性执行，无分支或循环，依赖 `extract::SymbolInfo` 的 `qualified_name` 与 `signature` 字段以及 `std::format` 字符串格式化设施。这种长度前缀设计使得后续的 `parse_symbol_target_key` 能够从中无损地恢复出原始限定名称。
+函数 `clore::generate::make_symbol_target_key` 从给定的 `extract::SymbolInfo` 对象构造一个唯一的目标键字符串。其算法简单：通过 `std::format` 创建一个长度前缀的限定名，格式为 `qualified_name.size():qualified_name`，然后将符号的 `signature` 直接拼接在该字符串之后。该键的目的是在后续的页面生成过程中作为 `SymbolTargetKeyView` 的序列化表示，依赖 `std::format` 和符号结构体的 `qualified_name` 与 `signature` 字段，没有分支或循环控制流。
 
 #### Side Effects
 
@@ -1107,25 +1134,25 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `symbol` of type `const extract::SymbolInfo&`
-- `symbol.qualified_name` (both its size and content)
+- `symbol.qualified_name.size()`
+- `symbol.qualified_name`
 - `symbol.signature`
 
 #### Usage Patterns
 
-- used to produce a lookup key for symbol information
-- paired with `clore::generate::parse_symbol_target_key` to decode the key back
-- likely called when indexing or caching symbol data during documentation generation
+- generating unique symbol keys for caching
+- indexing symbol analysis results
+- creating lookup keys for symbol targets
 
 ### `clore::generate::page_type_name`
 
-Declaration: `generate/model.cppm:16`
+Declaration: `src/generate/model.cppm:32`
 
-Definition: `generate/model.cppm:263`
+Definition: `src/generate/model.cppm:279`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::page_type_name` 是一个简单的枚举到字符串的映射转换。它通过 `switch` 语句将输入的 `PageType` 枚举值直接映射到对应的 `std::string_view` 字面量，例如 `PageType::Index` 映射为 `"index"`。该函数不依赖任何外部状态、分析结果或缓存机制，仅依赖 `PageType` 枚举本身的成员定义；如果传入未知的枚举值（非预期或已移除的值），则返回 `"unknown"` 作为安全兜底。内部没有循环、递归或间接调用，控制流完全由 `switch` 的分支决定，保证在有效输入下的常数时间复杂度。
+该函数采用一个 `PageType` 枚举值，通过 `switch` 语句将其映射为固定字符串：`Index`、`Module`、`Namespace` 和 `File` 分别对应 `"index"`、`"module"`、`"namespace"` 和 `"file"`，未匹配的枚举值则回退为 `"unknown"`。实现本身不依赖任何外部状态或分析结果，仅依赖 `PageType` 枚举定义，是一个纯查找表式的简单分支控制流。
 
 #### Side Effects
 
@@ -1133,22 +1160,23 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `type` parameter of type `PageType`
+- the `type` parameter of type `PageType`
 
 #### Usage Patterns
 
-- Converting page type to string for logging or page construction
-- Used when generating page paths or labels
+- used to derive page file names or directory components
+- called during page path construction and label generation
+- provides a human-readable name for page type in diagnostics or logs
 
 ### `clore::generate::parse_symbol_target_key`
 
-Declaration: `generate/model.cppm:143`
+Declaration: `src/generate/model.cppm:159`
 
-Definition: `generate/model.cppm:312`
+Definition: `src/generate/model.cppm:328`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数首先尝试调用 `parse_length_prefixed_symbol_target_key` 解析输入键，若成功则直接返回其 `SymbolTargetKeyView` 结果。若解析失败（即返回空），则回退构造一个 `SymbolTargetKeyView`，将其 `qualified_name` 字段直接设为原始 `target_key`，并将 `signature` 字段留空。此流程依赖 `parse_length_prefixed_symbol_target_key` 这一内部辅助函数来检测和处理长度前缀编码的符号目标键格式；当该格式不存在或无效时，函数将整个键视为纯限定名，不包含签名部分。
+该函数首先尝试调用内部辅助函数 `parse_length_prefixed_symbol_target_key` 对输入 `target_key` 进行解析；该辅助函数可能处理一种包含长度前缀的编码格式，用于同时携带限定名称和签名信息。如果解析成功并返回非空 `std::optional`，则直接解引用返回该 `SymbolTargetKeyView` 对象。否则，说明输入不包含前缀结构，此时退化为回退路径：构造并返回一个 `SymbolTargetKeyView`，将其 `qualified_name` 字段直接设为原始 `target_key`，`signature` 字段设为空字符串。整个流程仅依赖此单一分支，无其他控制流，全部逻辑均围绕 `parse_length_prefixed_symbol_target_key` 的结果展开。依赖方面，函数仅耦合于匿名命名空间中的 `parse_length_prefixed_symbol_target_key` 以及结构体 `SymbolTargetKeyView` 的布局——后者通过聚合初始化方式填充两个 `std::string_view` 字段。
 
 #### Side Effects
 
@@ -1156,22 +1184,24 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `target_key` parameter (`std::string_view`)
+- parameter `target_key`
 
 #### Usage Patterns
 
-- called by other generation functions to normalize symbol target keys
-- used as a fallback when structured parsing fails
+- Parse a symbol target key string into its components
+- Fallback to whole string as qualified name when prefix format fails
 
 ### `clore::generate::prompt_kind_name`
 
-Declaration: `generate/model.cppm:32`
+Declaration: `src/generate/model.cppm:48`
 
-Definition: `generate/model.cppm:273`
+Definition: `src/generate/model.cppm:289`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数实现了一个从 `clore::generate::PromptKind` 枚举值到固定字符串名称的直接映射。其内部控制流为一个单一的 `switch` 语句，覆盖所有枚举成员（如 `PromptKind::NamespaceSummary`、`PromptKind::ModuleSummary`、`PromptKind::FunctionAnalysis` 等），每个分支直接返回对应的字符串字面量（如 `"namespace_summary"`、`"module_summary"`、`"function_analysis"`）。对于未匹配到的枚举值，默认分支返回 `"unknown_prompt"`。该实现不涉及任何外部调用、数据结构或算法逻辑，仅依赖 `PromptKind` 枚举的定义，因此具有常量时间复杂度和确定性行为。
+Implementation: [Implementation](functions/prompt-kind-name.md)
+
+函数 `clore::generate::prompt_kind_name` 的实现基于一个纯粹的 `switch` 语句，将每个 `PromptKind` 枚举值映射到一个预定义的 `snake_case` 字符串标识符。该映射覆盖了所有已定义的 `PromptKind` 枚举成员（如 `PromptKind::NamespaceSummary`、`PromptKind::FunctionAnalysis` 等），并为未识别的枚举值返回回退字符串 `"unknown_prompt"`。内部不涉及任何条件分支以外的控制流，也不依赖其他函数或外部状态，完全依赖于 `PromptKind` 枚举的定义。
 
 #### Side Effects
 
@@ -1179,23 +1209,21 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `kind` of type `PromptKind`
+- the `PromptKind` parameter `kind`
 
 #### Usage Patterns
 
-- Obtain a string label for a prompt kind
-- Used in logging or serialization of prompt types
-- Called within prompt building and rendering logic
+- called by `clore::generate::prompt_request_key` to produce a string-based key for a prompt request
 
 ### `clore::generate::prompt_request_key`
 
-Declaration: `generate/model.cppm:131`
+Declaration: `src/generate/model.cppm:147`
 
-Definition: `generate/model.cppm:290`
+Definition: `src/generate/model.cppm:306`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::prompt_request_key` 基于输入的 `PromptRequest` 对象计算一个字符串键。如果成员 `request.target_key` 为空，则直接返回 `prompt_kind_name(request.kind)` 的字符串结果；否则，将该结果与 `":"` 以及 `request.target_key` 拼接起来。该函数依赖 `prompt_kind_name` 将 `PromptKind` 枚举值转换为可读名称，并直接读取 `PromptRequest` 的 `target_key` 字段。整个控制流仅包含一个简单分支，没有循环或外部状态访问，因此实现是直截了当的常量时间操作。
+函数 `clore::generate::prompt_request_key` 的实现基于一个简单的分支逻辑。当 `request.target_key` 为空时，直接返回通过 `prompt_kind_name(request.kind)` 获取的 `PromptKind` 名称字符串；否则返回该名称与 `target_key` 以冒号拼接的结果。整个控制流仅依赖 `prompt_kind_name` 这一外部调用，无复杂状态或循环。
 
 #### Side Effects
 
@@ -1205,26 +1233,21 @@ No observable side effects are evident from the extracted code.
 
 - `request.kind`
 - `request.target_key`
-- `prompt_kind_name(request.kind)`
-
-#### Writes To
-
-- returns a new `std::string` (no external state modification)
 
 #### Usage Patterns
 
-- caching or indexing prompt requests
-- generating a unique key for a `PromptRequest`
+- used to generate a cache or lookup key for a prompt request
+- called to produce a string identifier for a prompt based on its kind and optional target
 
 ### `clore::generate::validate_no_path_conflicts`
 
-Declaration: `generate/model.cppm:216`
+Declaration: `src/generate/model.cppm:232`
 
-Definition: `generate/model.cppm:644`
+Definition: `src/generate/model.cppm:660`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::validate_no_path_conflicts` 通过线性扫描 `path_to_id` 列表，利用局部 `std::unordered_map<std::string, std::string>` 变量 `seen` 检测路径冲突。对每个 `（path, id）` 对，它调用 `seen.emplace(path, id)` 尝试插入；若插入失败（即该 `path` 已存在），则立即返回 `std::unexpected(PathError{...})`，其中 `PathError::message` 通过 `std::format` 生成，包含冲突的 `id` 与原始 `id` 以及重复的 `path`。若全部成功插入，则返回 `{}` 表示无冲突。该函数仅依赖标准库容器和格式化工具，不涉及外部状态。
+该函数遍历 `path_to_id` 列表，使用 `std::unordered_map` 作缓存，记录已见过的路径及其对应的 ID。对于每个 `(path, id)` 对，尝试将 `path` 插入 `seen` 映射；若插入成功则继续，若失败（即该路径已存在），则返回一个 `std::unexpected<PathError>`，其 `message` 字段通过 `std::format` 描述两个冲突的 ID 以及重复的 `path`。若无任何冲突，返回一个空的 `std::expected<void, PathError>`。该函数是页面生成流水线中的前置校验步骤，保证所有生成的页面路径唯一，避免输出冲突。
 
 #### Side Effects
 
@@ -1232,22 +1255,16 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `path_to_id` parameter (a `std::vector` of `std::pair<std::string, std::string>`)
-
-#### Writes To
-
-- local variable `seen` (a `std::unordered_map`)
-- return value (a `std::expected<void, PathError>`)
+- `path_to_id` (parameter)
 
 #### Usage Patterns
 
-- Used to validate that generated documentation paths do not conflict before writing output.
+- Called during path computation to detect duplicate paths before generating pages
+- Used by functions like `compute_page_path` to validate path uniqueness
 
 ## Internal Structure
 
-`generate:model` 是生成器的核心数据模型模块，它定义了文档生成流程中所有关键的数据结构和类型契约。该模块将生成阶段所需的数据分解为三个主要类别：符号分析结果（如 `FunctionAnalysis`、`TypeAnalysis`、`VariableAnalysis` 及其容器 `SymbolAnalysisStore`）、页面规划数据（如 `PagePlan`、`PagePlanSet`、`PageIdentity`、`GeneratedPage`、枚举 `PageType` 和 `PromptKind`）、以及错误与辅助类型（如 `LinkResolver`、各错误结构体）。通过这种分解，`generate:model` 实现了与分析阶段（`extract` 模块）的输出解耦，并为页面排版和最终渲染提供了统一的中间表示。
-
-在内部，该模块采用匿名命名空间封装了路径处理、符号键解析、缓存管理（如 `SourceRelativeCache`）等私有实现细节，公开接口则保持纯数据结构和纯函数形式。模块依赖标准库与 `support` 模块，其中 `support` 提供了如文本规范化、路径拼接等底层工具，而 `std` 负责基本的容器与算法支持。整体上，`generate:model` 充当了生成管线中所有后续步骤（链接解析、页面路径计算、分析摘要生成）的数据基础，其结构清晰地区分了状态存储（如 `SymbolAnalysisStore` 和 `PagePlanSet`）、查询接口（如各 `find_*` 函数）以及转换函数（如 `analysis_markdown`），从而维护了生成器内部的职责分离与可测试性。
+模块 `generate:model` 是生成子系统的核心数据模型层，定义了页面类型（`PageType`）、提示类型（`PromptKind`）、符号分析存储（`SymbolAnalysisStore`）以及链接解析器（`LinkResolver`）等关键类型。它通过导入 `extract` 和 `support` 模块获取代码提取结果与通用工具支持。内部采用匿名命名空间层封装了路径缓存（`SourceRelativeCache`）、符号键解析（`parse_length_prefixed_symbol_target_key`）和字符串处理函数（如 `sanitize_path_chars`、`validate_path_component`），实现了底层实现细节的隐藏。模块暴露的查询函数（如 `find_type_analysis`、`analysis_overview_markdown`）和构建函数（如 `build_link_resolver`、`compute_page_path`）构成了生成流程中计划编排、路径计算和页面内容生成的契约接口。
 
 ## Related Pages
 

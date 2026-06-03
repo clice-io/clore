@@ -1,6 +1,22 @@
+module;
+
+#include <algorithm>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
+
 export module generate:dryrun;
 
-import std;
 import :analysis;
 import :model;
 import config;

@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::anthropic::schema'
-description: '命名空间 clore::net::anthropic::schema 负责定义与 Anthropic API 交互所需的数据结构和辅助函数，专注于模式层面的抽象。其显著声明包括模板函数 function_tool（用于配置函数工具，接受两个字符串参数并返回整数状态码）和 response_format（用于获取响应格式标识符，返回整数），以及 name 和 description 等变量。在架构上，该命名空间充当 API 请求构建与响应对接的中间层，通过模板支持多场景扩展，将底层的模式细节封装起来，为上层调用提供一致的类型接口。'
+description: '该命名空间 clore::net::anthropic::schema 负责封装与 Anthropic 模型交互所需的模式定义和工具函数。其中，function_tool 模板函数用于将调用方提供的函数签名包装为模型可识别的工具描述，它接受工具名称和描述字符串并返回一个整型标识符，供后续消息引用或结果匹配；response_format 模板函数则用于查询或配置当前请求的响应格式，返回操作状态码或格式标识符。此外，命名空间内还包含 name 和 description 等变量，通常作为配置参数或返回结果的一部分。整体上，该命名空间在 clore::net::anthropic 层中承担着序列化与模式验证的职责，是连接高层调用与底层 Anthropic REST API 格式的桥梁。'
 layout: doc
 template: doc
 ---
@@ -9,39 +9,39 @@ template: doc
 
 ## Summary
 
-命名空间 `clore::net::anthropic::schema` 负责定义与 Anthropic API 交互所需的数据结构和辅助函数，专注于模式层面的抽象。其显著声明包括模板函数 `function_tool`（用于配置函数工具，接受两个字符串参数并返回整数状态码）和 `response_format`（用于获取响应格式标识符，返回整数），以及 `name` 和 `description` 等变量。在架构上，该命名空间充当 API 请求构建与响应对接的中间层，通过模板支持多场景扩展，将底层的模式细节封装起来，为上层调用提供一致的类型接口。
+该命名空间 `clore::net::anthropic::schema` 负责封装与 Anthropic 模型交互所需的模式定义和工具函数。其中，`function_tool` 模板函数用于将调用方提供的函数签名包装为模型可识别的工具描述，它接受工具名称和描述字符串并返回一个整型标识符，供后续消息引用或结果匹配；`response_format` 模板函数则用于查询或配置当前请求的响应格式，返回操作状态码或格式标识符。此外，命名空间内还包含 `name` 和 `description` 等变量，通常作为配置参数或返回结果的一部分。整体上，该命名空间在 `clore::net::anthropic` 层中承担着序列化与模式验证的职责，是连接高层调用与底层 Anthropic REST API 格式的桥梁。
 
 ## Functions
 
 ### `clore::net::anthropic::schema::function_tool`
 
-Declaration: `network/anthropic.cppm:762`
+Declaration: `src/network/anthropic.cppm:771`
 
-Definition: `network/anthropic.cppm:762`
+Definition: `src/network/anthropic.cppm:771`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-函数 `clore::net::anthropic::schema::function_tool` 是一个模板函数，接受两个 `std::string` 参数并返回 `int`。调用方需提供两个字符串参数，并根据返回的 `int` 值判断调用是否成功。模板参数 `T` 用于指定函数工具的类型或上下文，具体行为取决于该模板参数。
+该函数是一个模板重载，用于将指定的函数签名封装为 Anthropic 模型可识别的 `function_tool`。它接受两个字符串参数——通常对应工具的名称和描述——并返回一个整型标识符，供后续消息引用或结果匹配。调用方负责提供有效的函数名称与描述字符串；返回值的语义由模板参数 `T` 决定，不应假设为特定常量。此函数仅在 `clore::net::anthropic::schema` 命名空间内可用，且不抛出异常。
 
 #### Usage Patterns
 
-- convenience wrapper for creating tool definitions
-- templated on type T to specify tool schema
-- called with a name and description for the tool
+- Create a `FunctionToolDefinition` for Anthropic API schema
+- Used to define tool call specifications for the Anthropic model
 
 ### `clore::net::anthropic::schema::response_format`
 
-Declaration: `network/anthropic.cppm:757`
+Declaration: `src/network/anthropic.cppm:766`
 
-Definition: `network/anthropic.cppm:757`
+Definition: `src/network/anthropic.cppm:766`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-函数 `clore::net::anthropic::schema::response_format` 是一个模板函数，返回一个 `int` 值，表示与当前调用上下文关联的响应格式标识符。调用者可以调用此函数（不传递参数）以获取整数代码，该代码用于配置或解析 Anthropic API 的响应格式。模板参数 `T` 允许该函数在多种场景下使用，但返回值本身不直接依赖 `T` 的具体类型。
+函数 `clore::net::anthropic::schema::response_format` 是一个模板函数，用于查询或配置当前请求的响应格式。调用者必须提供类型 `T` 来指定期望的格式类别。该函数返回 `int`，其值表示操作结果（例如，成功或失败的状态码）或当前格式的标识符。在调用此函数之前，应确保已正确初始化相关的网络和会话上下文。
 
 #### Usage Patterns
 
-- 在 Anthropic 命名空间下获取响应格式配置
+- 用于获取特定类型 `T` 的响应格式，例如在构建 Anthropic 请求时配置输出格式。
+- 作为 `clore::net::anthropic::schema` 命名空间下的便捷包装，隐藏底层 schema 实现细节。
 
 ## Related Pages
 

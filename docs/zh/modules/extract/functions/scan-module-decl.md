@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::scanmoduledecl'
-description: '函数首先调用 clang::scanSourceForDependencyDirectives，将文件内容解析为令牌与指令列表；若扫描失败则直接返回。随后定义 is_whitespace_only 和 is_punctuation_only 两个辅助 lambda，用于识别令牌类型。遍历每条指令：对于 cxx_export_module_decl 或 cxx_module_decl，跳过 export 和 module 关键字，收集后续令牌（连接标识符、点、冒号）作为模块名称；遇到分号或纯标点时终止，并将纯标点情形视为全局模块片段。若收集到有效名称，则设置 result.module_name，并根据指令类型设置 result.is_interface_unit。对于 cxx_import_decl，跳过 import 关键字，收集后续令牌作为导入名称，调用 normalize_partition_import 进行规范化，并仅在 result.module_imports 中尚未存在时添加该导入。整个算法的核心依赖是 Clang 的依赖指令扫描基础设施，无需运行完整预处理器即可快速提取模块声明信息。'
+description: 'The function clore::extract::scan_module_decl implements a lightweight module‑declaration scanner that avoids the overhead of a full preprocessor run by using Clang’s dependency‑directives scanner (clang::scanSourceForDependencyDirectives). It operates directly on the raw file content (std::string_view file_content) and populates the supplied ScanResult with the module name, interface‑unit flag, and a deduplicated list of module imports.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module extract:scan](../scan.md)
 
-Declaration: `extract/scan.cppm:49`
+Declaration: `src/extract/scan.cppm:67`
 
-Definition: `extract/scan.cppm:141`
+Definition: `src/extract/scan.cppm:159`
 
 Declaration: [`Namespace clore::extract`](../../../namespaces/clore/extract/index.md)
 
@@ -116,27 +116,29 @@ auto scan_module_decl(std::string_view file_content, ScanResult& result) -> void
 }
 ```
 
-函数首先调用 `clang::scanSourceForDependencyDirectives`，将文件内容解析为令牌与指令列表；若扫描失败则直接返回。随后定义 `is_whitespace_only` 和 `is_punctuation_only` 两个辅助 lambda，用于识别令牌类型。遍历每条指令：对于 `cxx_export_module_decl` 或 `cxx_module_decl`，跳过 `export` 和 `module` 关键字，收集后续令牌（连接标识符、点、冒号）作为模块名称；遇到分号或纯标点时终止，并将纯标点情形视为全局模块片段。若收集到有效名称，则设置 `result.module_name`，并根据指令类型设置 `result.is_interface_unit`。对于 `cxx_import_decl`，跳过 `import` 关键字，收集后续令牌作为导入名称，调用 `normalize_partition_import` 进行规范化，并仅在 `result.module_imports` 中尚未存在时添加该导入。整个算法的核心依赖是 Clang 的依赖指令扫描基础设施，无需运行完整预处理器即可快速提取模块声明信息。
+The function `clore::extract::scan_module_decl` implements a lightweight module‑declaration scanner that avoids the overhead of a full preprocessor run by using Clang’s dependency‑directives scanner (`clang::scanSourceForDependencyDirectives`). It operates directly on the raw file content (`std::string_view file_content`) and populates the supplied `ScanResult` with the module name, interface‑unit flag, and a deduplicated list of module imports.
+
+The algorithm first tokenises the file content into `tokens` and `directives` via the Clang scanner. Two local lambdas, `is_whitespace_only` and `is_punctuation_only`, help classify token text. It then iterates over each directive. For directives of kind `cxx_export_module_decl` or `cxx_module_decl`, it skips the `export` and `module` keywords, then concatenates subsequent tokens until a semicolon is encountered. A special case detects a module‑fragment declaration (e.g. `module;` or `module :...`) by checking if the first non‑whitespace token after `module` is punctuation; in that case the module name is left empty and `is_interface_unit` is not set. Otherwise the collected name is stored in `result.module_name`, and `result.is_interface_unit` is set to `true` only for an `export module` declaration. For directives of kind `cxx_import_decl`, the scanner extracts the import name, normalises it via `normalize_partition_import`, and appends it to `result.module_imports` if not already present. The function makes no changes to the `ScanResult` if the scanner itself fails, effectively falling back to no module detection.
 
 ## Side Effects
 
-- Modifies the `ScanResult` object passed by reference, setting `module_name`, `is_interface_unit`, and appending to `module_imports`.
+- Modifies the `ScanResult` object passed by reference by setting `module_name`, `is_interface_unit`, and appending to `module_imports`.
 
 ## Reads From
 
-- `file_content` parameter (string view of file source)
-- `result.module_imports` member (to avoid duplicate entries)
+- Reads from the `file_content` string view.
+- Uses Clang's `clang::scanSourceForDependencyDirectives` to parse tokens and directives internally.
 
 ## Writes To
 
-- `result.module_name`
-- `result.is_interface_unit`
-- `result.module_imports`
+- Writes to `result.module_name` (`std::string`).
+- Writes to `result.is_interface_unit` (`bool`).
+- Writes to `result.module_imports` via `push_back` (`std::vector<std::string>`).
 
 ## Usage Patterns
 
-- Called by `clore::extract::scan_file` during source file scanning to populate module metadata.
-- Used as a lightweight alternative to full preprocessing for extracting module information.
+- Called by `clore::extract::scan_file` to quickly extract module-level declarations without full preprocessing.
+- Designed for scanning source files to determine module name, interface status, and imported modules.
 
 ## Called By
 

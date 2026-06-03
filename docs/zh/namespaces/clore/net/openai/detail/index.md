@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::openai::detail'
-description: '命名空间 clore::net::openai::detail 封装了与 OpenAI API 交互的底层实现细节，包括请求构建、响应解析和环境配置。其主要类型 Protocol 提供了一系列静态方法，如 build_url、build_request_json、build_headers 用于构造网络请求，parse_response 处理返回数据，read_environment 和 provider_name 用于从环境中读取配置信息。此外，该命名空间还管理着 request、environment 和 raw_response 等内部变量，为上层 OpenAI 网络层提供无状态、可复用的基础操作。'
+description: '命名空间 clore::net::openai::detail 封装了与 OpenAI API 交互所需的底层实现细节。其核心是 Protocol 结构体，提供了解析响应、读取环境变量、构建 URL、请求 JSON 及 HTTP 头、生成能力探测键等方法。该命名空间还管理着 request、raw_response 和 environment 等内部变量，用于存储请求上下文和运行时环境。作为 detail 层，它将 OpenAI 协议特有的通信和配置逻辑与上层业务隔离，是 clore::net::openai 模块实现的关键基础设施。'
 layout: doc
 template: doc
 ---
@@ -9,27 +9,27 @@ template: doc
 
 ## Summary
 
-命名空间 `clore::net::openai::detail` 封装了与 `OpenAI` API 交互的底层实现细节，包括请求构建、响应解析和环境配置。其主要类型 `Protocol` 提供了一系列静态方法，如 `build_url`、`build_request_json`、`build_headers` 用于构造网络请求，`parse_response` 处理返回数据，`read_environment` 和 `provider_name` 用于从环境中读取配置信息。此外，该命名空间还管理着 `request`、`environment` 和 `raw_response` 等内部变量，为上层 `OpenAI` 网络层提供无状态、可复用的基础操作。
+命名空间 `clore::net::openai::detail` 封装了与 `OpenAI` API 交互所需的底层实现细节。其核心是 `Protocol` 结构体，提供了解析响应、读取环境变量、构建 URL、请求 JSON 及 HTTP 头、生成能力探测键等方法。该命名空间还管理着 `request`、`raw_response` 和 `environment` 等内部变量，用于存储请求上下文和运行时环境。作为 `detail` 层，它将 `OpenAI` 协议特有的通信和配置逻辑与上层业务隔离，是 `clore::net::openai` 模块实现的关键基础设施。
 
 ## Types
 
 ### `clore::net::openai::detail::Protocol`
 
-Declaration: `network/openai.cppm:692`
+Declaration: `src/network/openai.cppm:702`
 
-Definition: `network/openai.cppm:692`
+Definition: `src/network/openai.cppm:702`
 
 Implementation: [`Module openai`](../../../../../modules/openai/index.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- All members are static; no instance state exists.
-- Environment variables `OPENAI_BASE_URL` and `OPENAI_API_KEY` are required for credential configuration.
-- `build_url` always appends `/chat/completions` path.
-- `build_headers` always includes `Content-Type: application/json; charset=utf-8` and `Authorization: Bearer <key>`.
-- `parse_response` expects a JSON response body compatible with the completion response schema.
+- All methods are static; no instance state required.
+- Environment variable names are fixed to `OPENAI_BASE_URL` and `OPENAI_API_KEY`.
+- Uses `clore::net::detail` utilities for credential reading and URL construction.
+- Delegates core JSON and response parsing to `clore::net::protocol`.
+- Provider name is always `"LLM"`.
 
 #### Key Members
 
@@ -43,17 +43,17 @@ Insufficient evidence to summarize; provide more EVIDENCE
 
 #### Usage Patterns
 
-- Used as a template argument to generic HTTP client code that calls the static methods sequentially.
-- Other `Protocol` specializations (e.g., for other providers) follow the same static interface pattern.
-- Callers obtain credentials via `read_environment`, build the request with `build_*` methods, then parse the response with `parse_response`.
+- Used by network layer code to configure and make HTTP requests to an `OpenAI`-style LLM endpoint.
+- Provides standardized request building and response parsing for `CompletionRequest` and `CompletionResponse`.
+- `capability_probe_key` combines provider name, API base, and model for caching or deduplication.
 
 #### Member Functions
 
 ##### `clore::net::openai::detail::Protocol::build_headers`
 
-Declaration: `network/openai.cppm:705`
+Declaration: `src/network/openai.cppm:715`
 
-Definition: `network/openai.cppm:705`
+Definition: `src/network/openai.cppm:715`
 
 Implementation: [`Module openai`](../../../../../modules/openai/index.md)
 
@@ -65,9 +65,9 @@ auto (const int &) -> int;
 
 ##### `clore::net::openai::detail::Protocol::build_request_json`
 
-Declaration: `network/openai.cppm:719`
+Declaration: `src/network/openai.cppm:729`
 
-Definition: `network/openai.cppm:719`
+Definition: `src/network/openai.cppm:729`
 
 Implementation: [`Module openai`](../../../../../modules/openai/index.md)
 
@@ -79,9 +79,9 @@ auto (const int &) -> int;
 
 ##### `clore::net::openai::detail::Protocol::build_url`
 
-Declaration: `network/openai.cppm:701`
+Declaration: `src/network/openai.cppm:711`
 
-Definition: `network/openai.cppm:701`
+Definition: `src/network/openai.cppm:711`
 
 Implementation: [`Module openai`](../../../../../modules/openai/index.md)
 
@@ -93,9 +93,9 @@ auto (const int &) -> std::string;
 
 ##### `clore::net::openai::detail::Protocol::capability_probe_key`
 
-Declaration: `network/openai.cppm:743`
+Declaration: `src/network/openai.cppm:753`
 
-Definition: `network/openai.cppm:743`
+Definition: `src/network/openai.cppm:753`
 
 Implementation: [`Module openai`](../../../../../modules/openai/index.md)
 
@@ -107,9 +107,9 @@ auto (const int &, const int &) -> std::string;
 
 ##### `clore::net::openai::detail::Protocol::parse_response`
 
-Declaration: `network/openai.cppm:724`
+Declaration: `src/network/openai.cppm:734`
 
-Definition: `network/openai.cppm:724`
+Definition: `src/network/openai.cppm:734`
 
 Implementation: [`Module openai`](../../../../../modules/openai/index.md)
 
@@ -121,9 +121,9 @@ auto (const int &) -> int;
 
 ##### `clore::net::openai::detail::Protocol::provider_name`
 
-Declaration: `network/openai.cppm:739`
+Declaration: `src/network/openai.cppm:749`
 
-Definition: `network/openai.cppm:739`
+Definition: `src/network/openai.cppm:749`
 
 Implementation: [`Module openai`](../../../../../modules/openai/index.md)
 
@@ -135,9 +135,9 @@ auto () -> std::string_view;
 
 ##### `clore::net::openai::detail::Protocol::read_environment`
 
-Declaration: `network/openai.cppm:693`
+Declaration: `src/network/openai.cppm:703`
 
-Definition: `network/openai.cppm:693`
+Definition: `src/network/openai.cppm:703`
 
 Implementation: [`Module openai`](../../../../../modules/openai/index.md)
 

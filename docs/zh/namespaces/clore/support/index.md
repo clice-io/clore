@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::support'
-description: 'clore::support 命名空间提供了一组底层实用工具，负责处理与平台相关的文本文件、路径、编码和缓存等基础操作。其中包含用于读取和写入 UTF-8 文本文件、移除 BOM、截断多字节字符串、规范化行结束符与路径表示的函数，以及针对无序容器的透明字符串哈希与比较仿函数。这些工具为上层模块提供了可复用的基础设施，隐藏了底层实现细节，并确保不同环境下行为的可预测性。'
+description: '命名空间 clore::support 是 clore 库的基础支持层，提供跨模块复用的通用工具与基础设施。其显著声明包括用于缓存键构建与解析的 build_cache_key、split_cache_key 和 CacheKeyParts；用于 UTF‑8 文件读写、规范化与转码的 read_utf8_text_file、write_utf8_text_file、ensure_utf8、normalize_line_endings、strip_utf8_bom 及 truncate_utf8；用于路径标准化的 normalize_path_string；用于容器异构查找的透明哈希器 TransparentStringHash 与相等比较器 TransparentStringEqual；以及拓扑排序函数 topological_order、编译签名生成函数 build_compile_signature、控制台 UTF‑8 支持函数 enable_utf8_console 和日志级别规范化函数 canonical_log_level_name 等。该命名空间的职责明确：为编译缓存、文件系统交互、字符串处理、容器优化和日志系统提供稳定可靠的底层支持，体现其在架构中的工具层定位。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-`clore::support` 命名空间提供了一组底层实用工具，负责处理与平台相关的文本文件、路径、编码和缓存等基础操作。其中包含用于读取和写入 UTF-8 文本文件、移除 BOM、截断多字节字符串、规范化行结束符与路径表示的函数，以及针对无序容器的透明字符串哈希与比较仿函数。这些工具为上层模块提供了可复用的基础设施，隐藏了底层实现细节，并确保不同环境下行为的可预测性。
-
-在架构上，该命名空间扮演着“基石”角色：**`enable_utf8_console`** 确保跨平台控制台输出正确，**`normalize_path_string`** 和 **`normalize_line_endings`** 统一了输入格式，**`build_cache_key`** 和 **`split_cache_key`** 等函数则支撑了缓存系统。这些组件被其他多个模块依赖，既降低了代码重复，又通过集中处理常见问题（如编码、文件 I/O 错误处理）提升了整体健壮性。
+命名空间 `clore::support` 是 `clore` 库的基础支持层，提供跨模块复用的通用工具与基础设施。其显著声明包括用于缓存键构建与解析的 `build_cache_key`、`split_cache_key` 和 `CacheKeyParts`；用于 UTF‑8 文件读写、规范化与转码的 `read_utf8_text_file`、`write_utf8_text_file`、`ensure_utf8`、`normalize_line_endings`、`strip_utf8_bom` 及 `truncate_utf8`；用于路径标准化的 `normalize_path_string`；用于容器异构查找的透明哈希器 `TransparentStringHash` 与相等比较器 `TransparentStringEqual`；以及拓扑排序函数 `topological_order`、编译签名生成函数 `build_compile_signature`、控制台 UTF‑8 支持函数 `enable_utf8_console` 和日志级别规范化函数 `canonical_log_level_name` 等。该命名空间的职责明确：为编译缓存、文件系统交互、字符串处理、容器优化和日志系统提供稳定可靠的底层支持，体现其在架构中的工具层定位。
 
 ## Diagram
 
@@ -34,9 +32,9 @@ graph TD
 
 ### `clore::support::CacheKeyParts`
 
-Declaration: `support/logging.cppm:57`
+Declaration: `src/support/logging.cppm:80`
 
-Definition: `support/logging.cppm:57`
+Definition: `src/support/logging.cppm:80`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
@@ -44,8 +42,7 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `compile_signature` 默认初始化为 `0`
-- 成员变量直接公开访问
+- `compile_signature` 默认值为 `0`，表示未设置或无效签名
 
 #### Key Members
 
@@ -54,44 +51,41 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- 作为缓存键的组成部分被其他模块使用
-- 通常与 `clore::support::Cache` 相关组件配合
+- 直接访问 `path` 和 `compile_signature` 成员以构造缓存键或进行键匹配
+- 作为 `clore::support` 命名空间中缓存机制的输入数据单元
 
 ### `clore::support::TransparentStringEqual`
 
-Declaration: `support/logging.cppm:33`
+Declaration: `src/support/logging.cppm:56`
 
-Definition: `support/logging.cppm:33`
+Definition: `src/support/logging.cppm:56`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+结构体 `clore::support::TransparentStringEqual` 是一个透明的字符串相等比较器，用于支持异构查找场景。它通过定义 `is_transparent` 类型别名来启用透明操作，允许在不显式转换类型的情况下，比较 `std::string`、`std::string_view` 或其他兼容字符串类型。该类通常与 `TransparentStringHash` 配合使用，用于定义支持透明查找的关联容器（如 `std::unordered_set` 或 `std::unordered_map`），使得查找时无需构造临时 `std::string` 对象，从而提高性能。
 
 #### Invariants
 
-- All `operator()` overloads are `const` and `noexcept`
-- The equality comparison is symmetric across `std::string` and `std::string_view`
-- The function object is stateless with no data members
+- 无内部状态，所有操作纯函数式
+- 所有 `operator()` 重载保证不抛出异常
+- 比较结果对称且传递，等价于 `std::string_view` 的相等性
+- 与 `std::string` 及 `std::string_view` 的混合比较语义一致
 
 #### Key Members
 
-- `operator()(std::string_view, std::string_view)`
-- `operator()(const std::string&, std::string_view)`
-- `operator()(std::string_view, const std::string&)`
-- `operator()(const std::string&, const std::string&)`
-- `is_transparent` type alias
+- `is_transparent` 类型别名
+- `operator()` 四个重载：`(string_view, string_view)`, `(const string&, string_view)`, `(string_view, const string&)`, `(const string&, const string&)`
 
 #### Usage Patterns
 
-- Used as a transparent equality predicate for unordered containers (e.g., `std::unordered_set`) to allow heterogeneous lookup with `std::string_view`
-- Can be passed as the `Pred` template argument to `std::unordered_set<std::string, Hash, TransparentStringEqual>`
-- Enables use of `find` and similar member functions with `std::string_view` arguments without constructing a temporary `std::string`
+- 作为自定义比较器用于 `std::unordered_set` 或 `std::unordered_map`，配合透明哈希函数实现异质查找
+- 在需要高效字符串键比较且避免不必要 `std::string` 构造的场景中使用
 
 #### Member Types
 
 ##### `clore::support::TransparentStringEqual::is_transparent`
 
-Declaration: `support/logging.cppm:34`
+Declaration: `src/support/logging.cppm:57`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
@@ -105,9 +99,23 @@ using is_transparent = void
 
 ##### `clore::support::TransparentStringEqual::operator()`
 
-Declaration: `support/logging.cppm:46`
+Declaration: `src/support/logging.cppm:64`
 
-Definition: `support/logging.cppm:46`
+Definition: `src/support/logging.cppm:64`
+
+Implementation: [`Module support`](../../../modules/support/index.md)
+
+###### Declaration
+
+```cpp
+auto (const std::string &, std::string_view) const noexcept -> bool;
+```
+
+##### `clore::support::TransparentStringEqual::operator()`
+
+Declaration: `src/support/logging.cppm:69`
+
+Definition: `src/support/logging.cppm:69`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
@@ -119,23 +127,9 @@ auto (std::string_view, const std::string &) const noexcept -> bool;
 
 ##### `clore::support::TransparentStringEqual::operator()`
 
-Declaration: `support/logging.cppm:36`
+Declaration: `src/support/logging.cppm:74`
 
-Definition: `support/logging.cppm:36`
-
-Implementation: [`Module support`](../../../modules/support/index.md)
-
-###### Declaration
-
-```cpp
-auto (std::string_view, std::string_view) const noexcept -> bool;
-```
-
-##### `clore::support::TransparentStringEqual::operator()`
-
-Declaration: `support/logging.cppm:51`
-
-Definition: `support/logging.cppm:51`
+Definition: `src/support/logging.cppm:74`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
@@ -147,52 +141,55 @@ auto (const std::string &, const std::string &) const noexcept -> bool;
 
 ##### `clore::support::TransparentStringEqual::operator()`
 
-Declaration: `support/logging.cppm:41`
+Declaration: `src/support/logging.cppm:59`
 
-Definition: `support/logging.cppm:41`
+Definition: `src/support/logging.cppm:59`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
 ###### Declaration
 
 ```cpp
-auto (const std::string &, std::string_view) const noexcept -> bool;
+auto (std::string_view, std::string_view) const noexcept -> bool;
 ```
 
 ### `clore::support::TransparentStringHash`
 
-Declaration: `support/logging.cppm:17`
+Declaration: `src/support/logging.cppm:40`
 
-Definition: `support/logging.cppm:17`
+Definition: `src/support/logging.cppm:40`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-`clore::support::TransparentStringHash` 是一个用于字符串哈希的透明仿函数（transparent functor），通常与 `clore::support::TransparentStringEqual` 搭配使用。它通过定义类型别名 `is_transparent` 来启用无序关联容器的异构查找（heterogeneous lookup），使得可以在 `std::unordered_set` 或 `std::unordered_map` 中使用 `std::string_view`、`const char*` 等字符串类型直接作为查找键，而无需临时构造 `std::string` 对象。该结构体常用于需要高效字符串键查找且避免额外分配的场景。
+`clore::support::TransparentStringHash` 是一个自定义哈希函数对象，设计用于与无序容器（如 `std::unordered_set` 或 `std::unordered_map`）配合使用，以支持异质查找（heterogeneous lookup）。通过定义 `is_transparent` 类型别名，它满足透明哈希器的要求，允许在查找操作中直接使用 `std::string_view`、`const char*` 或其他可隐式转换为 `std::string_view` 的类型作为键，从而避免为进行哈希计算而构造临时的 `std::string` 对象。
+
+该类型通常与 `clore::support::TransparentStringEqual` 一同使用，两者结合使容器能够高效地比较和哈希字符串类型，提升查找性能并减少不必要的内存分配。它主要用于 `clore` 库的日志或缓存模块中，例如被 `clore::support::CacheKeyParts` 等组件使用。
 
 #### Invariants
 
-- 所有运算符重载均保证不抛出异常（`noexcept`）。
-- 对于任何字符串类型输入，哈希值仅依赖于其字符内容和字符顺序，类型转换不影响结果。
-- `is_transparent` 类型别名为 `void`，表明该哈希器是透明的。
+- 所有 `operator()` 重载都是 `noexcept` 的
+- 哈希计算完全基于 `std::hash<std::string_view>` 实现，无自定义状态或额外逻辑
+- 接受 `const std::string&` 和 `const char*` 的参数会隐式转换为 `std::string_view`
+- 类型别名 `is_transparent` 为 `void`，表明支持透明查找
 
 #### Key Members
 
 - `is_transparent` 类型别名
-- `operator()(std::string_view)`
-- `operator()(const std::string&)`
-- `operator()(const char*)`
+- `operator()(std::string_view) const noexcept`
+- `operator()(const std::string&) const noexcept`
+- `operator()(const char*) const noexcept`
 
 #### Usage Patterns
 
-- 用作 `std::unordered_set` 或 `std::unordered_map` 的自定义哈希器。
-- 允许使用 `std::string_view` 或 `const char*` 进行查找，无需创建 `std::string` 对象。
-- 可与 `std::equal_to<void>` 或类似的透明比较器配合使用。
+- 作为 `std::unordered_set<std::string, TransparentStringHash>` 或 `std::unordered_map<std::string, T, TransparentStringHash>` 的哈希器，允许使用 `std::string_view` 或 `const char*` 进行查找
+- 与其他支持透明哈希的容器或算法配合，例如 `std::unordered_set<std::string, TransparentStringHash>::find(std::string_view)`
+- 被用作代码库中需要字符串哈希且支持异构查找的通用组件
 
 #### Member Types
 
 ##### `clore::support::TransparentStringHash::is_transparent`
 
-Declaration: `support/logging.cppm:18`
+Declaration: `src/support/logging.cppm:41`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
@@ -206,23 +203,9 @@ using is_transparent = void
 
 ##### `clore::support::TransparentStringHash::operator()`
 
-Declaration: `support/logging.cppm:24`
+Declaration: `src/support/logging.cppm:43`
 
-Definition: `support/logging.cppm:24`
-
-Implementation: [`Module support`](../../../modules/support/index.md)
-
-###### Declaration
-
-```cpp
-auto (const std::string &) const noexcept -> std::size_t;
-```
-
-##### `clore::support::TransparentStringHash::operator()`
-
-Declaration: `support/logging.cppm:20`
-
-Definition: `support/logging.cppm:20`
+Definition: `src/support/logging.cppm:43`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
@@ -234,9 +217,9 @@ auto (std::string_view) const noexcept -> std::size_t;
 
 ##### `clore::support::TransparentStringHash::operator()`
 
-Declaration: `support/logging.cppm:28`
+Declaration: `src/support/logging.cppm:51`
 
-Definition: `support/logging.cppm:28`
+Definition: `src/support/logging.cppm:51`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
@@ -246,229 +229,246 @@ Implementation: [`Module support`](../../../modules/support/index.md)
 auto (const char *) const noexcept -> std::size_t;
 ```
 
+##### `clore::support::TransparentStringHash::operator()`
+
+Declaration: `src/support/logging.cppm:47`
+
+Definition: `src/support/logging.cppm:47`
+
+Implementation: [`Module support`](../../../modules/support/index.md)
+
+###### Declaration
+
+```cpp
+auto (const std::string &) const noexcept -> std::size_t;
+```
+
 ## Functions
 
 ### `clore::support::build_cache_key`
 
-Declaration: `support/logging.cppm:70`
+Declaration: `src/support/logging.cppm:93`
 
-Definition: `support/logging.cppm:368`
+Definition: `src/support/logging.cppm:391`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-`clore::support::build_cache_key` 结合一个字符串标识符和一个 `std::uint64_t` 签名值，生成一个可用于缓存系统的唯一 `std::string` 键。调用方应提供标识缓存对象的文本标签（例如文件路径或操作名称）以及代表该对象状态的签名（通常由 `clore::support::build_compile_signature` 等函数产生）。此函数保证对于相同的输入始终返回相同的键值，且键的格式稳定，适合作为哈希表的键或文件系统路径的一部分。返回的字符串不包含换行符或空字符，可直接用于后续的查询或存储操作。
+函数 `clore::support::build_cache_key` 根据给定的字符串标识符和一个无符号 64 位整数构造一个缓存键字符串。调用者应将一个代表缓存条目标识的 `std::string_view` 和一个版本或哈希值（通常由 `clore::support::build_compile_signature` 等函数生成）传递给它。返回的 `std::string` 与 `clore::support::split_cache_key` 函数兼容，从而允许将生成的键用于从缓存中存储或检索数据。合同未明确要求输入非空，但建议调用者确保标识符和整数值在此上下文中有效；不一致的输入可能导致键无法被对应的拆分函数正确解析。
 
 #### Usage Patterns
 
-- Called to build a cache key for a file path and its compilation signature
-- Used in conjunction with `split_cache_key` for round‑tripping cache entries
+- Used to generate a cache key from a normalized file path and a compile signature
+- Called before storing or retrieving cached compile results
 
 ### `clore::support::build_compile_signature`
 
-Declaration: `support/logging.cppm:66`
+Declaration: `src/support/logging.cppm:89`
 
-Definition: `support/logging.cppm:352`
+Definition: `src/support/logging.cppm:375`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-`clore::support::build_compile_signature` 接受两个 `std::string_view` 参数和一个 `const int&` 参数，返回一个 `std::uint64_t`。该函数根据提供的输入生成一个唯一的编译签名，用于标识一组特定的编译配置。调用者应保证第一个 `std::string_view` 代表源文件路径，第二个代表目标文件路径，整数参数作为额外的区分符（例如版本或选项标识）。返回的签名可用于缓存查找或比较编译结果是否一致；路径参数会经过内部规范化处理（依赖 `clore::support::normalize_path_string`），因此调用者无须预先规范化。
+函数 `clore::support::build_compile_signature` 根据给定的编译信息生成一个紧凑的数值签名。调用者应当提供两个标识符——通常第一个代表编译目标或输入源，第二个代表变体或平台——以及一个包含额外配置选项的字符串列表。返回的 `std::uint64_t` 值可用于唯一标识这组编译参数，例如与 `clore::support::build_cache_key` 配合构造缓存键。为保证签名在不同环境下的一致性，调用者应确保传入的路径字符串已经是规范化形式（该函数可能内部调用 `clore::support::normalize_path_string` 进行预处理）。
 
 #### Usage Patterns
 
-- generating a unique digest for compilation inputs
-- building a cache key for build systems
-- identifying identical compile configurations
+- Called to produce a compile signature for caching compile results
+- Used together with `clore::support::build_cache_key` to form a cache key
 
 ### `clore::support::canonical_log_level_name`
 
-Declaration: `support/logging.cppm:77`
+Declaration: `src/support/logging.cppm:100`
 
-Definition: `support/logging.cppm:424`
+Definition: `src/support/logging.cppm:447`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-该函数接受一个表示日志级别名称的字符串视图，并尝试将其转换为规范形式。如果输入能够被识别为一个有效的日志级别名称，则返回对应的规范字符串；否则返回 `std::nullopt`。
-
-调用者应当传递一个可能非规范的日志级别名称（例如 `"info"`、`"INFO"` 或 `"warning"`）。成功时，返回的 `std::optional<std::string>` 中会包含该级别在代码库中统一使用的标准字符串形式；失败时，结果为 `std::nullopt`，表示该输入无法映射到任何已知的日志级别。
+接受一个日志级别名称的字符串视图，返回其规范形式。如果输入无法识别为有效的日志级别名称，则返回 `std::nullopt`。调用者应确保传入的字符串视图在函数返回前保持有效。函数不修改输入，结果所有权由返回的 `std::optional<std::string>` 持有。
 
 #### Usage Patterns
 
-- Normalizing log level names before using them with spdlog
+- Canonicalizing user-provided log level strings
+- Validating log level names before configuration
 
 ### `clore::support::enable_utf8_console`
 
-Declaration: `support/logging.cppm:91`
+Declaration: `src/support/logging.cppm:114`
 
-Definition: `support/logging.cppm:534`
+Definition: `src/support/logging.cppm:557`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-函数 `clore::support::enable_utf8_console` 用于激活当前进程控制台的 UTF-8 编码支持，使标准输出（`stdout` 或 `std::cout`）能够正确显示多字节 UTF-8 文本。调用者应在任何涉及 UTF-8 数据的控制台输出操作之前调用此函数。该函数不接收参数，也不返回任何值；其效果在调用后持续至进程结束。
+`clore::support::enable_utf8_console` 函数负责配置控制台的 I/O 环境以支持 UTF‑8 编码。调用此函数不需要任何参数，且不产生返回值。建议调用者在程序启动的早期（例如在 `main` 函数开头）调用一次，以保证后续的宽字符输出和 UTF‑8 文本处理在控制台中正确呈现。
 
 #### Usage Patterns
 
-- Called early in program initialization to ensure UTF-8 console I/O
-- Typically invoked once at startup
+- Called during application initialization to enable UTF-8 console I/O on Windows
+- Invoked once at program startup to ensure console handles UTF-8 encoding
 
 ### `clore::support::ensure_utf8`
 
-Declaration: `support/logging.cppm:75`
+Declaration: `src/support/logging.cppm:98`
 
-Definition: `support/logging.cppm:405`
+Definition: `src/support/logging.cppm:428`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
 Declaration: [Declaration](functions/ensure-utf8.md)
 
-接受一个 `std::string_view`，返回一个 `std::string`。该函数保证输出字符串是有效的 UTF-8 编码，无论输入是否已符合该编码。它内部会验证输入序列的合法性，并在必要时进行规范化或修复，确保调用者获得一个可以安全用于任何期望 UTF-8 文本的上下文的字符串。
+`clore::support::ensure_utf8` 接受一个 `std::string_view` 并返回一个 `std::string`，该结果保证是有效的 UTF‑8 编码。调用者可将此函数用作一个适配层，确保无论输入数据的编码状态如何，下游处理都能接收到一个符合 UTF‑8 规范的字符串。函数内部会处理任何无效的字节序列，生成语义上可用的输出。
 
 #### Usage Patterns
 
-- 在输出或进一步处理前清理字符串
-- 被 `write_utf8_text_file` 和 `truncate_utf8` 调用
+- Normalizing input strings to ensure valid UTF-8 encoding
+- Used by `write_utf8_text_file` to guarantee valid UTF-8 before writing
+- Used by `truncate_utf8` to ensure truncated string ends at a valid boundary
 
 ### `clore::support::extract_first_plain_paragraph`
 
-Declaration: `support/logging.cppm:62`
+Declaration: `src/support/logging.cppm:85`
 
-Definition: `support/logging.cppm:303`
+Definition: `src/support/logging.cppm:326`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-从给定的字符串视图输入中提取第一个纯文本段落，移除任何内联 Markdown 标记。该函数适用于需要从可能包含 Markdown 格式的内容中获取纯文本首段落的场景。
+`clore::support::extract_first_plain_paragraph` 接受一个 `std::string_view` 输入，返回一个 `std::string`。它提取并返回输入文本中的第一个纯文本段落，通常用于从可能包含 Markdown 格式内容的字符串中获取简介性的连续文本块。
 
-调用者应当提供有效的 UTF-8 字符串；返回的 `std::string` 包含提取出的第一个段落，其中所有内联 Markdown 格式（如粗体、斜体、内联代码等）已被剥离。如果输入为空或不包含可识别的段落，行为由实现定义，但通常返回空字符串或截断后的内容。
+调用方应提供一个字符串（通常为 Markdown 内容），函数会忽略其内联格式（如粗体、斜体、代码等），只保留第一个非空段落中去除格式后的纯文本。如果输入为空或不包含有效段落，结果为空字符串。函数不解析复杂的 Markdown 结构（如表格、代码块），仅处理段落边界和简单内联标记。
 
 #### Usage Patterns
 
-- Extracts a plain text description from a Markdown‑formatted string, typically for logging or display purposes where formatting is not required.
+- Used to obtain a plain text summary from Markdown documentation or comments
+- Applied to extract the first paragraph for previews or search indexing
 
 ### `clore::support::normalize_line_endings`
 
-Declaration: `support/logging.cppm:79`
+Declaration: `src/support/logging.cppm:102`
 
-Definition: `support/logging.cppm:442`
+Definition: `src/support/logging.cppm:465`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-`clore::support::normalize_line_endings` 接受一个 `std::string_view` 输入的文本，返回一个新分配的 `std::string`。调用者需确保输入字符串包含可能是混合风格的行结束符（例如 `CRLF`、`CR` 或 `LF`）；该函数将这些序列转换为统一的规范形式，从而消除平台间的行结束符差异。返回的字符串可以安全地用于需要一致行结束符处理的后续操作，如日志写入或文本比较。该函数不修改原始输入，且调用者无需关心内部采用的特定规范形式。
+`clore::support::normalize_line_endings` 接受一个 `std::string_view` 输入，返回一个 `std::string`。该函数将其接收的字符串中的所有行结束符序列（包括 `"\r\n"`、`"\r"` 以及 `"\n"`）统一转换为单个换行符 `"\n"`。调用者负责提供一个合法的、可能包含混合行结束符的文本视图，而函数保证返回的字符串采用一致的 LF 结尾格式。此转换是深拷贝的：原始输入不会被修改，结果字符串拥有独立的所有权。
 
 #### Usage Patterns
 
-- normalizing line endings in text read from files or external sources
-- preparing text for consistent processing in the `clore::support` module
+- Normalizing line endings before further text processing or file output
+- Used in pipelines that require consistent line ending style (e.g., before parsing or comparison)
 
 ### `clore::support::normalize_path_string`
 
-Declaration: `support/logging.cppm:64`
+Declaration: `src/support/logging.cppm:87`
 
-Definition: `support/logging.cppm:348`
+Definition: `src/support/logging.cppm:371`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-`clore::support::normalize_path_string` 接受一个路径字符串视图，并返回一个标准化的 `std::string`。其目的是将传入的路径转换为一致的形式，以便可靠地用作查找键、哈希输入或字符串比较。调用方应提供一个有效的路径字符串；该函数不执行文件系统 I/O 或验证路径的实际存在。返回的规范形式旨在消除平台相关的差异，从而在不同的环境中产生可重复的结果。
+Declaration: [Declaration](functions/normalize-path-string.md)
+
+`clore::support::normalize_path_string` 接受一个路径字符串视图并返回一个标准化后的路径字符串。标准化处理使得路径表示一致：通常包括规范分隔符、消除冗余的点或双点段，并可能转换大小写或格式，具体取决于平台约定。返回的字符串是调用方可预期用于比较、哈希或作为缓存键一部分的稳定形式。
+
+调用方提供任意格式的路径字符串；函数负责输出一个规范、可重复的表示。该结果旨在与 `clore::support::build_compile_signature` 等需要唯一标识文件路径的上下文一起使用。调用方不应假定原路径被保留（例如，前导或尾随分隔符可能被修改），但保证输出是一个有效的标准化路径字符串。
 
 #### Usage Patterns
 
-- normalize paths before building compile signature in `build_compile_signature`
-- convert path to canonical generic form
+- 用于构建编译签名时规范化路径字符串
+- 在 `clore::support::build_compile_signature` 中被调用
 
 ### `clore::support::read_utf8_text_file`
 
-Declaration: `support/logging.cppm:85`
+Declaration: `src/support/logging.cppm:108`
 
-Definition: `support/logging.cppm:480`
+Definition: `src/support/logging.cppm:503`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-函数 `clore::support::read_utf8_text_file` 接受一个 `const int &` 类型的文件标识符，读取对应文件的内容，并返回一个 `int` 表示操作结果。调用者必须确保提供的标识符指向一个可读取的、以 UTF-8 编码存储的文本文件；文件内容中的 UTF-8 字节顺序标记（BOM）会被自动移除。返回值的具体语义（成功码或错误码）由实现定义，调用者应据此判断读取是否成功。
+`clore::support::read_utf8_text_file` 接受一个 `std::filesystem::path` 参数，尝试读取该路径对应的 UTF-8 文本文件。成功时返回包含文件完整内容的 `std::string`；失败时返回一个描述错误信息的 `std::string`。函数会妥善处理文件开头的 UTF-8 字节顺序标记（BOM），返回不含 BOM 的纯文本内容。使用 `std::expected` 返回类型，调用方应检查返回值以确定操作是否成功。
 
 #### Usage Patterns
 
-- Loading configuration files or input data
-- Reading UTF-8 text files for processing in applications
-- Utility for reading text files with automatic BOM handling
+- reading configuration or resource files
+- loading source code files
+- importing UTF-8 text data from the filesystem
 
 ### `clore::support::split_cache_key`
 
-Declaration: `support/logging.cppm:73`
+Declaration: `src/support/logging.cppm:96`
 
-Definition: `support/logging.cppm:378`
+Definition: `src/support/logging.cppm:401`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-函数 `clore::support::split_cache_key` 接受一个 `std::string_view` 参数（表示缓存键）并返回一个 `int`。调用者应确保传入的字符串是符合缓存键格式的有效数据；返回的整数通常标识该键的某个分解部分或派生标识符，用于后续的查找或路由决策。该函数不修改输入字符串，其行为由缓存键的约定语义定义。
+将缓存键字符串解析为其组成部分。接受一个 `std::string_view` 作为完整的缓存键，返回 `CacheKeyParts`（成功时）或一个错误描述字符串（输入不符合预期格式时）。调用者需确保传入的键有效；函数会进行验证，若无法解析则返回错误结果。
 
 #### Usage Patterns
 
-- 在日志或缓存机制中解析统一格式的缓存键以分离路径和签名
-- 作为 `build_cache_key` 的反向操作使用
+- Splitting a cache key into path and compile signature
+- Validating cache key format and parsing signature
+- Used in conjunction with `build_cache_key` for cache key decomposition
 
 ### `clore::support::strip_utf8_bom`
 
-Declaration: `support/logging.cppm:83`
+Declaration: `src/support/logging.cppm:106`
 
-Definition: `support/logging.cppm:470`
+Definition: `src/support/logging.cppm:493`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
 Declaration: [Declaration](functions/strip-utf8-bom.md)
 
-`clore::support::strip_utf8_bom` 接受一个以 `std::string_view` 表示的 UTF-8 编码文本，并移除可能出现在开头的 UTF-8 字节顺序标记（BOM, `0xEF 0xBB 0xBF`）。如果输入的开始处存在 BOM，函数返回指向紧随 BOM 之后内容的 `std::string_view`；否则返回与输入相同的 `std::string_view`。调用者保证输入字符串在返回的视图生命周期内保持有效，且函数本身不复制或修改底层数据。
+如果输入以 UTF‑8 字节顺序标记（U+FEFF，编码为 `\xEF\xBB\xBF`）开头，`clore::support::strip_utf8_bom` 返回一个指向紧随 BOM 之后的子串的 `std::string_view`；否则原样返回输入的视图。此函数不进行任何内存分配或修改。调用者有责任确保传入的 `std::string_view` 所引用的字符缓冲区的生命周期在返回值的使用期间内保持有效。
 
 #### Usage Patterns
 
-- used by `clore::support::read_utf8_text_file` to remove a BOM before further text processing
+- Stripping BOM from text loaded by `clore::support::read_utf8_text_file`
 
 ### `clore::support::topological_order`
 
-Declaration: `support/logging.cppm:93`
+Declaration: `src/support/logging.cppm:116`
 
-Definition: `support/logging.cppm:547`
+Definition: `src/support/logging.cppm:570`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-`clore::support::topological_order` accepts two `const int &` parameters and one `int` parameter, returning an `int`. Based on its name, it determines or indicates the relative topological ordering of two elements, likely for dependency resolution or structural sorting. A negative return value suggests the first element precedes the second in the topological sequence, a positive value suggests the opposite, and zero implies they are equivalent or incomparable. The third integer may serve as a contextual argument such as a node count, depth limit, or flag.
-
-Callers must provide valid integer identifiers and ensure that any implied dependency graph is acyclic. The exact interpretation of the arguments and return value is implementation-defined; consult the full documentation for the precise contract expected by this function.
+The function `clore::support::topological_order` computes a topological ordering of a set of named nodes given their dependency relationships. It accepts a list of all node names, a map from each node to the vector of nodes it depends on, and a map of initial per‑node integer values (such as in‑degree counts). If the dependency graph is acyclic, the function returns an `std::optional` containing the nodes in topological order; otherwise it returns `std::nullopt`.
 
 #### Usage Patterns
 
-- Used to obtain a linear order for dependency resolution
-- Called when computing compilation order or task scheduling
+- Used to compute a topological ordering of compilation units or graph nodes
+- Called with dependency information to detect cycles
+- Suitable for build systems and task scheduling
 
 ### `clore::support::truncate_utf8`
 
-Declaration: `support/logging.cppm:81`
+Declaration: `src/support/logging.cppm:104`
 
-Definition: `support/logging.cppm:460`
+Definition: `src/support/logging.cppm:483`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-给定一个 UTF-8 编码的字符串 `std::string_view` 和一个最大长度（以字节为单位）`std::size_t`，`clore::support::truncate_utf8` 返回一个截断后的 `std::string`。截断结果的长度不会超过指定的字节数，并且在截断点处保证不会破坏多字节字符的完整性，即不会在字符中间截断。
-
-调用者负责确保输入的字符串是有效的 UTF-8 编码；若输入包含无效序列，行为未定义。该函数不修改输入，返回一个独立的新字符串。
+`clore::support::truncate_utf8` 接受一个有效的 UTF-8 字符串视图和一个最大字节数，返回截断后的 `std::string`。结果字符串不包含超过指定字节数的完整字符，且始终在码点边界处结束，保证输出为有效的 UTF-8 序列。调用者必须确保输入 **不包含** 无效的 UTF-8 编码；否则行为未定义。返回的字符串拥有独立存储，调用者负责管理其生命周期。
 
 #### Usage Patterns
 
-- Truncating UTF-8 strings for storage in fixed-size buffers
-- Ensuring string length limits while respecting character boundaries
-- Normalizing and truncating user input
+- Truncating UTF-8 strings to fit within a byte limit
+- Ensuring valid UTF-8 boundaries after truncation
+- Preprocessing strings before storage or display
 
 ### `clore::support::write_utf8_text_file`
 
-Declaration: `support/logging.cppm:88`
+Declaration: `src/support/logging.cppm:111`
 
-Definition: `support/logging.cppm:515`
+Definition: `src/support/logging.cppm:538`
 
 Implementation: [`Module support`](../../../modules/support/index.md)
 
-`clore::support::write_utf8_text_file` 接受一个文件描述符引用（`const int &`）和一个要写入的文本（`std::string_view`），将文本内容写入文件。调用者需确保文件描述符已打开并具备写权限。函数在写入前会通过 `ensure_utf8` 确保文本为合法 UTF-8 序列。返回一个整数值表示操作结果，通常 0 表示成功，非零表示错误。
+函数 `clore::support::write_utf8_text_file` 接受一个 `const std::filesystem::path &` 和一个 `std::string_view`，将提供的文本内容写入指定的文件，以 UTF-8 编码存储。成功时返回 `std::expected<void, std::string>` 的空值；失败时返回描述错误的字符串。调用者应确保目标路径有效且具有写入权限，且写入操作是原子性（取决于底层文件系统）的。该函数会自动将输入内容转为合法的 UTF-8 序列（通过 `clore::support::ensure_utf8`），因此调用者无需预先处理编码。
 
 #### Usage Patterns
 
-- writing text content to a file
-- persisting string data as UTF-8
+- used to write UTF-8 text files
+- complement to `clore::support::read_utf8_text_file`
+- called with a path and a string view of the content to persist
 
 ## Related Pages
 

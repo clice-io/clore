@@ -1,6 +1,6 @@
 ---
 title: 'Module extract:scan'
-description: 'extract:scan 模块负责对 C++ 源文件进行快速扫描以提取模块与依赖信息。它提供了文件级扫描（scan_file）、模块声明快速解析（scan_module_decl）以及异步依赖图构建（build_dependency_graph_async）等公开接口，并利用 ScanCache 在连续扫描间复用结果以避免重复工作。模块公开的数据结构包括 ScanResult（包含模块名、是否为接口单元、模块导入和包含指令）、DependencyGraph（记录文件间的依赖边和拓扑顺序）以及 ScanError 等，调用者可通过这些类型获取扫描结果。'
+description: 'extract:scan 模块负责对编译条目执行扫描和分析，提取 C++ 模块声明、导入以及包含指令等依赖信息，为后续的工具链处理提供结构化的扫描结果。它通过 scan_file 对单个条目进行完整解析并产生 ScanResult 或 ScanError，通过 scan_module_decl 在不运行完整预处理器的前提下快速提取模块名和导入关系。此外，该模块还提供了 build_dependency_graph_async 用于异步构建整个项目的依赖图，以及 topological_order 计算图的拓扑排序，从而支持依赖分析和增量处理。'
 layout: doc
 template: doc
 ---
@@ -9,12 +9,13 @@ template: doc
 
 ## Summary
 
-`extract:scan` 模块负责对 C++ 源文件进行快速扫描以提取模块与依赖信息。它提供了文件级扫描（`scan_file`）、模块声明快速解析（`scan_module_decl`）以及异步依赖图构建（`build_dependency_graph_async`）等公开接口，并利用 `ScanCache` 在连续扫描间复用结果以避免重复工作。模块公开的数据结构包括 `ScanResult`（包含模块名、是否为接口单元、模块导入和包含指令）、`DependencyGraph`（记录文件间的依赖边和拓扑顺序）以及 `ScanError` 等，调用者可通过这些类型获取扫描结果。
+`extract:scan` 模块负责对编译条目执行扫描和分析，提取 C++ 模块声明、导入以及包含指令等依赖信息，为后续的工具链处理提供结构化的扫描结果。它通过 `scan_file` 对单个条目进行完整解析并产生 `ScanResult` 或 `ScanError`，通过 `scan_module_decl` 在不运行完整预处理器的前提下快速提取模块名和导入关系。此外，该模块还提供了 `build_dependency_graph_async` 用于异步构建整个项目的依赖图，以及 `topological_order` 计算图的拓扑排序，从而支持依赖分析和增量处理。
+
+公开实现方面，`extract:scan` 定义了核心数据类型 `ScanResult`、`ScanCache`、`DependencyGraph` 及 `DependencyEdge` 等，这些类型作为扫描管道的输入输出，供调用者驱动扫描流程并获取依赖关系。模块依赖 `extract:compiler` 提供的编译数据库和条目，以及 `support` 模块的通用工具，自身则专注于扫描逻辑和依赖图构建的抽象，不与文件系统或具体编译器细节耦合。
 
 ## Imports
 
 - [`extract:compiler`](compiler.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Imported By
@@ -25,142 +26,127 @@ template: doc
 
 ### `clore::extract::DependencyEdge`
 
-Declaration: `extract/scan.cppm:51`
+Declaration: `src/extract/scan.cppm:69`
 
-Definition: `extract/scan.cppm:51`
+Definition: `src/extract/scan.cppm:69`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-`clore::extract::DependencyEdge` 是一个扁平的数据聚合，其内部仅包含两个 `std::string` 成员：`from` 和 `to`。该结构没有定义构造函数、特殊成员函数或访问控制，因此成员均以公开方式直接暴露。设计上无额外不变量：所有字段均可独立赋值，且不对字符串内容施加任何格式或语义约束（例如不允许空字符串或自环）。成员实现仅依赖 `std::string` 的默认行为，未引入自定义拷贝、移动或析构逻辑。本质上，它充当了有向边上两个端点名称的简易容器，在提取流程中作为“从 `from` 到 `to`”的依赖关系载体。
+`clore::extract::DependencyEdge` 在定义上是一个仅包含两个 `std::string` 字段 `from` 和 `to` 的简单聚合体，用于在提取过程中表示一条有向依赖边。内部没有显式的不变量，但该结构体的语义要求 `from` 和 `to` 分别代表依赖的源头和目标（例如模块或实体名称），并且空字符串通常表示缺失或未定义的端点。成员均通过值语义直接存储，因此拷贝、移动和比较操作均基于字符串内容的逐位对比。在实现层面，该结构体常用作容器（如 `std::vector` 或 `std::set`）的元素，依赖其默认的逐成员比较规则进行排序或去重。
 
 #### Invariants
 
-- No invariants are documented beyond the default properties of `std::string`.
+- `from` 和 `to` 没有非空约束，可以是任意字符串；
+- 该结构体不保证 `from` 和 `to` 的语义对称性。
 
 #### Key Members
 
-- `from`
-- `to`
+- `from`：依赖边的起始节点标识；
+- `to`：依赖边的终止节点标识。
 
 #### Usage Patterns
 
-- Acts as a data container for a dependency edge in extraction processes.
+- 用于表示代码依赖图中节点之间的有向边；
+- 在依赖分析过程中由扫描器创建，并被后续的图处理逻辑使用。
 
 ### `clore::extract::DependencyGraph`
 
-Declaration: `extract/scan.cppm:56`
+Declaration: `src/extract/scan.cppm:74`
 
-Definition: `extract/scan.cppm:56`
+Definition: `src/extract/scan.cppm:74`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-结构体 `clore::extract::DependencyGraph` 的直接内部表示由两个公开的 `std::vector` 成员构成：`files` 存储所有被扫描的文件路径字符串，`edges` 存储连接这些文件的 `DependencyEdge` 对象。核心不变量在于每个 `DependencyEdge` 所引用的文件索引必须落在 `files` 的有效下标范围内，从而保证图结构始终指向已存在的顶点。该设计让新文件或边的添加只需对相应向量进行 `push_back`，并在构造或修改边时维护索引合法性。
+结构体 `clore::extract::DependencyGraph` 内部仅维护两个向量：`files` 用于存储所有被扫描文件的路径字符串，`edges` 则记录文件间的依赖边（类型为 `DependencyEdge`）。其核心不变量是 `edges` 中每条边所引用的源文件与目标文件索引均落在 `files` 的有效范围内（即 `0 <= idx < files.size()`），从而保证图的完整性。由于该结构体没有自定义构造或析构函数，这些向量的初始化和生命周期完全由编译器生成的默认成员管理；实际使用中，`edges` 与 `files` 的同步维护（例如添加新文件时更新边引用的索引）由外部调用代码负责。
 
 #### Invariants
 
-- The `files` vector contains paths of all scanned source files.
-- The `edges` vector contains all discovered dependency relationships.
+- No invariants are documented or inferable from the evidence.
 
 #### Key Members
 
-- `clore::extract::DependencyGraph::files`
-- `clore::extract::DependencyGraph::edges`
+- `files`
+- `edges`
 
 #### Usage Patterns
 
-- Populated by the extraction pipeline when scanning source modules.
-- Consumed by downstream consumers to analyze or visualize dependencies.
+- The struct is likely populated by a scan or extraction process and consumed by other parts of the `clore::extract` module.
 
 ### `clore::extract::IncludeInfo`
 
-Declaration: `extract/scan.cppm:24`
+Declaration: `src/extract/scan.cppm:42`
 
-Definition: `extract/scan.cppm:24`
+Definition: `src/extract/scan.cppm:42`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该结构体是一个简单的聚合体，用于存储预处理包含指令的解析结果。它包含两个公有数据成员：`path`（`std::string` 类型）用于保留原始包含路径的文本，`is_angled`（`bool` 类型）指示该包含是否以尖括号形式（例如 `#include <...>`）编写。两个成员均以默认值初始化，因此默认构造产生的实例中 `path` 为空字符串且 `is_angled` 为 `false`。由于没有自定义构造函数或成员函数，该类型的对象通常通过聚合初始化或逐个成员赋值来填充正确的值。使用方需确保在读取字段前已正确设置它们，尤其是在需要区分空路径与有效路径的场景下。
+结构体 `clore::extract::IncludeInfo` 是一个仅包含 `std::string path` 与 `bool is_angled` 两个成员的值类型，用于存储解析 `#include` 指令时提取的路径字符串及其包含风格（尖括号或引号）。其内部不变量要求 `path` 不包含空白字符（由调用方保证），而 `is_angled` 的取值直接反映预处理器标记的语法形式。该结构体在扫描阶段作为临时容器，不管理资源所有权，亦不定义自定义构造函数或赋值操作，依赖编译器生成的默认成员函数；其简单布局确保了通过值传递时的拷贝效率，并便于在向量或其他连续容器中批量存储。
 
 #### Invariants
 
-- `path` is a valid `std::string` (may be empty)
-- `is_angled` is either `true` or `false`
+- `path` is not validated for existence or format
+- `is_angled` distinguishes between angled and quoted includes
+- default initialization: `path` empty, `is_angled` false
 
 #### Key Members
 
-- `path`: the textual representation of the include target
-- `is_angled`: indicates whether the include uses angle brackets (`#include <...>`) or quotes (`#include "..."`)
+- `path`
+- `is_angled`
 
 #### Usage Patterns
 
-- Used as a building block for representing parsed include directives in the `clore::extract` module
-- Likely consumed by higher-level extraction logic that processes include chains
+- Used as a plain data container within the extraction pipeline to represent include directives
 
 ### `clore::extract::ScanCache`
 
-Declaration: `extract/scan.cppm:40`
+Declaration: `src/extract/scan.cppm:58`
 
-Definition: `extract/scan.cppm:40`
+Definition: `src/extract/scan.cppm:58`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-`clore::extract::ScanCache` 的内部结构仅由一个 `std::unordered_map<std::string, ScanResult>` 字段 `scan_results` 构成，该映射将文件路径（以 `std::string` 表示）映射到对应的已扫描结果。其核心不变量要求映射中的每个键必须对应一个唯一且完整的依赖扫描结果（`ScanResult`），且整个缓存的生命周期与调用者内部的编译数据库及文件系统状态保持同步：当外部状态发生变化时，缓存应立即被视为失效，调用者负责清空或替换 `scan_results` 的内容。重要成员实现方面，该结构体未定义任何自定义构造函数或修改方法，完全依赖默认成员函数；对于 `scan_results` 的插入、查找和清除操作均通过 `std::unordered_map` 的公共接口间接完成，因此不存在额外的内部同步或验证逻辑。
+`ScanCache` 的核心内部结构是一个 `std::unordered_map<std::string, ScanResult>` 成员 `scan_results`，它作为持久存储，在连续依赖扫描之间缓存已解析的扫描结果。其设计意图是避免重复扫描相同源文件，从而提升性能；但调用者必须保证在编译数据库或文件系统状态发生变化时主动清除或丢弃整个缓存，以维持正确性。内部不维护任何附加状态或失效逻辑——缓存的生存周期完全由外部管理，因此 `scan_results` 直接暴露了底层映射，默认初始化为空。重要的成员实现仅依赖于非成员函数对该映射的读写操作；结构体本身作为聚合类型，不包含自定义构造、析构或赋值行为，所有操作都隐式地由编译器生成。
 
 #### Invariants
 
-- 缓存中的扫描结果在依赖关系稳定时保持有效
-- 编译数据库或文件系统变化后缓存可能失效
-- 调用者负责在环境变化时丢弃缓存
+- Entries in `scan_results` remain valid as long as the compilation database and file system state are unchanged
+- The cache must be cleared or discarded by callers when external state (compilation DB or file system) changes
+- The key type `std::string` serves as a unique identifier for a scan result
 
 #### Key Members
 
-- `scan_results`
+- `scan_results` (`std::unordered_map<std::string, ScanResult>`)
 
 #### Usage Patterns
 
-- 扫描函数通过此缓存避免重复扫描相同的依赖项
-- 调用者在环境变化时创建新的 `ScanCache` 实例或清空现有实例
+- Other code accesses or populates `scan_results` to avoid redundant scanning across successive dependency scans
+- Callers are expected to check or clear the cache when the compilation database or file system is modified
 
 ### `clore::extract::ScanError`
 
-Declaration: `extract/scan.cppm:20`
+Declaration: `src/extract/scan.cppm:38`
 
-Definition: `extract/scan.cppm:20`
+Definition: `src/extract/scan.cppm:38`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-结构体 `clore::extract::ScanError` 的内部实现仅由一个 `std::string message` 成员组成，用于存储扫描期间遇到的错误描述。该结构体未定义任何自定义构造函数、析构函数或成员函数，其默认构造、复制、移动和析构行为完全由编译器合成，并依赖 `std::string` 的相应操作。由于 `message` 是唯一的数据成员，该结构体不维持任何超越字符串本身的不变性约束；`message` 的内容完全由调用方负责设置和解释。
-
-#### Invariants
-
-- The `message` member always contains a valid string (may be empty).
-- The struct has no other state or constraints beyond the string.
-
-#### Key Members
-
-- `message`
-
-#### Usage Patterns
-
-- Returned from `clore::extract` scanning functions to indicate failure.
-- Inspected by callers to obtain the error description.
+`clore::extract::ScanError` 是一个仅包含一个 `std::string` 类型数据成员 `message` 的简单聚合结构体，用于封装扫描过程中的错误描述。该结构体没有实现任何额外的不变量或构造函数，其全部语义依赖于 `message` 的字符串内容；构造和访问均通过公有成员直接进行，从而在实现内部作为一种轻量级的错误传递载体。
 
 ### `clore::extract::ScanResult`
 
-Declaration: `extract/scan.cppm:29`
+Declaration: `src/extract/scan.cppm:47`
 
-Definition: `extract/scan.cppm:29`
+Definition: `src/extract/scan.cppm:47`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-`clore::extract::ScanResult` 是一个聚合类型，用于承载对单个源文件进行词法扫描后提取的模块信息。其内部结构保证了字段的默认状态：`module_name` 为空字符串，`is_interface_unit` 为 `false`，`includes` 和 `module_imports` 均为空向量。扫描过程中，各个字段被独立填充：`module_name` 记录遇到的具名模块（若有），`module_imports` 收集源文件中所有模块导入语句的名称，`includes` 保存经过规范化处理的包含路径信息（类型为 `IncludeInfo`），而 `is_interface_unit` 专用于标记该源文件是否声明为模块接口单元。这些字段之间不存在强约束关系，但调用方需确保 `module_imports` 和 `includes` 按源文件中的出现顺序追加，以维持后续分析的可预测性。
+`clore::extract::ScanResult` 是一个聚合类型，用于承载模块扫描的完整输出。其公开字段直接暴露所有扫描结果：`module_name` 存储识别到的模块名称（可能为空表示非命名模块），`is_interface_unit` 标记当前翻译单元是否为模块接口单元，`includes` 收集所有 `#include` 指令的信息，`module_imports` 则记录导入的模块名称列表。该结构体本身不维护任何不变量，也未提供自定义构造函数或成员函数，所有字段均由外部扫描逻辑填充，作为扫描阶段的纯数据容器。这些字段的顺序和默认值（如 `module_name` 初始化为空字符串、`is_interface_unit` 默认为 `false`）保证了扫描结果的零初始化安全。
 
 #### Invariants
 
-- `module_name` may be empty if no module name was declared
-- `is_interface_unit` defaults to `false`
-- `includes` and `module_imports` are initially empty vectors
-- No guarantees about the ordering or uniqueness of elements in the vectors
+- Fields are default-constructed to empty/null states
+- `is_interface_unit` is `false` unless explicitly set
+- No relationships between members are enforced beyond aggregate initialization
 
 #### Key Members
 
@@ -171,121 +157,131 @@ Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.m
 
 #### Usage Patterns
 
-- Returned by scanning functions to represent a parsed C++ module unit
-- Consumed by downstream extraction or analysis code to access module metadata
+- Returned by scanning functions to represent a parsed module
+- Consumed by extraction pipeline to build further representations
+- Members are accessed directly as a plain aggregate
 
 ## Functions
 
 ### `clore::extract::build_dependency_graph_async`
 
-Declaration: `extract/scan.cppm:61`
+Declaration: `src/extract/scan.cppm:79`
 
-Definition: `extract/scan.cppm:370`
+Definition: `src/extract/scan.cppm:388`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-函数 `clore::extract::build_dependency_graph_async` 通过协程异步构建模块依赖图。它首先清空 `DependencyGraph` 的 `files` 和 `edges`，然后遍历 `CompilationDatabase` 的每一项，调用 `prepare_scan_entry` 生成 `PreparedScanEntry`，并将标准化文件名存入 `graph.files`。接着，它利用可选的 `ScanCache` 查询缓存：若 `cache_key` 已存在于 `cache->scan_results` 中，则直接使用缓存结果；否则将任务收集到 `MissingScanTask` 中（按 `cache_key` 去重）。缺失的任务通过 `run_scan_task` 并行执行，使用 `kota::when_all` 等待所有任务完成，并处理可能的 `ScanError`。
+函数 `clore::extract::build_dependency_graph_async` 首先清空 `graph.files` 与 `graph.edges`，然后遍历 `db.entries`：对每个条目调用 `prepare_scan_entry` 生成 `PreparedScanEntry`，并将归一化后的源文件路径去重后填入 `graph.files`。接着，它利用可选的 `ScanCache` 进行缓存查找：对每个条目，若其 `cache_key` 在 `cache->scan_results` 中存在则直接复用缓存的 `ScanResult`，否则按 `cache_key` 去重构造 `MissingScanTask` 列表。对于所有缺失扫描任务，函数通过 `kota::when_all` 并发执行 `run_scan_task` 协程，等待所有任务完成后收集 `ScanResult` 至 `scanned_results`，并处理错误与数量校验。
 
-在所有扫描结果就绪后，函数再次遍历所有入口项：从缓存或扫描结果中获取 `ScanResult`，提取其 `includes` 列表，仅当包含的目标文件名位于入口文件集合（`entry_files`）中时，才构造 `DependencyEdge`（包含 `from` 和 `to` 字段）并去重后添加到 `graph.edges`。最后，若提供了缓存，则用本次扫描结果更新 `cache->scan_results`。整个流程通过 `co_await` 与 `kota::fail` 实现异步控制流和错误传递，依赖于 `normalize_argument_path`、`prepare_scan_entry`、`run_scan_task` 以及 `kota::event_loop` 提供的并发调度。
+最后，函数再次遍历所有条目，从缓存或 `scanned_results` 中获取对应的 `ScanResult`，提取其 `includes` 字段中的 `IncludeInfo`，将路径归一化后，仅保留在入口文件集合 `entry_files` 中的包含关系，并利用 `emitted_edges` 集合去重，将 `DependencyEdge`（包含 `from` 与 `to` 字段）推入 `graph.edges`。同时，若提供了 `ScanCache`，则将当前 `ScanResult` 写入 `cache->scan_results` 以备后续重用。整个过程依赖异步事件循环 `loop` 驱动协程，并借助匿名命名空间中的 `PreparedScanEntry`、`MissingScanTask` 等内部类型组织数据流。
 
 #### Side Effects
 
-- 清空并填充 `DependencyGraph` 的 `files` 和 `edges` 成员
-- 若 `ScanCache` 非空，则更新其中的 `scan_results` 映射
-- 通过 `kota::event_loop` 调度异步扫描任务（可能触发文件 I/O）
+- clears and repopulates `graph.files` and `graph.edges`
+- updates `cache->scan_results` with scan results when cache is provided
+- launches asynchronous scan tasks that perform I/O and modify internal state
 
 #### Reads From
 
-- `const CompilationDatabase &db`
-- `ScanCache *cache`（若非空，读取其 `scan_results`）
-- 通过 `prepare_scan_entry` 预处理后的编译条目数据
+- `db` (compilation database) entries and their properties
+- `cache->scan_results` (if cache is not null)
+- prepared scan entry data derived from `db.entries`
 
 #### Writes To
 
-- `DependencyGraph &graph`（修改 `files` 和 `edges`）
-- `ScanCache *cache`（若非空，插入或更新扫描结果）
-- 局部变量 `scanned_results`、`cached_results` 等
+- `graph.files` and `graph.edges`
+- `cache->scan_results` (if cache is not null)
+- internal vectors `prepared_entries`, `cached_results`, `scanned_results`, and lookup structures
 
 #### Usage Patterns
 
-- 作为依赖图构建阶段的核心入口，通常在 `extract_project_async` 或类似提取流程中调用
-- 配合 `CompilationDatabase` 和可选缓存，用于增量或全量分析
+- called to build a dependency graph for a project's compilation database
+- used in conjunction with an event loop for async concurrency
+- integrated into higher-level extraction pipelines
 
 ### `clore::extract::scan_file`
 
-Declaration: `extract/scan.cppm:44`
+Declaration: `src/extract/scan.cppm:62`
 
-Definition: `extract/scan.cppm:238`
+Definition: `src/extract/scan.cppm:256`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-该函数首先验证传入的 `CompileEntry` 参数是否含有有效的命令行参数，若 `entry.arguments` 为空则直接返回一个包含错误信息的 `ScanError`。随后它创建一个 `ScanResult` 结构体，并通过读取 `entry.normalized_file` 对应的源文件内容，调用 `scan_module_decl` 快速扫描模块声明，将发现的模块名和接口单元标志填入 `result`。接着利用 `create_compiler_instance` 构造一个 Clang 编译器实例，并配置其前端操作仅执行预处理（`RunPreprocessorOnly`）。核心步骤是实例化一个 `ScanAction` 对象（其构造函数绑定到 `result` 的引用），通过 `BeginSourceFile` 与编译器实例关联，然后执行 `ExecuteAction` 以触发自定义预处理器回调（例如 `InclusionDirective`），收集包含指令和导入信息。若执行成功，调用 `EndSourceFile` 清理资源并返回填充完整的 `ScanResult`；任何阶段失败都会包装为 `ScanError` 并返回 `std::unexpected`。
+`clore::extract::scan_file` 首先检查 `entry.arguments` 是否为空，若为空则立即返回 `ScanError`。随后，它尝试从 `entry.normalized_file`（或通过 `normalize_entry_file` 标准化的路径）读取文件内容，并对该文本调用 `scan_module_decl` 快速解析模块声明（如 `module` 或 `import` 关键字），将结果填入本地的 `ScanResult result`。接着，函数通过 `create_compiler_instance` 构造一个 Clang 编译器实例，并将前端动作设为仅预处理，随后创建一个 `ScanAction` 对象（内部关联 `result`）。`ScanAction` 依次调用 `BeginSourceFile` 和 `ExecuteAction` 驱动预处理过程；`ScanPPCallbacks` 回调会在过程中捕获 `#include` 指令和模块导入等细节，并填充 `result` 的 `includes` 与 `module_imports` 字段。若 `ExecuteAction` 返回错误，则函数记录错误信息并返回 `ScanError`；反之，最终调用 `EndSourceFile` 并返回完整的 `ScanResult`。
 
-内部控制流紧密依赖 Clang 的 `Preprocessor` 接口和 `ScanPPCallbacks` 回调类，其中 `InclusionDirective` 负责记录每个 `IncludeInfo` 条目，同时 `scan_module_decl` 提供轻量级模块声明预解析。整个函数不依赖异步或拓扑排序，仅同步单文件扫描，其产出可直接用于后续的依赖图构建（如 `build_dependency_graph_async` 所消费的 `ScanResult`）。
+整个流程依赖外部函数 `scan_module_decl` 实现预解析，以及 Clang 预处理器基础设施与 `ScanPPCallbacks` 回调协作完成详细扫描。内部控制流兼具快速文本扫描与完整编译前端回调，从而在保证性能的同时获得精准的依赖关系。
 
 #### Side Effects
 
-- Reads source file content from disk via `std::ifstream`
-- Creates a compiler instance (likely invoking external toolchain processes) via `create_compiler_instance`
-- Executes a Clang preprocessor action that may perform filesystem I/O and interact with system headers
+- reads source file from disk
+- creates compiler instance (may invoke toolchain)
+- runs preprocessor (may read additional files such as headers)
+- modifies compiler frontend options (mutation of instance)
+- populates `ScanResult` object with extracted data
 
 #### Reads From
 
-- `entry.file`
 - `entry.arguments`
+- `entry.file`
 - `entry.normalized_file`
-- source file content on disk
-- compiler instance configuration returned by `create_compiler_instance`
-- `ScanAction::BeginSourceFile`, `Execute`, and `EndSourceFile` interactions
+- content of the source file at `normalized_file`
+- implicitly reads additional files during preprocessing
+
+#### Writes To
+
+- `result` (`ScanResult`) via `scan_module_decl` and `ScanAction`
+- `frontend_opts` (mutated locally)
+- `instance` (compiler instance mutated locally)
 
 #### Usage Patterns
 
-- Invoked for each `CompileEntry` in an extraction pipeline to gather module and symbol data
-- Combined with the fast text‑based scan to reduce reliance on full compilation for module detection
+- Called to scan a single source file for symbols as part of the extraction pipeline
+- Typically invoked with entries from a compilation database returned by `load_compdb`
+- May be used alongside other extraction functions like `extract_symbols`
 
 ### `clore::extract::scan_module_decl`
 
-Declaration: `extract/scan.cppm:49`
+Declaration: `src/extract/scan.cppm:67`
 
-Definition: `extract/scan.cppm:141`
+Definition: `src/extract/scan.cppm:159`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
 Implementation: [Implementation](functions/scan-module-decl.md)
 
-函数首先调用 `clang::scanSourceForDependencyDirectives`，将文件内容解析为令牌与指令列表；若扫描失败则直接返回。随后定义 `is_whitespace_only` 和 `is_punctuation_only` 两个辅助 lambda，用于识别令牌类型。遍历每条指令：对于 `cxx_export_module_decl` 或 `cxx_module_decl`，跳过 `export` 和 `module` 关键字，收集后续令牌（连接标识符、点、冒号）作为模块名称；遇到分号或纯标点时终止，并将纯标点情形视为全局模块片段。若收集到有效名称，则设置 `result.module_name`，并根据指令类型设置 `result.is_interface_unit`。对于 `cxx_import_decl`，跳过 `import` 关键字，收集后续令牌作为导入名称，调用 `normalize_partition_import` 进行规范化，并仅在 `result.module_imports` 中尚未存在时添加该导入。整个算法的核心依赖是 Clang 的依赖指令扫描基础设施，无需运行完整预处理器即可快速提取模块声明信息。
+The function `clore::extract::scan_module_decl` implements a lightweight module‑declaration scanner that avoids the overhead of a full preprocessor run by using Clang’s dependency‑directives scanner (`clang::scanSourceForDependencyDirectives`). It operates directly on the raw file content (`std::string_view file_content`) and populates the supplied `ScanResult` with the module name, interface‑unit flag, and a deduplicated list of module imports.
+
+The algorithm first tokenises the file content into `tokens` and `directives` via the Clang scanner. Two local lambdas, `is_whitespace_only` and `is_punctuation_only`, help classify token text. It then iterates over each directive. For directives of kind `cxx_export_module_decl` or `cxx_module_decl`, it skips the `export` and `module` keywords, then concatenates subsequent tokens until a semicolon is encountered. A special case detects a module‑fragment declaration (e.g. `module;` or `module :...`) by checking if the first non‑whitespace token after `module` is punctuation; in that case the module name is left empty and `is_interface_unit` is not set. Otherwise the collected name is stored in `result.module_name`, and `result.is_interface_unit` is set to `true` only for an `export module` declaration. For directives of kind `cxx_import_decl`, the scanner extracts the import name, normalises it via `normalize_partition_import`, and appends it to `result.module_imports` if not already present. The function makes no changes to the `ScanResult` if the scanner itself fails, effectively falling back to no module detection.
 
 #### Side Effects
 
-- Modifies the `ScanResult` object passed by reference, setting `module_name`, `is_interface_unit`, and appending to `module_imports`.
+- Modifies the `ScanResult` object passed by reference by setting `module_name`, `is_interface_unit`, and appending to `module_imports`.
 
 #### Reads From
 
-- `file_content` parameter (string view of file source)
-- `result.module_imports` member (to avoid duplicate entries)
+- Reads from the `file_content` string view.
+- Uses Clang's `clang::scanSourceForDependencyDirectives` to parse tokens and directives internally.
 
 #### Writes To
 
-- `result.module_name`
-- `result.is_interface_unit`
-- `result.module_imports`
+- Writes to `result.module_name` (`std::string`).
+- Writes to `result.is_interface_unit` (`bool`).
+- Writes to `result.module_imports` via `push_back` (`std::vector<std::string>`).
 
 #### Usage Patterns
 
-- Called by `clore::extract::scan_file` during source file scanning to populate module metadata.
-- Used as a lightweight alternative to full preprocessing for extracting module information.
+- Called by `clore::extract::scan_file` to quickly extract module-level declarations without full preprocessing.
+- Designed for scanning source files to determine module name, interface status, and imported modules.
 
 ### `clore::extract::topological_order`
 
-Declaration: `extract/scan.cppm:66`
+Declaration: `src/extract/scan.cppm:84`
 
-Definition: `extract/scan.cppm:495`
+Definition: `src/extract/scan.cppm:513`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-函数 `clore::extract::topological_order` 通过构建邻接表和入度表来执行依赖图的拓扑排序。首先遍历 `graph.files` 初始化每个文件的入度为 0，再遍历 `graph.edges`，对于每条边将 `edge.to` 作为键、`edge.from` 添加至邻接值列表，并递增 `edge.from` 的入度。这一构造将依赖关系反转：入度反映的是有多少其他文件依赖当前文件。随后将文件列表、邻接表和入度表一并委托给 `clore::support::topological_order` 计算排序结果。
-
-若 `clore::support::topological_order` 返回空值（表示检测到循环依赖），函数构造一个包含描述信息的 `ScanError` 并返回 `std::unexpected`；否则直接展开排序结果作为成功值返回。整个流程完全依赖外部的拓扑排序工具，内部仅负责将 `DependencyGraph` 的数据结构转换为算法所需的映射形式。
+函数首先为 `graph.files` 中的每个文件在 `in_degree` 映射中初始化为零，然后遍历 `graph.edges`：对于每条边，将 `edge.to` 的邻接表 `adj` 中添加 `edge.from`，并将 `edge.from` 的 `in_degree` 值递增。完成图构建后，调用 `clore::support::topological_order` 并传入 `graph.files`、`adj` 和 `in_degree` 执行拓扑排序。若排序失败（即存在循环依赖），函数直接返回一个包含描述信息的 `std::unexpected` 包装的 `ScanError`；否则成功时返回排序后的文件列表。该实现依赖 `clore::support::topological_order` 完成核心的 Kahn 算法流程，而自身仅负责将 `DependencyGraph` 的边列表转换为入度和邻接表数据结构。
 
 #### Side Effects
 
@@ -293,19 +289,17 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `graph.files`
-- `graph.edges`
+- `graph.files` (the set of file names)
+- `graph.edges` (dependency edges)
 
 #### Usage Patterns
 
-- computes compilation order from include graph
-- validates acyclic dependency graph for projects
+- Called during the extraction phase to determine processing order of source files
+- Used to detect circular dependencies in the project include graph
 
 ## Internal Structure
 
-模块 `extract:scan` 是 `clore::extract` 命名空间内负责 C++ 源文件依赖扫描的核心模块。它对外公开了三个主要函数：`scan_file`（对单个文件执行完整扫描并返回 `ScanResult` 或 `ScanError`）、`scan_module_decl`（快速扫描模块声明，不运行完整预处理器）以及 `build_dependency_graph_async`（异步构建包含文件间依赖关系的 `DependencyGraph`，支持可选的 `ScanCache` 以复用扫描结果）。辅助函数 `topological_order` 对依赖图进行拓扑排序，为后续处理提供线性顺序。
-
-内部实现通过匿名命名空间划分为多个职责清晰的单元：`ScanPPCallbacks` 实现 Clang 预处理器回调，收集 `#include` 指令和模块导入；`ScanAction` 封装一次原子性的扫描操作，包括解析预处理结果；`PreparedScanEntry` 和 `MissingScanTask` 管理扫描任务的预处理与缓存键生成，结合 `ScanCache` 避免重复工作。模块依赖 `extract:compiler`（提供编译数据库条目与标准化编译选项）和 `support`（提供文本处理、文件 I/O 及缓存键工具），并通过事件循环（`kota::event_loop`）支持异步执行。这种分层使得扫描逻辑与底层的 Clang 交互、缓存管理和任务调度解耦，便于维护与测试。
+`extract:scan` 模块将预处理扫描分解为多个内聚阶段，以实现异步依赖图构建。它导入 `extract:compiler` 获取标准化编译条目，并利用 `support` 中的缓存键构建与文件路径工具。内部通过匿名命名空间隐藏实现细节：`ScanPPCallbacks` 处理 `#include` 与模块导入指令，`ScanAction` 封装单次文件扫描的执行逻辑，`PreparedScanEntry` 和 `MissingScanTask` 为异步调度提供任务抽象。公开的 `scan_file` 和 `scan_module_decl` 分别支持完整预处理扫描和快速模块声明扫描，而 `build_dependency_graph_async` 协调这些任务，通过 `ScanCache` 按 `cache_key` 跳过已扫描条目，最终输出 `DependencyGraph` 及其拓扑序。这种分层使缓存、任务调度与依赖解析职责清晰分离，且所有可变状态生命周期均由调用方通过 `kota::event_loop` 管理。
 
 ## Related Pages
 

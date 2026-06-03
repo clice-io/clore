@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::icontains'
-description: 'The function clore::net::icontains determines whether the first std::string_view argument contains the second std::string_view argument as a substring, performing a case‑insensitive comparison. It returns true if the second string is found within the first, and false otherwise. Callers can rely on this function for matching patterns in text without regard to letter case.'
+description: 'clore::net::icontains returns true if the first std::string_view contains the second std::string_view as a substring, ignoring case. The function accepts two views and performs a case‑insensitive substring search.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Namespace clore::net](../index.md)
 
-Declaration: `network/protocol.cppm:768`
+Declaration: `src/network/protocol.cppm:780`
 
-Definition: `network/protocol.cppm:768`
+Definition: `src/network/protocol.cppm:780`
 
 Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 
@@ -21,12 +21,13 @@ Implementation: [`Module protocol`](../../../../modules/protocol/index.md)
 auto (std::string_view, std::string_view) -> bool;
 ```
 
-The function `clore::net::icontains` determines whether the first `std::string_view` argument contains the second `std::string_view` argument as a substring, performing a case‑insensitive comparison. It returns `true` if the second string is found within the first, and `false` otherwise. Callers can rely on this function for matching patterns in text without regard to letter case.
+`clore::net::icontains` returns `true` if the first `std::string_view` contains the second `std::string_view` as a substring, ignoring case. The function accepts two views and performs a case‑insensitive substring search.
+
+It is designed as a utility for pattern‑matching within diagnostic or error strings, such as determining whether an error message indicates a known condition. The caller supplies a full string (typically an error message) and a needle to search for, and `icontains` reports whether the needle appears anywhere in the input, disregarding character casing.
 
 ## Usage Patterns
 
-- invoked by `clore::net::is_feature_rejection_error` to detect feature-rejection keywords inside error message text
-- general case-insensitive substring matching within the `clore::net` module
+- Used in `is_feature_rejection_error` to perform case-insensitive substring checks on error messages.
 
 ## Called By
 

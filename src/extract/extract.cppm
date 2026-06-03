@@ -1,10 +1,32 @@
 module;
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <functional>
+#include <memory>
+#include <system_error>
+#include <mutex>
+#include <optional>
+#include <ranges>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
+
 #include "kota/async/async.h"
 
 export module extract;
 
-import std;
 import config;
 import support;
 

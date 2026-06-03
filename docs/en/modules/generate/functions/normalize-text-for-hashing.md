@@ -1,6 +1,6 @@
 ---
 title: 'clore::generate::cache::normalizetextforhashing'
-description: 'The implementation of clore::generate::cache::normalize_text_for_hashing applies a two‑pass normalization to an arbitrary input text to produce a canonical form suitable for hashing in cache‑key construction. The first pass trims all leading whitespace characters using std::isspace. The second pass iterates over the remaining characters and collapses any contiguous run of whitespace into a single ASCII space character ('' ''). The internal control flow uses a boolean flag prev_space to track whether the previous character was whitespace; when a non‑space character is encountered and prev_space is true, a single space is appended to the result std::string only if the result is not empty. The function depends only on the C++ standard library, specifically the <cctype> facilities via std::isspace, and uses result.reserve(text.size()) to minimise reallocations. This normalisation ensures that differing amounts of whitespace do not produce distinct hash keys, while preserving the distinction between words separated by any amount of whitespace versus no whitespace.'
+description: 'The function clore::generate::cache::normalize_text_for_hashing normalizes input text to a canonical form suitable for generating hash-based cache keys. It first trims all leading whitespace by advancing a start index past any characters for which std::isspace returns true. It then iterates over the remaining characters, using a prev_space flag to collapse any contiguous sequence of whitespace characters into a single space character inserted just before the next non‑space character. If the very first non‑space character after trimming would have been preceded by a space, the space is omitted because result is empty at that point; this effectively suppresses leading whitespace that was already trimmed. The resulting string contains no leading whitespace, no repeated spaces, and no trailing whitespace (because trailing whitespace is skipped by the collapse logic and not added back). Normalization relies solely on the C++ locale‑independent std::isspace check after casting each character to unsigned char, and uses only standard library facilities.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module generate:cache](../cache.md)
 
-Declaration: `generate/cache.cppm:192`
+Declaration: `src/generate/cache.cppm:211`
 
-Definition: `generate/cache.cppm:192`
+Definition: `src/generate/cache.cppm:211`
 
 Declaration: [`Namespace clore::generate::cache`](../../../namespaces/clore/generate/cache/index.md)
 
@@ -46,19 +46,23 @@ auto normalize_text_for_hashing(std::string_view text) -> std::string {
 }
 ```
 
-The implementation of `clore::generate::cache::normalize_text_for_hashing` applies a two‑pass normalization to an arbitrary input `text` to produce a canonical form suitable for hashing in cache‑key construction. The first pass trims all leading whitespace characters using `std::isspace`. The second pass iterates over the remaining characters and collapses any contiguous run of whitespace into a single ASCII space character (`' '`). The internal control flow uses a boolean flag `prev_space` to track whether the previous character was whitespace; when a non‑space character is encountered and `prev_space` is true, a single space is appended to the result `std::string` only if the result is not empty. The function depends only on the C++ standard library, specifically the `<cctype>` facilities via `std::isspace`, and uses `result.reserve(text.size())` to minimise reallocations. This normalisation ensures that differing amounts of whitespace do not produce distinct hash keys, while preserving the distinction between words separated by any amount of whitespace versus no whitespace.
+The function `clore::generate::cache::normalize_text_for_hashing` normalizes input text to a canonical form suitable for generating hash-based cache keys. It first trims all leading whitespace by advancing a `start` index past any characters for which `std::isspace` returns true. It then iterates over the remaining characters, using a `prev_space` flag to collapse any contiguous sequence of whitespace characters into a single space character inserted just before the next non‑space character. If the very first non‑space character after trimming would have been preceded by a space, the space is omitted because `result` is empty at that point; this effectively suppresses leading whitespace that was already trimmed. The resulting string contains no leading whitespace, no repeated spaces, and no trailing whitespace (because trailing whitespace is skipped by the collapse logic and not added back). Normalization relies solely on the C++ locale‑independent `std::isspace` check after casting each character to `unsigned char`, and uses only standard library facilities.
 
 ## Side Effects
 
-No observable side effects are evident from the extracted code.
+- Allocates a new string and returns it
 
 ## Reads From
 
-- the `text` parameter
+- text parameter
+
+## Writes To
+
+- returned result string
 
 ## Usage Patterns
 
-- Used by `make_prompt_response_cache_key` to normalize text before forming a cache key
+- Called by `make_prompt_response_cache_key` to normalize prompt and response texts before generating the cache key
 
 ## Called By
 

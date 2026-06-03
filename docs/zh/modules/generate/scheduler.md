@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:scheduler'
-description: 'generate:scheduler 模块是文档生成管线的核心编排器，负责将预先分析的符号与页面计划转化为实际的 LLM 请求、缓存查找和页面渲染任务。它管理一个异步工作队列，通过依赖跟踪器协调符号分析、页面提示生成与页面输出的顺序，确保在满足所有依赖（例如符号分析完成）后才提交页面提示任务，并在适当时候触发最终页面渲染。模块还负责LLM请求的并发控制、缓存命中/未命中统计、连续失败监控与重试限制，以及生成本地目录索引页面。'
+description: '该模块是文档生成管线的核心调度层，负责编排从代码分析输出到最终文档页面的完整异步工作流。它定义并实现了 PageGenerationScheduler、DependencyTracker、WorkQueue、PageRenderer 等关键组件，并对外提供 prepare_generation_context、render_generated_pages、build_directory_index_pages 等入口函数。调度器管理符号分析与页面提示的依赖关系、追踪各阶段进度（包括缓存命中、LLM 请求发出与完成、页面写入状态），并通过工作队列与事件循环驱动并发任务执行，确保页面生成按拓扑顺序推进。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 ## Summary
 
-`generate:scheduler` 模块是文档生成管线的核心编排器，负责将预先分析的符号与页面计划转化为实际的 LLM 请求、缓存查找和页面渲染任务。它管理一个异步工作队列，通过依赖跟踪器协调符号分析、页面提示生成与页面输出的顺序，确保在满足所有依赖（例如符号分析完成）后才提交页面提示任务，并在适当时候触发最终页面渲染。模块还负责LLM请求的并发控制、缓存命中/未命中统计、连续失败监控与重试限制，以及生成本地目录索引页面。
+该模块是文档生成管线的核心调度层，负责编排从代码分析输出到最终文档页面的完整异步工作流。它定义并实现了 `PageGenerationScheduler`、`DependencyTracker`、`WorkQueue`、`PageRenderer` 等关键组件，并对外提供 `prepare_generation_context`、`render_generated_pages`、`build_directory_index_pages` 等入口函数。调度器管理符号分析与页面提示的依赖关系、追踪各阶段进度（包括缓存命中、LLM 请求发出与完成、页面写入状态），并通过工作队列与事件循环驱动并发任务执行，确保页面生成按拓扑顺序推进。
 
-该模块对外暴露的核心实现包括：`PageGenerationScheduler` 类（构造、`run`、`run_page_prompt_task`、`run_symbol_analysis_task`、`submit_after_symbol_analysis`、`finish_page_prompt_work`、`render_ready_page` 等）、`WorkQueue` 和 `DependencyTracker` 类、`PageRenderer` 类，以及 `prepare_generation_context`、`render_generated_pages`、`build_directory_index_pages`、`build_evidence_for_request` 等自由函数。它通过 `config`、`model`、`generate:analysis`、`generate:cache`、`generate:page` 等子模块协同完成文档生成的全部调度工作。
+在公共实现范围内，模块拥有生成上下文的准备与解构、符号分析的提交与调度、页面提示的发起与结果回写、缓存的检查与记录、失败重试与限流控制、干运行（dry‑run）支持，以及目录索引页的构建等职责。它借助 `config`、`extract`、`generate:planner`、`generate:cache`、`generate:model` 等依赖模块提供的分析、规划与缓存能力，将页面计划转化为可执行的工作单元，最终由 `PageRenderer` 完成 Markdown 页面的渲染与写入。
 
 ## Imports
 
@@ -30,7 +30,6 @@ template: doc
 - [`http`](../http/index.md)
 - [`network`](../network/index.md)
 - [`protocol`](../protocol/index.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Dependency Diagram
@@ -54,7 +53,7 @@ graph LR
 
 ## Internal Structure
 
-`generate::scheduler` 是文档生成管线的核心调度模块，负责编排从符号分析、页面生成、LLM 请求到最终渲染的完整工作流。模块内部采用分层结构：`PageGenerationScheduler` 作为顶层协调器，依赖 `WorkQueue`（管理任务队列与并行度）、`DependencyTracker`（追踪页面与符号分析的依赖关系）以及 `PageRenderer`（负责最终的页面输出与汇总）。辅助类型如 `PreparedPrompt`、`PageState` 和 `SymbolAnalysisWork` 封装了各阶段的状态与数据，通过 `WorkerActivity` 实现对事件循环的集成。模块广泛导入 `generate:analysis`、`generate:cache`、`generate:model`、`generate:page` 等子模块，并依赖 `network` 与 `protocol` 完成异步 LLM 请求，从而实现高内聚、低耦合的调度逻辑。
+`generate:scheduler` 模块是文档生成管线的核心调度与执行引擎，通过协调多个内部组件实现页面生成的全生命周期管理。它大量导入了 `config`、`extract`、`generate:model`、`generate:planner`、`generate:page` 等周边模块，依赖这些模块提供的配置、代码提取结果、数据结构定义以及页面模板来驱动工作流。模块内部采用分层设计：顶层是 `PageGenerationScheduler` 类，它持有私有成员 `WorkQueue`（任务队列）、`DependencyTracker`（依赖跟踪）、`PageRenderer`（输出渲染）以及分析缓存、计数器等状态，并通过 `WorkerActivity` 的 RAII 机制在事件循环中调度异步工作线程。匿名命名空间中的辅助结构体（如 `PreparedPrompt`、`PreparedGenerationContext`、`SymbolAnalysisWork`）封装了生成过程中所需的数据集和中间状态，确保各组件之间以清晰的数据结构传递信息。模块暴露给外部的函数（如 `render_generated_pages`、`prepare_generation_context`）作为入口点，内部则通过 `run`、`worker_task` 等私有方法循环从队列中取出工作项，经过符号分析、提示请求、缓存命中判断、页面渲染等多个阶段，最终生成文档输出。这种分解使得调度逻辑、依赖控制和页面构建职责分离，便于维护和扩展。
 
 ## Related Pages
 

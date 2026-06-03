@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::scanmoduledecl'
-description: 'The function clore::extract::scan_module_decl performs a fast scan of a C++ module declaration using Clang’s dependency directives scanner. It avoids running the full preprocessor and instead directly populates the module_name, is_interface_unit, and module_imports fields of a provided ScanResult object. The caller supplies a std::string_view containing the source text of the translation unit and a mutable reference to a ScanResult that will receive the extracted module information. The function returns void and relies on the caller to ensure the source text is valid and the ScanResult is properly initialized.'
+description: 'clore::extract::scan_module_decl performs a fast scan of a C++ source file to extract module-related metadata without invoking the full preprocessor. It accepts the file''s contents as a std::string_view and a reference to a ScanResult object. On success, it populates the ScanResult''s module_name, is_interface_unit, and module_imports fields using Clang''s dependency directives scanner.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Namespace clore::extract](../index.md)
 
-Declaration: `extract/scan.cppm:49`
+Declaration: `src/extract/scan.cppm:67`
 
-Definition: `extract/scan.cppm:141`
+Definition: `src/extract/scan.cppm:159`
 
 Implementation: [`Module extract:scan`](../../../../modules/extract/scan.md)
 
@@ -21,12 +21,14 @@ Implementation: [`Module extract:scan`](../../../../modules/extract/scan.md)
 auto (std::string_view, ScanResult &) -> void;
 ```
 
-The function `clore::extract::scan_module_decl` performs a fast scan of a C++ module declaration using Clang’s dependency directives scanner. It avoids running the full preprocessor and instead directly populates the `module_name`, `is_interface_unit`, and `module_imports` fields of a provided `ScanResult` object. The caller supplies a `std::string_view` containing the source text of the translation unit and a mutable reference to a `ScanResult` that will receive the extracted module information. The function returns `void` and relies on the caller to ensure the source text is valid and the `ScanResult` is properly initialized.
+`clore::extract::scan_module_decl` performs a fast scan of a C++ source file to extract module-related metadata without invoking the full preprocessor. It accepts the file's contents as a `std::string_view` and a reference to a `ScanResult` object. On success, it populates the `ScanResult`'s `module_name`, `is_interface_unit`, and `module_imports` fields using Clang's dependency directives scanner.
+
+Callers should use this function when they need a quick, lightweight pass to identify module declarations and import dependencies from source text. The function relies solely on the raw source content and does not require a `CompileEntry` or compilation database, making it suitable for early analysis stages or contexts where only the module structure is needed. The supplied `ScanResult` must be default-initialized; existing fields not mentioned above remain unchanged.
 
 ## Usage Patterns
 
-- called by `scan_file` to fill `ScanResult` fields without full preprocessing
-- used as a fast module detection step before heavy parsing
+- Called by `scan_file` to quickly obtain module metadata
+- Used in the extraction pipeline for module scanning without full preprocessing
 
 ## Called By
 

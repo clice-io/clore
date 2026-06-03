@@ -1,6 +1,6 @@
 ---
 title: 'Module extract'
-description: '模块 clore::extract 负责从项目源代码中提取结构化信息，包括抽象语法树、依赖关系、模块定义等，并为此提供异步执行、缓存评估与持久化机制。其公开接口仅包含 extract_project_async 函数，该函数接收项目标识和事件循环引用，返回状态码以指示提取是否成功启动。模块内部实现了从扫描缓存加载、并行 AST 提取、模块信息构建到缓存保存的完整流水线，并利用 support 和 config 模块提供的底层工具与配置支持。'
+description: '模块 extract 负责对项目进行代码提取并管理相关的 AST 缓存，以支持后续的符号查询、引用分析等操作。它提供了一个异步入口 extract_project_async，调用方传入项目上下文句柄和事件循环后，该函数调度整个提取流程，包括加载扫描缓存、评估缓存有效性、批量解析 AST、构建模块信息，并将结果持久化到本地缓存中。提取完成后，可通过该命名空间下的同步查询函数（如 find_symbol、lookup_symbol）访问提取到的项目数据。'
 layout: doc
 template: doc
 ---
@@ -9,12 +9,13 @@ template: doc
 
 ## Summary
 
-模块 `clore::extract` 负责从项目源代码中提取结构化信息，包括抽象语法树、依赖关系、模块定义等，并为此提供异步执行、缓存评估与持久化机制。其公开接口仅包含 `extract_project_async` 函数，该函数接收项目标识和事件循环引用，返回状态码以指示提取是否成功启动。模块内部实现了从扫描缓存加载、并行 AST 提取、模块信息构建到缓存保存的完整流水线，并利用 `support` 和 `config` 模块提供的底层工具与配置支持。
+模块 `extract` 负责对项目进行代码提取并管理相关的 AST 缓存，以支持后续的符号查询、引用分析等操作。它提供了一个异步入口 `extract_project_async`，调用方传入项目上下文句柄和事件循环后，该函数调度整个提取流程，包括加载扫描缓存、评估缓存有效性、批量解析 AST、构建模块信息，并将结果持久化到本地缓存中。提取完成后，可通过该命名空间下的同步查询函数（如 `find_symbol`、`lookup_symbol`）访问提取到的项目数据。
+
+在公开实现层面上，模块仅暴露 `extract_project_async` 作为启动提取的唯一接口，以及 `ExtractError` 作为错误类型。内部复杂的缓存加载、AST 解析、依赖图构建等逻辑均封装在匿名命名空间和私有函数中，不对模块外部可见，从而保持了接口的简洁性和稳定性。模块依赖于 `config` 和 `support` 模块提供的配置和通用工具支持。
 
 ## Imports
 
 - [`config`](../config/index.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Imported By
@@ -38,79 +39,79 @@ template: doc
 
 ### `clore::extract::ExtractError`
 
-Declaration: `extract/extract.cppm:21`
+Declaration: `src/extract/extract.cppm:43`
 
-Definition: `extract/extract.cppm:21`
+Definition: `src/extract/extract.cppm:43`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-实现上，`clore::extract::ExtractError` 仅包含一个 `std::string message` 成员，用于存储错误描述文本。整个结构体没有自定义构造函数、析构函数或赋值运算符，依赖编译器生成的默认特殊成员函数，因此其生命周期和资源管理完全由 `message` 的 `std::string` 实现负责。不变量在于 `message` 中始终存放可解释的错误信息；对于该结构体的使用方而言，直接读取 `message` 即可获得错误详情，无需额外解析。
+struct `clore::extract::ExtractError` 的实现仅由一个 `std::string message` 成员构成，该成员负责存储错误描述信息。该类没有自定义的构造、析构或赋值操作，因此依赖编译器生成的默认函数，其内部状态完全由 `message` 的字符串内容所定义。任何对 `ExtractError` 实例的拷贝或移动都遵循 `std::string` 的对应语义。
 
 #### Invariants
 
-- 包含错误描述字符串
-- 无其他约束或保证
+- The `message` string should contain a meaningful error description.
 
 #### Key Members
 
-- `message` 成员
+- `message` (public data member of type `std::string`)
 
 #### Usage Patterns
 
-- 作为提取函数的错误返回类型
-- 调用者通过读取 `message` 获取错误详情
+- Likely used as the exception type or error result in extraction functions where a descriptive string is sufficient.
+- Other code can construct an `ExtractError` by providing a `std::string` argument to `message`.
 
 ## Functions
 
 ### `clore::extract::extract_project_async`
 
-Declaration: `extract/extract.cppm:25`
+Declaration: `src/extract/extract.cppm:47`
 
-Definition: `extract/extract.cppm:539`
+Definition: `src/extract/extract.cppm:561`
 
 Declaration: [`Namespace clore::extract`](../../namespaces/clore/extract/index.md)
 
-函数 `clore::extract::extract_project_async` 实现了异步提取整个项目模型的核心流程。算法首先加载编译数据库并应用筛选，随后并行加载提取缓存和 Clice 缓存（通过 `load_caches_async`），并为每个编译条目计算缓存键、编译签名和源哈希，构建 `cache_evaluations` 映射以判断扫描和 AST 结果是否有效。接着调用 `build_dependency_graph_async` 结合种子扫描缓存构建依赖图，并对其执行拓扑排序以获得文件处理顺序。之后启动 `extract_ast_batch_async` 并行处理所有条目，该任务使用缓存评估结果决定是否跳过 AST 解析。
+该函数实现了一个异步协程工作流，用于从编译数据库提取完整的项目模型。它首先调用 `load_compdb` 加载编译数据库条目，然后根据 `config.filter` 和 `filter_root` 过滤条目，并标准化文件路径与缓存键。接着通过 `load_caches_async` 异步加载已有的 extract 缓存和 clice 缓存，并对每个条目进行 `CacheEvaluation`，利用 `compile_signature` 和 `source_hash` 判断 `scan_valid` 和 `ast_valid` 状态，从而决定后续是否可以跳过扫描或 AST 解析。之后构建 `DependencyGraph`（依赖 `build_dependency_graph_async`），并按拓扑顺序确定文件处理顺序。随后启动 `extract_ast_batch_async` 并行处理所有条目的 AST 解析。
 
-主循环按拓扑序遍历每个条目：若该条目缓存中的 AST 有效，则直接从 `cache_records` 读取 `ASTResult`；否则从并行任务结果中获取。针对每个条目，函数遍历其包含的扫描结果和 AST，通过 `resolve_symbol_location_path` 协程解析符号声明与定义的文件路径至规范形式，并利用 `filter_root` 过滤掉不在项目范围内的符号和包含项，最终将符号、关系及包含信息合并至 `ProjectModel` 中。处理完成后，函数调用 `rebuild_model_indexes` 和 `build_module_info` 完善模型结构，并通过后台队列协程解析源代码片段。最后，异步保存更新后的缓存记录（`save_caches_async`）并记录性能指标。
+在遍历每个条目时，该函数根据缓存命中情况从缓存记录或并行 AST 结果中获取 AST 数据，并解析每个符号的声明位置路径（通过 `resolve_symbol_location_path` 进行路径规范化与缓存）。它按过滤器筛选保留的符号和包含项，维护 `ProjectModel` 中的 symbol 映射与关系（继承、调用、引用），同时根据源哈希更新或删除 `cache_records`。全部条目处理完毕后，调用 `rebuild_model_indexes`、`build_module_info`（解析模块单元）和 `rebuild_lookup_maps` 完善模型结构。最后异步执行 `resolve_source_snippet` 为符号填充源代码片段，并调用 `save_caches_async` 持久化更新后的缓存，再统计并记录耗时信息后返回 `ProjectModel`。
 
 #### Side Effects
 
-- loads compilation database from disk
-- loads/saves cache files
-- logs progress and metrics
-- mutates `ProjectModel` (inserts symbols, files, relations)
-- mutates `cache_records` and `cache_evaluations`
-- uses `kota::event_loop` for asynchronous I/O and task scheduling
+- Writes log messages via `logging::info` and `logging::warn`
+- Performs file I/O: reads compilation database file and cache files, writes cache files asynchronously
+- Modifies global or passed-in state: fills `cache_evaluations`, `prepared_entries`, `seeded_scan_cache`, `dep_graph`, `model`, `cache_records`, `clice_cache`, `resolved_path_cache`
+- Spawns asynchronous tasks on the event loop (`kota::task`, `kota::queue`, `co_await`)
+- Potentially modifies `cache_records` by inserting, erasing, or updating entries
+- Allocates memory for `ProjectModel`, `ScanCache`, `CacheEvaluation`, `PreparedEntryState`, `DependencyGraph`, and other containers
 
 #### Reads From
 
-- `config::TaskConfig` (`compile_commands_path`, `workspace_root`, filter, etc.)
-- compilation database file
-- cache files on disk
-- `CompileEntry` fields (file, directory, `cache_key`, `source_hash`)
-- scan cache (`seeded_scan_cache`)
-- dependency graph
-- parallel AST results
+- `config::TaskConfig &config` (fields: `compile_commands_path`, `workspace_root`, `filter`)
+- `kota::event_loop &loop`
+- Compilation database file on disk (via `load_compdb`)
+- Cache files on disk (via `load_caches_async`)
+- Source files (via `resolve_symbol_location_path`, `resolve_source_snippet`)
+- `scan_cache.scan_results` for each processed entry
+- `cache_records` (cache records map)
 
 #### Writes To
 
-- `ProjectModel` (symbols, files, relations, `file_order`, namespaces, modules)
-- cache records (in memory and persisted to disk)
-- log output (via `logging::info` and `logging::cache_hit_rate`)
-- `resolved_path_cache` (internal cache)
+- `ProjectModel &model` (symbols, files, namespaces, modules, etc.)
+- `cache_records` (inserts, updates, or erases entries)
+- Cache files on disk (via `save_caches_async`)
+- Log output (via `logging::info`, `logging::warn`)
 
 #### Usage Patterns
 
-- top-level extraction entry point
-- called in an asynchronous context with `co_await`
-- used to generate the project model for further analysis or IDE features
+- Called as the main entry point for project extraction from a compilation database
+- Invoked with application configuration and event loop for asynchronous execution
+- Used in conjunction with cache management to optimize incremental extractions
+- Part of the `clore::extract` module for building project models in a code analysis tool
 
 ## Internal Structure
 
-模块 `extract` 按功能分解为两层：缓存管理层和提取执行层。缓存层负责加载、验证和持久化扫描结果、闭包缓存及提取缓存记录，通过 `load_caches_async`、`save_caches_async` 等异步函数与 `CacheEvaluation`、`LoadedCaches` 等内部类型协同工作。提取执行层在缓存就绪后，对每个条目解析 AST 并建立依赖图，由 `extract_ast_entry`、`build_module_info`、`extract_ast_batch_async` 等函数驱动，通过 `run_worker_task_async` 和 `run_cache_io_async` 实现并行 I/O 与计算分离。
+模块 `extract` 在整体上承担从项目源码中异步提取结构化信息的职责，其设计围绕缓存驱动的流水线展开。内部依赖 `config` 和 `support`：前者提供全局配置（如根目录、过滤规则），后者封装文件路径规范化、缓存键构造等通用工具。模块入口是 `extract_project_async`，它接收项目句柄和事件循环，通过一系列在匿名命名空间中定义的异步函数协调工作。
 
-该模块导入 `config` 获取项目配置，导入 `support` 获得文本处理、文件操作及缓存键管理工具，标准库提供并发与容器支持。内部逻辑围绕 `PreparedEntryState` 构建索引，利用 `ParallelASTResult` 和 `DepGraph` 汇聚各文件的提取结果，最终由 `extract_project_async` 整合并返回状态码，整个过程在 `kota::event_loop` 上异步推进。
+分解上，模块按阶段组织：缓存加载（`load_caches_async` 加载 `clice` 与 `extract` 两类缓存）、条目准备与依赖图构建、并行 AST 提取（`extract_ast_batch_async` 按批次调度 `extract_ast_entry`）、模块信息构建（`build_module_info` 利用扫描缓存填充模型），最后持久化新缓存（`save_caches_async`）。内部数据结构如 `CacheEvaluation` 记录每个文件的编译签名、哈希与 AST/扫描有效性，`PreparedEntryState` 保存规范化路径与缓存键，`ParallelASTResult` 整合 AST 与依赖结果，而 `ExtractError` 统一错误传递。这种分层使得缓存命中检测、任务并行与结果聚合清晰分离，整体实现是一个面向事件循环的异步有限状态机。
 
 ## Related Pages
 

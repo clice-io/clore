@@ -1,10 +1,35 @@
 module;
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <deque>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <functional>
+#include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <shared_mutex>
+#include <span>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
+
 #include "kota/async/async.h"
 
 export module generate:scheduler;
 
-import std;
 import :analysis;
 import :dryrun;
 import :evidence;

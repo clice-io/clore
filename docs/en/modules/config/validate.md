@@ -1,6 +1,6 @@
 ---
 title: 'Module config:validate'
-description: 'The module config:validate is responsible for verifying that configuration values conform to the expected constraints defined by the application''s schema. It exposes the public function clore::config::validate, which accepts a reference to a constant integer (representing a configuration value) and returns an integer status code indicating success (zero) or a specific error condition (non-zero). The module also provides the public struct ValidationError that carries a descriptive message string. Within the module, internal helper functions such as validate_nonzero and validate_nonempty support the validation logic for common checks. This module depends on config:schema and the standard library.'
+description: 'The module config:validate is responsible for validating configuration values against the project’s configuration schema. Its public interface consists of the clore::config::validate function, which verifies that a given integer configuration value is valid, returning either success or a ValidationError that describes the failure. The module also exposes the ValidationError struct, which contains a message field to communicate the reason for a validation failure.'
 layout: doc
 template: doc
 ---
@@ -9,68 +9,72 @@ template: doc
 
 ## Summary
 
-The module `config:validate` is responsible for verifying that configuration values conform to the expected constraints defined by the application's schema. It exposes the public function `clore::config::validate`, which accepts a reference to a constant integer (representing a configuration value) and returns an integer status code indicating success (zero) or a specific error condition (non-zero). The module also provides the public struct `ValidationError` that carries a descriptive `message` string. Within the module, internal helper functions such as `validate_nonzero` and `validate_nonempty` support the validation logic for common checks. This module depends on `config:schema` and the standard library.
+The module `config:validate` is responsible for validating configuration values against the project’s configuration schema. Its public interface consists of the `clore::config::validate` function, which verifies that a given integer configuration value is valid, returning either success or a `ValidationError` that describes the failure. The module also exposes the `ValidationError` struct, which contains a `message` field to communicate the reason for a validation failure.
 
 ## Imports
 
 - [`config:schema`](schema.md)
-- `std`
 
 ## Types
 
 ### `clore::config::ValidationError`
 
-Declaration: `config/validate.cppm:8`
+Declaration: `src/config/validate.cppm:14`
 
-Definition: `config/validate.cppm:8`
+Definition: `src/config/validate.cppm:14`
 
 Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
-The struct `clore::config::ValidationError` is implemented as a lightweight wrapper holding a single `std::string` member named `message`. There are no additional invariants or special member functions; the struct relies on the default compiler‑generated constructors, destructor, and assignment `operator`s. Its sole purpose is to carry a human‑readable description of a validation problem, making it suitable for use in error‑reporting flows within the configuration validation subsystem.
+The internal structure of `clore::config::ValidationError` consists solely of a `std::string` member `message`, which stores a human‑readable description of the validation failure. The struct relies on the default member‑wise copy/move semantics and trivial destructor provided by the compiler, as no custom special member functions are declared. No invariants are enforced beyond those inherent to `std::string`; the `message` may be empty to represent a missing or non‑informative error, though in practice callers are expected to supply a meaningful value. The simplicity of the implementation makes `clore::config::ValidationError` a lightweight value type suitable for propagation in result types or exception‑like flows.
 
 #### Invariants
 
-- The `message` member is a `std::string` with no additional constraints imposed by the struct.
+- `message` contains a textual description of the validation error.
+- The struct is trivially constructible and copyable.
 
 #### Key Members
 
-- `message` stores the error description.
+- `message`
 
 #### Usage Patterns
 
-- Returned or thrown by validation functions to indicate a configuration error.
-- Likely compared or logged by callers to understand the validation failure.
+- Returned from config validation functions to indicate a specific validation failure.
+- Carried inside `std::expected` or similar error-handling types.
 
 ## Functions
 
 ### `clore::config::validate`
 
-Declaration: `config/validate.cppm:12`
+Declaration: `src/config/validate.cppm:18`
 
-Definition: `config/validate.cppm:42`
+Definition: `src/config/validate.cppm:48`
 
 Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
-The implementation of `clore::config::validate` performs field‑by‑field validation on the input `TaskConfig` and returns a `std::expected<void, ValidationError>` that signals either success (an empty expected) or the first detected error. The algorithm follows a sequential short‑circuit pattern: it checks each required field for emptiness using `std::string::empty`, then for filesystem existence (`std::filesystem::exists`), and finally for the correct file type (`std::filesystem::is_regular_file` or `std::filesystem::is_directory`). For `output_root`, a non‑empty value must either not exist or be a directory. After the core filesystem checks, the LLM sub‑configuration is validated by calling two internal helpers—`validate_nonempty` on `config.llm.system_prompt` and `validate_nonzero` on `config.llm.retry_limit`. Each helper returns a `std::expected`; if either fails, the function immediately propagates that result. The only dependencies are the `std::filesystem` and `std::format` libraries and the two anonymous‑namespace validation functions.
+The function `clore::config::validate` performs a sequential series of validation steps on the input `TaskConfig` and returns `std::expected<void, ValidationError>`. The algorithm checks filesystem paths first: it verifies that `compile_commands_path` is non‑empty, exists on disk, and is a regular file; then it checks that `project_root` is non‑empty, exists, and is a directory; finally it checks that `output_root` is non‑empty and, if it already exists, that it is a directory. For the LLM sub‑configuration it delegates to the anonymous‑namespace helpers `validate_nonzero` for `llm.retry_limit` and `validate_nonempty` for `llm.system_prompt`. On the first violation the function returns `std::unexpected` containing a `ValidationError` with a descriptive message; if all checks pass it returns a valid `std::expected`. Control flow is purely sequential with early exit on the first error, and all error messages are constructed using `std::format`.
 
 #### Side Effects
 
-- Reads file system state to check existence and type of paths specified in the config.
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- const `TaskConfig`& config
-- File system state for paths: `compile_commands_path`, `project_root`, `output_root`
-- Fields `llm.system_prompt` and `llm.retry_limit` via helpers
+- config`.compile_commands_path`
+- config`.project_root`
+- config`.output_root`
+- config`.llm``.system_prompt`
+- config`.llm``.retry_limit`
 
 #### Usage Patterns
 
-- Called after constructing or loading a `TaskConfig` to ensure configuration validity before use.
-- Returned expected is typically checked with error handling, e.g., logging or propagating the `ValidationError`.
+- called after loading config from file or string
+- used before proceeding with task execution
 
 ## Internal Structure
 
-The `config:validate` module is responsible for verifying that configuration values conform to the constraints defined by the `config:schema` module. It imports `config:schema` to access schema types such as `FilterRule`, `LLMConfig`, and `TaskConfig`, and uses standard library facilities via `std`. Internally, the module is decomposed into a public function `clore::config::validate` and a set of helper functions placed in an anonymous namespace to enforce internal linkage. These helpers, such as `validate_nonzero` and `validate_nonempty`, implement specific validation rules against individual configuration fields supplied as function parameters. The public `validate` function orchestrates these helpers, applying them to the configuration reference it receives and returning an integer status code that signals success (zero) or a specific error condition (non-zero). The module also defines a `ValidationError` struct with a public `message` field to communicate error details to callers. This layered structure separates low‑level validation logic from the high‑level entry point, keeping the implementation modular and testable.
+The `config:validate` module is responsible for validating configuration values against domain-specific constraints, building on the types defined in the `config:schema` module. Its public interface consists of the `validate` function, which accepts a `const int &` and returns a `std::expected<void, ValidationError>`, and the `ValidationError` struct that carries a descriptive `message` string when validation fails.
+
+Internally, the module uses two anonymous‑namespace helper functions—`validate_nonzero` and `validate_nonempty`—to perform specific checks on numeric and string fields respectively, each returning the same result type. This decomposition keeps the validation logic modular and testable, with each helper focusing on a single invariant. The overall implementation structure separates the public validation entry point from the private, type‑specific validation routines, while relying on the schema module solely for its type definitions rather than any behavior.
 
 ## Related Pages
 

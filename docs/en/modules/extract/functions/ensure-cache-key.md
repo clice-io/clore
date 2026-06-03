@@ -1,6 +1,6 @@
 ---
 title: 'clore::extract::ensurecachekey'
-description: 'The function clore::extract::ensure_cache_key acts as a thin public wrapper around the implementation function clore::extract::ensure_cache_key_impl. It receives a mutable reference to a CompileEntry and immediately forwards it to ensure_cache_key_impl, which performs the actual work of computing and storing the cache key. This design separates the public interface from the implementation details, allowing ensure_cache_key_impl to reside in an anonymous namespace or internal translation unit while ensure_cache_key is declared in the module interface. The control flow is therefore trivial: a single delegation call with no additional logic, error handling, or preprocessing.'
+description: 'The function delegates directly to ensure_cache_key_impl, which performs the core algorithm for populating CompileEntry::cache_key and CompileEntry::source_hash. The implementation normalizes the entry’s file path via clore::extract::normalize_entry_file and builds a compile signature using clore::extract::build_compile_signature, also querying the toolchain cache through clore::extract::query_toolchain_cached when available. File hashing is attempted through clore::extract::(anonymous namespace)::try_hash_source_file, and argument paths are normalized with clore::extract::normalize_argument_path. The computed key and hash are then stored directly into the entry’s fields, ensuring that subsequent operations can rely on a cached, deterministic identifier for the compilation.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module extract:compiler](../compiler.md)
 
-Declaration: `extract/compiler.cppm:60`
+Declaration: `src/extract/compiler.cppm:76`
 
-Definition: `extract/compiler.cppm:225`
+Definition: `src/extract/compiler.cppm:241`
 
 Declaration: [`Namespace clore::extract`](../../../namespaces/clore/extract/index.md)
 
@@ -23,23 +23,19 @@ auto ensure_cache_key(CompileEntry& entry) -> void {
 }
 ```
 
-The function `clore::extract::ensure_cache_key` acts as a thin public wrapper around the implementation function `clore::extract::ensure_cache_key_impl`. It receives a mutable reference to a `CompileEntry` and immediately forwards it to `ensure_cache_key_impl`, which performs the actual work of computing and storing the cache key. This design separates the public interface from the implementation details, allowing `ensure_cache_key_impl` to reside in an anonymous namespace or internal translation unit while `ensure_cache_key` is declared in the module interface. The control flow is therefore trivial: a single delegation call with no additional logic, error handling, or preprocessing.
+The function delegates directly to `ensure_cache_key_impl`, which performs the core algorithm for populating `CompileEntry::cache_key` and `CompileEntry::source_hash`. The implementation normalizes the entry’s file path via `clore::extract::normalize_entry_file` and builds a compile signature using `clore::extract::build_compile_signature`, also querying the toolchain cache through `clore::extract::query_toolchain_cached` when available. File hashing is attempted through `clore::extract::(anonymous namespace)::try_hash_source_file`, and argument paths are normalized with `clore::extract::normalize_argument_path`. The computed key and hash are then stored directly into the entry’s fields, ensuring that subsequent operations can rely on a cached, deterministic identifier for the compilation.
 
 ## Side Effects
 
-- Calls `ensure_cache_key_impl(entry)`, which may modify the cache key fields of the `CompileEntry` object
+No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- The `entry` parameter (passed by mutable reference to `ensure_cache_key_impl`)
-
-## Writes To
-
-- The `entry` parameter (through the delegated call to `ensure_cache_key_impl`)
+- entry (`CompileEntry`&)
 
 ## Usage Patterns
 
-- Called by `query_toolchain_cached` to prepare a cache key before toolchain lookup
+- Called by `query_toolchain_cached` to ensure a cache key is set for a compile entry before use.
 
 ## Calls
 

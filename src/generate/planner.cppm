@@ -1,6 +1,23 @@
+module;
+
+#include <algorithm>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <map>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
+
 export module generate:planner;
 
-import std;
 import :model;
 import config;
 import extract;

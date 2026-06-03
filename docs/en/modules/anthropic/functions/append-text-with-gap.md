@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::anthropic::protocol::detail::appendtextwithgap'
-description: 'The function clore::net::anthropic::protocol::detail::append_text_with_gap appends a given std::string_view text to a std::string& target while inserting a gap separator when both strings are non‑empty. The control flow begins with an early return if text is empty, preserving the existing content of target. If target is not already empty, a double newline ("\n\n") is appended to separate the previously stored content from the incoming text. Finally, the text itself is appended. This ensures that accumulated text blocks are visually separated by a blank line, while avoiding leading whitespace for the first block. The implementation relies solely on std::string and std::string_view operations, with no external dependencies beyond the standard library.'
+description: 'The function clore::net::anthropic::protocol::detail::append_text_with_gap appends the content of text (a std::string_view) to the target std::string. It first guards against an empty input by returning immediately if text is empty. When target already contains data, it inserts a double newline separator ("\n\n") to create a visual gap before concatenating the new fragment. This ensures that the first piece of text is not preceded by an unnecessary separator while subsequent pieces are cleanly spaced. The implementation uses only standard library types and no external dependencies.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module anthropic](../index.md)
 
-Declaration: `network/anthropic.cppm:25`
+Declaration: `src/network/anthropic.cppm:34`
 
-Definition: `network/anthropic.cppm:25`
+Definition: `src/network/anthropic.cppm:34`
 
 Declaration: [`Namespace clore::net::anthropic::protocol::detail`](../../../namespaces/clore/net/anthropic/protocol/detail/index.md)
 
@@ -29,24 +29,24 @@ auto append_text_with_gap(std::string& target, std::string_view text) -> void {
 }
 ```
 
-The function `clore::net::anthropic::protocol::detail::append_text_with_gap` appends a given `std::string_view text` to a `std::string& target` while inserting a gap separator when both strings are non‑empty. The control flow begins with an early return if `text` is empty, preserving the existing content of `target`. If `target` is not already empty, a double newline (`"\n\n"`) is appended to separate the previously stored content from the incoming `text`. Finally, the `text` itself is appended. This ensures that accumulated text blocks are visually separated by a blank line, while avoiding leading whitespace for the first block. The implementation relies solely on `std::string` and `std::string_view` operations, with no external dependencies beyond the standard library.
+The function `clore::net::anthropic::protocol::detail::append_text_with_gap` appends the content of `text` (a `std::string_view`) to the `target` `std::string`. It first guards against an empty input by returning immediately if `text` is empty. When `target` already contains data, it inserts a double newline separator (`"\n\n"`) to create a visual gap before concatenating the new fragment. This ensures that the first piece of text is not preceded by an unnecessary separator while subsequent pieces are cleanly spaced. The implementation uses only standard library types and no external dependencies.
 
 ## Side Effects
 
-- Mutates the `target` string by appending `text` and optionally inserting a double-newline separator.
+- mutates `target` by appending a gap and/or `text`
 
 ## Reads From
 
-- `target` parameter (reads its current content to check if empty for separator insertion)
-- `text` parameter (reads its content and checks emptiness)
+- `target` contents via `target.empty()`
+- `text` via `text.empty()` and `text` value
 
 ## Writes To
 
-- `target` parameter (appends separator and `text` content)
+- `target` string
 
 ## Usage Patterns
 
-- Used by `build_request_json` to accumulate JSON text blocks with gap separation.
+- called by `build_request_json` to concatenate text segments with separation
 
 ## Called By
 

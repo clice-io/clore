@@ -1,12 +1,24 @@
 module;
 
+#include <cstdint>
+#include <expected>
+#include <format>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <variant>
+#include <vector>
+
 #include "kota/async/async.h"
-#include "kota/codec/json/error.h"
 #include "kota/codec/json/json.h"
 
 export module protocol;
 
-import std;
 import http;
 import support;
 
@@ -356,7 +368,7 @@ auto make_empty_array(std::string_view context) -> std::expected<json::Array, LL
 template <typename T>
 auto parse_json_value(std::string_view raw, std::string_view context)
     -> std::expected<T, LLMError> {
-    auto parsed = json::from_json<T>(raw);
+    auto parsed = json::parse<T>(raw);
     if(!parsed.has_value()) {
         return std::unexpected(
             LLMError(std::format("failed to parse {}: {}", context, parsed.error().to_string())));
@@ -595,7 +607,7 @@ auto parse_response_text(const CompletionResponse& response) -> std::expected<T,
         return std::unexpected(std::move(text.error()));
     }
 
-    auto parsed = kota::codec::json::from_json<T>(*text);
+    auto parsed = kota::codec::json::parse<T>(*text);
     if(!parsed.has_value()) {
         return std::unexpected(LLMError(std::format("failed to parse structured LLM response: {}",
                                                     parsed.error().to_string())));
@@ -613,7 +625,7 @@ auto parse_tool_arguments(const ToolCall& call) -> std::expected<T, LLMError> {
                                  encoded.error().to_string())));
     }
 
-    auto parsed = kota::codec::json::from_json<T>(*encoded);
+    auto parsed = kota::codec::json::parse<T>(*encoded);
     if(!parsed.has_value()) {
         return std::unexpected(LLMError(std::format("failed to parse tool arguments for '{}': {}",
                                                     call.name,

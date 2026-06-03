@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:cache'
-description: 'The clore::generate::cache module owns the caching subsystem for generated LLM responses, providing a persistent store that maps prompt–response pairs to deterministic keys. It exposes a public interface for saving and loading cache entries synchronously (save_cache_entry, load_cache_index, find_cached_response) and asynchronously (save_cache_entry_async, load_cache_index_async). Cache keys are constructed from normalized text via make_prompt_response_cache_key, which uses normalize_text_for_hashing to produce repeatable representations of semantically equivalent inputs.'
+description: 'The generate:cache module provides a persistent caching layer for generated responses in the LLM completion workflow. Its core responsibility is to store, retrieve, and index results keyed by the combination of prompt, system prompt, tool choice, and response format, enabling efficient reuse of previously computed outputs. The public-facing implementation includes synchronous interfaces (save_cache_entry, load_cache_index, find_cached_response) for direct cache access, asynchronous counterparts (save_cache_entry_async, load_cache_index_async) for non‑blocking operations, and utility functions (make_prompt_response_cache_key, normalize_text_for_hashing) that produce deterministic cache keys from request parameters. The module also exposes two structs — CacheIndex holding the in‑memory index of cached entries, and CacheError for reporting failures — all under the clore::generate::cache namespace.'
 layout: doc
 template: doc
 ---
@@ -9,14 +9,11 @@ template: doc
 
 ## Summary
 
-The `clore::generate::cache` module owns the caching subsystem for generated LLM responses, providing a persistent store that maps prompt–response pairs to deterministic keys. It exposes a public interface for saving and loading cache entries synchronously (`save_cache_entry`, `load_cache_index`, `find_cached_response`) and asynchronously (`save_cache_entry_async`, `load_cache_index_async`). Cache keys are constructed from normalized text via `make_prompt_response_cache_key`, which uses `normalize_text_for_hashing` to produce repeatable representations of semantically equivalent inputs.
-
-The module stores its data in JSONL files within a cache directory, maintaining an in-memory index (`CacheIndex`) of entries for efficient lookups. It handles file I/O, directory creation, and concurrency with mutex‑based locking, returning `CacheError` values for any failures. Internally it uses helpers such as `all_jsonl_files`, `cache_directory`, `format_iso_timestamp`, and `escape_json_string` to manage the persistent representation. The module depends on the `protocol` and `support` modules for its data types and foundational utilities.
+The `generate:cache` module provides a persistent caching layer for generated responses in the LLM completion workflow. Its core responsibility is to store, retrieve, and index results keyed by the combination of prompt, system prompt, tool choice, and response format, enabling efficient reuse of previously computed outputs. The public-facing implementation includes synchronous interfaces (`save_cache_entry`, `load_cache_index`, `find_cached_response`) for direct cache access, asynchronous counterparts (`save_cache_entry_async`, `load_cache_index_async`) for non‑blocking operations, and utility functions (`make_prompt_response_cache_key`, `normalize_text_for_hashing`) that produce deterministic cache keys from request parameters. The module also exposes two structs — `CacheIndex` holding the in‑memory index of cached entries, and `CacheError` for reporting failures — all under the `clore::generate::cache` namespace.
 
 ## Imports
 
 - [`protocol`](../protocol/index.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Imported By
@@ -27,61 +24,61 @@ The module stores its data in JSONL files within a cache directory, maintaining 
 
 ### `clore::generate::cache::CacheError`
 
-Declaration: `generate/cache.cppm:16`
+Declaration: `src/generate/cache.cppm:35`
 
-Definition: `generate/cache.cppm:16`
+Definition: `src/generate/cache.cppm:35`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-The struct `clore::generate::cache::CacheError` is defined as an aggregate type containing a single field `message` of type `std::string`. No user‑declared constructors, destructors, or assignment `operator`s are provided; the default memberwise initialization and copy/move semantics apply. The only invariant is that `message` holds a valid `std::string` instance (including the empty string). Since the struct is defined within a C++20 module, its name is subject to module linkage, and no additional member functions or friend declarations are present.
+The struct `clore::generate::cache::CacheError` is a minimal error wrapper defined in the implementation namespace. Its sole data member, `message` of type `std::string`, holds a human-readable description of the error. The struct carries no invariants beyond the string being in a valid state, and it relies entirely on the default special member functions provided by the compiler and the `std::string` class. This lightweight design makes it suitable for use as an error result or exception payload within the `clore::generate::cache` module, where no additional error metadata or custom behavior is required.
 
 #### Invariants
 
-- No invariants beyond those of `std::string`.
+- The `message` member can be any string, including an empty string.
 
 #### Key Members
 
-- message
+- `message`
 
 #### Usage Patterns
 
-- Defined as a simple error type for caching operations.
+- Used to store an error description string; likely returned from functions to indicate failure.
 
 ### `clore::generate::cache::CacheIndex`
 
-Declaration: `generate/cache.cppm:20`
+Declaration: `src/generate/cache.cppm:39`
 
-Definition: `generate/cache.cppm:20`
+Definition: `src/generate/cache.cppm:39`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-The struct `clore::generate::cache::CacheIndex` is a thin wrapper around a single member, a `std::unordered_map<std::string, std::string>` named `entries`. The map serves as the entire internal storage of the index, associating string keys with string values. The primary invariant is the same as that of the underlying unordered map: each key is unique within the map, and the hash and equality operations on the keys are determined by the default standard library specializations for `std::string`. The struct itself has no custom constructors, assignment `operator`s, or other member functions, so all behavioral guarantees—such as the average constant-time lookup, insertion, and erasure—are inherited directly from the `std::unordered_map` implementation. The absence of additional members or invariants makes `CacheIndex` a straightforward, data-only point of use for clients that require an unordered mapping of strings to strings within the cache subsystem.
+The struct `clore::generate::cache::CacheIndex` is implemented as a thin wrapper around a single public member `entries`, which is an `std::unordered_map` mapping strings to strings. This container stores the mapping from cache keys (likely resource identifiers or paths) to their corresponding cached values (e.g., file hashes or generated output). The only structural invariant is that each key is unique and maps to exactly one value, enforced by the underlying associative container. There are no additional methods or constraints beyond those inherent to the hash map; the struct serves as a direct index into the cached data.
 
 #### Invariants
 
-- Keys in `entries` are unique by definition of `std::unordered_map`
+- The `entries` map is an unordered mapping from string keys to string values
+- No invariants beyond those of `std::unordered_map` are guaranteed by this struct
 
 #### Key Members
 
-- `entries`
+- entries
 
 #### Usage Patterns
 
-- Instantiated and populated with key-value pairs representing cached index data
-- Accessed directly via its public member to insert, look up, or iterate over cache entries
-- Likely used as a building block within a larger cache manager or cache file representation
+- Used by the cache system to store and retrieve string-based index entries
+- Likely manipulated via direct access to the `entries` member
 
 ## Functions
 
 ### `clore::generate::cache::find_cached_response`
 
-Declaration: `generate/cache.cppm:35`
+Declaration: `src/generate/cache.cppm:54`
 
-Definition: `generate/cache.cppm:347`
+Definition: `src/generate/cache.cppm:366`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-The `find_cached_response` function performs a straightforward lookup in the provided `CacheIndex`. It converts the input `cache_key` from `std::string_view` to a `std::string` and uses it as the key in the `index.entries` map (which is likely a `std::unordered_map` or similar associative container). If the key is not found via `std::map::find`, the function returns `std::nullopt`; otherwise it returns the stored `std::string_view` value associated with that key. This implementation has no branching beyond the existence check and no external dependencies beyond the `CacheIndex` type and standard library containers.
+The implementation of `clore::generate::cache::find_cached_response` performs a direct hash-map lookup into the pre‑loaded `clore::generate::cache::CacheIndex` object. The function converts the incoming `std::string_view` `cache_key` into a `std::string` and calls `std::unordered_map::find` on the `clore::generate::cache::CacheIndex::entries` member. If the key is absent, it returns `std::nullopt`; otherwise it returns `it->second`, which is the cached response string (wrapped in `std::optional<std::string_view>`). No additional parsing, validation, or file I/O occurs—the entire retrieval path depends on the integrity of the `clore::generate::cache::CacheIndex` that was previously assembled by `clore::generate::cache::load_cache_index` or its async counterpart. The control flow is therefore purely sequential and constant‑time (amortized) with respect to the number of cached entries.
 
 #### Side Effects
 
@@ -89,206 +86,206 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `index.entries` (the internal map of the `CacheIndex`)
-- `cache_key` parameter
+- `index.entries` (the map inside `CacheIndex`)
+- `cache_key` (the lookup string)
 
 #### Usage Patterns
 
-- checking for an existing cached response before generating a new one
-- lookup by cache key in a `CacheIndex`
+- Check if a response is cached before generating a new one
+- Used internally by higher-level cache query functions
 
 ### `clore::generate::cache::load_cache_index`
 
-Declaration: `generate/cache.cppm:29`
+Declaration: `src/generate/cache.cppm:48`
 
-Definition: `generate/cache.cppm:252`
+Definition: `src/generate/cache.cppm:271`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-The function begins by calling `all_jsonl_files(workspace_root)` to obtain a list of pathnames for every `.jsonl` file under the given workspace directory. If that helper fails, the error is immediately forwarded as the return value. For each successfully retrieved file, `load_cache_index` reads the entire file content through `clore::support::read_utf8_text_file`; if the read attempt itself fails, that file is silently skipped. The content is then split line by line, and empty lines are discarded. Each non‑empty line is parsed as a `kota::codec::json::Object`; lines that fail to parse are also skipped without terminating the loop. For a successfully parsed object, the implementation looks for a `"key"` string field and a `"resp"` string field: if either is missing or empty, that entry is ignored. Otherwise, the key‑value pair is inserted into `index.entries`, with the key serving as the map key and the response as the associated value. After all files have been processed, the populated `CacheIndex` is returned. The only dependency that can produce an early `std::unexpected` is `all_jsonl_files`; all other errors are recovered by simply continuing to the next candidate entry.
+The implementation of `clore::generate::cache::load_cache_index` begins by calling `all_jsonl_files` on the provided `workspace_root`; if this call fails, the function immediately returns an unexpected `CacheError`.  It then iterates over every file path in the returned list, reading each as UTF‑8 text with `clore::support::read_utf8_text_file`.  For each file that is successfully read, the function splits the content into lines and processes each non‑empty line.  Every such line is parsed as a JSON object using `kota::codec::json::parse`.  If parsing succeeds, the function looks for the `"key"` and `"resp"` string fields in the parsed object; a line is skipped if either field is missing, not a string, or empty.  When both fields are valid, the pair is inserted into the `CacheIndex`’s `entries` map, overwriting any existing entry for the same key.  The function returns the assembled `CacheIndex` after all files have been processed, gracefully ignoring any file‑ or line‑level errors encountered along the way.
 
 #### Side Effects
 
-- reads multiple files from the filesystem
-- allocates memory for `CacheIndex::entries` and contained strings
+- Reads multiple JSONL files from the filesystem under `workspace_root`
+- Parses file contents into JSON objects
 
 #### Reads From
 
 - `workspace_root` parameter
-- filesystem files matching `*.jsonl` under `workspace_root`
-- contents of those files as UTF-8 text
-- the `"key"` and `"resp"` JSON fields from each non-empty line
-
-#### Writes To
-
-- constructs and returns a `CacheIndex` value
-- populates `CacheIndex::entries` with key-response pairs
+- JSONL files on disk
 
 #### Usage Patterns
 
-- cache index initialization on application startup
-- reloading cache index from disk
-- building a lookup structure for quickly retrieving cached responses by key
+- Initialize cache state at startup
+- Load existing cache entries from disk
 
 ### `clore::generate::cache::load_cache_index_async`
 
-Declaration: `generate/cache.cppm:38`
+Declaration: `src/generate/cache.cppm:57`
 
-Definition: `generate/cache.cppm:356`
-
-Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
-
-The implementation of `load_cache_index_async` is a coroutine that delegates the synchronous loading work to the event loop. It calls `kota::queue` with a lambda that invokes `clore::generate::cache::load_cache_index` on the given `workspace_root`, and then awaits the resulting queued task with cancellation support. If the queuing itself fails (e.g., due to cancellation), it constructs a `CacheError` with a descriptive message and fails via `kota::fail`. Otherwise, it inspects the inner `std::expected<CacheIndex, CacheError>` returned from `load_cache_index`: if that expected result holds an error, the coroutine fails with the moved error object; if it holds a value, the coroutine co-returns that `CacheIndex`. This pattern cleanly offloads the blocking I/O‑bound index loading to the event loop’s thread pool while preserving error propagation through the asynchronous task chain.
-
-#### Side Effects
-
-- reads cache index from filesystem via `load_cache_index`
-- schedules work on the provided event loop
-- may propagate a `CacheError` through `kota::fail`
-
-#### Reads From
-
-- the `workspace_root` parameter
-- the `loop` parameter (for scheduling)
-- the cache index file (indirectly through `load_cache_index`)
-- the error state of the queued result
-
-#### Usage Patterns
-
-- asynchronous cache index loading before response caching
-- non‑blocking initialization in event‑loop driven applications
-- part of the cache layer that integrates with `save_cache_entry_async`
-
-### `clore::generate::cache::make_prompt_response_cache_key`
-
-Declaration: `generate/cache.cppm:24`
-
-Definition: `generate/cache.cppm:219`
+Definition: `src/generate/cache.cppm:375`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-The function constructs a deterministic cache key by concatenating several components separated by tab characters. The `request_key` is taken as given, while both the `request.prompt` and `system_prompt` are first normalized via `normalize_text_for_hashing` and then hashed with `llvm::xxh3_64bits` to produce 64‑bit integer strings. The `response_format_fingerprint` and `tool_choice_fingerprint` helpers each yield a fingerprint string; the former may fail, and that error is propagated immediately by returning `std::unexpected`. Finally a single character derived from `request.output_contract` is appended. The result string is built with a reserved capacity sufficient for the known components.
+The implementation of `load_cache_index_async` is a coroutine that wraps the synchronous `load_cache_index` function for asynchronous execution on a `kota::event_loop`. It calls `kota::queue` to offload the synchronous work to a background thread, passing a lambda that captures the moved `workspace_root` and delegates to `load_cache_index`. After `co_await`, it invokes `catch_cancel` to handle task cancellation gracefully. If the `queued_result` contains an error at the top level (e.g., the task was cancelled), it `co_awaits` `kota::fail` with a `CacheError` describing the failure. Otherwise, it unwraps the inner `std::expected` from `load_cache_index`: if that expected holds an error, it `co_awaits` `kota::fail` with the moved `CacheError`; on success, it `co_returns` the moved `CacheIndex` value.
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- dispatches a blocking disk read operation to an event loop
+- may load and parse a cache index file from disk into memory
 
 #### Reads From
 
-- `request_key` parameter (string view)
-- `system_prompt` parameter (string view)
-- `request.prompt` (string view)
-- `request.response_format` (some type, read for fingerprint)
-- `request.tool_choice` (some type, read for fingerprint)
-- `request.output_contract` (integral, converted to char)
+- disk via the synchronous `load_cache_index` call
+- event loop parameter loop
 
 #### Writes To
 
-- The returned `std::string` (heap allocation and construction)
+- allocates and populates a `CacheIndex` object returned via the task
 
 #### Usage Patterns
 
-- Used before `clore::generate::cache::find_cached_response` to generate key for lookup
-- Used before `clore::generate::cache::save_cache_entry` to generate key for storing
-- Employed by asynchronous cache operations such as `save_cache_entry_async` when constructing keys
+- called to asynchronously retrieve the cache index before performing cache queries or updates
+
+### `clore::generate::cache::make_prompt_response_cache_key`
+
+Declaration: `src/generate/cache.cppm:43`
+
+Definition: `src/generate/cache.cppm:238`
+
+Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
+
+The function first processes the `request.response_format` by calling `response_format_fingerprint`, propagating any error immediately via `std::unexpected`. It then normalizes both the prompt and the system prompt using `normalize_text_for_hashing`, and computes 64‑bit hashes of each with `llvm::xxh3_64bits`. A fingerprint for `request.tool_choice` is obtained through `tool_choice_fingerprint`. The final cache key is built by appending the `request_key`, the two hash values as decimal strings, the response format fingerprint, the tool choice fingerprint, and a single character encoding `request.output_contract`, each component separated by a tab character. The string is constructed with a pre‑reserved capacity to minimize allocations.
+
+#### Side Effects
+
+- allocates heap memory for the returned string
+- calls `normalize_text_for_hashing` which may allocate
+- calls `llvm::xxh3_64bits` which is a pure hash but may use internal state
+
+#### Reads From
+
+- parameter `request_key`
+- parameter `system_prompt`
+- parameter `request` fields: `request.response_format`, `request.prompt`, `request.tool_choice`, `request.output_contract`
+
+#### Writes To
+
+- local `response_format`
+- local `normalized_prompt`
+- local `normalized_system_prompt`
+- local `prompt_hash`
+- local `system_prompt_hash`
+- local `tool_choice`
+- local `key`
+- return value (new heap-allocated string)
+
+#### Usage Patterns
+
+- called during cache key generation for prompt-response pairs
+- used by `find_cached_response` and related cache functions
 
 ### `clore::generate::cache::normalize_text_for_hashing`
 
-Declaration: `generate/cache.cppm:192`
+Declaration: `src/generate/cache.cppm:211`
 
-Definition: `generate/cache.cppm:192`
+Definition: `src/generate/cache.cppm:211`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
 Implementation: [Implementation](functions/normalize-text-for-hashing.md)
 
-The implementation of `clore::generate::cache::normalize_text_for_hashing` applies a two‑pass normalization to an arbitrary input `text` to produce a canonical form suitable for hashing in cache‑key construction. The first pass trims all leading whitespace characters using `std::isspace`. The second pass iterates over the remaining characters and collapses any contiguous run of whitespace into a single ASCII space character (`' '`). The internal control flow uses a boolean flag `prev_space` to track whether the previous character was whitespace; when a non‑space character is encountered and `prev_space` is true, a single space is appended to the result `std::string` only if the result is not empty. The function depends only on the C++ standard library, specifically the `<cctype>` facilities via `std::isspace`, and uses `result.reserve(text.size())` to minimise reallocations. This normalisation ensures that differing amounts of whitespace do not produce distinct hash keys, while preserving the distinction between words separated by any amount of whitespace versus no whitespace.
+The function `clore::generate::cache::normalize_text_for_hashing` normalizes input text to a canonical form suitable for generating hash-based cache keys. It first trims all leading whitespace by advancing a `start` index past any characters for which `std::isspace` returns true. It then iterates over the remaining characters, using a `prev_space` flag to collapse any contiguous sequence of whitespace characters into a single space character inserted just before the next non‑space character. If the very first non‑space character after trimming would have been preceded by a space, the space is omitted because `result` is empty at that point; this effectively suppresses leading whitespace that was already trimmed. The resulting string contains no leading whitespace, no repeated spaces, and no trailing whitespace (because trailing whitespace is skipped by the collapse logic and not added back). Normalization relies solely on the C++ locale‑independent `std::isspace` check after casting each character to `unsigned char`, and uses only standard library facilities.
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- Allocates a new string and returns it
 
 #### Reads From
 
-- the `text` parameter
+- text parameter
+
+#### Writes To
+
+- returned result string
 
 #### Usage Patterns
 
-- Used by `make_prompt_response_cache_key` to normalize text before forming a cache key
+- Called by `make_prompt_response_cache_key` to normalize prompt and response texts before generating the cache key
 
 ### `clore::generate::cache::save_cache_entry`
 
-Declaration: `generate/cache.cppm:31`
+Declaration: `src/generate/cache.cppm:50`
 
-Definition: `generate/cache.cppm:303`
+Definition: `src/generate/cache.cppm:322`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-The function `clore::generate::cache::save_cache_entry` serializes a new cache entry by appending a single JSONL line to the current daily cache file. It first acquires a static `std::mutex` named `cache_file_mutex` to ensure exclusive access. The directory path is resolved by calling `cache_directory` on `workspace_root`; if that fails, the error is forwarded. The directory is then created if absent using `fs::create_directories`, with any creation failure reported as a `CacheError`. The target file path is formed by concatenating the directory with `current_jsonl_filename()`. A JSONL line is built from `cache_key` and `response` via the helper `build_jsonl_line`. The file is opened in binary append mode and, if successful, the line is written and flushed. Write errors are captured and returned as a `CacheError`. On success the function returns an empty `std::expected<void>`. All intermediate operations check for failure and propagate errors as `std::unexpected(CacheError{...})`.
+The function first acquires a static `std::mutex` via `std::lock_guard lock(cache_file_mutex)` to serialize concurrent cache writes. It resolves the cache directory by calling `cache_directory(workspace_root)`; if that fails, the error is forwarded. After ensuring the directory exists with `fs::create_directories`, it constructs the target JSONL file path by appending the result of `current_jsonl_filename()` to the directory. A JSONL line is built from `cache_key` and `response` using `build_jsonl_line`, and the file is opened in binary append mode. The line is written, flushed, and the write status is checked; any failure (open or write) returns a `CacheError` with a descriptive message. On success, the function returns `{}`. This implementation depends on the internal helpers `cache_directory`, `current_jsonl_filename`, and `build_jsonl_line`, and uses a static mutex to provide thread-safe append to the rotating JSONL log files.
 
 #### Side Effects
 
-- acquires a static mutex for synchronization
-- creates directories under `workspace_root` if they do not exist
-- appends a JSONL line to the cache file in the cache directory
+- acquires a static mutex
+- creates directories on the filesystem
+- opens and appends to a JSONL file
+- flushes the file stream
 
 #### Reads From
 
-- `workspace_root` parameter
-- `cache_key` parameter
-- `response` parameter
-- filesystem through `cache_directory` and `current_jsonl_filename`
-- result of `build_jsonl_line` call
+- parameter `workspace_root`
+- parameter `cache_key`
+- parameter `response`
+- `current_jsonl_filename()`
+- `cache_directory(workspace_root)`
+- `build_jsonl_line(cache_key, response)`
 
 #### Writes To
 
-- filesystem cache directory (created if missing)
-- JSONL cache file in that directory (appended)
-- static mutex lock state
+- filesystem: cache directory
+- filesystem: JSONL file at `*dir / current_jsonl_filename()`
 
 #### Usage Patterns
 
-- persist a generated response in the cache after completion of a generation request
-- synchronous alternative to `save_cache_entry_async` for environments where async is not desired
+- used to persist a cache entry for later retrieval via `load_cache_index` and `find_cached_response`
+- wrapped by `save_cache_entry_async` for asynchronous execution
 
 ### `clore::generate::cache::save_cache_entry_async`
 
-Declaration: `generate/cache.cppm:41`
+Declaration: `src/generate/cache.cppm:60`
 
-Definition: `generate/cache.cppm:376`
+Definition: `src/generate/cache.cppm:395`
 
 Declaration: [`Namespace clore::generate::cache`](../../namespaces/clore/generate/cache/index.md)
 
-This function is a coroutine that offloads the synchronous `clore::generate::cache::save_cache_entry` onto the provided `kota::event_loop` via `kota::queue`, then awaits the result. The captured arguments (`workspace_root`, `cache_key`, `response`) are moved into the lambda to avoid copies. If the queue operation is cancelled, `catch_cancel` returns an error; the function then fails with a `CacheError` containing a descriptive message. If the inner `save_cache_entry` call returned a `std::expected` containing an error, that error is forwarded by failing with it. On success, the coroutine completes normally. The control flow is linear: queue the work, check for cancellation, check the expected result, and either re-raise the error or `co_return`. The primary dependency is the blocking `save_cache_entry` (which performs filesystem I/O and JSONL appending), the `kota::queue` asynchronous dispatch mechanism, and the `CacheError` type used for error propagation.
+The function `clore::generate::cache::save_cache_entry_async` offloads the synchronous `clore::generate::cache::save_cache_entry` onto a background task via `kota::queue` on the provided `kota::event_loop`. The three string arguments (`workspace_root`, `cache_key`, and `response`) are moved into the lambda closure to avoid copies. After awaiting the queued operation, it first checks for cancellation — if the task was cancelled, it fails with a `CacheError` containing a generic message. Otherwise, it inspects the inner `std::expected`; if the save produced an error, that error is forwarded via `kota::fail`. On success, the coroutine returns `void`. The implementation relies on the synchronous `save_cache_entry` for the actual file‑system write, and on the `kota` concurrency framework for asynchronous dispatch and error propagation.
 
 #### Side Effects
 
-- Initiates a write to the cache storage via the synchronous `save_cache_entry`
-- Potentially modifies the state of the event loop's task queue
+- I/O to disk via file writes
+- synchronization via event loop queue
+- allocation of task, lambda, and moved strings
+- error propagation through coroutine failure
 
 #### Reads From
 
-- Parameter `std::string workspace_root`
-- Parameter `std::string cache_key`
-- Parameter `std::string response`
-- Parameter `kota::event_loop& loop`
-- Result of `save_cache_entry(workspace_root, cache_key, response)`
+- `workspace_root`
+- `cache_key`
+- `response`
+- `loop`
 
 #### Writes To
 
-- Cache storage (via `save_cache_entry`)
+- disk cache entry via `save_cache_entry`
+- error state via `kota::fail`
 
 #### Usage Patterns
 
-- Used to asynchronously persist a generated response into a cache indexed by key and workspace
-- Called when a cache miss occurs and a new response must be stored without blocking the caller
-- Part of the `clore::generate::cache` module's asynchronous API
+- asynchronous caching of prompt-response
+- offloading blocking cache save to event loop
 
 ## Internal Structure
 
-The `generate:cache` module is decomposed into a public API surface and a set of anonymous-namespace helpers. The public API exposes cache operations that are either synchronous (`load_cache_index`, `save_cache_entry`) or asynchronous (`load_cache_index_async`, `save_cache_entry_async`) using a `kota::event_loop`, alongside utility functions for constructing deterministic cache keys (`make_prompt_response_cache_key`) and normalizing text for hashing (`normalize_text_for_hashing`). The module imports `protocol` (for completion‑related types such as tool choice and response format), `std` (for standard library types and filesystem support), and `support` (for foundational utilities like logging, path normalization, and transparent hash lookups).
-
-Internally, the cache is organized as a set of JSONL files in a workspace‑rooted cache directory. A `CacheIndex` struct holds parsed entries, while helpers such as `cache_directory`, `all_jsonl_files`, and `current_jsonl_filename` manage file discovery and creation on disk. Key construction relies on fingerprinting functions (`tool_choice_fingerprint`, `response_format_fingerprint`) and text normalization (`normalize_text_for_hashing`), which produce stable hashes from prompt, system prompt, tool choice, and response format components. Write operations are protected by a `cache_file_mutex` and use `build_jsonl_line` to format entries; `format_iso_timestamp` provides timestamps for cache‑file naming. This layering separates the public cache contract from filesystem details and fingerprint generation, enabling both synchronous and asynchronous access while keeping the core logic independent of any particular I/O strategy.
+The `generate:cache` module is implemented as a single C++20 module partition (`src/generate/cache.cppm`) that imports the `protocol` and `support` modules. It provides both synchronous and asynchronous `APIs` for persisting and retrieving LLM response caches. Internally, the module is decomposed into a public interface (functions like `load_cache_index`, `save_cache_entry`, `find_cached_response`, `make_prompt_response_cache_key`) and an anonymous namespace containing private helpers—for example, `escape_json_string`, `format_iso_timestamp`, and fingerprint generators for response format and tool choice. Cache entries are stored as JSONL files, and cache keys are constructed by normalizing textual inputs (via `normalize_text_for_hashing`) and combining hashes of the system prompt, user request, and tool configuration. Asynchronous operations (`load_cache_index_async`, `save_cache_entry_async`) delegate to a `kota::event_loop` for non‑blocking I/O, while a `cache_file_mutex` guards concurrent file access. This layered structure keeps I/O and key‑generation logic separated, making the module easy to extend with new caching strategies without affecting the public contract.
 
 ## Related Pages
 

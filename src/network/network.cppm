@@ -1,10 +1,17 @@
 module;
 
+#include <expected>
+#include <format>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
 #include "kota/async/async.h"
 
 export module network;
 
-import std;
 export import anthropic;
 export import client;
 export import http;

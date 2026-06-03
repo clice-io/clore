@@ -1,10 +1,22 @@
 module;
 
+#include <algorithm>
+#include <array>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <mutex>
+#include <optional>
+#include <shared_mutex>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <utility>
+
+#include "kota/async/async.h"
 #include "kota/codec/json/json.h"
 
 export module agent:tools;
-
-import std;
 import extract;
 import generate;
 import protocol;
@@ -649,7 +661,7 @@ auto dispatch_reflected_tool(const json::Value& arguments, const ToolContext& co
         });
     }
 
-    auto parsed = json::from_json<typename ToolImpl::Args>(*encoded);
+    auto parsed = json::parse<typename ToolImpl::Args>(*encoded);
     if(!parsed.has_value()) {
         return std::unexpected(
             ToolError{.message = std::format("failed to parse arguments for '{}': {}",
@@ -872,8 +884,8 @@ auto extract_string_arg(const json::Value& arguments, std::string_view field_nam
         return std::unexpected(ToolError{.message = "failed to read arguments object"});
     }
     for(auto entry: *object) {
-        if(entry.key == field_name) {
-            auto str = entry.value.get_string();
+        if(entry.first == field_name) {
+            auto str = entry.second.get_string();
             if(str.has_value()) {
                 return std::string(*str);
             }

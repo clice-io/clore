@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::generate'
-description: 'The clore::generate namespace is the core documentation generation engine, responsible for transforming code analysis data into final Markdown-based documentation pages. It defines a comprehensive pipeline that includes evidence gathering (e.g., EvidencePack, build_evidence_for_* functions), page planning (e.g., PagePlan, PagePlanSet, build_page_plan_set), page construction (e.g., build_page_root, build_file_page_root, build_namespace_page_root), and rendered output (e.g., render_page_markdown, render_markdown, write_pages). Key declarations include the PageType and PromptKind enumerations for categorizing pages and prompts, along with supporting data types such as LinkResolver, MarkdownDocument, and the analysis structs (FunctionAnalysis, TypeAnalysis, VariableAnalysis) that encapsulate per-symbol information. The namespace orchestrates the entire flow from raw symbol facts to a cohesive set of generated documentation files.'
+description: 'The clore::generate namespace provides the core infrastructure for transforming code analysis results into structured documentation pages. It orchestrates the entire generation pipeline, from constructing page plans and assembling evidence for LLM prompts to rendering final Markdown output. Key architectural roles include page planning (via PagePlan and PagePlanSet), evidence collection and prompt building (through EvidencePack and build_prompt), and final page assembly using MarkdownDocument and GeneratedPage. The namespace also centralizes cross‑reference resolution with LinkResolver, which maps entity names to page‑relative paths, and manages error handling through types like PromptError, PlanError, and GenerateError.'
 layout: doc
 template: doc
 ---
@@ -9,7 +9,9 @@ template: doc
 
 ## Summary
 
-The `clore::generate` namespace is the core documentation generation engine, responsible for transforming code analysis data into final Markdown-based documentation pages. It defines a comprehensive pipeline that includes evidence gathering (e.g., `EvidencePack`, `build_evidence_for_*` functions), page planning (e.g., `PagePlan`, `PagePlanSet`, `build_page_plan_set`), page construction (e.g., `build_page_root`, `build_file_page_root`, `build_namespace_page_root`), and rendered output (e.g., `render_page_markdown`, `render_markdown`, `write_pages`). Key declarations include the `PageType` and `PromptKind` enumerations for categorizing pages and prompts, along with supporting data types such as `LinkResolver`, `MarkdownDocument`, and the analysis structs (`FunctionAnalysis`, `TypeAnalysis`, `VariableAnalysis`) that encapsulate per-symbol information. The namespace orchestrates the entire flow from raw symbol facts to a cohesive set of generated documentation files.
+The `clore::generate` namespace provides the core infrastructure for transforming code analysis results into structured documentation pages. It orchestrates the entire generation pipeline, from constructing page plans and assembling evidence for LLM prompts to rendering final Markdown output. Key architectural roles include page planning (via `PagePlan` and `PagePlanSet`), evidence collection and prompt building (through `EvidencePack` and `build_prompt`), and final page assembly using `MarkdownDocument` and `GeneratedPage`. The namespace also centralizes cross‑reference resolution with `LinkResolver`, which maps entity names to page‑relative paths, and manages error handling through types like `PromptError`, `PlanError`, and `GenerateError`.
+
+Notable declarations include the high‑level entry points `generate_pages` and `generate_pages_async`, which synchronously or asynchronously drive the full generation workflow. Lower‑level builders such as `build_page_root`, `render_page_markdown`, and `render_page_bundle` produce content for individual pages, while utilities like `make_link_target` and `format_evidence_text` support link generation and evidence formatting. The namespace’s design cleanly separates analysis storage (`SymbolAnalysisStore`), page layout (`PageDocLayout`), and rendering into self‑contained units, enabling modular extension and testing of the documentation generator.
 
 ## Diagram
 
@@ -40,68 +42,72 @@ graph TD
     NS --> T10
     T11["GenerationSummary"]
     NS --> T11
-    T12["LinkFragment"]
+    T12["InlineFragment"]
     NS --> T12
-    T13["LinkResolver"]
+    T13["LinkFragment"]
     NS --> T13
-    T14["LinkTarget"]
+    T14["LinkResolver"]
     NS --> T14
-    T15["ListItem"]
+    T15["LinkTarget"]
     NS --> T15
-    T16["MarkdownDocument"]
+    T16["ListItem"]
     NS --> T16
-    T17["MarkdownFragmentResponse"]
+    T17["MarkdownDocument"]
     NS --> T17
-    T18["MarkdownNode"]
+    T18["MarkdownFragmentResponse"]
     NS --> T18
-    T19["MermaidDiagram"]
+    T19["MarkdownNode"]
     NS --> T19
-    T20["PageDocLayout"]
+    T20["MermaidDiagram"]
     NS --> T20
-    T21["PageIdentity"]
+    T21["PageDocLayout"]
     NS --> T21
-    T22["PagePlan"]
+    T22["PageIdentity"]
     NS --> T22
-    T23["PagePlanSet"]
+    T23["PagePlan"]
     NS --> T23
-    T24["PageType"]
+    T24["PagePlanSet"]
     NS --> T24
-    T25["Paragraph"]
+    T25["PageType"]
     NS --> T25
-    T26["PathError"]
+    T26["Paragraph"]
     NS --> T26
-    T27["PlanError"]
+    T27["PathError"]
     NS --> T27
-    T28["PromptError"]
+    T28["PlanError"]
     NS --> T28
-    T29["PromptKind"]
+    T29["PromptError"]
     NS --> T29
-    T30["PromptRequest"]
+    T30["PromptKind"]
     NS --> T30
-    T31["RawMarkdown"]
+    T31["PromptRequest"]
     NS --> T31
-    T32["RenderError"]
+    T32["RawMarkdown"]
     NS --> T32
-    T33["SemanticKind"]
+    T33["RenderError"]
     NS --> T33
-    T34["SemanticSection"]
+    T34["SemanticKind"]
     NS --> T34
-    T35["SymbolAnalysisStore"]
+    T35["SemanticSection"]
     NS --> T35
-    T36["SymbolDocPlan"]
+    T36["SemanticSectionPtr"]
     NS --> T36
-    T37["SymbolDocView"]
+    T37["SymbolAnalysisStore"]
     NS --> T37
-    T38["SymbolFact"]
+    T38["SymbolDocPlan"]
     NS --> T38
-    T39["SymbolTargetKeyView"]
+    T39["SymbolDocView"]
     NS --> T39
-    T40["TextFragment"]
+    T40["SymbolFact"]
     NS --> T40
-    T41["TypeAnalysis"]
+    T41["SymbolTargetKeyView"]
     NS --> T41
-    T42["VariableAnalysis"]
+    T42["TextFragment"]
     NS --> T42
+    T43["TypeAnalysis"]
+    NS --> T43
+    T44["VariableAnalysis"]
+    NS --> T44
     NSC0["__detail"]
     NS --> NSC0
     NSC1["cache"]
@@ -116,114 +122,77 @@ graph TD
 
 ### `clore::generate::BlockQuote`
 
-Declaration: `generate/markdown.cppm:62`
+Declaration: `src/generate/markdown.cppm:73`
 
-Definition: `generate/markdown.cppm:62`
+Definition: `src/generate/markdown.cppm:73`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-The `clore::generate::BlockQuote` struct represents a block quotation element within a generated markdown document. It is one of several markdown node types—alongside `Paragraph`, `CodeFence`, `BulletList`, and `TextFragment`—that together form the content structure used by the generation pipeline. This type is designed to hold the quoted content, typically as one or more `MarkdownNode` instances, and is rendered as an indented blockquote in the final output.
-
-`BlockQuote` is commonly used when the generator needs to emphasize a cited excerpt, a verbatim warning, or a noteworthy extract from source code comments or documentation. It participates in the same composable node system as other markdown fragments, allowing builders to nest inline elements or continue with further document construction after the quote.
-
-#### Invariants
-
-- The `fragments` vector holds the sequence of inline elements within the block quote.
-- An empty `fragments` vector represents an empty block quote.
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Key Members
 
-- `fragments`
+- fragments
 
 #### Usage Patterns
 
-- Constructed with a list of `InlineFragment` objects to define the quote content.
-- Iterated over or accessed during markdown output generation to render the block quote.
+- Used by markdown generation code to structure block quotes
+- May be populated with inline fragments representing styled text or inline elements
 
 ### `clore::generate::BulletList`
 
-Declaration: `generate/markdown.cppm:49`
+Declaration: `src/generate/markdown.cppm:60`
 
-Definition: `generate/markdown.cppm:49`
+Definition: `src/generate/markdown.cppm:60`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+`clore::generate::BulletList` is a data type used in the markdown generation subsystem to represent an unordered (bulleted) list structure within a document. It typically appears as a node in a tree of `clore::generate::MarkdownNode` variants, allowing the renderer to emit a proper markdown bullet list when building the final output. `BulletList` is often composed of one or more `clore::generate::ListItem` instances, and it may be nested inside other block-level constructs such as `clore::generate::Section` or `clore::generate::Paragraph` contexts.
+
+#### Invariants
+
+- Items are stored in sequence as they appear in the vector
+- The vector may be empty, representing an empty bullet list
+
+#### Key Members
+
+- `items`: `std::vector<ListItem>` containing the list entries
+
+#### Usage Patterns
+
+- Populated with `ListItem` objects and passed to rendering functions for markdown output
+- Likely constructed by builders or parsers during document generation
 
 ### `clore::generate::CodeFence`
 
-Declaration: `generate/markdown.cppm:53`
+Declaration: `src/generate/markdown.cppm:64`
 
-Definition: `generate/markdown.cppm:53`
+Definition: `src/generate/markdown.cppm:64`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-The `clore::generate::CodeFence` struct represents a fenced code block within a generated Markdown document. It is used to encapsulate source code or other preformatted content, providing the appropriate Markdown fence syntax and optional language identifier as part of the document generation pipeline.
+`clore::generate::CodeFence` represents a fenced code block within a generated Markdown document. It encapsulates the language identifier and the body of the code, serving as a structured fragment that can be composed into larger output structures such as `MarkdownDocument` or `GeneratedPage`. This type is typically used during the rendering phase to produce correctly formatted code fences, enabling syntax highlighting and clear separation of code from surrounding text.
+
+#### Invariants
+
+- Both `language` and `code` are arbitrary `std::string` objects; no content restrictions are enforced.
+- The struct has no user-declared constructors, destructors, or assignment `operator`s, so it is an aggregate type.
+
+#### Key Members
+
+- `language`: the language identifier for the code fence (e.g., "cpp", "python").
+- `code`: the actual source code content enclosed in the fence.
+
+#### Usage Patterns
+
+- Direct initialization and member assignment are used to set `language` and `code`.
+- Other code accesses the members to read the stored values, likely for serialization into markdown text.
 
 ### `clore::generate::CodeFragment`
 
-Declaration: `generate/markdown.cppm:29`
+Declaration: `src/generate/markdown.cppm:40`
 
-Definition: `generate/markdown.cppm:29`
-
-Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
-
-The `clore::generate::CodeFragment` struct represents a fragment of code content within a generated markdown document. It is used to encapsulate a code snippet or block, typically as part of a larger markdown fragment hierarchy that includes types like `TextFragment`, `LinkFragment`, and `RawMarkdown`. `CodeFragment` serves as a building block for constructing structured code-related output in the documentation generation pipeline.
-
-#### Invariants
-
-- The `code` member is a valid `std::string` object.
-- No constraints on the content or length of the string are enforced.
-
-#### Key Members
-
-- `code` of type `std::string` stores the code fragment content.
-
-#### Usage Patterns
-
-- Instantiated directly with a string literal or variable containing code.
-- Collected into larger objects or sequences for later assembly into complete generated output.
-
-### `clore::generate::EvidencePack`
-
-Declaration: `generate/evidence.cppm:22`
-
-Definition: `generate/evidence.cppm:22`
-
-Implementation: [`Module generate:evidence`](../../../modules/generate/evidence.md)
-
-`clore::generate::EvidencePack` is a container type that aggregates collected evidence from code analysis, such as symbols, types, and functions, to be consumed by the documentation generation pipeline. It represents the intermediate knowledge state of the codebase under generation, serving as the primary input for planning and rendering pages. This pack bundles together objects like `SymbolFact`, `TypeAnalysis`, and `FunctionAnalysis` so that downstream stages—such as `PagePlan`, `GeneratedPage`, and `MarkdownDocument`—can access the full analytical context without re-querying the source.
-
-#### Invariants
-
-- All fields are expected to be populated before the struct is used for generation.
-- `subject_name` and `subject_kind` must be non-empty strings.
-- Vectors may be empty but should be consistent with the evidence collected.
-
-#### Key Members
-
-- `subject_name`
-- `subject_kind`
-- `page_id`
-- `prompt_kind`
-- `target_facts`
-- `local_context`
-- `dependency_context`
-- `reverse_usage_context`
-- `source_snippets`
-- `related_page_summaries`
-
-#### Usage Patterns
-
-- `EvidencePack` is constructed by evidence collection logic that scans the codebase for facts about a symbol.
-- It is passed to a prompt generator or LLM invocation to provide context for documentation generation.
-- Each field is used to shape the final prompt, such as `subject_name` for identification and context vectors for relevance.
-
-### `clore::generate::Frontmatter`
-
-Declaration: `generate/markdown.cppm:18`
-
-Definition: `generate/markdown.cppm:18`
+Definition: `src/generate/markdown.cppm:40`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
@@ -231,9 +200,56 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `layout` defaults to `"doc"`
-- `page_template` defaults to `"doc"`
-- all members are `std::string`
+- No invariants beyond those of `std::string`.
+
+#### Key Members
+
+- `code`
+
+#### Usage Patterns
+
+- Used as a data carrier for code fragments.
+
+### `clore::generate::EvidencePack`
+
+Declaration: `src/generate/evidence.cppm:34`
+
+Definition: `src/generate/evidence.cppm:34`
+
+Implementation: [`Module generate:evidence`](../../../modules/generate/evidence.md)
+
+Insufficient evidence to summarize; provide more EVIDENCE.
+
+#### Invariants
+
+- All vector fields may be empty
+- Scalar string fields may be empty
+
+#### Key Members
+
+- `target_facts`
+- `local_context`
+- `subject_name`
+- `subject_kind`
+
+#### Usage Patterns
+
+- Assembled by evidence collectors and consumed by generation logic
+- Each field is independently populated
+
+### `clore::generate::Frontmatter`
+
+Declaration: `src/generate/markdown.cppm:29`
+
+Definition: `src/generate/markdown.cppm:29`
+
+Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
+
+The `clore::generate::Frontmatter` struct represents the metadata block (frontmatter) that accompanies a generated Markdown document. It stores properties such as title, description, and other page‑level attributes that appear between `---` delimiters at the top of the output file. This struct is part of the document generation infrastructure and is typically populated during page planning, then consumed when rendering the final Markdown document.
+
+#### Invariants
+
+- No enforced invariants; all members are freely assignable strings.
 
 #### Key Members
 
@@ -244,23 +260,23 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Populated with frontmatter data before generating markdown pages
-- Consumed by functions that produce YAML header blocks in documentation output
+- No usage patterns observed in the provided evidence.
 
 ### `clore::generate::FunctionAnalysis`
 
-Declaration: `generate/model.cppm:81`
+Declaration: `src/generate/model.cppm:97`
 
-Definition: `generate/model.cppm:81`
+Definition: `src/generate/model.cppm:97`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The `clore::generate::FunctionAnalysis` struct holds the results of analyzing a function symbol during the documentation generation pipeline. It belongs to a family of analysis types—including `TypeAnalysis`, `VariableAnalysis`, and `SymbolFact`—that collectively model the semantic information extracted from a codebase. Its primary role is to capture function-specific details such as parameters, return type, and any associated constraints, which are then used by downstream generation components (e.g., `PagePlan`, `SymbolDocPlan`) to produce accurate and context-rich documentation pages. The struct is typically stored within a `SymbolAnalysisStore` alongside analyses for other symbol kinds, enabling uniform processing across the generation workflow.
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- All members are public and mutable.
-- `has_side_effects` defaults to `false` and is independent of the contents of `side_effects`.
+- Default value of `has_side_effects` is false
+- All vector fields may be empty
+- Strings contain plain markdown fragments
 
 #### Key Members
 
@@ -274,13 +290,15 @@ The `clore::generate::FunctionAnalysis` struct holds the results of analyzing a 
 
 #### Usage Patterns
 
-- The struct is used as a cacheable result container for per-function analysis, populated by analysis passes and consumed by documentation generation.
+- Cached and reused across namespace, module, file, and symbol documentation pages
+- Populated by code analysis passes
+- Consumed by documentation generators
 
 ### `clore::generate::GenerateError`
 
-Declaration: `generate/model.cppm:69`
+Declaration: `src/generate/model.cppm:85`
 
-Definition: `generate/model.cppm:69`
+Definition: `src/generate/model.cppm:85`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -288,49 +306,49 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Message contains a descriptive error string
+- The `message` field is intended to be non-empty when the struct is used to represent an actual error.
 
 #### Key Members
 
-- `message` - a `std::string` holding the error description
+- `message`
 
 #### Usage Patterns
 
-- Constructed with an error description when a generation fails
-- Likely thrown as an exception or returned from a function indicating an error
+- Returned or thrown from generation functions to indicate failure.
+- Inspected by callers to obtain error details.
 
 ### `clore::generate::GeneratedPage`
 
-Declaration: `generate/model.cppm:55`
+Declaration: `src/generate/model.cppm:71`
 
-Definition: `generate/model.cppm:55`
+Definition: `src/generate/model.cppm:71`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+The `clore::generate::GeneratedPage` struct represents the final output of a single documentation page after the generation process completes. It serves as a container that aggregates the structured content produced from semantic analysis and rendering, including text sections, symbol facts, semantic sections, and other page components. This type is typically used as the result type in page-generation workflows, where a `clore::generate::PagePlan` is transformed into a fully resolved page suitable for downstream formatting or writing.
+
+Within the `clore::generate` namespace, `GeneratedPage` works alongside related types such as `PageIdentity`, `PagePlan`, and `SemanticSection` to form the core data model for the documentation generator. It encapsulates the final state of a page after all prompts, symbol lookups, and rendering steps have been applied, making it a key output type for consumers that need to emit final documentation files.
 
 #### Invariants
 
-- all fields are `std::string` values, possibly empty
-- the struct has no other invariants beyond the default string invariants
+- All fields are default-initialized to empty strings.
 
 #### Key Members
 
-- `title` – the page title
-- `relative_path` – the relative file path for the generated page
-- `content` – the full page content
+- `title`
+- `relative_path`
+- `content`
 
 #### Usage Patterns
 
-- constructed using aggregate initialization `GeneratedPage{...}`
-- fields are read or modified directly to configure a generated page
-- passes completed page data from generation logic to output or serialization
+- Returned from page generation functions.
+- Passed to serialization or file writing routines.
 
 ### `clore::generate::GenerationSummary`
 
-Declaration: `generate/model.cppm:61`
+Declaration: `src/generate/model.cppm:77`
 
-Definition: `generate/model.cppm:61`
+Definition: `src/generate/model.cppm:77`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -338,9 +356,8 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- All counter members are non-negative integers.
-- Every counter begins at zero on default construction.
-- Cache hit and miss counts for a given category are independent (no enforced relationship).
+- All fields are initialized to zero by default
+- Counters are non-negative integers
 
 #### Key Members
 
@@ -352,14 +369,12 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Instances are populated during generation to record performance metrics.
-- Consumers read these values to report or log generation statistics.
+- Collected and read by generation logic to report performance statistics
+- Used as a return or output parameter from generation functions
 
-### `clore::generate::LinkFragment`
+### `clore::generate::InlineFragment`
 
-Declaration: `generate/markdown.cppm:33`
-
-Definition: `generate/markdown.cppm:33`
+Declaration: `src/generate/markdown.cppm:50`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
@@ -367,34 +382,62 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `code_style` defaults to `false`
-- No invariants enforced; all members are mutable public strings and bool
+- Only one alternative is active at a time
 
 #### Key Members
 
-- `label`
-- `target`
-- `code_style`
+- `std::variant`
+- `TextFragment`
+- `CodeFragment`
+- `LinkFragment`
 
 #### Usage Patterns
 
-- No explicit usage is described in the evidence; the struct likely serves as input to markdown generation functions where a link fragment with optional code styling is needed.
+- Used to store and process inline elements in Markdown generation
 
-### `clore::generate::LinkResolver`
+### `clore::generate::LinkFragment`
 
-Declaration: `generate/model.cppm:174`
+Declaration: `src/generate/markdown.cppm:44`
 
-Definition: `generate/model.cppm:174`
+Definition: `src/generate/markdown.cppm:44`
 
-Implementation: [`Module generate:model`](../../../modules/generate/model.md)
+Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-The `LinkResolver` struct is a key component for generating hyperlinks within markdown documentation. It maintains a mapping from entity names—such as qualified type and namespace names, module names, and file paths—to their corresponding page-relative paths within the output directory. When producing cross-reference links in markdown, the resolver is consulted to translate a symbolic name into the correct relative URL, ensuring that all internal references point to the intended target page.
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Each `unordered_map` is keyed by a string representing an entity name, page ID, or similar identifier.
-- All lookup methods return `nullptr` when the key is not present in the respective map.
-- The maps are read-only after construction; no mutating methods are provided.
+- No explicit invariants are documented; the struct is a plain aggregate.
+- `code_style` defaults to `false`.
+- All members are public and can be directly accessed.
+
+#### Key Members
+
+- `label` - the display text of the link fragment
+- `target` - the URL target of the link fragment
+- `code_style` - whether the label should be rendered as inline code
+
+#### Usage Patterns
+
+- Not specified in evidence; the struct is only defined in the provided snippet.
+
+### `clore::generate::LinkResolver`
+
+Declaration: `src/generate/model.cppm:190`
+
+Definition: `src/generate/model.cppm:190`
+
+Implementation: [`Module generate:model`](../../../modules/generate/model.md)
+
+`clore::generate::LinkResolver` is a struct that maps entity names—such as qualified type names, namespace names, module names, or file paths—to their corresponding page-relative paths within the output directory. Its primary purpose is to enable the generation of Markdown cross-reference links by providing the target path for any documented entity.
+
+During the documentation generation process, `LinkResolver` is used to resolve the destination of links between generated pages. When a piece of content references an entity, the resolver looks up the stored mapping and produces the correct relative path, ensuring that hyperlinks in the final Markdown output point to the appropriate page for that entity.
+
+#### Invariants
+
+- All maps are fully populated before any resolve call.
+- Keys in each map are unique.
+- Returned pointers remain valid as long as the map is not modified.
 
 #### Key Members
 
@@ -409,118 +452,122 @@ The `LinkResolver` struct is a key component for generating hyperlinks within ma
 
 #### Usage Patterns
 
-- Used by link generation code to resolve entity names to relative paths for markdown cross-reference links.
-- Typically populated by a builder component that collects namespace, module, and type information.
-- Queried via the four `resolve*` methods during documentation page generation.
+- Called during documentation generation to resolve cross-reference links.
+- Used to convert entity names to output-relative paths.
+- Supports separate lookups for names, namespaces, modules, and page titles.
 
 #### Member Functions
 
 ##### `clore::generate::LinkResolver::resolve`
 
-Declaration: `generate/model.cppm:180`
+Declaration: `src/generate/model.cppm:196`
 
-Definition: `generate/model.cppm:180`
+Definition: `src/generate/model.cppm:196`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
 ###### Declaration
 
 ```cpp
-auto (const int &) const -> int;
+auto (const std::string &) const -> const std::string *;
 ```
 
 ##### `clore::generate::LinkResolver::resolve_module`
 
-Declaration: `generate/model.cppm:190`
+Declaration: `src/generate/model.cppm:206`
 
-Definition: `generate/model.cppm:190`
+Definition: `src/generate/model.cppm:206`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
 ###### Declaration
 
 ```cpp
-auto (const int &) const -> int;
+auto (const std::string &) const -> const std::string *;
 ```
 
 ##### `clore::generate::LinkResolver::resolve_namespace`
 
-Declaration: `generate/model.cppm:185`
+Declaration: `src/generate/model.cppm:201`
 
-Definition: `generate/model.cppm:185`
+Definition: `src/generate/model.cppm:201`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
 ###### Declaration
 
 ```cpp
-auto (const int &) const -> int;
+auto (const std::string &) const -> const std::string *;
 ```
 
 ##### `clore::generate::LinkResolver::resolve_page_title`
 
-Declaration: `generate/model.cppm:195`
+Declaration: `src/generate/model.cppm:211`
 
-Definition: `generate/model.cppm:195`
+Definition: `src/generate/model.cppm:211`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
 ###### Declaration
 
 ```cpp
-auto (const int &) const -> int;
+auto (const std::string &) const -> const std::string *;
 ```
 
 ### `clore::generate::LinkTarget`
 
-Declaration: `generate/render/common.cppm:11`
+Declaration: `src/generate/render/common.cppm:22`
 
-Definition: `generate/render/common.cppm:11`
+Definition: `src/generate/render/common.cppm:22`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
-
-### `clore::generate::ListItem`
-
-Declaration: `generate/markdown.cppm:45`
-
-Definition: `generate/markdown.cppm:45`
-
-Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
-
-`clore::generate::ListItem` represents a single entry within a generated list, such as a bullet list or ordered list. It is typically used as a child element of `clore::generate::BulletList` or analogous container types, encapsulating the text, fragments, or other inline content that constitutes one item of the list. During document generation, `ListItem` is assembled to form the rendered markdown or plain-text output corresponding to each list entry.
+The `clore::generate::LinkTarget` struct represents a destination for a hyperlink within generated documentation. It encapsulates the necessary information to resolve a cross-reference to a particular symbol, page, or section, such as the target’s identifier, location, or other addressing details. Instances of `LinkTarget` are typically produced by a `LinkResolver` and consumed by rendering components to create correct HTML or Markdown links, ensuring that all internal references in the documentation point to valid targets.
 
 #### Invariants
 
-- The `fragments` vector may be empty or non-empty; no constraint is imposed.
-- `ListItem` is a simple aggregate with no special constructors or invariants beyond those of its member types.
+- No invariants beyond the default value of `code_style` being `false`.
 
 #### Key Members
 
-- `fragments` – stores the list item's content as a vector of inline fragments
+- `label`
+- `target`
+- `code_style`
 
 #### Usage Patterns
 
-- Defined in the `clore::generate` module for markdown generation.
-- Likely used as part of a larger list structure (e.g., `ListBlock` or similar) but no evidence of such usage is provided.
+- Used as a data holder for constructing links in generated documentation or reports.
 
-### `clore::generate::MarkdownDocument`
+### `clore::generate::ListItem`
 
-Declaration: `generate/markdown.cppm:94`
+Declaration: `src/generate/markdown.cppm:56`
 
-Definition: `generate/markdown.cppm:94`
+Definition: `src/generate/markdown.cppm:56`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-The `clore::generate::MarkdownDocument` struct represents a complete Markdown document generated by the Clore documentation system. It serves as the primary container for structured Markdown content, assembling various document elements such as headings, paragraphs, code blocks, lists, and other formatted fragments into a cohesive output.
+`clore::generate::ListItem` is a struct that models a single entry within a generated markdown list. It is typically used as a component of list containers such as `BulletList`, where each `ListItem` holds the content for that entry, which may consist of inline fragments, paragraphs, or nested structures. The type facilitates structured generation of list items in documentation output.
 
-This type is typically produced by rendering a `PagePlan` or similar generation pipeline and is used as the final output form before writing to a file or stream. It integrates with related types like `MarkdownNode`, `Frontmatter`, and `RawMarkdown` to ensure the generated document adheres to the desired layout and Markdown specification.
+#### Key Members
+
+- fragments
+
+### `clore::generate::MarkdownDocument`
+
+Declaration: `src/generate/markdown.cppm:105`
+
+Definition: `src/generate/markdown.cppm:105`
+
+Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
+
+The `clore::generate::MarkdownDocument` struct is a container for a complete generated Markdown document. It assembles the output from individual sections such as `TextSection`, `SymbolSection`, and `SemanticSection`, as well as other structural nodes like `Paragraph`, `CodeFence`, and `BulletList`. This struct is typically produced by the documentation generation pipeline after all analysis and planning are completed.
+
+At the generation step, a `MarkdownDocument` is constructed from a `PagePlan` or `PageDocLayout` and then rendered into final Markdown text. It represents the fully structured document that includes frontmatter, content sections, and any generated diagrams or code examples. The document is subsequently processed by downstream stages, such as file writing or inclusion in a larger documentation set.
 
 #### Invariants
 
-- The `frontmatter` may be absent (`std::nullopt`).
-- The `children` vector may be empty, and its elements are stored in document order.
+- `frontmatter` may be `std::nullopt`
+- `children` may be empty
 
 #### Key Members
 
@@ -529,108 +576,107 @@ This type is typically produced by rendering a `PagePlan` or similar generation 
 
 #### Usage Patterns
 
-- Other code populates the fields and then traverses or serializes the structure.
+- Used to represent the result of generating a Markdown document
+- Can be constructed with or without frontmatter
 
 ### `clore::generate::MarkdownFragmentResponse`
 
-Declaration: `generate/model.cppm:77`
+Declaration: `src/generate/model.cppm:93`
 
-Definition: `generate/model.cppm:77`
+Definition: `src/generate/model.cppm:93`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The `clore::generate::MarkdownFragmentResponse` type represents the structured result of generating a single Markdown fragment within the documentation pipeline. It is used to encapsulate the output produced when a fragment—such as a code block, list, table, or paragraph—is generated from a prompt or plan. As a model type in the generation layer, it pairs with related types like `MarkdownNode`, `RawMarkdown`, or `TextFragment`, and likely carries the generated content along with associated metadata or success status. Callers of fragment-generation functions receive this response to inspect or embed the resulting Markdown fragment into a larger page or document.
+The `clore::generate::MarkdownFragmentResponse` struct represents the result of a markdown fragment generation operation within the documentation generation pipeline. It encapsulates the output produced when a prompt or a generation request yields structured markdown content, as distinct from a full `MarkdownDocument` or a raw text response.
 
-#### Invariants
-
-- No documented invariants; the struct is trivially copyable and movable.
-- The `markdown` member holds any valid `std::string` value.
-
-#### Key Members
-
-- `std::string markdown`
-
-#### Usage Patterns
-
-- Used as a return type for functions that produce markdown fragments.
-- Can be aggregate-initialized with a string literal or `std::string`.
+This type is employed in conjunction with `clore::generate::PromptRequest` and `clore::generate::RenderError` to model the outcomes of fragment-level generation steps. It serves as a building block in the larger process of assembling `clore::generate::GeneratedPage` objects, allowing generation stages to produce atomic markdown units that can be composed or processed further.
 
 ### `clore::generate::MarkdownNode`
 
-Declaration: `generate/markdown.cppm:73`
+Declaration: `src/generate/markdown.cppm:84`
 
-Definition: `generate/markdown.cppm:73`
+Definition: `src/generate/markdown.cppm:84`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+`clore::generate::MarkdownNode` is a struct that represents a single node within a structured Markdown document hierarchy. It serves as a fundamental building block for the Markdown generation pipeline, encapsulating a portion of rendered content such as text, code, links, or other formatting elements. This node is typically composed into larger structures like `clore::generate::MarkdownDocument` and is processed by the generation machinery to produce final Markdown output.
+
+#### Invariants
+
+- The `value` variant always holds exactly one of the listed types.
+- The node does not enforce any additional structural constraints beyond the variant's type safety.
+
+#### Key Members
+
+- `value` of type `std::variant<...>`
+
+#### Usage Patterns
+
+- Used as a building block in a Markdown document model.
+- Likely traversed or visited to generate output Markdown text.
+- Can be combined with `SemanticSectionPtr` for hierarchical document structure.
 
 ### `clore::generate::MermaidDiagram`
 
-Declaration: `generate/markdown.cppm:58`
+Declaration: `src/generate/markdown.cppm:69`
 
-Definition: `generate/markdown.cppm:58`
+Definition: `src/generate/markdown.cppm:69`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
-
-The `clore::generate::MermaidDiagram` struct represents a node in a generated Markdown document that holds the content of a Mermaid diagram. It is used within the documentation generation pipeline to embed a Mermaid diagram as a distinct Markdown element, which can later be rendered or processed as a code block of type `mermaid`. This struct is part of the set of Markdown fragment types (such as `CodeFence`, `RawMarkdown`, etc.) that together form the output page content.
-
-#### Invariants
-
-- The `code` member is a free-form string; no validity of Mermaid syntax is enforced.
-
-#### Key Members
-
-- `code` of type `std::string`
-
-#### Usage Patterns
-
-- Instances are created with a diagram string and passed to functions that generate output.
-- Acts as a straightforward value type for representing Mermaid diagram content.
-
-### `clore::generate::PageDocLayout`
-
-Declaration: `generate/render/symbol.cppm:19`
-
-Definition: `generate/render/symbol.cppm:19`
-
-Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `type_docs`, `variable_docs`, and `function_docs` each contain only `SymbolDocPlan` objects relevant to their category
-- All keys in `index_paths` are unique
-- The struct is intended to be fully populated before use
+- The `code` string contains the Mermaid diagram source.
 
 #### Key Members
 
-- `index_paths`
-- `type_docs`
-- `variable_docs`
-- `function_docs`
+- `code` (`std::string`) – the Mermaid diagram source code.
 
 #### Usage Patterns
 
-- Populated by a layout builder during documentation generation
-- Consumed by a renderer to produce the final page output
-- Used to categorize symbol documentation by type, variable, and function
+- Other code creates instances of `MermaidDiagram` and assigns to the `code` member, or uses it to pass diagram data between components.
 
-### `clore::generate::PageIdentity`
+### `clore::generate::PageDocLayout`
 
-Declaration: `generate/model.cppm:207`
+Declaration: `src/generate/render/symbol.cppm:37`
 
-Definition: `generate/model.cppm:207`
+Definition: `src/generate/render/symbol.cppm:37`
 
-Implementation: [`Module generate:model`](../../../modules/generate/model.md)
+Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
-The `clore::generate::PageIdentity` struct represents an identifier or descriptor for a documentation page within the generation pipeline. It is used to associate a page with its originating source element, such as a declaration or symbol, and to distinguish different pages across the generated output. This type is commonly referenced in higher-level planning and rendering types like `clore::generate::PagePlan` and `clore::generate::GeneratedPage` to map generation intent to concrete page instances.
+The struct `clore::generate::PageDocLayout` represents the structural layout of a generated documentation page within the code generation pipeline. It organizes the various content sections—such as symbol documentation, semantic sections, and text blocks—that make up the final page. This type is used during the rendering phase to assemble the page from planned components, working alongside related types like `PagePlan`, `SymbolSection`, and `SemanticSection`. It plays a key role in determining how generated documentation is decomposed and then composed into a coherent output, such as a Markdown document.
 
 #### Invariants
 
-- `page_type` should be a valid member of the `PageType` enumeration
-- All string members may be empty unless set externally
+- No explicit invariants are documented in the evidence.
+
+#### Key Members
+
+- `type_docs`
+- `variable_docs`
+- `function_docs`
+- `index_paths`
+
+#### Usage Patterns
+
+- Populated during documentation generation and used by rendering functions to produce the final page content.
+
+### `clore::generate::PageIdentity`
+
+Declaration: `src/generate/model.cppm:223`
+
+Definition: `src/generate/model.cppm:223`
+
+Implementation: [`Module generate:model`](../../../modules/generate/model.md)
+
+The struct `clore::generate::PageIdentity` represents the unique identity of a page within the documentation generation system. It is used to distinguish one generated page from another, serving as a key or handle in various generation and planning structures such as `clore::generate::PagePlanSet`, `clore::generate::GeneratedPage`, and `clore::generate::PageDocLayout`. The exact fields are not specified here, but its role is to encapsulate the distinguishing characteristics of a page—likely including something like a symbolic reference, a page type (`clore::generate::PageType`), or a path—so that renderers and planners can associate different pieces of information (plans, errors, facts) with the correct output. In essence, `PageIdentity` is the fundamental identifier that binds together all stages of the generation pipeline for a single document page.
+
+#### Invariants
+
+- Fields are default-initialized.
+- No explicit invariants documented.
 
 #### Key Members
 
@@ -641,23 +687,24 @@ The `clore::generate::PageIdentity` struct represents an identifier or descripto
 
 #### Usage Patterns
 
-- Not evident from provided context; used as a data container for page identification
+- Not provided in evidence.
 
 ### `clore::generate::PagePlan`
 
-Declaration: `generate/model.cppm:39`
+Declaration: `src/generate/model.cppm:55`
 
-Definition: `generate/model.cppm:39`
+Definition: `src/generate/model.cppm:55`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The `clore::generate::PagePlan` struct represents a single page's generation blueprint within the documentation generation subsystem. It encapsulates the information needed to produce one output page, such as its identity, structure, content sections, and associated rendering instructions. A `clore::generate::PagePlan` is typically created during the planning phase and later consumed by page rendering logic to produce the final page output. It plays a central role in organizing the overall documentation into a coherent set of pages, often grouped under a `clore::generate::PagePlanSet`.
+The `clore::generate::PagePlan` struct represents a blueprint for generating a single documentation page. It captures the page's identity, the set of semantic sections to render, and any associated symbol facts or other structural information needed to produce the final output. This type is central to the generation pipeline, acting as the intermediate plan from which a `clore::generate::GeneratedPage` is ultimately produced.
+
+Typically, a `PagePlan` is created by the planner component and then processed by a renderer, which uses the plan's content to construct the page layout, apply formatting, and resolve cross-references. It works in concert with types such as `clore::generate::PagePlanSet` (a collection of plans) and `clore::generate::PageDocLayout` (which governs the arrangement of sections) to drive the generation workflow.
 
 #### Invariants
 
-- `page_type` defaults to `PageType::File` if not otherwise set.
-- All string and vector fields are default-initialized to empty values.
-- The struct itself does not enforce inter-field consistency; it is a plain aggregate.
+- Fields are initialized to default values (empty strings, File type, empty vectors).
+- No internal invariants are enforced; valid values depend on the caller.
 
 #### Key Members
 
@@ -672,15 +719,14 @@ The `clore::generate::PagePlan` struct represents a single page's generation blu
 
 #### Usage Patterns
 
-- Used as a data container to specify all attributes needed to generate a page.
-- Consumed by page generation logic to determine the page's identity, dependencies, and content requests.
-- Likely populated by other components (e.g., parsing, planning) before being passed to generation.
+- Constructed and populated by code that determines page generation requirements.
+- Passed to a generator function that processes the plan to produce final page output.
 
 ### `clore::generate::PagePlanSet`
 
-Declaration: `generate/model.cppm:50`
+Declaration: `src/generate/model.cppm:66`
 
-Definition: `generate/model.cppm:50`
+Definition: `src/generate/model.cppm:66`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -688,51 +734,34 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- No explicit invariants are provided in the evidence.
+- Both `plans` and `generation_order` are default-constructed as empty
+- No further invariants are specified
 
 #### Key Members
 
-- `plans` – the container of `PagePlan` instances
-- `generation_order` – a sequence of strings tracking generation order
+- `plans`: a vector of `PagePlan` objects
+- `generation_order`: a vector of strings indicating generation order
 
 #### Usage Patterns
 
-- No usage patterns are shown in the evidence.
+- Used to represent a set of page generation plans with an associated ordering
+- Likely consumed by code generation logic that processes pages in the specified order
 
 ### `clore::generate::PageType`
 
-Declaration: `generate/model.cppm:9`
+Declaration: `src/generate/model.cppm:25`
 
-Definition: `generate/model.cppm:9`
+Definition: `src/generate/model.cppm:25`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The `clore::generate::PageType` enumeration categorizes the different kinds of pages produced during documentation generation. It classifies a page by its structural role—such as an overview, a detail page for a single symbol, an index, or a table of contents—allowing the generation pipeline to select appropriate layouts and content strategies. This type is used throughout the generation phases, for example in `PageIdentity`, `PagePlan`, and `GeneratedPage`, to consistently label and process pages according to their intended purpose.
-
-#### Invariants
-
-- Only four distinct page types exist
-- Each enumerator maps to a unique `std::uint8_t` value
-- The enum is stored in `uint8_t` for space efficiency
-
-#### Key Members
-
-- `clore::generate::PageType::Index`
-- `clore::generate::PageType::Module`
-- `clore::generate::PageType::Namespace`
-- `clore::generate::PageType::File`
-
-#### Usage Patterns
-
-- Used as a parameter or field to indicate the kind of page being generated
-- Switched on to produce different layout or content logic
-- Passed to page creation functions to specialize output
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Member Variables
 
 ##### `clore::generate::PageType::File`
 
-Declaration: `generate/model.cppm:13`
+Declaration: `src/generate/model.cppm:29`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -744,7 +773,7 @@ File
 
 ##### `clore::generate::PageType::Index`
 
-Declaration: `generate/model.cppm:10`
+Declaration: `src/generate/model.cppm:26`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -756,7 +785,7 @@ Index
 
 ##### `clore::generate::PageType::Module`
 
-Declaration: `generate/model.cppm:11`
+Declaration: `src/generate/model.cppm:27`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -768,7 +797,7 @@ Module
 
 ##### `clore::generate::PageType::Namespace`
 
-Declaration: `generate/model.cppm:12`
+Declaration: `src/generate/model.cppm:28`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -780,59 +809,38 @@ Namespace
 
 ### `clore::generate::Paragraph`
 
-Declaration: `generate/markdown.cppm:41`
+Declaration: `src/generate/markdown.cppm:52`
 
-Definition: `generate/markdown.cppm:41`
+Definition: `src/generate/markdown.cppm:52`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
-
-#### Invariants
-
-- The fragments are stored in a `std::vector` in the order they were added.
-- The vector may be empty, indicating an empty paragraph.
-- Each element in the vector is an `InlineFragment`.
-
-#### Key Members
-
-- `fragments` — the vector of inline fragments composing the paragraph.
-
-#### Usage Patterns
-
-- Constructed with a list of `InlineFragment` objects to form a paragraph.
-- Iterated over to render or process the paragraph content.
-- Likely part of a larger markup or document generation system where paragraphs are assembled from inline elements.
+The struct `clore::generate::Paragraph` models a paragraph within generated markdown documentation. It is a building block used to represent a semantically distinct block of prose or inline content, typically composed of text, code fragments, links, or other inline elements. This type appears alongside other markdown nodes such as `ListItem`, `BlockQuote`, and `CodeFence`, and is likely aggregated within a `MarkdownDocument` or `MarkdownNode` to form the final textual output during the document generation process.
 
 ### `clore::generate::PathError`
 
-Declaration: `generate/model.cppm:203`
+Declaration: `src/generate/model.cppm:219`
 
-Definition: `generate/model.cppm:203`
+Definition: `src/generate/model.cppm:219`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
-#### Invariants
-
-- `message` contains a human-readable error description
-- the struct is default-constructible and copyable via implicit compiler-generated special members
-
 #### Key Members
 
-- `message`
+- message
 
 #### Usage Patterns
 
-- returned or thrown to indicate a path-related error
-- used in contexts where a descriptive string error is sufficient
+- Returned or thrown by path generation functions to indicate failure
+- Inspected by callers to retrieve the error description
 
 ### `clore::generate::PlanError`
 
-Declaration: `generate/planner.cppm:11`
+Declaration: `src/generate/planner.cppm:28`
 
-Definition: `generate/planner.cppm:11`
+Definition: `src/generate/planner.cppm:28`
 
 Implementation: [`Module generate:planner`](../../../modules/generate/planner.md)
 
@@ -840,57 +848,62 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- No explicit constraints are placed on the value of `message`; it may be any valid `std::string`.
-- The struct has no invariant beyond those inherent to `std::string`.
+- `message` may be empty or contain arbitrary error text.
+- No other state is stored.
 
 #### Key Members
 
-- `message`
+- `message` field - stores the error description.
 
 #### Usage Patterns
 
-- Returned or thrown to indicate a plan‑generation error.
-- Logged or inspected by callers to diagnose the cause of failure.
+- Returned or thrown as an error type in generation planner functions.
+- Likely used in conjunction with other error handling mechanisms.
 
 ### `clore::generate::PromptError`
 
-Declaration: `generate/evidence.cppm:90`
+Declaration: `src/generate/evidence.cppm:102`
 
-Definition: `generate/evidence.cppm:90`
+Definition: `src/generate/evidence.cppm:102`
 
 Implementation: [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
-
-#### Key Members
-
-- `message`: a `std::string` that holds a descriptive error message.
-
-#### Usage Patterns
-
-- The struct is used to represent errors that occur during prompt generation, likely as a thrown exception or a return value from generation-related functions.
-
-### `clore::generate::PromptKind`
-
-Declaration: `generate/model.cppm:18`
-
-Definition: `generate/model.cppm:18`
-
-Implementation: [`Module generate:model`](../../../modules/generate/model.md)
-
-Insufficient evidence to summarize; provide more EVIDENCE.
+The struct `clore::generate::PromptError` represents an error that occurs during the construction or validation of a prompt used in document generation. It is one of several error types in the `clore::generate` namespace alongside `GenerateError`, `RenderError`, `PlanError`, and `PathError`. When a prompt request cannot be formed or contains invalid data, functions may return or throw a `PromptError` to signal the specific failure point, allowing callers to distinguish prompt‑related errors from other stages of the generation pipeline.
 
 #### Invariants
 
-- Each enumerator value corresponds to a specific kind of prompt.
-- The underlying type is `std::uint8_t`, ensuring compact storage.
-- All enumerators are mutually exclusive and distinct.
+- The `message` string is expected to be non-empty when representing an actual error.
+
+#### Key Members
+
+- `message`: a `std::string` that holds the error description.
+
+#### Usage Patterns
+
+- Used as the exception type or error result in prompt generation contexts, such as in `clore::generate::PromptGenerator` or related functions.
+
+### `clore::generate::PromptKind`
+
+Declaration: `src/generate/model.cppm:34`
+
+Definition: `src/generate/model.cppm:34`
+
+Implementation: [`Module generate:model`](../../../modules/generate/model.md)
+
+The `clore::generate::PromptKind` enum classifies the variety of prompts used within the code generation pipeline. It encodes the semantic intent of a prompt, enabling the system to select appropriate formatting, processing, or validation logic based on the prompt's purpose. This type is typically employed as a member of prompt‑related structures (such as `PromptRequest`) to distinguish between different documentation‑generation tasks or query types.
+
+#### Invariants
+
+- All enumerator values are distinct within the enum.
+- The enum is scoped (`enum class`), preventing implicit conversion to integers.
+- The set of enumerators is fixed at compile time.
 
 #### Key Members
 
 - `clore::generate::PromptKind::NamespaceSummary`
 - `clore::generate::PromptKind::ModuleSummary`
 - `clore::generate::PromptKind::ModuleArchitecture`
+- `clore::generate::PromptKind::IndexOverview`
 - `clore::generate::PromptKind::FunctionAnalysis`
 - `clore::generate::PromptKind::TypeAnalysis`
 - `clore::generate::PromptKind::VariableAnalysis`
@@ -898,19 +911,18 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 - `clore::generate::PromptKind::FunctionImplementationSummary`
 - `clore::generate::PromptKind::TypeDeclarationSummary`
 - `clore::generate::PromptKind::TypeImplementationSummary`
-- `clore::generate::PromptKind::IndexOverview`
 
 #### Usage Patterns
 
-- Used to select generation behavior in switch or if-else chains.
-- Passed as a parameter to indicate which type of prompt to generate.
-- May be stored in configuration or state to drive the generation process.
+- Used to select the appropriate prompt template or generation function.
+- Passed as an argument to query a prompt registry or dispatcher.
+- May be stored to indicate the kind of analysis requested.
 
 #### Member Variables
 
 ##### `clore::generate::PromptKind::FunctionAnalysis`
 
-Declaration: `generate/model.cppm:23`
+Declaration: `src/generate/model.cppm:39`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -922,7 +934,7 @@ FunctionAnalysis
 
 ##### `clore::generate::PromptKind::FunctionDeclarationSummary`
 
-Declaration: `generate/model.cppm:26`
+Declaration: `src/generate/model.cppm:42`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -934,7 +946,7 @@ FunctionDeclarationSummary
 
 ##### `clore::generate::PromptKind::FunctionImplementationSummary`
 
-Declaration: `generate/model.cppm:27`
+Declaration: `src/generate/model.cppm:43`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -946,7 +958,7 @@ FunctionImplementationSummary
 
 ##### `clore::generate::PromptKind::IndexOverview`
 
-Declaration: `generate/model.cppm:22`
+Declaration: `src/generate/model.cppm:38`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -958,7 +970,7 @@ IndexOverview
 
 ##### `clore::generate::PromptKind::ModuleArchitecture`
 
-Declaration: `generate/model.cppm:21`
+Declaration: `src/generate/model.cppm:37`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -970,7 +982,7 @@ ModuleArchitecture
 
 ##### `clore::generate::PromptKind::ModuleSummary`
 
-Declaration: `generate/model.cppm:20`
+Declaration: `src/generate/model.cppm:36`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -982,7 +994,7 @@ ModuleSummary
 
 ##### `clore::generate::PromptKind::NamespaceSummary`
 
-Declaration: `generate/model.cppm:19`
+Declaration: `src/generate/model.cppm:35`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -994,7 +1006,7 @@ NamespaceSummary
 
 ##### `clore::generate::PromptKind::TypeAnalysis`
 
-Declaration: `generate/model.cppm:24`
+Declaration: `src/generate/model.cppm:40`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -1006,7 +1018,7 @@ TypeAnalysis
 
 ##### `clore::generate::PromptKind::TypeDeclarationSummary`
 
-Declaration: `generate/model.cppm:28`
+Declaration: `src/generate/model.cppm:44`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -1018,7 +1030,7 @@ TypeDeclarationSummary
 
 ##### `clore::generate::PromptKind::TypeImplementationSummary`
 
-Declaration: `generate/model.cppm:29`
+Declaration: `src/generate/model.cppm:45`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -1030,7 +1042,7 @@ TypeImplementationSummary
 
 ##### `clore::generate::PromptKind::VariableAnalysis`
 
-Declaration: `generate/model.cppm:25`
+Declaration: `src/generate/model.cppm:41`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
@@ -1042,72 +1054,80 @@ VariableAnalysis
 
 ### `clore::generate::PromptRequest`
 
-Declaration: `generate/model.cppm:34`
+Declaration: `src/generate/model.cppm:50`
 
-Definition: `generate/model.cppm:34`
+Definition: `src/generate/model.cppm:50`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::PromptRequest` is a data structure that represents a request to generate a prompt, typically used as input to a prompt construction pipeline. It encapsulates the parameters and context required to produce a prompt tailored to a specific generation task, such as documentation or code creation. Within the `clore::generate` namespace, this type works alongside other prompt‑related types like `PromptKind`, `PromptError`, and evidence‑gathering structures to control and drive the generation process.
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- `kind` is always a valid `PromptKind` value
-- `target_key` is a string, possibly empty
-- Default initialization sets `kind` to `PromptKind::NamespaceSummary` and `target_key` to an empty string
-- Both fields are publicly accessible for direct manipulation
+- `kind` defaults to `PromptKind::NamespaceSummary`
+- `target_key` defaults to an empty string
+- No user-defined constructors or destructors; trivial type
 
 #### Key Members
 
-- `kind` field
-- `target_key` field
+- `kind`
+- `target_key`
 
 #### Usage Patterns
 
-- Instances are constructed with specific `kind` and `target_key` values to request a prompt for a particular entity
-- The struct is passed to functions that generate prompts based on its contents
-- Default-constructed instances represent a request for a namespace summary with an unspecified target
+- Instantiated and passed to prompt generation functions
+- Used to specify prompt type and associated identifier
 
 ### `clore::generate::RawMarkdown`
 
-Declaration: `generate/markdown.cppm:66`
+Declaration: `src/generate/markdown.cppm:77`
 
-Definition: `generate/markdown.cppm:66`
+Definition: `src/generate/markdown.cppm:77`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-The `clore::generate::RawMarkdown` struct represents an unprocessed block of Markdown content within the documentation generation pipeline. It is used to hold raw Markdown text that has not yet been parsed or structured into higher-level representations such as `MarkdownNode` or `MarkdownDocument`. This type serves as a basic container for intermediate or final Markdown strings, enabling collection of fragments from prompts, external sources, or fallback output before rendering or further processing.
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- The `markdown` string may be empty or contain any valid Markdown text.
-- No validation is performed on the content of `markdown`.
+- The `markdown` string can be any valid UTF-8 or ASCII content.
 
 #### Key Members
 
-- `markdown`: the `std::string` holding the Markdown content.
+- `markdown`: the raw markdown string
 
 #### Usage Patterns
 
-- Used as an input or output type in functions that handle Markdown generation.
-- Constructed directly from a string literal or variable.
-- The member `markdown` is accessed directly for reading or writing.
+- Used as a wrapper to pass or store raw markdown content.
 
 ### `clore::generate::RenderError`
 
-Declaration: `generate/model.cppm:73`
+Declaration: `src/generate/model.cppm:89`
 
-Definition: `generate/model.cppm:73`
+Definition: `src/generate/model.cppm:89`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
+#### Invariants
+
+- The `message` field holds a descriptive error string
+
+#### Key Members
+
+- message
+
+#### Usage Patterns
+
+- Returned or thrown from generation functions to indicate errors
+- Used as a lightweight error carrier
+
 ### `clore::generate::SemanticKind`
 
-Declaration: `generate/markdown.cppm:7`
+Declaration: `src/generate/markdown.cppm:18`
 
-Definition: `generate/markdown.cppm:7`
+Definition: `src/generate/markdown.cppm:18`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
@@ -1115,31 +1135,30 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Each enumerator corresponds to a unique semantic category.
-- The underlying type is `std::uint8_t`.
-- All possible values of `SemanticKind` are explicitly listed as enumerators.
+- Each enumerator value is unique and non-overlapping.
+- The enum is used as a discriminator for documentation generation logic.
 
 #### Key Members
 
-- `clore::generate::SemanticKind::Type`
-- `clore::generate::SemanticKind::Index`
-- `clore::generate::SemanticKind::Function`
-- `clore::generate::SemanticKind::File`
-- `clore::generate::SemanticKind::Module`
-- `clore::generate::SemanticKind::Namespace`
-- `clore::generate::SemanticKind::Variable`
-- `clore::generate::SemanticKind::Section`
+- `Index`
+- `Namespace`
+- `Module`
+- `Type`
+- `Function`
+- `Variable`
+- `File`
+- `Section`
 
 #### Usage Patterns
 
-- Used to categorize documentation symbols in the `clore::generate` module.
-- Likely used as a discriminator in a variant or as a tag in a switch statement.
+- Used in tag dispatch or `switch` statements to select documentation generation behavior.
+- Passed as a parameter to functions in the `clore::generate` module.
 
 #### Member Variables
 
 ##### `clore::generate::SemanticKind::File`
 
-Declaration: `generate/markdown.cppm:14`
+Declaration: `src/generate/markdown.cppm:25`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
@@ -1151,7 +1170,7 @@ File
 
 ##### `clore::generate::SemanticKind::Function`
 
-Declaration: `generate/markdown.cppm:12`
+Declaration: `src/generate/markdown.cppm:23`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
@@ -1163,7 +1182,7 @@ Function
 
 ##### `clore::generate::SemanticKind::Index`
 
-Declaration: `generate/markdown.cppm:8`
+Declaration: `src/generate/markdown.cppm:19`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
@@ -1175,7 +1194,7 @@ Index
 
 ##### `clore::generate::SemanticKind::Module`
 
-Declaration: `generate/markdown.cppm:10`
+Declaration: `src/generate/markdown.cppm:21`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
@@ -1187,7 +1206,7 @@ Module
 
 ##### `clore::generate::SemanticKind::Namespace`
 
-Declaration: `generate/markdown.cppm:9`
+Declaration: `src/generate/markdown.cppm:20`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
@@ -1199,7 +1218,7 @@ Namespace
 
 ##### `clore::generate::SemanticKind::Section`
 
-Declaration: `generate/markdown.cppm:15`
+Declaration: `src/generate/markdown.cppm:26`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
@@ -1211,7 +1230,7 @@ Section
 
 ##### `clore::generate::SemanticKind::Type`
 
-Declaration: `generate/markdown.cppm:11`
+Declaration: `src/generate/markdown.cppm:22`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
@@ -1223,7 +1242,7 @@ Type
 
 ##### `clore::generate::SemanticKind::Variable`
 
-Declaration: `generate/markdown.cppm:13`
+Declaration: `src/generate/markdown.cppm:24`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
@@ -1235,52 +1254,70 @@ Variable
 
 ### `clore::generate::SemanticSection`
 
-Declaration: `generate/markdown.cppm:70`
+Declaration: `src/generate/markdown.cppm:81`
 
-Definition: `generate/markdown.cppm:84`
+Definition: `src/generate/markdown.cppm:95`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+The struct `clore::generate::SemanticSection` represents a unit of generated content with an explicitly labeled semantic kind. It is used to assemble structured markdown output, where each section corresponds to a specific type of documentation element such as a paragraph, code fence, or list. The related type alias `SemanticSectionPtr` indicates that instances are typically managed through pointers, enabling polymorphic composition within page plans or document trees. This type is central to the generation system's representation of content sections that carry both structural and semantic information.
 
 #### Invariants
 
-- Default `level` is 2
-- Default `omit_if_empty` is true
-- Default `code_style_heading` is false
-- `children` vector may be empty
-- Default `kind` is `SemanticKind::Section`
+- All fields have default values that serve as sensible starting points.
+- The `children` vector is initially empty unless populated.
 
 #### Key Members
 
-- `kind`
-- `heading`
-- `level`
-- `children`
-- `omit_if_empty`
-- `subject_key`
-- `code_style_heading`
+- `kind` – discriminates the semantic role of the section.
+- `heading` – the section's headline text.
+- `children` – nested child nodes for hierarchical structure.
+- `level` – the heading level (e.g., `<h2>` for 2).
+- `omit_if_empty` – controls whether an empty section is dropped.
+- `code_style_heading` – indicates if the heading should be rendered as code.
 
 #### Usage Patterns
 
-- Used to represent sections in markdown generation
-- Likely aggregated into a hierarchy via the `children` vector
-- Defaults allow trivial creation of simple sections without explicit configuration
+- Created as a simple value type and populated with field-assignment syntax.
+- Passed to markdown generation routines that iterate `children` and use `kind`, `heading`, `level`, etc., to emit formatted output.
+- Used in conjunction with `MarkdownNode` to build document trees.
 
-### `clore::generate::SymbolAnalysisStore`
+### `clore::generate::SemanticSectionPtr`
 
-Declaration: `generate/model.cppm:125`
+Declaration: `src/generate/markdown.cppm:82`
 
-Definition: `generate/model.cppm:125`
+Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-Implementation: [`Module generate:model`](../../../modules/generate/model.md)
-
-Insufficient evidence to summarize; provide more EVIDENCE.
+`clore::generate::SemanticSectionPtr` is a type alias representing a pointer (commonly `std::unique_ptr` or `std::shared_ptr`) to a `SemanticSection` object. It is used throughout the generation pipeline to manage ownership and lifecycle of semantic sections, which encapsulate structured documentation content for symbols or pages. The alias streamlines memory management and clearly conveys the intended usage when passing or storing these sections.
 
 #### Invariants
 
-- Each cache is expected to be fully populated before use.
-- The struct is intended to be shared across multiple documentation generation contexts.
+- Exclusive ownership of a single `SemanticSection` object
+- Can be null if uninitialized or moved from
+
+#### Key Members
+
+- Underlying `std::unique_ptr` interface (e.g., `get`, `reset`, `operator*`, `operator->`)
+
+#### Usage Patterns
+
+- Used to manage the lifetime of `SemanticSection` objects
+- Passed by value to transfer ownership
+- Stored in containers or as class members
+
+### `clore::generate::SymbolAnalysisStore`
+
+Declaration: `src/generate/model.cppm:141`
+
+Definition: `src/generate/model.cppm:141`
+
+Implementation: [`Module generate:model`](../../../modules/generate/model.md)
+
+The `clore::generate::SymbolAnalysisStore` struct represents a container that holds aggregated analysis data for a single symbol within the documentation generation pipeline. It is used to collect and organise results from various analysis passes—such as `FunctionAnalysis`, `TypeAnalysis`, and `VariableAnalysis`—making them accessible for later stages like plan creation and page generation.
+
+#### Invariants
+
+- The three cache fields are distinct and likely initialized together.
 
 #### Key Members
 
@@ -1290,52 +1327,51 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Accessed as a shared cache by documentation generators.
-- Populated once and then reused for multiple pages.
+- The struct is used to hold the analysis results for symbols, likely populated during analysis phase and queried during generation.
 
 ### `clore::generate::SymbolDocPlan`
 
-Declaration: `generate/render/symbol.cppm:13`
+Declaration: `src/generate/render/symbol.cppm:31`
 
-Definition: `generate/render/symbol.cppm:13`
+Definition: `src/generate/render/symbol.cppm:31`
 
 Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
-
-The `clore::generate::SymbolDocPlan` struct is a key component in the documentation generation pipeline, representing the plan for documenting a single symbol. It combines symbol-specific facts, a documentation view, and a page plan to define how a symbol's documentation should be rendered.
-
-#### Invariants
-
-- No explicit invariants beyond default initialization
-- `symbol` may be null if not set
-- `index_path` may be empty
-- `children` vector may be empty
-
-#### Key Members
-
-- `symbol` member
-- `index_path` member
-- `children` member
-
-#### Usage Patterns
-
-- Used by documentation generation infrastructure to represent a hierarchical plan for symbol documentation
-- Other code likely populates instances of `SymbolDocPlan` by assigning the `symbol`, `index_path`, and `children` fields
-- The recursive `children` vector allows building a tree structure of nested symbol documentation plans
-
-### `clore::generate::SymbolDocView`
-
-Declaration: `generate/render/common.cppm:17`
-
-Definition: `generate/render/common.cppm:17`
-
-Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
 Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- Each enumerator is a unique value of type `std::uint8_t`.
-- Values are non-negative and ordered as declared.
+- `symbol` may be nullptr for a container/grouper node
+- `children` forms a tree with no cycles (expected but not enforced)
+- `index_path` is unique among siblings in a well-formed plan
+
+#### Key Members
+
+- `symbol` — the symbol being documented
+- `children` — child documentation plans
+- `index_path` — deterministic path for indexing output
+
+#### Usage Patterns
+
+- Built by a planner that traverses the symbol hierarchy
+- Traversed recursively by renderers to produce documentation pages
+- Used as input to index generation via `index_path`
+
+### `clore::generate::SymbolDocView`
+
+Declaration: `src/generate/render/common.cppm:28`
+
+Definition: `src/generate/render/common.cppm:28`
+
+Implementation: [`Module generate:common`](../../../modules/generate/common.md)
+
+The `clore::generate::SymbolDocView` enum defines the perspective or modality under which a symbol's documentation is generated or rendered. It is used within the planning and rendering pipeline—likely alongside types such as `clore::generate::PageType` and `clore::generate::SymbolDocPlan`—to select the appropriate content structure, level of detail, or context (for example, a brief declaration view versus a full documentation view). By encoding the intended view, the enum enables the generation logic to adjust output without altering the underlying symbol data.
+
+#### Invariants
+
+- The three enumerators are the only valid values
+- Each value corresponds to a mutually exclusive view
+- Underlying type is `std::uint8_t`
 
 #### Key Members
 
@@ -1345,14 +1381,14 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Used to parameterize rendering logic for symbol documentation.
-- Consumed by code that generates different output sections based on the selected view.
+- Used to select which portion of a symbol’s documentation to generate or display
+- Likely passed as a parameter to rendering functions
 
 #### Member Variables
 
 ##### `clore::generate::SymbolDocView::Declaration`
 
-Declaration: `generate/render/common.cppm:18`
+Declaration: `src/generate/render/common.cppm:29`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
@@ -1364,7 +1400,7 @@ Declaration
 
 ##### `clore::generate::SymbolDocView::Details`
 
-Declaration: `generate/render/common.cppm:20`
+Declaration: `src/generate/render/common.cppm:31`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
@@ -1376,7 +1412,7 @@ Details
 
 ##### `clore::generate::SymbolDocView::Implementation`
 
-Declaration: `generate/render/common.cppm:19`
+Declaration: `src/generate/render/common.cppm:30`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
@@ -1388,9 +1424,9 @@ Implementation
 
 ### `clore::generate::SymbolFact`
 
-Declaration: `generate/evidence.cppm:9`
+Declaration: `src/generate/evidence.cppm:21`
 
-Definition: `generate/evidence.cppm:9`
+Definition: `src/generate/evidence.cppm:21`
 
 Implementation: [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
@@ -1398,19 +1434,17 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- id holds a valid `SymbolID` from the extraction phase
-- `qualified_name`, signature, `kind_label`, access are populated with corresponding extracted values
-- `is_template` is false by default and true only for templated symbols
-- `declaration_line` defaults to 0 if unknown
-- `doc_comment` may be empty if no comment exists
+- Fields are expected to be populated with consistent data from extraction
+- `is_template` defaults to `false` if not set
+- `declaration_line` defaults to `0` if not provided
 
 #### Key Members
 
-- id
+- `id`
 - `qualified_name`
-- signature
+- `signature`
 - `kind_label`
-- access
+- `access`
 - `is_template`
 - `template_params`
 - `declaration_file`
@@ -1419,77 +1453,63 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Usage Patterns
 
-- Created after symbol extraction to hold per-symbol facts
-- Consumed by generation code to produce documentation output
-- Stored in containers and passed by value or const reference
-- Fields are read directly without abstraction
+- Instantiated by extraction phases to hold symbol data
+- Consumed by generation phases to produce documentation output
+- Stored or passed between components as a value type
 
 ### `clore::generate::SymbolTargetKeyView`
 
-Declaration: `generate/model.cppm:136`
+Declaration: `src/generate/model.cppm:152`
 
-Definition: `generate/model.cppm:136`
+Definition: `src/generate/model.cppm:152`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-Insufficient evidence to summarize; provide more EVIDENCE.
+The `clore::generate::SymbolTargetKeyView` struct provides a lightweight, non-owning view into a key used to identify a `SymbolTarget` within the generation pipeline. It is designed to facilitate lookups or comparisons involving symbol targets without requiring ownership or copying of the underlying key data. This type is typically employed when inspecting or querying a collection of symbol targets, such as in `SymbolFact` or `SymbolAnalysisStore`, to efficiently reference a target's identity during documentation generation.
 
 #### Invariants
 
-- The underlying character data for both `qualified_name` and `signature` must outlive the `SymbolTargetKeyView` instance.
-- The struct has no owning or allocating behavior; it is a passive view into externally managed strings.
+- The referenced strings must outlive the view
+- `qualified_name` and `signature` refer to valid, stable data
 
 #### Key Members
 
-- `std::string_view qualified_name`
-- `std::string_view signature`
+- `qualified_name`
+- `signature`
 
 #### Usage Patterns
 
-- Used as a key type for symbol identification in maps or sets without copying qualified names or signatures.
-- Likely constructed by passing pointers or string views from persistent symbol tables or string storage.
-- Expected to be compared or hashed for efficient lookup of symbol targets.
+- Used as a key for symbol target lookup or storage
+- Passed as a parameter to functions requiring symbol identity without copying
 
 ### `clore::generate::TextFragment`
 
-Declaration: `generate/markdown.cppm:25`
+Declaration: `src/generate/markdown.cppm:36`
 
-Definition: `generate/markdown.cppm:25`
+Definition: `src/generate/markdown.cppm:36`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::TextFragment` represents a contiguous block of plain text within a generated Markdown document. It is one of several fragment types used to compose the final output, alongside `LinkFragment`, `CodeFragment`, and `RawMarkdown`. Each `TextFragment` holds the raw string content that should appear as regular text in the rendered page. The struct is typically embedded in larger composition structures, such as `MarkdownFragmentResponse` or `Paragraph`, and its primary purpose is to supply the textual portion of a Markdown element without any formatting or special syntax.
-
-#### Invariants
-
-- The `text` member is a valid `std::string` object.
-- The struct has no user-defined constructors, destructors, or assignment `operator`s.
-- All members are public and directly accessible.
+Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Key Members
 
-- `text`
-
-#### Usage Patterns
-
-- Instances are created as aggregate initializers or default-constructed.
-- Other code populates the `text` member and reads it to obtain the textual content.
-- Serves as a building block within the generation system for passing string data.
+- text
 
 ### `clore::generate::TypeAnalysis`
 
-Declaration: `generate/model.cppm:91`
+Declaration: `src/generate/model.cppm:107`
 
-Definition: `generate/model.cppm:91`
+Definition: `src/generate/model.cppm:107`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The `clore::generate::TypeAnalysis` struct represents the analysis data derived from a C++ type entity—such as a class, struct, or enumeration—during the documentation generation pipeline. It is one of several specialization structs (alongside `FunctionAnalysis` and `VariableAnalysis`) that hold entity‑specific information used to produce the final documentation output. This struct forms part of the generation model and is typically stored within or referenced by larger analysis containers like `SymbolAnalysisStore`, enabling the renderer to access type‑related facts when constructing documentation pages.
+`clore::generate::TypeAnalysis` represents the collected analysis data for a type symbol within the code generation pipeline. It is one of several symbol-specific analysis structures used to capture metadata and semantic information necessary for producing documentation. The struct serves as a component of the broader `SymbolAnalysisStore` and is typically employed in conjunction with other analysis types such as `FunctionAnalysis` or `VariableAnalysis` to provide a complete picture of a symbol's documentation requirements.
 
 #### Invariants
 
-- Fields are of standard library types (`std::string` and `std::vector<std::string>`).
-- Each field holds independently maintained documentation text.
+- Fields are populated consistently for a given type analysis
+- No field is null or undefined after initialization
 
 #### Key Members
 
@@ -1501,1784 +1521,1815 @@ The `clore::generate::TypeAnalysis` struct represents the analysis data derived 
 
 #### Usage Patterns
 
-- Cached and reused across namespace, module, file, and symbol documentation pages.
-- Stores analysis output for later retrieval by documentation generation.
+- Created once per type and reused across documentation pages
+- Populated by analysis logic and consumed by documentation generators
 
 ### `clore::generate::VariableAnalysis`
 
-Declaration: `generate/model.cppm:99`
+Declaration: `src/generate/model.cppm:115`
 
-Definition: `generate/model.cppm:99`
+Definition: `src/generate/model.cppm:115`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The `clore::generate::VariableAnalysis` struct holds the result of analyzing a variable declaration during documentation generation. It belongs to a family of per-symbol analysis types, alongside `clore::generate::FunctionAnalysis` and `clore::generate::TypeAnalysis`, and is stored within a `clore::generate::SymbolAnalysisStore`. This struct captures facts about a variable needed to produce the corresponding documentation pages, such as its type, constness, storage class, or initializer information. It is typically created by code analysis passes and consumed by page-planning stages to render the variable’s documentation.
+`clore::generate::VariableAnalysis` is a structure that captures the semantic analysis results for a variable declaration within the documentation generation pipeline. It represents the properties and metadata discovered about a variable during the analysis phase, serving as input for later rendering steps.
+
+The structure is typically populated by the analysis pass and consumed by page planning or fragment generation. It belongs to the same family of analysis types as `clore::generate::FunctionAnalysis` and `clore::generate::TypeAnalysis`, and may be stored within a `clore::generate::SymbolAnalysisStore` to correlate analysis data with its corresponding symbol.
 
 #### Invariants
 
-- `is_mutated` is initialized to `false`
-- `mutation_sources` and `usage_patterns` start as empty vectors
-- All fields are expected to be populated by an analysis pass before use
+- `is_mutated` is initialized to false
+- `mutation_sources` and `usage_patterns` are initially empty
 
 #### Key Members
 
-- `overview_markdown`
-- `details_markdown`
-- `is_mutated`
-- `mutation_sources`
-- `usage_patterns`
+- overview and detail documentation strings
+- mutation flag and source list
+- usage pattern list
 
 #### Usage Patterns
 
-- Created and populated by variable analysis routines within the `clore::generate` library
-- Consumed by documentation generation to produce structured content for variable symbols
-
-## Variables
-
-### `clore::generate::add_prompt_output`
-
-Declaration: `generate/render/common.cppm:142`
-
-Implementation: [`Module generate:common`](../../../modules/generate/common.md)
-
-The variable `clore::generate::add_prompt_output` is a public variable declared at line 142 in the `generate/render/common.cppm` module with an `auto` type. Its name suggests it is involved in managing or producing prompt outputs within the code generation rendering process.
-
-### `clore::generate::add_symbol_analysis_detail_sections`
-
-Declaration: `generate/render/common.cppm:170`
-
-Implementation: [`Module generate:common`](../../../modules/generate/common.md)
-
-The variable `clore::generate::add_symbol_analysis_detail_sections` is declared with `auto` at line 170 of `generate/render/common.cppm`. Its type is deduced by the compiler; the name suggests it is a callable responsible for adding detailed analysis sections for symbols.
-
-#### Usage Patterns
-
-- likely invoked to add analysis detail sections
-
-### `clore::generate::add_symbol_analysis_sections`
-
-Declaration: `generate/render/common.cppm:176`
-
-Implementation: [`Module generate:common`](../../../modules/generate/common.md)
-
-The variable `clore::generate::add_symbol_analysis_sections` is declared in `generate/render/common.cppm` at line 176. It appears to be a callable object, likely a function or lambda, that participates in generating symbol documentation pages.
-
-#### Usage Patterns
-
-- Called to add analysis sections for a symbol
-
-### `clore::generate::add_symbol_doc_links`
-
-Declaration: `generate/render/symbol.cppm:43`
-
-Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
-
-Public variable `clore::generate::add_symbol_doc_links` declared at `generate/render/symbol.cppm:43` with deduced `auto` type. It is used within the anonymous namespace function `render_symbol_page` to add documentation links for symbols.
-
-#### Usage Patterns
-
-- called or referenced inside `render_symbol_page` to add symbol documentation links
-
-### `clore::generate::append_symbol_doc_pages`
-
-Declaration: `generate/render/symbol.cppm:60`
-
-Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
-
-The variable `clore::generate::append_symbol_doc_pages` is declared with `auto` at `generate/render/symbol.cppm:60`. Based on its name and the surrounding context of other documentation-generation variables, it likely provides the logic or callable for appending symbol documentation pages during rendering.
-
-### `clore::generate::append_type_member_sections`
-
-Declaration: `generate/render/symbol.cppm:49`
-
-Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
-
-Public variable `clore::generate::append_type_member_sections` declared at `generate/render/symbol.cppm:49`. Its type is deduced via `auto` and its purpose is not fully described in the available evidence.
-
-### `clore::generate::push_link_paragraph`
-
-Declaration: `generate/render/common.cppm:92`
-
-Implementation: [`Module generate:common`](../../../modules/generate/common.md)
-
-A variable named `push_link_paragraph` declared at `generate/render/common.cppm:92` with `auto` type in the `clore::generate` namespace.
-
-### `clore::generate::push_location_paragraph`
-
-Declaration: `generate/render/common.cppm:399`
-
-Implementation: [`Module generate:common`](../../../modules/generate/common.md)
-
-Variable `clore::generate::push_location_paragraph` is declared with `auto` at `generate/render/common.cppm:399` and is publicly accessible. It is a callable object (likely a lambda or function wrapper) that encapsulates the logic for generating a location paragraph in the documentation rendering pipeline.
-
-#### Usage Patterns
-
-- called by `build_symbol_source_locations`
-
-### `clore::generate::push_optional_link_paragraph`
-
-Declaration: `generate/render/common.cppm:111`
-
-Implementation: [`Module generate:common`](../../../modules/generate/common.md)
-
-The variable `clore::generate::push_optional_link_paragraph` is declared at `generate/render/common.cppm:111` with `auto` type and public access. Its name suggests involvement in rendering link paragraphs for documentation pages.
+- Used to store results of variable analysis, likely populated by analysis functions
+- Consumed by documentation generation to produce variable pages
 
 ## Functions
 
-### `clore::generate::analysis_details_markdown`
+### `clore::generate::add_prompt_output`
 
-Declaration: `generate/model.cppm:157`
+Declaration: `src/generate/render/common.cppm:153`
 
-Definition: `generate/model.cppm:373`
+Definition: `src/generate/render/common.cppm:153`
 
-Implementation: [`Module generate:model`](../../../modules/generate/model.md)
+Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::analysis_details_markdown` produces a Markdown representation of the analysis details for a specific symbol. It accepts a reference to a `SymbolAnalysisStore` containing the analysis data, and a reference to an integer identifying the target symbol. The return value is an integer handle that can be used to embed the resulting Markdown fragment into a document page. Callers must ensure that the provided symbol identifier is valid within the given store; the function assumes the symbol exists and has been populated with analysis information.
+The function `clore::generate::add_prompt_output` appends the content of an optional prompt output string into a mutable output context represented by an `int&`. It expects a pointer to a `const std::string` that may be null; when the pointer is non‑null, the string’s contents are incorporated into the output. This allows callers to conditionally insert prompt output without needing to manage empty or missing results explicitly. The output context is updated in‑place, and the function returns nothing.
 
 #### Usage Patterns
 
-- Called to retrieve the details markdown for rendering in documentation pages
+- Used to add a prompt's output to a list of markdown nodes, typically when building a page's markdown content.
+
+### `clore::generate::add_symbol_analysis_detail_sections`
+
+Declaration: `src/generate/render/common.cppm:181`
+
+Definition: `src/generate/render/common.cppm:196`
+
+Implementation: [`Module generate:common`](../../../modules/generate/common.md)
+
+The function `clore::generate::add_symbol_analysis_detail_sections` accepts a mutable reference `int &` (representing the output container or page builder), three `const int &` arguments that provide symbol analysis data and identification, and a `std::uint8_t` value likely denoting a nesting level or section depth. Its responsibility is to populate or extend the given builder with detailed analysis sections for a specific symbol, drawing from the supplied analysis stores. The caller must supply valid analysis references and a correct level indicator; the function guarantees that the builder is updated with the relevant detail content, but does not handle validation of the analysis data or its context.
+
+#### Usage Patterns
+
+- Called from higher-level page generation functions to populate detail sections.
+- Typically invoked per symbol during rendering of analysis pages.
+
+### `clore::generate::add_symbol_analysis_sections`
+
+Declaration: `src/generate/render/common.cppm:187`
+
+Definition: `src/generate/render/common.cppm:187`
+
+Implementation: [`Module generate:common`](../../../modules/generate/common.md)
+
+The function `clore::generate::add_symbol_analysis_sections` appends analysis‑related sections to a mutable page or document structure, using the provided symbol analysis data. The caller passes a non‑const `int &` representing the target context to be extended, followed by three `const int &` parameters that supply the necessary symbol, analysis store, and layout information, and a `std::uint8_t` that typically indicates a nesting level or section depth. The function returns `void` and operates by side‑effect, ensuring that the target accumulates the appropriate symbol analysis sections without altering the input data.
+
+#### Usage Patterns
+
+- called during symbol page generation to include analysis sections
+- used when building documentation for a symbol's analysis
+
+### `clore::generate::add_symbol_doc_links`
+
+Declaration: `src/generate/render/symbol.cppm:61`
+
+Definition: `src/generate/render/symbol.cppm:828`
+
+Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
+
+The function `clore::generate::add_symbol_doc_links` inserts hyperlinks to the documentation pages of a symbol into an in‑progress output document structure. It accepts a mutable reference to the document root (represented as `int &`), a `std::string_view` identifying the symbol, a `const PageDocLayout &` describing the page’s link‑resolution context, and two additional integer parameters that likely control indexing or filtering. The function modifies the output structure in place by appending inline link fragments or paragraphs that point to the target symbol’s declaration page, using the provided layout to compute relative paths and resolve page titles. Callers must ensure the document structure is in a state that can accept new link nodes, and that the symbol exists in the page plan so that a valid `LinkTarget` can be constructed.
+
+#### Usage Patterns
+
+- Used during page generation to add cross-reference links for symbol documentation.
+
+### `clore::generate::analysis_details_markdown`
+
+Declaration: `src/generate/model.cppm:173`
+
+Definition: `src/generate/model.cppm:389`
+
+Implementation: [`Module generate:model`](../../../modules/generate/model.md)
+
+`clore::generate::analysis_details_markdown` accepts a `const SymbolAnalysisStore &` and a `const int &` (representing a symbol identifier) and returns `const std::string *`. The function produces a detailed analysis description in Markdown form for the specified symbol. On success, it returns a pointer to a string containing that Markdown; if no details are available for the given identifier, it returns `nullptr`. The caller receives a non‑owning pointer—the string’s lifetime is managed internally and must not be mutated or freed by the caller.
+
+#### Usage Patterns
+
+- Used during documentation generation to retrieve the detailed analysis section for a symbol.
 
 ### `clore::generate::analysis_markdown`
 
-Declaration: `generate/model.cppm:342`
+Declaration: `src/generate/model.cppm:358`
 
-Definition: `generate/model.cppm:342`
+Definition: `src/generate/model.cppm:358`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::analysis_markdown` is a generic function template that generates markdown documentation from a given `SymbolAnalysisStore` and a symbol index, using a custom `FieldAccessor` to extract and format specific analysis fields. The caller supplies the `FieldAccessor` to control which aspects of the symbol’s analysis are rendered. The function returns an integer that represents the resulting markdown content for further processing or output. This abstraction allows reuse of the generation logic across different analysis contexts without duplicating the markdown formatting pipeline.
+This function generates a markdown string that describes the analysis results for a specific symbol. The caller supplies a `SymbolAnalysisStore` containing the analysis data, an integer identifier (typically a symbol or page ID), and a `FieldAccessor` callable used to retrieve relevant fields from the store. The return value is a pointer to a `const std::string` containing the rendered markdown, or `nullptr` if no analysis is available for the given identifier.
 
 #### Usage Patterns
 
-- accessing overview or details markdown for function, type, or variable analysis
-- template used with field accessors like `&FunctionAnalysis::overview` or `&TypeAnalysis::details`
-- lookup by symbol key in analysis store
+- Retrieving overview markdown for a symbol analysis
+- Retrieving details markdown for a symbol analysis
+- Extracting specific analysis fields via an accessor
 
 ### `clore::generate::analysis_overview_markdown`
 
-Declaration: `generate/model.cppm:154`
+Declaration: `src/generate/model.cppm:170`
 
-Definition: `generate/model.cppm:366`
+Definition: `src/generate/model.cppm:382`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::analysis_overview_markdown` generates a Markdown overview of the analysis performed for a given symbol. It accepts a `const SymbolAnalysisStore &` containing the analysis data and a `const int &` identifying the target symbol. The function returns an `int` that represents the generated markdown content—typically a reference to an internal node or a status code indicating success. Callers must ensure the provided store includes analysis for the specified symbol; the function does not validate symbol existence or store completeness. The overview is intended for inclusion in a higher-level documentation page, such as a module or namespace summary.
+The function `clore::generate::analysis_overview_markdown` accepts a `const SymbolAnalysisStore &` and a `const int &` (interpreted as a symbol or page identifier) and returns a `const std::string *`. It is the caller’s responsibility to provide a valid analysis store and a meaningful integer key; the function returns a pointer to a string containing a Markdown overview of the analysis for that symbol or page. If no overview is available, the function returns `nullptr`. The resulting string is intended for direct embedding into a generated documentation page and represents the high-level summary portion of the symbol’s analysis.
 
 #### Usage Patterns
 
-- Used as a convenience accessor for the overview markdown of a symbol's analysis.
+- Used to obtain overview markdown for a symbol analysis
+- Likely called by documentation rendering functions such as `render_page_markdown` or `build_symbol_analysis_prompt`
 
 ### `clore::generate::analysis_prompt_kind_for_symbol`
 
-Declaration: `generate/analysis.cppm:27`
+Declaration: `src/generate/analysis.cppm:43`
 
-Definition: `generate/analysis.cppm:286`
+Definition: `src/generate/analysis.cppm:302`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-The function `clore::generate::analysis_prompt_kind_for_symbol` accepts a symbol identifier (represented as `const int &`) and returns the corresponding `PromptKind` value (as an `int`). It maps a symbol to the analysis prompt kind that should be used when generating an analysis prompt for that symbol. Callers rely on this function to determine the appropriate prompt category—for example, to differentiate between variable, function, or type analysis prompts—ensuring that the correct prompt template and evidence strategy is applied for the given symbol.
+The function `clore::generate::analysis_prompt_kind_for_symbol` returns the *prompt kind* — an integer discriminant — associated with a given symbol, identified by its internal symbol handle (`const int &`). Callers use this value to select the appropriate analysis prompt template or processing branch for that symbol during documentation generation. The contract assumes a valid symbol handle is provided; the function maps the symbol’s semantic role (e.g., function, variable, type) to a corresponding `PromptKind` that guides how the symbol’s analysis is structured in the generated output.
 
 #### Usage Patterns
 
-- Used to select the appropriate `PromptKind` when constructing analysis evidence and prompts for a symbol
+- used to map a symbol to its required analysis prompt kind
+
+### `clore::generate::append_symbol_doc_pages`
+
+Declaration: `src/generate/render/symbol.cppm:78`
+
+Definition: `src/generate/render/symbol.cppm:975`
+
+Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
+
+The function `clore::generate::append_symbol_doc_pages` populates a document builder (the first `int &` parameter) with generated documentation pages for symbols. It accepts an additional series of opaque identifier handles (each `const int &`) that represent the symbol, analysis stores, and page‑building context, together with a `const PageDocLayout &` that specifies the structural layout of the resulting pages. The caller is responsible for supplying these handles from valid, previously initialized state and a fully constructed `PageDocLayout`. The return value of `int` indicates the outcome—typically a count of appended pages or a non‑zero error code on failure. This function is a high‑level entry point in the page generation pipeline, intended to be called after all prerequisite analysis and layout construction are complete.
+
+#### Usage Patterns
+
+- Recursively processes a tree of `SymbolDocPlan` to generate symbol documentation pages.
+
+### `clore::generate::append_type_member_sections`
+
+Declaration: `src/generate/render/symbol.cppm:67`
+
+Definition: `src/generate/render/symbol.cppm:842`
+
+Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
+
+`clore::generate::append_type_member_sections` appends documentation sections for the members of a type to an output document. It is called during page generation to populate member groups such as member functions, member variables, nested types, and related entities. The caller provides a mutable output object (passed as the first `int &` parameter), several identifiers that identify the type and its analysis context (each `const int &`), a `PageDocLayout` that controls the structure and ordering of sections, a `std::string_view` specifying the member group or symbol name, and a `std::uint8_t` that defines the heading level at which sections are inserted. The function modifies the output object in place, adding markdown content for each member. It does not return a value; the caller is responsible for ensuring that the output object is in a valid state before and after the call, and that the provided identifiers and layout are consistent with the current page being built.
+
+#### Usage Patterns
+
+- Called during type documentation page generation to populate member sections.
 
 ### `clore::generate::apply_symbol_analysis_response`
 
-Declaration: `generate/analysis.cppm:39`
+Declaration: `src/generate/analysis.cppm:55`
 
-Definition: `generate/analysis.cppm:348`
+Definition: `src/generate/analysis.cppm:364`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-The caller passes a mutable state reference (first parameter, `int &`), two immutable data references (second and third parameters, each `const int &`), an integral flag or index (fourth parameter, `int`), and a response string (fifth parameter, `std::string_view`). The function processes a symbol‑analysis response and returns an `int` result, typically indicating success, failure, or a count of applied changes. This function expects the response to be well‑formed according to the symbol‑analysis protocol; it does not perform its own analysis but rather applies the externally produced result to the generation state.
+The function `clore::generate::apply_symbol_analysis_response` is responsible for incorporating the result of a symbol analysis into a mutable target object. It accepts a mutable reference to the target (likely a page or document builder), followed by const references to the relevant symbol and analysis contexts, an integer code or kind identifier, and a `std::string_view` containing the analysis response text. The return value is an integer indicating the outcome—typically the number of changes applied or a status code.
+
+Callers invoke this function after obtaining a symbol analysis response (for example, from an LLM or a cached result) to update the generation state in place. The contract ensures that the target is modified to reflect the analysis, while the analysis inputs remain unchanged. The response string is interpreted according to the kind parameter; invalid or empty responses may be safely ignored.
 
 #### Usage Patterns
 
-- Called by generation infrastructure to integrate AI responses into the analysis store
-- Typically invoked after sending a prompt for a specific symbol and `PromptKind`
-- The response is parsed and merged, with fallback logic for robustness
+- Called after receiving a prompt response to store analysis results
+- Used in a loop over multiple prompt responses
 
 ### `clore::generate::build_dry_run_page_summary_texts`
 
-Declaration: `generate/dryrun.cppm:11`
+Declaration: `src/generate/dryrun.cppm:27`
 
-Definition: `generate/dryrun.cppm:316`
+Definition: `src/generate/dryrun.cppm:332`
 
 Implementation: [`Module generate:dryrun`](../../../modules/generate/dryrun.md)
 
-The function `clore::generate::build_dry_run_page_summary_texts` generates the textual summary content that appears on a dry-run documentation page. It accepts two `const int &` parameters—likely representing a page identity and a symbol key or other context identifier—and returns an `int` indicating the result status (for example, a success code or the number of texts produced). Callers can use this function to obtain a set of pre‑formatted summary texts that describe what the dry‑run page would contain, such as symbol names, evidence snippets, or page titles. The function expects its arguments to refer to valid, already‑resolved entities within the generation pipeline; it does not perform any rendering or I/O itself, but rather assembles the text fragments that downstream code can embed into the final page layout.
+`clore::generate::build_dry_run_page_summary_texts` constructs the summary text content for each page during a dry-run generation workflow. The caller supplies two parameters of type `const int &` that identify the page plan set and symbol analysis store to use as context for the summary generation. The function returns an `int` indicating success or the number of summaries produced. This allows callers to preview the generated page summaries without writing them to output, fulfilling the dry-run contract of producing all derived content in memory for inspection.
 
 #### Usage Patterns
 
-- called during dry-run page generation to produce summary key-value pairs
+- Dry run generation to build a map of summary texts per prompt request
+- Aggregates cached or fallback summaries for later use
 
 ### `clore::generate::build_evidence_for_function_analysis`
 
-Declaration: `generate/evidence.cppm:40`
+Declaration: `src/generate/evidence.cppm:52`
 
-Definition: `generate/evidence_builder.cppm:53`
+Definition: `src/generate/evidence_builder.cppm:61`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-The function `clore::generate::build_evidence_for_function_analysis` is responsible for assembling the evidence pack required for analyzing a specific function symbol. It takes three parameters: two constant references to an `int` (likely representing the function's identifier and some context) and an `int` (perhaps a page or depth control), and returns an `int` indicating success or the number of evidence items produced. Callers must provide valid identifiers and may use the return value to track processing status.
+The function `clore::generate::build_evidence_for_function_analysis` assembles the evidence pack required to perform a detailed analysis of a single function symbol. Callers provide a reference to the analysis store, a reference to the function's identity, and a `std::string_view` representing the function's qualified name. The function returns an `int` that acts as a handle or status code for the resulting evidence structure, which downstream prompt-building routines then consume to generate the analysis text. This function is the primary entry point for collecting all contextual information—such as the function's declaration, implementation, usage patterns, and cross-references—needed to produce a coherent analysis prompt for that function.
 
 #### Usage Patterns
 
-- Invoked as part of the evidence preparation pipeline for function analysis, alongside similar builders for other symbol kinds.
+- called by other evidence-building functions
+- used in analysis generation workflows
 
 ### `clore::generate::build_evidence_for_function_declaration_summary`
 
-Declaration: `generate/evidence.cppm:67`
+Declaration: `src/generate/evidence.cppm:79`
 
-Definition: `generate/evidence_builder.cppm:238`
+Definition: `src/generate/evidence_builder.cppm:246`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-The caller’s responsibility is to provide the necessary identifiers and analysis information for a function declaration. The function `clore::generate::build_evidence_for_function_declaration_summary` constructs the evidence block that appears on the summary page for a function’s declaration. It accepts references to the function’s identity, its owning context, and the associated analysis store, along with a page index; the returned `int` is used as a handle or a status indicator for the generated evidence structure.
-
-#### Usage Patterns
-
-- called to build evidence for a function declaration summary during page generation
-- likely invoked by higher-level page builders like `build_page_root` or `render_page_markdown`
+The function `clore::generate::build_evidence_for_function_declaration_summary` constructs the evidence data needed to generate a natural‑language summary for a function declaration. Callers supply three opaque identifier handles (the first three `const int &` parameters) that collectively specify the target function, the owning page structure, and the overall document context, along with a `std::string_view` that provides an additional resolver key or name qualifier. The function returns an `int` representing a success status or a handle to the assembled evidence object; it is the caller’s responsibility to ensure that the provided identifiers correspond to a valid function declaration within the current page plan and analysis store. This function is part of the evidence‑building pipeline and is typically invoked before the generated evidence is passed to a prompt‑construction or rendering step.
 
 ### `clore::generate::build_evidence_for_function_implementation_summary`
 
-Declaration: `generate/evidence.cppm:72`
+Declaration: `src/generate/evidence.cppm:84`
 
-Definition: `generate/evidence_builder.cppm:268`
+Definition: `src/generate/evidence_builder.cppm:276`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-The function `clore::generate::build_evidence_for_function_implementation_summary` is responsible for constructing an evidence pack that serves as the input data for generating a summary of a function’s implementation. Callers supply the relevant symbol references and a numeric symbol identifier, which the function uses to gather and structure the contextual information needed by downstream generation steps.
+`clore::generate::build_evidence_for_function_implementation_summary` assembles the evidence data required to produce an implementation summary for a given function symbol. It accepts two opaque integer identifiers (likely representing the function's symbol index and a related page or analysis context) and a `std::string_view` that qualifies the enclosing scope (e.g., a module or namespace name). The caller is responsible for providing valid identifiers that correspond to entries in the symbol store and for ensuring the string view outlives the call. The function returns an `int` status code, where zero typically indicates success and a non-zero value signals an error or failure to build the evidence.
 
-This function fulfills a contract: it returns an evidence object (type indicated by the return) that encapsulates all necessary details about the function implementation, such as its source location, associated analysis, and any related declarations. It is a pure query that never mutates its arguments; the caller is expected to provide valid, resolved symbol identifiers and references from the same generation session.
+#### Usage Patterns
+
+- used to generate evidence for function implementation summaries during documentation generation
 
 ### `clore::generate::build_evidence_for_index_overview`
 
-Declaration: `generate/evidence.cppm:64`
+Declaration: `src/generate/evidence.cppm:76`
 
-Definition: `generate/evidence_builder.cppm:204`
+Definition: `src/generate/evidence_builder.cppm:212`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-The function `clore::generate::build_evidence_for_index_overview` constructs the evidence data required for generating an index overview page. It accepts two `const int &` parameters that identify the target page and its context within the generation pipeline, and returns an `int` handle representing the assembled evidence structure. Callers use this evidence to produce the final markdown content for the index overview, ensuring all necessary symbol analysis and linkage information is included.
-
-#### Usage Patterns
-
-- used when generating the index overview page in the documentation generation pipeline.
+`clore::generate::build_evidence_for_index_overview` constructs the evidence data required to generate the top‑level index overview page. It accepts two integer arguments—typically identifiers that refer to the document layout and the page plan—and returns an integer that represents either a success status or a handle to the assembled evidence pack. The caller relies on this function to supply the necessary information (such as symbol summaries, links, and structural metadata) that drives the rendering of the index page, ensuring the overview is populated with accurate content derived from the entire documentation set.
 
 ### `clore::generate::build_evidence_for_module_architecture`
 
-Declaration: `generate/evidence.cppm:58`
+Declaration: `src/generate/evidence.cppm:70`
 
-Definition: `generate/evidence_builder.cppm:173`
+Definition: `src/generate/evidence_builder.cppm:181`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-`clore::generate::build_evidence_for_module_architecture` constructs and returns an evidence pack (represented as an integer) that describes the high-level architectural structure of a module. Callers invoke this function to obtain the evidence necessary for generating documentation pages that summarize a module’s overall design, dependencies, and organizational patterns. The returned evidence is later consumed by other generation functions (such as those that produce markdown or module page roots) to produce the final output.
-
-The function takes five arguments: four reference-to-const integers that identify the target module and its associated analysis data, and one plain integer that likely controls the scope or detail level of the evidence. The exact contract is that the caller must supply valid, consistent identifiers that have already been resolved within the generation context. The return value is an opaque integer handle to the evidence object, which should not be directly inspected but passed to downstream formatting functions.
+The function `clore::generate::build_evidence_for_module_architecture` constructs an evidence pack that captures the architectural structure of a module. It accepts a set of resource identifiers (as `const int &` parameters) and a module name as a `std::string_view`; the caller must supply valid identifiers for the relevant symbol, analysis, and page contexts, along with the fully qualified module name. The function returns an `int` representing either a status code or a handle to the built evidence, which is then consumed by downstream page‑generation or prompt‑building logic.
 
 #### Usage Patterns
 
-- Called during the generation of documentation evidence for module architecture pages.
+- Called during page generation for module documentation
+- Invoked as part of the evidence-building pipeline for module-level pages
 
 ### `clore::generate::build_evidence_for_module_summary`
 
-Declaration: `generate/evidence.cppm:52`
+Declaration: `src/generate/evidence.cppm:64`
 
-Definition: `generate/evidence_builder.cppm:142`
+Definition: `src/generate/evidence_builder.cppm:150`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-The function `clore::generate::build_evidence_for_module_summary` constructs the evidence pack necessary for generating a summary page for a module. It accepts a set of context identifiers—typically including the module and related file or symbol identifiers—and an integer flag or count. The caller is responsible for providing valid, coherent identifiers; the function returns an integer representing the evidence artifact or status, which subsequent generation steps use to produce the final module summary content. This function is one of several parallel evidence builders that feed into the page generation pipeline for different summary types.
+The function `clore::generate::build_evidence_for_module_summary` constructs the evidence needed for generating a module summary page. It accepts a set of parameters that collectively identify the module, its context (such as the analysis store and page plan), and provides a module name via `std::string_view`. The caller is expected to supply valid handles for the module and related structures; the return value is an integer handle to the resulting evidence object, which can later be used by downstream generation functions (e.g., `build_prompt` or `format_evidence_text`). This function does not produce the final page content but prepares the structured input for subsequent prompt construction.
 
 #### Usage Patterns
 
-- Called during the generation of module summary documentation
+- called when constructing module summary evidence for a code generation page
+- used in the page building pipeline for module documentation
 
 ### `clore::generate::build_evidence_for_namespace_summary`
 
-Declaration: `generate/evidence.cppm:35`
+Declaration: `src/generate/evidence.cppm:47`
 
-Definition: `generate/evidence_builder.cppm:21`
+Definition: `src/generate/evidence_builder.cppm:29`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-The function `clore::generate::build_evidence_for_namespace_summary` constructs a bundle of evidence data used to generate a namespace summary page. It takes identifiers for a namespace, its associated analysis store, a page plan, and additional contextual parameters, and returns a representation of the gathered evidence. Calling this function is a prerequisite for any caller that needs to produce a summary of namespace‑level declarations, analysis results, or relationships as part of the documentation generation pipeline.
+The function `clore::generate::build_evidence_for_namespace_summary` constructs the evidence data required to generate a namespace summary page. It accepts opaque handles or identifiers representing the page plan, symbol analysis store, and related infrastructure, along with a `std::string_view` specifying the target namespace. The call returns an integer status or handle that the caller can use to reference the assembled evidence for subsequent rendering steps.
 
-#### Usage Patterns
-
-- Called during namespace page generation to provide evidence for AI summary prompts
-- Used by `clore::generate::build_namespace_page_root` and similar page root builders
+Callers invoke this function during page generation to produce the structured information needed by a namespace summary page, such as symbol listings, documentation links, and analysis prompts. The resulting evidence is typically consumed by other generation functions like `clore::generate::render_page_bundle` or `clore::generate::build_prompt`.
 
 ### `clore::generate::build_evidence_for_type_analysis`
 
-Declaration: `generate/evidence.cppm:44`
+Declaration: `src/generate/evidence.cppm:56`
 
-Definition: `generate/evidence_builder.cppm:82`
+Definition: `src/generate/evidence_builder.cppm:90`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-The `clore::generate::build_evidence_for_type_analysis` function constructs the evidence pack necessary for performing type analysis on a type symbol. It accepts two reference parameters that supply the symbol and analysis context, and an integer parameter that identifies the specific analysis prompt or evidence category. The function returns an integer handle to the assembled evidence pack, which can then be used by other analysis functions such as `clore::generate::build_symbol_analysis_prompt` to generate prompt content. Callers must ensure that the provided context and prompt index are valid and consistent with the symbol under analysis.
+The function `clore::generate::build_evidence_for_type_analysis` constructs the evidence pack used to drive type‑analysis prompts within the documentation generation pipeline. It accepts two integer references (likely representing the relevant symbol store and the target type symbol) and a `std::string_view` (perhaps the fully qualified name or a cache key), and returns an integer status—typically indicating success or the number of evidence items produced.
+
+Callers invoke this function when a page or prompt requires type‑level analysis evidence (e.g., for a class, struct, or enum). The evidence it builds feeds into later stages such as prompt assembly or markdown rendering. The function assumes that the provided symbol references are valid and that the evidence context (e.g., pre‑loaded analysis results) is available; it does not perform validation on its own.
 
 #### Usage Patterns
 
-- Used during documentation generation for type symbols to build a structured evidence pack.
-- Probably called from `clore::generate::build_prompt` or similar orchestration functions.
-- Part of a family of `build_evidence_for_*_analysis` functions for different symbol kinds.
+- Called during page generation for type symbols
+- Used to prepare evidence for type analysis prompts
 
 ### `clore::generate::build_evidence_for_type_declaration_summary`
 
-Declaration: `generate/evidence.cppm:77`
+Declaration: `src/generate/evidence.cppm:89`
 
-Definition: `generate/evidence_builder.cppm:302`
+Definition: `src/generate/evidence_builder.cppm:310`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-`clore::generate::build_evidence_for_type_declaration_summary` constructs the evidence content used to generate the summary section on a type's declaration page. It accepts references to the `SymbolAnalysisStore`, `PagePlanSet`, and `LinkResolver` (represented by integer handles) along with a depth parameter, and returns a handle to a `MarkdownNode` or evidence pack. The caller must ensure that the provided handles are valid and that the type analysis data has been populated. The function is responsible for assembling the relevant declaration details, such as the type name, namespace, and base types, into a concise summary suitable for inclusion in the page's overview. It follows the same pattern as other `build_evidence_for_*_summary` functions within the `clore::generate` module, focusing on extracting just the declaration-level information without implementation or analysis details.
+The function `clore::generate::build_evidence_for_type_declaration_summary` is responsible for assembling the evidence data necessary to generate a summary page for a type declaration. It accepts internal identifiers (represented as `const int &` parameters) that reference the relevant page plan, symbol analysis store, and page root, along with a `std::string_view` that specifies the fully qualified name of the type. Its return value of type `int` is an opaque handle that refers to the constructed evidence pack, which callers can later use when building prompts or rendering the page. This function is part of the evidence-building pipeline and is invoked during page generation for type declarations, ensuring that the summary section receives all required contextual and analytical information.
 
 #### Usage Patterns
 
-- Used in the page generation pipeline for type declaration documentation
-- Called by higher-level builders to create evidence for type summaries
+- invoked during type declaration summary generation
 
 ### `clore::generate::build_evidence_for_type_implementation_summary`
 
-Declaration: `generate/evidence.cppm:82`
+Declaration: `src/generate/evidence.cppm:94`
 
-Definition: `generate/evidence_builder.cppm:334`
+Definition: `src/generate/evidence_builder.cppm:342`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-The function `build_evidence_for_type_implementation_summary` constructs the evidence data that populates a summary for a type's implementation. The caller supplies parameters that identify the type symbol, the analysis store, and a context index; the function returns an integer that may serve as an identifier or status for the generated evidence. This routine is part of the evidence-building pipeline for type-related content and is intended to be invoked when assembling the markdown for a type's implementation summary page.
+Constructs the evidence required for generating an implementation summary page for a type. The caller supplies two opaque integer references representing the type analysis and the broader generation context, along with a `std::string_view` identifying the relevant scope or namespace. The function returns an `int` value that signals the outcome — typically zero for success or a positive count of evidence items prepared. It governs the extraction and formatting of all supporting information that an implementation summary page needs, such as member details, inheritance, and usage context, following the same contract as the analogous `build_evidence_for_function_implementation_summary` for function types.
 
 #### Usage Patterns
 
 - called during generation of type implementation summary pages
-- used to build evidence data for type documentation
-- likely invoked from higher-level page generation functions like `build_symbol_analysis_prompt`
+- invoked by higher-level page building functions like `clore::generate::append_type_member_sections`
 
 ### `clore::generate::build_evidence_for_variable_analysis`
 
-Declaration: `generate/evidence.cppm:48`
+Declaration: `src/generate/evidence.cppm:60`
 
-Definition: `generate/evidence_builder.cppm:113`
+Definition: `src/generate/evidence_builder.cppm:121`
 
 Implementation: [`Module generate:evidence_builder`](../../../modules/generate/index.md) | [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-This function constructs the evidence data for a variable analysis within the code generation process. It takes a reference to a `SymbolAnalysisStore`, a reference to a variable identifier key, and an integer parameter (likely page depth or limit), and returns an integer representing the evidence pack or status. Callers use this function to obtain the necessary evidence for rendering variable analysis sections in generated documentation pages.
+The function `clore::generate::build_evidence_for_variable_analysis` assembles the evidence pack required for analyzing a variable symbol. It accepts a reference to a symbol analysis store, a reference to a page plan set (or similar synthesis context), and a `std::string_view` identifying the variable. The caller is responsible for ensuring that the provided identifiers are valid and that the variable exists in the analysis store. The return value indicates success or failure of the evidence construction process.
+
+#### Usage Patterns
+
+- Called during documentation generation for variable symbols
+- Part of the evidence building pipeline for analysis
 
 ### `clore::generate::build_file_page_root`
 
-Declaration: `generate/render/page.cppm:345`
+Declaration: `src/generate/render/page.cppm:364`
 
-Definition: `generate/render/page.cppm:345`
+Definition: `src/generate/render/page.cppm:364`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-The function `clore::generate::build_file_page_root` constructs the root node of a documentation page for a single file. It accepts six integer parameters that together identify the target file and its surrounding context (such as its module, namespace, or analysis store) and returns an integer representing the newly created page root. Callers are responsible for supplying the correct identifiers; the function then initializes the page’s top‑level structure, making it ready for subsequent content assembly and rendering steps.
+The function `clore::generate::build_file_page_root` constructs the root element of a page dedicated to a source file within the generated documentation. It accepts six opaque integer handles—likely representing the file, its enclosing project or module, and the generation context—and returns an integer indicating success or failure (or a handle to the built root). Callers invoke it during page generation to establish the top-level structure for a file's documentation page, which will later be populated with analysis, symbols, and rendered content.
 
 #### Usage Patterns
 
-- called to generate the root semantic section for a file page in the documentation generation pipeline
-- used within page-building functions such as `build_page_root`
-- combines multiple sections into a single root for a file-level document
+- Called during documentation page generation to create the top-level semantic structure for a file page.
 
 ### `clore::generate::build_index_page_root`
 
-Declaration: `generate/render/page.cppm:447`
+Declaration: `src/generate/render/page.cppm:466`
 
-Definition: `generate/render/page.cppm:447`
+Definition: `src/generate/render/page.cppm:466`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-Constructs the root content for an index page within the generated documentation. Callers provide five integer references that collectively identify the necessary components—such as target page identity, link resolver, or symbol context—used to produce the page’s base content. The function returns an integer handle to the resulting root node, which is later composed into the full page structure.
+The function `clore::generate::build_index_page_root` is responsible for constructing the foundational content of a generated index page. Callers provide five contextual identifiers (passed as `const int &` references) that specify the project state, page set, or other generation artifacts required to produce the page root. The function returns an `int` that indicates success or an error condition; callers should check this value after invocation. As a page-building operation, it participates in the same pipeline as other `build_*_page_root` functions and is expected to be called during the page generation workflow rather than in isolation.
 
 #### Usage Patterns
 
-- called during index page generation in the documentation pipeline
-- used to compose the root content of a generated index page
+- Called during index page generation to produce the root section
+- Used as part of the page construction pipeline
 
 ### `clore::generate::build_link_resolver`
 
-Declaration: `generate/model.cppm:201`
+Declaration: `src/generate/model.cppm:217`
 
-Definition: `generate/model.cppm:471`
+Definition: `src/generate/model.cppm:487`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The function `clore::generate::build_link_resolver` constructs a `LinkResolver` from a `PagePlanSet`. The returned resolver is used to look up page titles, namespaces, and modules during page generation, enabling the creation of cross-references and navigation links. Callers supply the complete set of page plans; the resolver provides a read-only, queryable interface for resolving symbolic references to their final page destinations.
+Constructs a `LinkResolver` from a `PagePlanSet`. The returned resolver translates symbolic identifiers—such as module names, namespace names, and page titles—into their corresponding page targets during documentation generation. Callers should provide the complete set of page plans; the resolver is built to reflect all planned pages and their relationships. The resulting `LinkResolver` can then be queried via its `resolve`, `resolve_module`, `resolve_namespace`, and `resolve_page_title` methods to obtain link targets without requiring repeated access to the original plan set.
 
 #### Usage Patterns
 
-- Building a `LinkResolver` from a `PagePlanSet`
-- Used by page generation to provide a mapping from `IDs` to titles and paths
+- Called to build a `LinkResolver` for later use in resolving page titles, namespaces, and modules
+- Used by other functions that need to map symbol keys or page `IDs` to relative paths
 
 ### `clore::generate::build_list_section`
 
-Declaration: `generate/render/common.cppm:133`
+Declaration: `src/generate/render/common.cppm:144`
 
-Definition: `generate/render/common.cppm:133`
+Definition: `src/generate/render/common.cppm:144`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::build_list_section` constructs a list section within a generated document. It accepts three integer parameters that represent the content, formatting options, and structural position of the list, and returns an integer that identifies the resulting section or indicates the outcome of the operation. Callers provide the necessary numeric identifiers for list data and configuration; the function handles the assembly of a complete list section element suitable for inclusion in the output document.
+The function `clore::generate::build_list_section` accepts a `std::string` representing the section title, a `std::uint8_t` for the nesting depth (likely indentation level), and an `int` parameter whose exact role is determined by the caller. It returns an `int` that typically serves as a handle or a status code indicating success or failure. Callers can use this function to add a structured list section to a page being generated; the contract does not guarantee the internal format of the returned integer aside from its use in subsequent page‑building operations.
 
 #### Usage Patterns
 
-- Called by page builders to generate a list section with a heading
-- Used when a documentation section requires a bullet list as content
-- Likely invoked in the generation of overview, analysis, or summary pages
+- Used to generate a section with a bullet list for documentation pages (e.g., symbol lists, option lists).
 
 ### `clore::generate::build_llms_page`
 
-Declaration: `generate/dryrun.cppm:19`
+Declaration: `src/generate/dryrun.cppm:35`
 
-Definition: `generate/dryrun.cppm:333`
+Definition: `src/generate/dryrun.cppm:349`
 
 Implementation: [`Module generate:dryrun`](../../../modules/generate/dryrun.md)
 
-`clore::generate::build_llms_page` constructs and returns a page representation dedicated to `LLMs` (large language models) within the documentation generation pipeline. The caller provides two reference-to-const integer arguments and one integer argument, which together specify the context and content parameters for the LLM‑related page. The function returns an integer indicating the outcome of the build operation. This function is part of the `clore::generate` page‑building infrastructure, alongside analogous builders for index, module, file, namespace, and request‑estimate pages, and is responsible for producing the LLM‑specific page content for the generated documentation set.
+The function `clore::generate::build_llms_page` constructs the documentation page that serves as the overview or index for all large language models (`LLMs`) within the project. It accepts a reference to the generation context and a reference to the page plan, along with a `std::string_view` providing the name or identifier of the LLM data source. The returned `int` value indicates whether the page was built successfully, with a non‑zero value typically representing an error condition.
 
 #### Usage Patterns
 
-- called as part of the page generation pipeline to produce the `LLMs` overview file
+- Used in page generation pipeline to produce the LLMS index file
 
 ### `clore::generate::build_module_page_root`
 
-Declaration: `generate/render/page.cppm:255`
+Declaration: `src/generate/render/page.cppm:274`
 
-Definition: `generate/render/page.cppm:255`
+Definition: `src/generate/render/page.cppm:274`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-The function `clore::generate::build_module_page_root` constructs the root page content for a module in the generated documentation. It takes as input the module's identifier along with associated analysis and context data, and returns an integer representing the constructed root page (e.g., a handle or status indicator). Callers should provide the necessary module-specific data and ensure that all referenced data remains valid for the duration of the call.
+The function `clore::generate::build_module_page_root` generates the root documentation page content for a module. It accepts contextual references (such as cached page plan data, symbol analysis stores, and module identity) through a set of integer handles. Callers must ensure that the passed identifiers correspond to a valid module and that all required precomputed data (e.g., the page plan set) is available. The return value is an integral status code where zero typically indicates success and non-zero indicates an error.
 
 #### Usage Patterns
 
-- called during page generation for module pages
-- part of the page building pipeline alongside `build_file_page_root` and `build_namespace_page_root`
-- invoked with page plan, configuration, project model, analysis outputs, and layout to produce a modular documentation section
+- Called during module page generation to build the top-level section.
+- Used within `build_page_root` dispatch for module page types.
 
 ### `clore::generate::build_namespace_page_root`
 
-Declaration: `generate/render/page.cppm:165`
+Declaration: `src/generate/render/page.cppm:184`
 
-Definition: `generate/render/page.cppm:165`
+Definition: `src/generate/render/page.cppm:184`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-Constructs the root page for a namespace-scoped documentation page within the generation pipeline. The caller supplies the seven required context references (typically identifiers for the namespace, its parent, the containing module, a page plan set, a link resolver, a prompt cache, and an analysis store) and receives an integer handle representing the fully built page root. The function guarantees that all immediate sub-pages, evidence sections, and navigation links for the namespace are resolved and attached, so the returned root can be consumed directly by the page rendering step.
+The function `clore::generate::build_namespace_page_root` is responsible for constructing the root-level structure of a generated namespace documentation page. It accepts seven `const int &` parameters that together identify the page plan, the namespace, and the surrounding generation context, and it returns an `int` indicating success or failure. Callers invoke this function during page generation when the target page type corresponds to a namespace overview, ensuring that the initial page skeleton (including links, metadata, and layout placeholders) is correctly assembled before sub-sections are appended. The precise contract of each parameter is defined by the page planning infrastructure; all provided identifiers must be valid within the active generation run.
 
 #### Usage Patterns
 
-- Called during namespace page generation to produce the root content section
-- Used as a stage in the page building pipeline where the result is later rendered to markdown
-- Typically invoked once per namespace from `generate_pages` or similar orchestration functions
+- called during namespace page generation
+- used to build the top-level section of a namespace page
 
 ### `clore::generate::build_page_doc_layout`
 
-Declaration: `generate/render/symbol.cppm:37`
+Declaration: `src/generate/render/symbol.cppm:55`
 
-Definition: `generate/render/symbol.cppm:897`
+Definition: `src/generate/render/symbol.cppm:915`
 
 Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
-The function `clore::generate::build_page_doc_layout` accepts two constant integer references and returns a `PageDocLayout`. It is responsible for constructing the layout structure that governs how documentation content is arranged for a given page. Callers should supply the appropriate identifiers—typically a symbol identifier and a page context identifier—to obtain the fully defined layout. The returned `PageDocLayout` serves as the blueprint for rendering the page’s documentation sections, and its contract ensures that the layout is consistent with the page’s type and associated metadata.
+The function `clore::generate::build_page_doc_layout` accepts two integer identifiers (presumably a page identity and an associated symbol or context) and returns a `PageDocLayout`.  
+Its caller‑facing responsibility is to produce a complete, structured layout that dictates how documentation sections are arranged for the given page. The contract requires valid integer inputs; the returned `PageDocLayout` is then used by downstream rendering or assembly functions to organise and emit the final document content.
 
 #### Usage Patterns
 
-- Called during page documentation generation to create subpage layouts for types, variables, and functions
-- Used as part of building the overall page structure for module, namespace, or implementation pages
+- Called during page generation to organize symbol documentation groups based on a page plan and project model.
 
 ### `clore::generate::build_page_plan_set`
 
-Declaration: `generate/planner.cppm:15`
+Declaration: `src/generate/planner.cppm:32`
 
-Definition: `generate/planner.cppm:369`
+Definition: `src/generate/planner.cppm:386`
 
 Implementation: [`Module generate:planner`](../../../modules/generate/planner.md)
 
-Constructs a page plan set. Callers provide two identifiers (as `const int &`) and receive an `int` representing the resulting plan set. The returned value serves as a handle that can be used by downstream generation stages to iterate over or evaluate the planned pages. This function is part of the page-building pipeline and should be invoked before tasks such as rendering or evidence collection that depend on the plan set.
+The function `clore::generate::build_page_plan_set` constructs a comprehensive plan set for page generation. It accepts two opaque integer references that represent the document analysis context and the overall generation configuration. The function returns an integer handle to the resulting `PagePlanSet`, which can be used to build link resolvers and individual page roots. Callers must invoke this function before any page-specific builders to establish the complete set of page plans.
 
 #### Usage Patterns
 
-- Called by high-level generation entry points to create a plan set from configuration and project model
-- Used as a prerequisite before rendering or writing pages based on the plan
+- Called during page generation to produce a sorted set of plans
+- Used by higher-level generation functions like `generate_pages`
 
 ### `clore::generate::build_page_root`
 
-Declaration: `generate/render/page.cppm:546`
+Declaration: `src/generate/render/page.cppm:565`
 
-Definition: `generate/render/page.cppm:546`
+Definition: `src/generate/render/page.cppm:565`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-`clore::generate::build_page_root` is the primary entry point for constructing the top-level representation of a generated documentation page. It accepts seven `const int &` parameters that together identify the page context (for example, a symbol, file, module, or namespace identifier along with associated analysis and layout indices). The function assembles the root content structure and returns an `int` that indicates the outcome (typically zero for success or a negative error code). Callers must supply valid, resolved identifiers that correspond to entities already prepared in the current generation session; the function relies on these to delegate section building to specialized helpers such as `clore::generate::build_file_page_root` or `clore::generate::build_namespace_page_root`.
+`clore::generate::build_page_root` is the entry point for constructing the root content of a generated documentation page. It accepts seven `const int &` parameters that collectively identify the page's symbol, analysis data, page plan, document layout, and supporting context. The function assembles the top‑level sections, metadata, and structural elements required for a complete page, and returns an integer status (typically zero for success). Callers should provide the correct identifiers from earlier stages of the generation pipeline and expect the function to produce all common page infrastructure before any child or supplementary sections are added.
 
 #### Usage Patterns
 
-- Called during page rendering to select the appropriate page builder based on `PageType`
-- Used as a central dispatch point in the page generation pipeline, likely invoked by `render_page_markdown` or similar functions
+- called during page generation to create the root semantic section
+- used as a central point for type-based page root construction
 
 ### `clore::generate::build_prompt`
 
-Declaration: `generate/evidence.cppm:94`
+Declaration: `src/generate/evidence.cppm:106`
 
-Definition: `generate/evidence.cppm:651`
+Definition: `src/generate/evidence.cppm:663`
 
 Implementation: [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-The `clore::generate::build_prompt` function constructs a prompt by combining an integer identifier (likely representing a prompt kind or target context) with a const reference to an `EvidencePack`. It returns an integer handle that identifies the built prompt for later use. Callers are responsible for providing a valid evidence pack and an appropriate prompt kind; the returned handle is opaque and must be consumed according to the conventions of the prompt-building subsystem.
+The function `clore::generate::build_prompt` accepts an integer representing a prompt kind and a const `EvidencePack` containing gathered evidence. It constructs a complete prompt string suitable for an LLM request by formatting the evidence and instantiating the corresponding prompt template. On success, it returns an `std::string`; on failure, it returns a `PromptError` indicating the reason for failure. This is the primary entry point for assembling a prompt from a given kind and evidence.
 
 #### Usage Patterns
 
-- Used to construct a prompt string for a given `PromptKind` and `EvidencePack`
-- Returns either the prompt string or a `PromptError`
+- called by prompt-building infrastructure
+- used to generate documentation prompts from evidence packs
 
 ### `clore::generate::build_prompt_section`
 
-Declaration: `generate/render/common.cppm:124`
+Declaration: `src/generate/render/common.cppm:135`
 
-Definition: `generate/render/common.cppm:124`
+Definition: `src/generate/render/common.cppm:135`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::build_prompt_section` assembles a discrete section of a prompt, accepting a section identifier, a size or limit parameter, and an optional pointer to an integer array. It returns an `int` that indicates the outcome of the operation—for instance, a status code or the number of elements processed.
+`clore::generate::build_prompt_section` accepts a title string, a heading depth (as a `std::uint8_t`), and an optional content string (as a `const std::string *`, which may be null). It constructs a markdown section suitable for inclusion in a generated prompt. The caller is responsible for providing a valid depth (typically 1–6) and a non‑null title. The optional content, if provided, will be inserted as the body of the section.
 
-Callers are responsible for providing valid arguments: the pointer must point to a memory region of sufficient capacity when non‑null, and the integer parameters must satisfy any preconditions enforced by the function (such as non‑negativity or bounds). The precise meaning of the return value is determined by the caller’s context and is typically checked against an expected range or sentinel.
+The function returns an integer representing either a section handle or a status code that indicates success or failure. This return value is used by other prompt‑building infrastructure within the generation pipeline.
 
 #### Usage Patterns
 
-- Building prompt sections with optional output text for documentation generation
-- Used in combination with `make_section` and `make_raw_markdown` to structure prompt content
+- Called to construct a section with optional raw markdown content within a prompt page
 
 ### `clore::generate::build_related_page_targets`
 
-Declaration: `generate/render/common.cppm:504`
+Declaration: `src/generate/render/common.cppm:515`
 
-Definition: `generate/render/common.cppm:504`
+Definition: `src/generate/render/common.cppm:515`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::build_related_page_targets` constructs a collection of page targets that are related to a given element or resource, based on the provided identifiers and a depth or scope parameter. Callers supply the necessary resource and context identifiers as `const int &` arguments, along with an `int` value that controls the extent of relatedness (e.g., number of link hops or target limit). The return value is an `int` that represents the result of the construction—typically a status code or a handle to the generated target set. This function is used during page rendering to produce cross-reference links, enabling navigation between related documentation pages.
+`clore::generate::build_related_page_targets` constructs a representation of target references for documentation pages that are related to a given context. The caller supplies two integer identifiers and a string view, and receives an integer result that can be used to refer to the built targets in subsequent page-generation steps. This function is part of the cross-reference resolution pipeline: it is called when a page needs to emit links or references to other pages that are semantically related, such as sibling symbols, associated modules, or supporting analysis pages. The caller is responsible for passing the correct identifiers—typically referencing entity or page-plan keys—and a string view that provides the necessary context (for example, a qualified name or a page path). The returned integer acts as a handle to the constructed target list, which can later be consumed by functions like `clore::generate::push_link_paragraph` or `clore::generate::build_symbol_link_list`. The contract requires that the provided integers and string view are valid within the current generation session; otherwise the behavior is undefined.
 
 #### Usage Patterns
 
-- called during page generation to collect related page links
-- used to populate a "related pages" section in a documentation page
+- Used during page generation to collect cross-reference link targets for related pages
+- Called when building navigation or 'related pages' sections in documentation output
 
 ### `clore::generate::build_request_estimate_page`
 
-Declaration: `generate/dryrun.cppm:15`
+Declaration: `src/generate/dryrun.cppm:31`
 
-Definition: `generate/dryrun.cppm:230`
+Definition: `src/generate/dryrun.cppm:246`
 
 Implementation: [`Module generate:dryrun`](../../../modules/generate/dryrun.md)
 
-The function `clore::generate::build_request_estimate_page` constructs the page content for estimating a build request. It accepts three `const int &` parameters that represent the identifiers required to locate and scope the estimate (for example, a project, module, or symbol key). The caller must supply valid, corresponding identifiers; the function returns an `int` that signals the result of the operation or provides a handle to the generated page.
+The function `clore::generate::build_request_estimate_page` constructs a page that provides an estimate or summary of request-related data. It accepts three `const int &` parameters, which likely represent identifiers or quantities needed to compute the estimate. The function returns an `int`, typically indicating success or a handle to the generated page content. Callers should provide the appropriate integer arguments that drive the estimation logic; the exact semantics of each parameter are defined by the call site in the page-building pipeline.
 
 #### Usage Patterns
 
-- called during dry run generation to produce the estimate page
-- likely invoked by `clore::generate::generate_dry_run`
+- Used during dry run generation to produce the estimate page
+- Called by the dry run orchestrator to generate the request estimate page
 
 ### `clore::generate::build_string_list`
 
-Declaration: `generate/render/common.cppm:148`
+Declaration: `src/generate/render/common.cppm:159`
 
-Definition: `generate/render/common.cppm:148`
+Definition: `src/generate/render/common.cppm:159`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-Constructs and returns a string list derived from the provided identifier. The caller supplies a `const int &` parameter, which identifies the source data used to produce the list. The return value is an `int` that may represent a handle, a result code, or a count; its semantics are defined by the caller's usage context within the generation pipeline.
+Constructs a list of strings from the given integer argument, returning an integer handle that identifies the resulting list. The caller provides the integer input and receives an opaque handle; no additional ownership or lifetime management is implied by the return value.
 
 #### Usage Patterns
 
-- Constructs a markdown bullet list from a list of strings
-- Used in generating symbol lists and evidence sections in documentation pages
-- Relies on `code_spanned_fragments` for inline code formatting
+- building bullet lists from string collections
+- generating markdown lists from code-annotated text
 
 ### `clore::generate::build_symbol_analysis_prompt`
 
-Declaration: `generate/analysis.cppm:46`
+Declaration: `src/generate/analysis.cppm:62`
 
-Definition: `generate/analysis.cppm:429`
+Definition: `src/generate/analysis.cppm:445`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-`clore::generate::build_symbol_analysis_prompt` constructs a prompt that is used to request an AI-based analysis of a code symbol. The caller supplies the contextual parameters that identify the symbol and the analysis scope; the exact meaning of each parameter is defined by the internal prompt-building protocol. The function returns an opaque `int` value that acts as a handle to the generated prompt, which can be passed to further processing or evaluation stages. This function is part of the code-generation pipeline and is not intended to be called directly by consumer code; instead, it is invoked by higher-level orchestration when preparing analysis requests for individual symbols.
+`clore::generate::build_symbol_analysis_prompt` constructs the prompt used to request analysis of a symbol. It accepts context information about the symbol—such as its declaration, usage, and documentation—and returns a status indicating whether the prompt was successfully built.
+
+This function is the primary entry point for generating prompts in the symbol analysis pipeline; callers use it to obtain the prompt that will be sent to an analysis service. It is typically invoked during page generation to drive documentation or insight extraction for a given symbol.
 
 #### Usage Patterns
 
-- generating prompts for function, type, and variable analysis
-- called from higher-level generation functions to produce LLM prompts
+- used to generate prompts for symbol analysis pipelines
+- called when building prompts for function, type, or variable analysis
+- typically invoked by higher-level prompt construction routines like `apply_symbol_analysis_response` or `build_dry_run_page_summary_texts`
 
 ### `clore::generate::build_symbol_link_list`
 
-Declaration: `generate/render/common.cppm:360`
+Declaration: `src/generate/render/common.cppm:371`
 
-Definition: `generate/render/common.cppm:360`
+Definition: `src/generate/render/common.cppm:371`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-Constructs a linked list of symbol references based on the provided parameters. The caller supplies a primary symbol identifier as a `const int &`, an integer count or depth as `int`, an auxiliary symbol identifier as a `const int &`, and a `bool` flag that controls inclusion or filtering behavior. The returned `int` handle represents the resulting list of links; valid identifiers and appropriate flag semantics must be ensured by the caller for the current generation context.
+The function `clore::generate::build_symbol_link_list` constructs a structured list of hyperlink targets for related symbols, typically used to populate cross‑reference sections or navigation menus in generated documentation. Callers provide an identifier for the symbol collection context, a string path or name to filter or organize the links, an additional configuration handle, and a boolean flag controlling inclusion or grouping behavior.
+
+The return value is an opaque handle to the resulting link list, which can be passed subsequently to rendering functions. The caller is responsible for ensuring that the first and third arguments refer to valid internal states and that the string view remains valid for the duration of the call.
 
 #### Usage Patterns
 
-- building navigable symbol lists for documentation pages
-- creating bullet lists of related symbols with resolved hyperlinks
-- used in page generation to render symbol cross-references
+- Called during page rendering to build a list of links to related symbols
+- Used in documentation generation pipelines to produce navigation or reference lists
 
 ### `clore::generate::build_symbol_source_locations`
 
-Declaration: `generate/render/common.cppm:412`
+Declaration: `src/generate/render/common.cppm:423`
 
-Definition: `generate/render/common.cppm:412`
+Definition: `src/generate/render/common.cppm:423`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::build_symbol_source_locations` accepts several integer parameters — three by `const int &` and one by `int` — and returns an `int` that represents the constructed source‑location information for a symbol. Callers supply identifiers that collectively designate a symbol, a source file, and position details; the function assembles these into a compact, internal representation and returns a handle that can be used to retrieve or reference the locations later in the generation pipeline. The `int` result serves as an opaque key or index into the stored location data, and the caller must treat it as valid only within the current generation context.
+The function `clore::generate::build_symbol_source_locations` constructs source location information for a given symbol. It accepts three integer parameters that identify the symbol (such as symbol, file, and line indices) and a `std::string_view` that may provide additional context, such as a file path or label. The function returns an `int` that indicates the outcome of the operation, typically a success code or a handle to the built location data. Callers supply the necessary identifiers and text, and the function produces a structured representation of the symbol’s source locations for use in documentation generation.
 
 #### Usage Patterns
 
-- Used to build source location sections in generated documentation pages
+- used in page rendering to generate source location link sections
 
 ### `clore::generate::code_spanned_fragments`
 
-Declaration: `generate/markdown.cppm:124`
+Declaration: `src/generate/markdown.cppm:135`
 
-Definition: `generate/markdown.cppm:693`
+Definition: `src/generate/markdown.cppm:704`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-The function `clore::generate::code_spanned_fragments` is a core generator routine that produces a collection of code-spanned fragments for Markdown rendering. It accepts an integer token representing a source entity and returns an integer that encodes the resulting fragment list. Callers supply the token of the entity (e.g., a symbol index or analysis store handle) and receive the identifier of the generated fragment set, which can then be consumed by downstream rendering functions such as `clore::generate::render_page_markdown` or composed with other fragment types. The exact semantics of the integer parameters and return value are defined by the broader generation pipeline; the function is not intended to be invoked in isolation and should be called only within the context of page assembly.
+Declaration: [Declaration](functions/code-spanned-fragments.md)
+
+The function `clore::generate::code_spanned_fragments` accepts a `std::string_view` and returns a `std::vector<InlineFragment>`. It is responsible for extracting inline code spans from Markdown source text, providing the caller with a decomposed list of fragments that correspond to code spans. This allows downstream processing to treat each code span as a distinct inline element.
 
 #### Usage Patterns
 
-- Parse markdown text into inline fragments based on code spans
+- Used by `clore::generate::(anonymous namespace)::append_rendered_text` to break up text into fragments for rendering
 
 ### `clore::generate::code_spanned_markdown`
 
-Declaration: `generate/markdown.cppm:126`
+Declaration: `src/generate/markdown.cppm:137`
 
-Definition: `generate/markdown.cppm:699`
+Definition: `src/generate/markdown.cppm:710`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::code_spanned_markdown` accepts an integer representing a markdown node or fragment and returns an integer representing a transformed node. This function is responsible for identifying and wrapping inline code segments within the provided markdown content, ensuring that code spans are properly delimited according to the expected markup conventions. Callers can rely on this function to produce a markdown node where all inline code spans have been correctly formatted, ready for further processing or rendering.
-
-#### Usage Patterns
-
-- used in generation pipeline to format documentation markdown
-- called when rendering page content with code span handling
+The function `clore::generate::code_spanned_markdown` accepts a `std::string_view` input and returns a `std::string` containing the input formatted as inline code spans in Markdown. It is responsible for escaping or wrapping the input so that it renders as monospaced, inline code when included in a Markdown document. The caller provides a plain text string (often a code fragment, symbol name, or literal), and receives a valid Markdown fragment suitable for embedding in a larger document. The contract guarantees that the output is safe against Markdown misinterpretation of special characters (e.g., backticks) and is ready for direct insertion into a document’s paragraph or inline context.
 
 ### `clore::generate::collect_implementation_symbols`
 
-Declaration: `generate/render/common.cppm:314`
+Declaration: `src/generate/render/common.cppm:325`
 
-Definition: `generate/render/common.cppm:314`
+Definition: `src/generate/render/common.cppm:325`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::collect_implementation_symbols` is a public template function that accepts two integer parameters and a forwarding predicate (`Predicate &&`). It returns an integer result. The caller provides identifiers and a predicate to filter symbols, and the function collects the set of implementation symbols that satisfy the given condition. The exact nature of the integer inputs and the meaning of the return value are defined by the broader code generation context; this function is intended to be used as part of symbol analysis or page-building pipelines that require a filtered collection of symbol definitions.
+`clore::generate::collect_implementation_symbols` is a template function that collects a set of implementation symbols (such as those belonging to a namespace or module) that match a caller-supplied predicate. The caller provides two integer-like opaque references (likely handles to analysis data and page planning structures) and a `Predicate` callable that selects which symbols to include. The function returns an integer representing the count of collected symbols or a handle to the resulting collection. The predicate is forwarded with its exact type and is expected to return a truthy value for each symbol that should be retained; the function’s contract is to traverse the available implementation symbols and return those for which the predicate evaluates to `true`.
 
 #### Usage Patterns
 
-- Called to gather all implementation symbols for a given page plan and project model
-- Typically used to populate the symbol list for rendering a page, with a predicate filtering by symbol kind or other criteria
+- called to gather symbols for implementation documentation pages
+- used with a plan and model to filter symbols that are page-level and match a predicate
 
 ### `clore::generate::collect_namespace_symbols`
 
-Declaration: `generate/render/common.cppm:289`
+Declaration: `src/generate/render/common.cppm:300`
 
-Definition: `generate/render/common.cppm:289`
+Definition: `src/generate/render/common.cppm:300`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::collect_namespace_symbols` is a template function parameterized by `Predicate`. It accepts an identifier (presumably a namespace identifier), an integer parameter, and a forwarding reference to a callable `Predicate` object. The function returns an integer value. Its behavior is determined by the provided predicate, which is evaluated for each candidate symbol; the semantics of the return value serve as a handle or count of collected symbols. Callers provide a filtered traversal over namespace contents, with the predicate controlling which symbols are gathered. The function is designed to be used in contexts where a caller needs to enumerate symbols within a namespace under a custom selection criterion, typically as part of page-building or analysis workflows.
+The template function `clore::generate::collect_namespace_symbols` accepts a `const int &` (presumably a context or store identifier), a `std::string_view` naming the target namespace, and a `Predicate &&` callable that determines which symbols to include. It returns an `int` representing a handle or collection of references to the matching symbols from that namespace. The caller supplies the predicate to filter symbols (e.g., by kind or name pattern); the function enumerates declarations belonging to the namespace and yields a result that can be passed to subsequent generation steps. The `Predicate` type is deduced from the argument, and the contract requires it to be invocable with the element type used internally to represent a symbol.
 
 #### Usage Patterns
 
-- called by page‑building functions to gather namespace symbols for documentation generation
+- called from namespace page builders to gather symbols
+- used with a predicate to filter symbols for analysis or rendering
+- provides sorted list of namespace symbols for further processing
 
 ### `clore::generate::compute_page_path`
 
-Declaration: `generate/model.cppm:214`
+Declaration: `src/generate/model.cppm:230`
 
-Definition: `generate/model.cppm:576`
+Definition: `src/generate/model.cppm:592`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The function `clore::generate::compute_page_path` accepts a `const PageIdentity &` and returns an `int`.  It is responsible for determining the file-system path associated with a given page identity during page generation.  
-
-Callers supply a valid `PageIdentity` object, and the function produces an integral value that represents the computed path.  The exact interpretation of the returned `int` is part of the internal page‑generation protocol; callers should treat the result as an opaque handle or identifier that can be passed to other generation functions expecting a path argument.
+The function `clore::generate::compute_page_path` maps a `PageIdentity` to its corresponding output file path. It returns a `std::expected<std::string, PathError>`: on success, the result holds the computed path as a string; on failure, it contains a `PathError` describing why the path could not be derived. Callers must check the returned `std::expected` for an error before using the path. This function is a core part of the page generation pipeline, translating abstract page identities into concrete filesystem locations.
 
 #### Usage Patterns
 
-- Called during page generation to determine the output file path for a given `PageIdentity`.
-- Used by page building functions such as `build_page_root` and `write_page` to produce the final file location.
+- called during page generation to determine output file path for each page
 
 ### `clore::generate::doc_label`
 
-Declaration: `generate/render/common.cppm:279`
+Declaration: `src/generate/render/common.cppm:290`
 
-Definition: `generate/render/common.cppm:279`
+Definition: `src/generate/render/common.cppm:290`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::doc_label` computes a unique integer label for a given `SymbolDocView`. Callers supply the symbol documentation view to identify, and the returned `int` can be used as a compact, stable key for referencing that view in documentation generation pipelines. The caller is responsible for passing a valid `SymbolDocView`; the resulting label is suitable for use in hashing, indexing, or linking operations within the generation framework.
+`clore::generate::doc_label` accepts a `SymbolDocView` and returns a `std::string_view` representing a short, human-readable label for the documented symbol. This label is intended for use in page titles, navigation elements, or within generated documentation content where a compact textual identifier is required. The caller must ensure that the provided `SymbolDocView` is valid and corresponds to a symbol whose label is meaningful in the current documentation context; the returned view remains valid only as long as the underlying data persists.
 
 #### Usage Patterns
 
-- Used to obtain a display label for a symbol documentation view
-- Called in contexts where a human-readable heading or tag is needed for the declaration, implementation, or details section
+- used to get display labels for documentation sections
+- used in rendering markdown for symbol documentation
+- provides human-readable string for each `SymbolDocView` value
 
 ### `clore::generate::escape_mermaid_label`
 
-Declaration: `generate/render/diagram.cppm:13`
+Declaration: `src/generate/render/diagram.cppm:27`
 
-Definition: `generate/render/diagram.cppm:109`
+Definition: `src/generate/render/diagram.cppm:123`
 
 Implementation: [`Module generate:diagram`](../../../modules/generate/diagram.md)
 
-The function `clore::generate::escape_mermaid_label` accepts a label identifier (represented as an integer handle) and returns an escaped version of that label suitable for embedding within Mermaid diagram code. Callers are responsible for providing a label that may contain characters special to Mermaid syntax; the function guarantees that the returned integer handle refers to a string with all such characters properly escaped, making it safe for inclusion in diagram declarations. This ensures that generated Mermaid diagrams remain syntactically valid regardless of the original label content.
+Declaration: [Declaration](functions/escape-mermaid-label.md)
+
+The function `clore::generate::escape_mermaid_label` takes a `std::string_view` and returns a `std::string` that is sanitized for safe inclusion as a label in Mermaid diagram markup. Callers should supply any raw text that may contain characters special to Mermaid label syntax—such as quotes, parentheses, newlines, or angle brackets—and the returned value can be directly embedded in Mermaid diagram code without breaking the syntax or causing rendering errors. This is required when generating diagram text from user‑facing or symbol‑derived strings, as in the `render_namespace_diagram_code` function, to ensure the output remains valid Mermaid.
 
 #### Usage Patterns
 
-- used to prepare label strings for Mermaid diagram generation
-- called when constructing Mermaid diagram code to ensure label text does not break syntax
+- Sanitizing labels for Mermaid diagrams
+- Called by `clore::generate::render_namespace_diagram_code`
 
 ### `clore::generate::find_declaration_page`
 
-Declaration: `generate/render/common.cppm:473`
+Declaration: `src/generate/render/common.cppm:484`
 
-Definition: `generate/render/common.cppm:473`
+Definition: `src/generate/render/common.cppm:484`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::find_declaration_page` locates the page associated with a declaration given contextual identifiers. It accepts references to two constant integers (likely representing a symbol analysis store and a symbol or node identifier) and a third integer that selects the specific declaration page. The function returns an integer representing the found page’s identity or index. Callers can use this result to obtain a page handle for rendering, linking, or further processing within the documentation generation pipeline.
+Returns the `LinkTarget` for the declaration page corresponding to the given symbol and context identifiers. If no such page exists, returns `std::nullopt`. The first two parameters are opaque identifiers that together specify the symbol and its enclosing scope; the third parameter is a string view that typically conveys the qualified name or a path hint for the declaration.
+
+Callers use this function to resolve cross-references to declaration pages during page generation. It is part of the link resolution layer and does not perform any rendering or mutation of state. The return type `std::optional<LinkTarget>` indicates a potentially missing target; callers must handle the absence gracefully, for example by skipping the link.
 
 #### Usage Patterns
 
-- Used during page layout construction to generate a 'Declaration' link for symbols
-- Called when building symbol documentation pages to provide navigation to declaration site
-- Invoked as part of rendering a page bundle to include declaration backlinks
+- Called during page rendering to add a link to the declaration page of a symbol
 
 ### `clore::generate::find_doc_index_path`
 
-Declaration: `generate/render/symbol.cppm:40`
+Declaration: `src/generate/render/symbol.cppm:58`
 
-Definition: `generate/render/symbol.cppm:804`
+Definition: `src/generate/render/symbol.cppm:822`
 
 Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
-Returns the integer path index for a given doc entry within a `PageDocLayout` and a symbolic identifier. Callers use this function to retrieve the specific index path that corresponds to a particular symbol or grouping within the layout, enabling navigation or further processing of that entry.
-
-The caller is responsible for ensuring that the supplied identifier is valid and relevant to the provided `PageDocLayout`. The result is the path index used by other generation functions to reference that doc entry.
+Given a `PageDocLayout` and an identifier (such as a symbol name) expressed as a `std::string_view`, `clore::generate::find_doc_index_path` returns a pointer to a `const std::string` representing the documentation index path for that identifier, or `nullptr` if no such path exists in the layout. The caller must ensure the provided `PageDocLayout` is valid and that the `string_view` outlives the call. The returned pointer (if non-null) remains valid as long as the associated layout or internal storage is alive; the function does not transfer ownership.
 
 #### Usage Patterns
 
-- Lookup of index page paths during documentation generation
-- Retrieving a path for a symbol after constructing a `PageDocLayout`
+- Used to resolve documentation index paths during page generation
 
 ### `clore::generate::find_function_analysis`
 
-Declaration: `generate/model.cppm:145`
+Declaration: `src/generate/model.cppm:161`
 
-Definition: `generate/model.cppm:323`
+Definition: `src/generate/model.cppm:339`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-Looks up a `FunctionAnalysis` in the given `SymbolAnalysisStore` for the function identified by the provided integer identifier. Returns a pointer to the analysis object if found, or `nullptr` if no analysis exists for that function.
-
-The caller is responsible for ensuring the identifier corresponds to a valid function symbol; the store must outlive the returned pointer. This function is the primary entry point for retrieving the detailed analysis data for a function from the analysis store.
+The function `clore::generate::find_function_analysis` accepts a reference to a `SymbolAnalysisStore` and a `std::string_view` identifying the function. It returns a pointer to a `const FunctionAnalysis` representing the stored analysis for that function. The caller must ensure the provided string view refers to a valid function identifier within the store; if no matching analysis is found, the function returns `nullptr`. This allows callers to conditionally retrieve function-specific analysis details without creating a new analysis entry.
 
 #### Usage Patterns
 
-- Retrieve existing `FunctionAnalysis` for a symbol key
-- Check if a function analysis has been cached
-- Used by other generation functions to access analysis data
+- Lookup function analysis by symbol key for further processing
+- Check existence of analysis before accessing detailed fields
 
 ### `clore::generate::find_implementation_pages`
 
-Declaration: `generate/render/common.cppm:433`
+Declaration: `src/generate/render/common.cppm:444`
 
-Definition: `generate/render/common.cppm:433`
+Definition: `src/generate/render/common.cppm:444`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::find_implementation_pages` resolves the documentation page identifier for the implementation of a given symbol or scope. It accepts a set of integer references and one integer value that together uniquely identify the target entity within the project model—typically including a symbol target key, module, file, and optional page kind. The returned integer can be directly used by other generation functions (such as `clore::generate::build_evidence_for_function_implementation_summary` or `clore::generate::build_evidence_for_type_implementation_summary`) to retrieve or link to the implementation page. Callers rely on this function to obtain a stable page identifier for cross-referencing implementation‑level documentation.
+The function `clore::generate::find_implementation_pages` locates documentation pages that correspond to the implementation of a given code element. It accepts a set of integer identifiers (likely representing a module, file, and symbol), a `std::string_view` key or name, and a `const std::string&` type or context qualifier. The return value is an integer that indicates the result of the lookup, such as a page handle or status code. This function is designed to be used during page generation to connect implementation entities with their generated documentation pages, enabling cross-referencing and navigation.
 
 #### Usage Patterns
 
-- Collecting link targets for implementation pages of a symbol during documentation generation
+- called during document generation to collect implementation page links for symbols
 
 ### `clore::generate::find_module_for_file`
 
-Declaration: `generate/render/common.cppm:496`
+Declaration: `src/generate/render/common.cppm:507`
 
-Definition: `generate/render/common.cppm:496`
+Definition: `src/generate/render/common.cppm:507`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::find_module_for_file` retrieves the module that owns a given source file. The first argument is the file's identifier; the second argument supplies a secondary key or hint that refines the lookup (e.g., a module index or fallback). It returns the corresponding module identifier, or an indicator that no module was found.
-
-Callers must supply a valid file identifier and a suitable secondary parameter. The function does not modify its arguments and is safe to call concurrently with different inputs.
+The function `clore::generate::find_module_for_file` determines the C++ module to which a given file belongs within a specific generation or analysis context. It accepts an opaque identifier (likely representing a compilation unit, project, or analysis store) as the first parameter and a file path as the second. If the file is part of a module, the function returns that module’s name as a `std::string` wrapped in `std::optional`; otherwise, it returns `std::nullopt`. Callers should ensure the provided context handle and file path are valid, and that the context has been fully populated before invoking this function.
 
 #### Usage Patterns
 
-- Mapping source file paths to module names for documentation generation
-- Used as a helper in page-building functions such as `build_page_root` and `build_file_page_root`
+- Used to determine the module for a file during page generation or link resolution
 
 ### `clore::generate::find_type_analysis`
 
-Declaration: `generate/model.cppm:148`
+Declaration: `src/generate/model.cppm:164`
 
-Definition: `generate/model.cppm:329`
+Definition: `src/generate/model.cppm:345`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The function `clore::generate::find_type_analysis` retrieves the type analysis for a given symbol identifier from the provided `SymbolAnalysisStore`. It accepts a const reference to the store and an integer symbol ID, and returns a pointer to a `TypeAnalysis` object. The function returns `nullptr` if no type analysis is associated with the given symbol ID in the store. Callers must ensure that the symbol ID corresponds to a type symbol; calling this function with a non-type symbol ID yields undefined behavior. The returned pointer remains valid only as long as the referenced `SymbolAnalysisStore` is not modified.
+The function `clore::generate::find_type_analysis` looks up a type analysis record within the provided `SymbolAnalysisStore` using the given identifier as a string view. It returns a pointer to a constant `TypeAnalysis` object, or `nullptr` if no analysis exists for that type name. The caller must ensure that the store remains valid for the lifetime of the returned pointer, and should not modify the pointed-to analysis. This function is the primary way to retrieve precomputed semantic analysis for a type symbol during documentation generation.
 
 #### Usage Patterns
 
-- Look up an existing type analysis for rendering
-- Called from other analysis retrieval functions
+- Retrieve type analysis for a symbol during documentation generation
+- Used by higher-level analysis formatting functions like `analysis_details_markdown` or `analysis_overview_markdown`
 
 ### `clore::generate::find_variable_analysis`
 
-Declaration: `generate/model.cppm:151`
+Declaration: `src/generate/model.cppm:167`
 
-Definition: `generate/model.cppm:335`
+Definition: `src/generate/model.cppm:351`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The function `clore::generate::find_variable_analysis` performs a lookup within a given `SymbolAnalysisStore` for the analysis data associated with a variable symbol identified by an integral symbol key. It accepts a store and a symbol identifier, and returns a pointer to a `const VariableAnalysis` if a corresponding record exists, or a null pointer if the symbol is not a variable or lacks a stored analysis. Callers must check for a null return before dereferencing the pointer; the function does not own or extend the lifetime of the returned analysis object, which remains valid only as long as the supplied `SymbolAnalysisStore` is alive. This function is the variable-specific counterpart of `clore::generate::find_type_analysis` and `clore::generate::find_function_analysis`, providing a uniform interface for retrieving per-symbol analysis data within the code generation pipeline.
+The `clore::generate::find_variable_analysis` function performs a lookup in a `SymbolAnalysisStore` for the analysis data associated with a given variable. It accepts a reference to the analysis store and a `std::string_view` identifying the variable (typically its qualified name). The function returns a pointer to a `const VariableAnalysis` if the variable is found in the store; otherwise, it returns `nullptr`.  
+
+Callers must ensure that the provided store is properly initialized and that the variable identifier matches the keying convention used by the store (e.g., full qualified name). The function does not modify the store and is intended for read‑only retrieval of pre‑computed analysis results. It is a lightweight lookup with no side effects, suitable for use during documentation generation where variable analysis details are needed.
 
 #### Usage Patterns
 
-- Retrieve variable analysis for a given symbol target key
-- Used by functions that build evidence or markdown for variable symbols
+- retrieve a `VariableAnalysis`* for a given symbol target key
+- check if variable analysis exists
 
 ### `clore::generate::for_each_symbol_doc_group`
 
-Declaration: `generate/render/symbol.cppm:27`
+Declaration: `src/generate/render/symbol.cppm:45`
 
-Definition: `generate/render/symbol.cppm:27`
+Definition: `src/generate/render/symbol.cppm:45`
 
 Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
-`clore::generate::for_each_symbol_doc_group` iterates over the symbol documentation groups defined within the provided `PageDocLayout`, invoking the given `Visitor` callable for each group. The visitor is called with the representation of each symbol doc group as its argument; the exact group type is determined by the layout. The function returns `void` and has no special preconditions beyond a valid layout and a callable visitor. This function enables structured, consumer‑driven processing of all symbol doc groups that constitute a page’s documentation layout.
+The function `clore::generate::for_each_symbol_doc_group` is a template that accepts a `const PageDocLayout &` and a `Visitor &&` callable. It iterates over each symbol documentation group present in the layout and invokes the visitor with that group. The caller is responsible for providing a callable whose signature matches the expected group type; the function itself returns `void` and does not retain or modify the layout.
+
+The template parameter `Visitor` is deduced from the argument and must be invocable with a single argument representing a symbol documentation group (the exact type is not exposed in this interface). This enables generic traversal of grouped symbol documentation data, decoupling the iteration logic from the specific processing applied by the visitor.
 
 #### Usage Patterns
 
-- used to apply a visitor to each of the three symbol documentation groups (type, variable, function) from a `PageDocLayout`
+- Iterate over symbol doc groups in a layout to generate documentation sections
+- Apply a transformation or collection function to each doc group
 
 ### `clore::generate::format_evidence_text`
 
-Declaration: `generate/evidence.cppm:86`
+Declaration: `src/generate/evidence.cppm:98`
 
-Definition: `generate/evidence.cppm:580`
+Definition: `src/generate/evidence.cppm:592`
 
 Implementation: [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-The function `clore::generate::format_evidence_text` accepts a const reference to an `EvidencePack` and returns an integer. Its caller-facing responsibility is to generate a formatted textual representation of the evidence data contained in the provided pack. The returned integer serves as a handle or identifier for the resulting formatted text, allowing callers to reference the output during page generation or prompt construction. The contract requires that the supplied `EvidencePack` is valid and populated; the function does not modify the input.
+Declaration: [Declaration](functions/format-evidence-text.md)
+
+The function `clore::generate::format_evidence_text` accepts a reference to an `EvidencePack` and returns a `std::string` containing a formatted representation of the evidence data. It is designed to produce the complete evidence text that is later embedded into a prompt template by `clore::generate::build_prompt`. The caller provides the entire `EvidencePack`, and the function returns a single string that consolidates all evidence entries into a readable, prompt‑ready format. There is no limit on the output length; for size‑constrained use cases, the related `clore::generate::format_evidence_text_bounded` provides a bounded alternative.
 
 #### Usage Patterns
 
-- Used as a convenience wrapper around `format_evidence_text_bounded` to produce unbounded evidence text.
-- Called when the full evidence string is needed without any truncation.
+- called by `clore::generate::build_prompt` to obtain the full evidence text for a prompt
 
 ### `clore::generate::format_evidence_text_bounded`
 
-Declaration: `generate/evidence.cppm:88`
+Declaration: `src/generate/evidence.cppm:100`
 
-Definition: `generate/evidence.cppm:584`
+Definition: `src/generate/evidence.cppm:596`
 
 Implementation: [`Module generate:evidence`](../../../modules/generate/evidence.md)
 
-The public function `clore::generate::format_evidence_text_bounded` accepts a reference to an `EvidencePack` and an integer bound, and returns an integer result. It is responsible for formatting the evidence text contained in the pack, subject to a length or size constraint specified by the bound parameter. The caller provides the evidence data and a limit, and receives back either the formatted output length or a status indicator. The contract guarantees that the formatting operation will respect the given bound, making it suitable for scenarios where output size must be controlled. The exact semantics of the return value should be consulted in the function’s documentation, but it is intended to convey the outcome of the bounded formatting process.
+Declaration: [Declaration](functions/format-evidence-text-bounded.md)
+
+The function `clore::generate::format_evidence_text_bounded` accepts a `const EvidencePack &` and a `std::size_t` limiting the total length of the output. It generates a single `std::string` that contains a human‑readable representation of all evidence items in the pack, formatted in a consistent textual style suitable for inclusion in prompt contexts or logs.
+
+The caller must provide the bound as the second argument; the resulting string is guaranteed not to exceed that length. If formatting all evidence would exceed the bound, the function truncates the output at the boundary, preserving as much content as possible from earlier evidence items. The function is primarily invoked by `clore::generate::format_evidence_text`, which supplies an effectively unbounded size to obtain the complete text.
 
 #### Usage Patterns
 
-- Called to produce a length-limited evidence markdown string for inclusion in prompt building or document generation contexts
+- called by `clore::generate::format_evidence_text`
+- used to generate bounded evidence strings for prompts
 
 ### `clore::generate::generate_dry_run`
 
-Declaration: `generate/generate.cppm:25`
+Declaration: `src/generate/generate.cppm:42`
 
-Definition: `generate/scheduler.cppm:1932`
+Definition: `src/generate/scheduler.cppm:1957`
 
 Implementation: [`Module generate:scheduler`](../../../modules/generate/scheduler.md) | [`Module generate`](../../../modules/generate/index.md)
 
-The function `clore::generate::generate_dry_run` performs a dry-run simulation of the page generation workflow. It accepts two `const int &` parameters that identify the generation context (e.g., a module or page plan) and returns an `int` result, commonly representing the number of pages that would be produced or a success status. As a dry-run, it does not commit any output or side effects, enabling callers to preview the generation outcome without modifying the output directory.
+The function `clore::generate::generate_dry_run` lets the caller simulate the full documentation generation pipeline without writing any output files. It accepts two `const int &` parameters that represent internal generation state (for example, a page plan set and a configuration handle) and returns an `int` status code: `0` if the dry run finds no problems, and a non‑zero value if a real generation would encounter an error. This makes it possible to validate the generation plan, estimate the number of pages, and detect issues (e.g., through side‑channel diagnostic output) before committing to an actual run of `generate_pages`.
+
+The contract of `generate_dry_run` is purely inspect‑and‑report: it performs the same validation and traversal steps as a normal generation, but discards all generated page bundles, evidence packs, and prompt outputs. Callers use it to answer questions like “will the input set produce a consistent page structure?” and “how much work would the real generation involve?” without side effects. Success or failure is indicated solely by the return value.
 
 ### `clore::generate::generate_pages`
 
-Declaration: `generate/generate.cppm:28`
+Declaration: `src/generate/generate.cppm:45`
 
-Definition: `generate/scheduler.cppm:1991`
+Definition: `src/generate/scheduler.cppm:2016`
 
 Implementation: [`Module generate:scheduler`](../../../modules/generate/scheduler.md) | [`Module generate`](../../../modules/generate/index.md)
 
-The function `clore::generate::generate_pages` is the synchronous entry point for the documentation page generation pipeline. It accepts opaque resource identifiers (as `const int &` arguments), an initial file or configuration path as `std::string_view`, a concurrency limit as `std::uint32_t`, and an output directory as `std::string_view`. On success it returns zero; a non‑zero value signals an error. Callers are responsible for ensuring the input identifiers refer to valid, previously loaded compilation data and that the output directory is writable.
+The function `clore::generate::generate_pages` is the primary synchronous entry point for the page generation pipeline. It accepts two `const int &` handles (typically representing an analysis store and a page plan set), a `std::string_view` output directory path, a `std::uint32_t` concurrency limit, and a `std::string_view` project root path. It returns an `int` status code indicating success or failure. Callers must have fully prepared the analysis state and page plan before invocation; this function orchestrates the entire generation workflow, including rendering all pages and writing them to the output directory.
 
 #### Usage Patterns
 
-- Primary invocation point for generating all documentation pages after analysis is complete
-- Called by higher-level generation orchestration code, possibly `generate_pages_async` for asynchronous execution
+- main driver for documentation generation
+- called from the top-level CLI or build system entry point
 
 ### `clore::generate::generate_pages_async`
 
-Declaration: `generate/generate.cppm:37`
+Declaration: `src/generate/generate.cppm:54`
 
-Definition: `generate/scheduler.cppm:1969`
+Definition: `src/generate/scheduler.cppm:1994`
 
 Implementation: [`Module generate:scheduler`](../../../modules/generate/scheduler.md) | [`Module generate`](../../../modules/generate/index.md)
 
-The function `clore::generate::generate_pages_async` initiates asynchronous page generation on the provided `kota::event_loop &`. It accepts two integer references, a `std::string_view`, a `std::uint32_t`, and another `std::string_view` as input parameters. The return value is an `int` representing a task that callers must explicitly schedule on the event loop and then execute. The caller is responsible for ensuring the returned task is properly integrated into the loop's execution model to complete the generation.
+`clore::generate::generate_pages_async` initiates asynchronous page generation. It accepts the same configuration parameters as `clore::generate::generate_pages` — including page indices, output path, concurrency limit, and a content directory — plus a reference to a `kota::event_loop`. The function returns a task object that performs the actual generation work. Callers must schedule the returned task on the provided event loop and run it; no work begins until the task is executed. The contract requires the event loop to remain alive for the duration of the task’s execution.
 
 #### Usage Patterns
 
-- callers must schedule the returned task on the loop and run it
-- used to run page generation asynchronously in a cooperating event loop
+- Callers schedule the returned task on the event loop and run it.
+- Used for asynchronous documentation generation.
 
 ### `clore::generate::is_base_symbol_analysis_prompt`
 
-Declaration: `generate/analysis.cppm:31`
+Declaration: `src/generate/analysis.cppm:47`
 
-Definition: `generate/analysis.cppm:325`
+Definition: `src/generate/analysis.cppm:341`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-The function `clore::generate::is_base_symbol_analysis_prompt` accepts an integer representing a `PromptKind` value and returns `bool`. It defines whether the given prompt kind qualifies as a base-level symbol analysis prompt — a fundamental category used to identify prompts that drive the core analysis of symbols, as opposed to more specialized or synthesized prompt variants. Callers rely on this predicate to classify prompts during prompt construction and evidence gathering, ensuring that only foundational analysis prompts are treated as such within the generation pipeline.
+The function `clore::generate::is_base_symbol_analysis_prompt` takes a prompt kind (represented as an `int`) and returns a `bool` indicating whether that kind corresponds to a base symbol analysis prompt. It is used to categorize a `PromptKind` as a base analysis prompt specifically for a symbol, as opposed to other prompt types such as declaration summaries or page summaries. This predicate helps callers branch behavior based on the prompt’s intended analysis scope.
 
 #### Usage Patterns
 
-- used to determine whether a given prompt kind belongs to the base symbol analysis category
-- called when building prompts or caching keys for symbol analysis
+- Used to test whether a prompt kind should trigger a base symbol analysis
+- Possibly called before dispatching to analysis-specific builders
 
 ### `clore::generate::is_declaration_summary_prompt`
 
-Declaration: `generate/analysis.cppm:33`
+Declaration: `src/generate/analysis.cppm:49`
 
-Definition: `generate/analysis.cppm:330`
+Definition: `src/generate/analysis.cppm:346`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-The function `clore::generate::is_declaration_summary_prompt` accepts an `int` value that represents a prompt kind and returns a `bool`. It determines whether the given prompt kind corresponds to a declaration summary—that is, a prompt intended to generate a concise summary describing the declaration of a symbol such as a function, type, or variable. A return value of `true` indicates that the prompt kind is a declaration summary prompt; `false` indicates it is not. This predicate is used by callers to classify prompt kinds and to dispatch the appropriate generation logic for declaration-oriented summarization tasks.
+The function `clore::generate::is_declaration_summary_prompt` is a predicate that tests whether a given prompt kind (represented as an `int`) corresponds to a declaration summary prompt. It returns `true` if the provided kind is such a prompt, and `false` otherwise. Callers use this function to classify `PromptKind` values and to dispatch generation logic that is specific to declaration summary prompts, such as assembling evidence or building the prompt structure for a declaration page.
 
 #### Usage Patterns
 
-- classifying prompt kinds
-- determining if a prompt is a declaration summary
+- used to branch prompt generation logic based on prompt kind
+- called in contexts that need to treat declaration summary prompts distinctly
 
 ### `clore::generate::is_function_kind`
 
-Declaration: `generate/model.cppm:162`
+Declaration: `src/generate/model.cppm:178`
 
-Definition: `generate/model.cppm:393`
+Definition: `src/generate/model.cppm:409`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-Determines whether the provided integer represents a function kind. This predicate is used to classify symbol or entity kinds in the generation pipeline, allowing callers to branch on whether the entity is a function.
+Determines whether the supplied integer corresponds to a function kind in the symbol‑kind classification used by the generation pipeline. The caller passes an opaque kind value (typically drawn from a symbol‑analysis or page‑plan set), and the function returns `true` if that value represents a function, `false` otherwise.
+
+This predicate is commonly employed during page construction and evidence building to dispatch behaviour based on the nature of the target symbol. It forms part of a family of similar queries—such as `clore::generate::is_type_kind` and `clore::generate::is_variable_kind`—that collectively map an integral kind identifier to a specific symbolic category.
 
 #### Usage Patterns
 
-- Checking if a symbol kind corresponds to a function (including method)
-- Filtering symbols in meta-programming or generation logic
-- Branching on symbol classification in `SymbolAnalysisStore` processing
+- filtering symbol kinds
+- guard conditions when deciding how to process a symbol
 
 ### `clore::generate::is_page_level_symbol`
 
-Declaration: `generate/model.cppm:166`
+Declaration: `src/generate/model.cppm:182`
 
-Definition: `generate/model.cppm:405`
+Definition: `src/generate/model.cppm:421`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The function `clore::generate::is_page_level_symbol` determines whether a given symbol qualifies as a page-level symbol in the documentation generation process. It accepts two `const int &` parameters, which typically represent a symbol identifier and contextual information (such as the containing page or module), and returns a `bool` value indicating whether the symbol should be rendered as an independent documentation page.
+Determines whether a given symbol qualifies as a page-level symbol. This is a predicate used during page plan construction to decide which symbols should produce their own documentation page. It accepts two opaque symbol identifiers and returns `true` if the symbol represented by the first identifier should be promoted to a page-level entity, and `false` otherwise.
 
-Callers use this predicate to filter symbols that warrant their own generated page, as opposed to being summarized or grouped within other pages. The function provides a yes/no decision based on the symbol's properties and the current generation context; its exact criteria are an internal detail of the `clore::generate` module.
+The function is typically invoked during page layout and index generation to filter symbols that require independent rendering. Its contract is to provide the caller with a boolean decision that guides downstream page creation and linking logic.
 
 #### Usage Patterns
 
-- Filtering symbols for page-level documentation generation
-- Used in functions like `build_page_plan_set`, `collect_namespace_symbols`, and `collect_implementation_symbols`
+- Called during page generation to filter symbols that warrant a dedicated documentation page
 
 ### `clore::generate::is_page_summary_prompt`
 
-Declaration: `generate/model.cppm:133`
+Declaration: `src/generate/model.cppm:149`
 
-Definition: `generate/model.cppm:297`
+Definition: `src/generate/model.cppm:313`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::is_page_summary_prompt` accepts a `PromptKind` and returns `bool`. It indicates whether the provided prompt kind corresponds to a page-level summary prompt. Callers use this function to classify prompt types, typically to decide which generation or evidence‑building logic applies, without needing to know the specific set of prompt kinds that qualify as page summaries. The contract is straightforward: it returns `true` when the kind is a page summary prompt and `false` otherwise.
+`clore::generate::is_page_summary_prompt` tests whether a given `PromptKind` represents a prompt that generates a summary for an entire documentation page. The function returns `true` for prompt kinds that produce page‑level overview text (such as for a namespace, module, file, or index page) and `false` otherwise. Callers use this predicate to classify prompts for routing, caching, or conditional logic that depends on whether the prompt is a whole‑page summary rather than a symbol‑specific or declaration‑specific prompt.
 
 #### Usage Patterns
 
-- Used as a predicate to distinguish page-level summary prompts from other prompt kinds.
-- Likely called when building prompts for namespace or module summary pages.
+- Called to classify whether a prompt kind corresponds to a page summary
+- Used in conditional logic for prompt generation or caching
 
 ### `clore::generate::is_symbol_analysis_prompt`
 
-Declaration: `generate/model.cppm:134`
+Declaration: `src/generate/model.cppm:150`
 
-Definition: `generate/model.cppm:301`
+Definition: `src/generate/model.cppm:317`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The function `clore::generate::is_symbol_analysis_prompt` determines whether a given `PromptKind` corresponds to a symbol analysis prompt. It returns `true` for kinds that request analysis of a specific symbol (such as type, function, or variable analysis) and `false` otherwise.
-
-The caller’s contract is straightforward: pass a `PromptKind` value; the function returns a `bool` indicating if that kind belongs to the set of symbol analysis prompt kinds. This is used to branch behavior in the generation pipeline, particularly when selecting or building prompts and evidence for symbol-level analysis pages.
+The function `clore::generate::is_symbol_analysis_prompt` is a pure predicate that accepts a `PromptKind` value and returns `bool`. Its sole responsibility is to determine whether the given prompt kind belongs to the category of symbol analysis prompts. Callers can use this to conditionally branch on prompt kinds that require symbol-analysis-specific processing, such as building analysis evidence or rendering analysis sections. The function imposes no side effects and communicates its classification through the boolean result: `true` if the kind is a symbol analysis prompt, `false` otherwise.
 
 #### Usage Patterns
 
-- branching on prompt kind in build or dispatch logic
-- filtering symbol analysis prompts from other prompt kinds
+- Used to classify prompt kinds as symbol analysis prompts
+- Likely invoked when deciding whether a prompt belongs to symbol analysis category
 
 ### `clore::generate::is_type_kind`
 
-Declaration: `generate/model.cppm:160`
+Declaration: `src/generate/model.cppm:176`
 
-Definition: `generate/model.cppm:380`
+Definition: `src/generate/model.cppm:396`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The function `clore::generate::is_type_kind` accepts an integer and returns a `bool`. It indicates whether the provided integer corresponds to a type kind in the kind classification used during page generation. Callers can use this predicate to selectively process symbols based on whether their kind designator represents a type.
+The function `clore::generate::is_type_kind` accepts an integer value and returns `true` if that value corresponds to a type kind within the symbol‑kind enumeration used by the generation pipeline. Callers can use this predicate to test whether a given symbol kind represents a type (for example, a class, struct, union, or enum) as opposed to a function, variable, or namespace. The argument should be a valid member of the relevant symbol‑kind enumerator; the result is unspecified for arbitrary integer values. No side effects occur.
 
 #### Usage Patterns
 
-- Used as a predicate to filter or classify symbol kinds as type-like
-- Likely called in type analysis or evidence building functions
+- called to classify symbol kinds in generation logic
+- used as a condition in control flow for type-specific processing
 
 ### `clore::generate::is_variable_kind`
 
-Declaration: `generate/model.cppm:164`
+Declaration: `src/generate/model.cppm:180`
 
-Definition: `generate/model.cppm:401`
+Definition: `src/generate/model.cppm:417`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::is_variable_kind` is a predicate that accepts an `int` value representing a symbol kind identifier and returns `bool`. It determines whether the given identifier corresponds to a variable kind. This function is part of the code generation symbol classification utilities and is used to filter or branch on symbol types when building documentation pages. The caller must supply a valid kind identifier; the function performs no side effects and does not modify any state.
+The function `clore::generate::is_variable_kind` determines whether a given symbol kind identifier corresponds to a variable kind. It accepts a single `int` value that represents a symbol kind (such as those defined for semantic analysis) and returns `true` if the identifier denotes a variable, variable template, or a similar variable‑related entity; otherwise it returns `false`. The caller is responsible for supplying a valid symbol kind identifier; the function does not validate the input and assumes it originates from the internal classification system used during symbol analysis and page generation.
 
 #### Usage Patterns
 
-- used as a predicate to classify symbol kinds
-- likely called in `clore::generate` symbol processing or filtering
+- Used in symbol classification
+- Called during analysis or page generation
 
 ### `clore::generate::make_blockquote`
 
-Declaration: `generate/markdown.cppm:113`
+Declaration: `src/generate/markdown.cppm:124`
 
-Definition: `generate/markdown.cppm:169`
+Definition: `src/generate/markdown.cppm:180`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-The function `clore::generate::make_blockquote` constructs a `MarkdownNode` representing a blockquote. It accepts an integer parameter that identifies or provides the content to be placed inside the blockquote. The callee returns an opaque `MarkdownNode` object that can be further composed into a larger `MarkdownDocument`. The caller is responsible for ensuring the integer argument refers to valid, preprocessed content; no validation of the argument is performed by this function itself. The resulting node, when rendered, produces the standard blockquote formatting in the output markdown.
+The function `clore::generate::make_blockquote` accepts a `std::string` containing the quoted content and returns a `MarkdownNode`. It constructs a blockquote element suitable for inclusion in generated Markdown output, wrapping the provided text in the blockquote formatting (`> `). Callers use this function to semantically represent quoted or cited passages within documentation pages, ensuring the resulting node integrates consistently with other Markdown nodes produced by the generation pipeline.
 
 #### Usage Patterns
 
-- Used to create a blockquote Markdown element
+- Building blockquote elements for documentation.
+- Creating markdown nodes for text quotations.
 
 ### `clore::generate::make_code`
 
-Declaration: `generate/markdown.cppm:101`
+Declaration: `src/generate/markdown.cppm:112`
 
-Definition: `generate/markdown.cppm:136`
+Definition: `src/generate/markdown.cppm:147`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::make_code` constructs a `MarkdownNode` that represents an inline code span. The caller supplies an integer argument that identifies the code content to be wrapped; the function returns a `MarkdownNode` suitable for inclusion in a Markdown document tree.
+Declaration: [Declaration](functions/make-code.md)
 
-The contract is minimal: the integer parameter must reference a valid content identifier as understood by the generation pipeline. The returned node can be combined with other nodes (such as paragraphs, sections, or links) to produce formatted documentation output.
+The function `clore::generate::make_code` accepts a `std::string` and returns an `InlineFragment`. It is responsible for creating an inline fragment that represents a code span in generated markdown content. The caller supplies the raw text that should be rendered as inline code; the returned `InlineFragment` encapsulates that text with the appropriate semantic markup.
+
+This function is a factory for building code spans, analogous to `clore::generate::make_text` for plain text or `clore::generate::make_link` for hyperlinks. It is used internally by code-aware formatting routines to preserve pre‑existing code spans in markdown fragments, ensuring they are correctly represented in the final output. The contract does not prescribe how the code span is formatted, only that the provided string is treated as literal code content.
 
 #### Usage Patterns
 
-- Used to create inline code fragments for markdown pages
-- Called by other generation functions to produce code snippets
+- creating inline code fragments in `append_existing_code_span`
+- creating inline code fragments in `append_code_aware_text`
+- wrapping a string into a code span fragment
 
 ### `clore::generate::make_code_fence`
 
-Declaration: `generate/markdown.cppm:109`
+Declaration: `src/generate/markdown.cppm:120`
 
-Definition: `generate/markdown.cppm:156`
+Definition: `src/generate/markdown.cppm:167`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::make_code_fence` constructs a `MarkdownNode` that represents a fenced code block suitable for embedding in a generated Markdown document. The caller provides a language identifier and the code content as integer handles; the resulting node encapsulates the block-level formatting required by the Markdown specification (e.g., triple backticks and optional language tag). This function is part of the high-level Markdown generation API and is typically used when rendering source code snippets or example blocks.
+The function `clore::generate::make_code_fence` constructs a `MarkdownNode` that represents a fenced code block in the output Markdown. It takes two `std::string` arguments: a language identifier (such as `"cpp"` or `"python"`) and the literal code content to be placed inside the fence. The caller is responsible for providing a well-formed language tag and the exact code text; the function does not perform escaping or formatting beyond constructing the fence syntax. The returned `MarkdownNode` is designed to be composed with other nodes through the structured document API, allowing it to appear as part of a larger `MarkdownDocument`.
 
 #### Usage Patterns
 
-- building code fence nodes for Markdown generation
-- used in page rendering functions like `render_page_markdown`
-- paired with other `MarkdownNode` factories such as `make_blockquote` or `make_mermaid`
+- building markdown code blocks
+- generating fenced code regions for documentation output
 
 ### `clore::generate::make_link`
 
-Declaration: `generate/markdown.cppm:103`
+Declaration: `src/generate/markdown.cppm:114`
 
-Definition: `generate/markdown.cppm:140`
+Definition: `src/generate/markdown.cppm:151`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-The function `clore::generate::make_link` creates a link identifier from a source identifier, a target identifier, and a boolean flag. The caller supplies the source and target as integer identifiers, and a boolean that controls a property of the link, such as its relativity or resolution mode. It returns an integer representing the generated link, which can be used in further link resolution or rendering steps.
-
-The contract expects valid source and target identifiers; passing invalid identifiers may result in undefined behavior. The returned link identifier is consistent for the same combination of inputs and is intended for use within the same generation context.
+Constructs an `InlineFragment` that represents a Markdown hyperlink.  
+The caller provides the link text as a `std::string`, the link target as another `std::string`, and a boolean flag that controls an aspect of the link’s rendering or resolution. The returned `InlineFragment` can be combined with other fragments (e.g., from `clore::generate::make_text` or `clore::generate::make_code`) to build a Markdown document. This function is a convenience factory for producing inline links that are later rendered by the Markdown generation pipeline; it does not itself validate the target or guarantee that the target is reachable.
 
 #### Usage Patterns
 
-- Create link fragments for Markdown rendering
-- Used to generate hyperlinks in documentation pages
+- Used to create inline link fragments for markdown rendering
 
 ### `clore::generate::make_link_target`
 
-Declaration: `generate/render/common.cppm:81`
+Declaration: `src/generate/render/common.cppm:92`
 
-Definition: `generate/render/common.cppm:81`
+Definition: `src/generate/render/common.cppm:92`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::make_link_target` constructs a `LinkTarget` value from three integer arguments and a boolean flag. Callers supply the fundamental identifiers needed to designate a target—typically encoding a symbol, page, or location key—and the boolean parameter controls a linking property such as whether the target is relative or absolute. The returned `LinkTarget` is intended for use in downstream link resolution and rendering within generated documentation.
+The function `clore::generate::make_link_target` constructs a `LinkTarget` from a base path, a target identifier, an optional anchor, and a boolean flag. The contract expects the caller to supply a qualified or relative path string (first parameter), a display or target string (second parameter), an optional fragment or anchor suffix (third parameter), and a flag that controls whether the resulting link should be treated as absolute or relative (fourth parameter). The function returns a fully formed `LinkTarget` suitable for insertion into generated Markdown or HTML output. It is a low-level building block used by higher-level link construction utilities such as `clore::generate::make_relative_link_target` and is typically called when assembling links to symbols, source files, or documentation pages.
 
 #### Usage Patterns
 
-- used to generate relative link targets for cross-referencing pages
-- called by page rendering utilities that produce documentation hyperlinks
+- creating hyperlink targets for page navigation
+- building link data for markdown rendering
 
 ### `clore::generate::make_mermaid`
 
-Declaration: `generate/markdown.cppm:111`
+Declaration: `src/generate/markdown.cppm:122`
 
-Definition: `generate/markdown.cppm:165`
+Definition: `src/generate/markdown.cppm:176`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::make_mermaid` constructs a `MarkdownNode` representing a Mermaid diagram block. It accepts an integer parameter that identifies the diagram content or source. The caller is responsible for providing a valid diagram specification; the returned node is suitable for inclusion in a Markdown document and will be rendered as a Mermaid code block.
+The function `clore::generate::make_mermaid` accepts a Mermaid diagram source string and returns a `MarkdownNode` that encapsulates the diagram in a format suitable for inclusion in a generated Markdown document. The caller is responsible for providing a syntactically valid Mermaid diagram definition; the returned node can be inserted into a document tree and will be rendered as a fenced code block with the `mermaid` language identifier.
 
 #### Usage Patterns
 
-- Wrapping Mermaid diagram code for inclusion in generated Markdown documents
+- creating Mermaid diagram nodes for markdown generation
 
 ### `clore::generate::make_paragraph`
 
-Declaration: `generate/markdown.cppm:105`
+Declaration: `src/generate/markdown.cppm:116`
 
-Definition: `generate/markdown.cppm:148`
+Definition: `src/generate/markdown.cppm:159`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::make_paragraph` constructs a `MarkdownNode` that represents a Markdown paragraph element. The caller provides an `int` argument that encodes the content to be placed inside the paragraph; the function interprets this argument and produces the corresponding node. The returned `MarkdownNode` is intended for inclusion in a larger `MarkdownDocument` and satisfies the contract that the resulting paragraph will be valid Markdown.
+`clore::generate::make_paragraph` accepts a plain text string and returns a `MarkdownNode` representing a single markdown paragraph. Callers provide the paragraph content as a `std::string`, and the function produces a paragraph-level node suitable for inclusion in a larger `MarkdownDocument` or as a standalone node. This function is a pure factory with no side effects; the returned node carries exactly the supplied text as its body, without any additional wrapping or formatting.
 
 #### Usage Patterns
 
-- used to create paragraph nodes when building markdown page content
-- likely called by higher-level page generators like `render_page_markdown` or `build_page_root`
+- creating paragraph nodes from plain text
+- building markdown paragraph content
 
 ### `clore::generate::make_raw_markdown`
 
-Declaration: `generate/markdown.cppm:107`
+Declaration: `src/generate/markdown.cppm:118`
 
-Definition: `generate/markdown.cppm:152`
+Definition: `src/generate/markdown.cppm:163`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-The function `clore::generate::make_raw_markdown` constructs a `MarkdownNode` from a given integer value. It is the caller's responsibility to supply a valid integer that identifies or encodes the raw markdown content; the function itself does not parse or validate the provided data. The returned `MarkdownNode` represents unprocessed markdown intended for direct inclusion in a document without further transformation.
+The function `clore::generate::make_raw_markdown` constructs a `MarkdownNode` that represents verbatim, unprocessed Markdown content. The caller provides a `std::string` containing the raw Markdown text, and receives a node that can be inserted directly into a `MarkdownDocument` tree. The function does not parse, validate, or modify the input; the content is preserved exactly as given, including any embedded Markdown syntax. This is the primary way to inject literal Markdown fragments into the generation pipeline.
 
 #### Usage Patterns
 
-- Called by generation functions to create a `MarkdownNode` holding raw markdown text.
-- Used when the markdown content does not require further structure like paragraphs or code blocks.
+- creating a markdown node from raw string
+- as a building block for more complex markdown generation
 
 ### `clore::generate::make_relative_link_target`
 
-Declaration: `generate/render/common.cppm:57`
+Declaration: `src/generate/render/common.cppm:68`
 
-Definition: `generate/render/common.cppm:57`
+Definition: `src/generate/render/common.cppm:68`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::make_relative_link_target` accepts two integer arguments and returns an integer representing a relative link target. Callers use this function to produce a cross-reference target that is relative to the current context, typically for navigation within generated documentation.
+Declaration: [Declaration](functions/make-relative-link-target.md)
 
-The contract requires that the first argument identifies the source location and the second argument identifies the target location. The returned integer serves as an opaque handle that can be passed to other rendering functions (such as `make_link`) to insert the relative target into generated markup. The caller is responsible for ensuring that both arguments correspond to valid, previously registered locations within the page plan.
+The function `clore::generate::make_relative_link_target` computes a relative filesystem path between two paths, both provided as `std::string_view`, and returns the resulting relative path as a `std::string`. It is a utility used internally when constructing link targets for generated documentation pages. The caller is responsible for supplying a valid source path and a valid target path; the function resolves the relative relationship between them without any side effects. The returned string is intended to be used as the path component of a `LinkTarget`, as seen in the caller `clore::generate::make_link_target`, which combines this relative path with a label and an optional code-style flag into a complete `LinkTarget` object.
 
 #### Usage Patterns
 
-- Generating relative links between documentation pages
-- Computing href attributes in generated Markdown
+- Called by `clore::generate::make_link_target` to produce a relative link target for documentation pages.
 
 ### `clore::generate::make_section`
 
-Declaration: `generate/markdown.cppm:115`
+Declaration: `src/generate/markdown.cppm:126`
 
-Definition: `generate/markdown.cppm:173`
+Definition: `src/generate/markdown.cppm:184`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-The function `clore::generate::make_section` constructs a Markdown section node that represents a particular semantic category within a generated document. It accepts a `SemanticKind` enumerator indicating the type of section, three integer parameters that typically serve as identifiers or indices for the content being sectioned, and two boolean flags that control structural options such as whether the section is collapsible or includes an explicit header. The caller must supply a valid `SemanticKind` and integer values consistent with the document model; the returned integer is an opaque handle that uniquely identifies the generated section, suitable for passing to downstream rendering functions like `render_page_markdown`.
+Constructs a semantic section for use in documentation generation. The caller provides a `SemanticKind` to classify the section’s purpose, a heading string, a body string, a heading level as a `std::uint8_t`, and two boolean flags that control section behavior (such as collapsibility and default open state). The function returns a `SemanticSectionPtr` owning the newly created section. This function is a fundamental building block for assembling structured markdown documents, allowing higher-level routines to compose sections with consistent semantics.
 
 #### Usage Patterns
 
-- Used to construct a `SemanticSection` for semantic analysis output
-- Commonly called by page building functions to create structured sections
+- called to create section nodes for documentation page building
+- used within page rendering logic to encapsulate semantic content
 
 ### `clore::generate::make_source_link_target`
 
-Declaration: `generate/render/common.cppm:383`
+Declaration: `src/generate/render/common.cppm:394`
 
-Definition: `generate/render/common.cppm:383`
+Definition: `src/generate/render/common.cppm:394`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-Constructs a `LinkTarget` that resolves to a source-code location. Callers supply three identifiers (presumably a file, a line, and a column) plus an additional `int` parameter; the returned `LinkTarget` can be used within generated documentation to create a hyperlink directly to the corresponding position in the source file.
-
-The function is a convenience wrapper over the generic `clore::generate::make_link_target`, specialized for source‑code references. It guarantees a valid `LinkTarget` for any combination of the given arguments, under the constraint that the source‑location identifiers are valid within the current project’s index.
+The function `clore::generate::make_source_link_target` constructs a `LinkTarget` that identifies a specific location in a source file. It accepts three integer references representing the file, line, and column, along with a `std::string_view` that typically provides a label or additional context for the target. Callers use this function to produce a linkable reference to a source code position, which can later be attached to paragraphs or other page elements via functions like `clore::generate::push_location_paragraph`. The returned `LinkTarget` encapsulates the resolved path and anchor information needed to generate a hyperlink in the generated documentation output.
 
 #### Usage Patterns
 
-- Called when generating source-reference links in documentation pages
-- Used to create clickable source file locations with line numbers
+- Used to generate a source link target for navigation within generated documentation pages.
+- Called by rendering functions that need to link to source code locations.
 
 ### `clore::generate::make_source_relative`
 
-Declaration: `generate/model.cppm:169`
+Declaration: `src/generate/model.cppm:185`
 
-Definition: `generate/model.cppm:432`
+Definition: `src/generate/model.cppm:448`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::make_source_relative` transforms an absolute source path into a path relative to a designated base directory, suitable for embedding in generated documentation. It accepts two source location identifiers (likely representing file paths or positions) and returns an integer representing the relative path offset or identifier.
-
-The function is typically used by page generation routines to produce portable file references. Callers should ensure both arguments refer to valid, resolved source locations; the function caches results internally for efficiency, using a private `source_relative_cache` to avoid recomputation.
+The function `clore::generate::make_source_relative` computes a relative file path from one source location to another. It accepts two `const std::string &` arguments representing the base path and the target path, and returns a `std::string` containing the relative path as determined by the underlying file system semantics. Callers should treat the result as a normalized relative path suitable for use in link generation or other contexts where a source‑relative reference is required. The function may reuse internal caching to avoid repeated path calculations for the same pair of inputs.
 
 #### Usage Patterns
 
-- computing relative source file paths for documentation generation
-- used by other generate functions to obtain relative paths from project root
+- Used to normalize file paths for consistent relative references in generated documentation.
 
 ### `clore::generate::make_symbol_target_key`
 
-Declaration: `generate/model.cppm:141`
+Declaration: `src/generate/model.cppm:157`
 
-Definition: `generate/model.cppm:306`
+Definition: `src/generate/model.cppm:322`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::make_symbol_target_key` constructs an integral key from a given `int` value. The returned `int` is an opaque handle that can later be decomposed by `clore::generate::parse_symbol_target_key` into a structured `SymbolTargetKeyView`. Callers should use this function when they need a compact, passable representation of a symbol target, such as for indexing, caching, or inter-function communication within the generation pipeline. The function accepts its argument by const reference and yields a key that uniquely identifies the original value within the current generation context.
+The function `clore::generate::make_symbol_target_key` accepts a symbol identifier (a reference to `const int`) and returns a `std::string` that serves as a unique key for that symbol's target. Callers use this key to index, store, or look up symbol target information within the generation infrastructure.
+
+The contract guarantees that for the same integer identifier, the returned key is consistent and uniquely maps to that symbol target. The key is designed to be a lightweight, deterministic string suitable for use in associative containers or as a lookup token in further processing steps.
 
 #### Usage Patterns
 
-- Generating unique keys for symbol targets in page plan or link resolution
-- Creating cache keys for symbol analysis requests
-- Mapping symbol identifiers to stable strings for output generation
+- Called to generate a lookup key for a symbol analysis.
+- Used in `parse_symbol_target_key` to reverse the operation.
+- Employed as part of key construction for caching symbol data.
 
 ### `clore::generate::make_text`
 
-Declaration: `generate/markdown.cppm:99`
+Declaration: `src/generate/markdown.cppm:110`
 
-Definition: `generate/markdown.cppm:132`
+Definition: `src/generate/markdown.cppm:143`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-`clore::generate::make_text` constructs a text element from a given numeric identifier and returns a representation suitable for inclusion in generated documentation or prompts. Callers provide an integer parameter and receive an integer result that can be used in further processing. This function is part of the text-building utilities within the generate module.
+Declaration: [Declaration](functions/make-text.md)
+
+`clore::generate::make_text` accepts a `std::string` and returns an `InlineFragment`. This function is the primary factory for creating plain, unformatted text fragments within the markdown generation pipeline. It is used by higher-level functions such as `clore::generate::make_paragraph` and `clore::generate::make_blockquote` to supply the textual content that those nodes wrap. Calling `make_text` with an arbitrary string guarantees an `InlineFragment` that represents exactly that string with no additional markdown interpretation or decoration.
 
 #### Usage Patterns
 
-- Called to wrap a plain string into a markdown text node.
-- Used in constructing markdown document content from strings.
+- used to embed plain text in inline fragments
+- called by `make_paragraph`, `make_blockquote`, and `append_text_fragment`
 
 ### `clore::generate::namespace_of`
 
-Declaration: `generate/render/common.cppm:53`
+Declaration: `src/generate/render/common.cppm:64`
 
-Definition: `generate/render/common.cppm:53`
+Definition: `src/generate/render/common.cppm:64`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::namespace_of` accepts an integer argument and returns an integer. It is a utility used within the page‑generation pipeline to map a given symbol or context identifier to its corresponding namespace representation. Callers can rely on this function to obtain a compact namespace handle suitable for further processing in documentation generation tasks; the returned integer is intended to be consumed by other generation functions that require namespace information.
+The function `clore::generate::namespace_of` accepts a `std::string_view` and returns a `std::string`. Its responsibility is to extract the namespace component from a qualified name or identifier. The caller provides a fully qualified name, and the function returns the portion that represents the enclosing namespace, or an empty string if the name belongs to the global namespace. The contract assumes the input is a valid C++ qualified name (e.g., `A::B::C` yields `A::B`). The result does not include a trailing `::`.
 
 #### Usage Patterns
 
-- Obtaining the namespace part of a symbol's qualified name for grouping or display
-- Used internally within page-building functions to determine namespace context
+- obtaining namespace portion of a fully qualified symbol name
 
 ### `clore::generate::normalize_frontmatter_title`
 
-Declaration: `generate/render/symbol.cppm:33`
+Declaration: `src/generate/render/symbol.cppm:51`
 
-Definition: `generate/render/symbol.cppm:885`
+Definition: `src/generate/render/symbol.cppm:903`
 
 Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
-`clore::generate::normalize_frontmatter_title` accepts a symbol identifier and returns a normalized title string suitable for embedding as a frontmatter title in generated Markdown pages. The function ensures the title is consistently formatted, trimmed, and free of extraneous markup or characters, so that callers can rely on it as a clean, uniform label for the page header.
+Declaration: [Declaration](functions/normalize-frontmatter-title.md)
 
-Callers should pass an identifier obtained from a symbol in the documentation graph and expect a string identifier representing the normalized title. The returned value is intended for direct use in frontmatter blocks (for example, in YAML `title:` fields) without further sanitization.
+Returns a normalized version of the provided frontmatter title string. The input is a raw title string, and the output is a processed, canonical form suitable for embedding in the YAML frontmatter of generated documentation pages. This function ensures consistent formatting of title metadata across all generated pages, typically by trimming whitespace, removing extraneous characters, and applying any standard transformations required by the generation pipeline.
 
 #### Usage Patterns
 
-- used to normalize titles for frontmatter in documentation page generation
-- ensures a clean, non-empty title for metadata rendering
+- Used to normalize frontmatter titles for documentation pages
 
 ### `clore::generate::normalize_markdown_fragment`
 
-Declaration: `generate/analysis.cppm:21`
+Declaration: `src/generate/analysis.cppm:37`
 
-Definition: `generate/analysis.cppm:267`
+Definition: `src/generate/analysis.cppm:283`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-The function `clore::generate::normalize_markdown_fragment` accepts two `std::string_view` arguments and returns an `int`. It is responsible for normalizing a raw Markdown fragment — typically extracted from structured analysis output or generated documentation — into a consistent, well-formed representation suitable for embedding in a larger Markdown document. The first parameter supplies the fragment to be cleaned or standardized, while the second provides additional context (such as a language identifier or processing hint) that governs the normalization rules.
+`clore::generate::normalize_markdown_fragment` accepts two `std::string_view` parameters—the first is a Markdown fragment to be normalized, and the second provides contextual information (for example, a base path or reference document identifier). The function returns an `int` that indicates the result of the normalization operation, such as a success code, an error status, or a count of modifications applied.
 
-The return value serves as a status code: a zero value indicates successful normalization, while a nonzero value signals an unrecoverable malformation or processing error. Callers must ensure both string views remain valid for the duration of the call and should check the returned status before using the normalized output stored in an internal buffer or returned through an out‑parameter (not visible in this declaration). This function is a low‑level utility used by higher‑level rendering and page‑building routines to guarantee that Markdown fragments are safe and consistently formatted before they are concatenated into a final document.
+Callers supply a raw Markdown fragment together with a context string and rely on the function to produce a consistently formatted fragment suitable for embedding in generated documentation. The returned `int` allows the caller to verify that normalization completed successfully or to reason about any changes made.
 
 #### Usage Patterns
 
-- Called when a raw markdown fragment needs to be validated and normalized before further processing; returns an error if the fragment is empty.
+- Called during markdown fragment processing to ensure well-formed output
+- Used to validate and normalize markdown content before embedding in generated documentation
 
 ### `clore::generate::page_summary_cache_key_for_request`
 
-Declaration: `generate/dryrun.cppm:23`
+Declaration: `src/generate/dryrun.cppm:39`
 
-Definition: `generate/dryrun.cppm:293`
+Definition: `src/generate/dryrun.cppm:309`
 
 Implementation: [`Module generate:dryrun`](../../../modules/generate/dryrun.md)
 
-The function `clore::generate::page_summary_cache_key_for_request` computes an integer cache key that uniquely identifies a page summary for a given request. It accepts two `const int &` parameters representing the request and returns an `int` key. Callers can use this key to store or retrieve previously generated page summaries, avoiding redundant computation when the same request is encountered again. The function is deterministic: identical inputs produce the same key.
+Generates an optional cache key string for a page summary request identified by the two provided integer values. Returns `std::nullopt` when no valid key can be derived from the given inputs, indicating that caching is not applicable for this particular request. Callers must supply valid, non‑default identifiers; the function does not modify those arguments.
 
 #### Usage Patterns
 
-- Used to derive a cache key for page summaries, particularly for namespace and module summaries.
+- used as a cache key computation for page summaries
+- determines if a page summary can be cached based on prompt kind
 
 ### `clore::generate::page_supports_symbol_subpages`
 
-Declaration: `generate/render/symbol.cppm:35`
+Declaration: `src/generate/render/symbol.cppm:53`
 
-Definition: `generate/render/symbol.cppm:893`
+Definition: `src/generate/render/symbol.cppm:911`
 
 Implementation: [`Module generate:symbol`](../../../modules/generate/symbol.md)
 
-The function `clore::generate::page_supports_symbol_subpages` queries whether the symbol identified by the given symbol ID can have subpages in the generated documentation. A caller uses this predicate to decide whether to attempt subpage generation for that symbol; if it returns `true`, the symbol is expected to support hierarchical subpage content below its main page. The exact criterion for “support” is an internal design property of the symbol (e.g., its kind or structural role), not a runtime or configuration choice.
+The function `clore::generate::page_supports_symbol_subpages` accepts a page identifier (as a `const int &`) and returns a `bool` indicating whether that page is permitted to contain symbol subpages. Callers use this contract to guard the generation of nested symbol content: if the result is `false`, subpage generation for that page should be skipped.
+
+This is a caller-facing decision point that controls the structure of generated documentation. The function does not modify any state; it purely queries the page’s capability.
 
 #### Usage Patterns
 
-- Called in page generation logic to decide whether to generate symbol subpages for a given page plan.
-- Used by functions such as `clore::generate::build_page_root` and `clore::generate::build_namespace_page_root` to conditionally include subpage structures.
+- Used to conditionally generate symbol subpages for namespace and module pages
 
 ### `clore::generate::page_type_name`
 
-Declaration: `generate/model.cppm:16`
+Declaration: `src/generate/model.cppm:32`
 
-Definition: `generate/model.cppm:263`
+Definition: `src/generate/model.cppm:279`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The function `clore::generate::page_type_name` accepts a `PageType` enumerator and returns an `int` value that serves as a compact identifier or handle for the name of that page type. This mapping allows callers to reference or compare page types using a simple integer, which is useful in contexts where string names are inconvenient or where a stable, efficient key is required for tables or caches.
-
-The contract: the input must be a valid `PageType` value; the returned integer is unique for each distinct page type name within the same generation session. Callers should not assume any particular ordering or semantic meaning of the returned integers beyond identity and reuse for the same `PageType` value.
+The function `clore::generate::page_type_name` maps a `PageType` enumerator to its corresponding human-readable name as a `std::string_view`. Callers supply a `PageType` value representing the kind of documentation page (e.g., a module page, namespace page, or type page) and receive a concise, non‑owning string that can be used for labeling, logging, or constructing page titles and references. The contract guarantees that every valid `PageType` enumerator yields a non‑empty, distinct `std::string_view`; the returned view remains valid for the lifetime of the program.
 
 #### Usage Patterns
 
-- used to obtain a string label for a page type during page generation
-- likely called in functions such as `build_page_root` or `compute_page_path` to derive path components or metadata
+- Get human-readable name of a page type for documentation or logging
+- Label page generation targets
+- Map page types to output file names or identifiers
 
 ### `clore::generate::parse_markdown_prompt_output`
 
-Declaration: `generate/analysis.cppm:24`
+Declaration: `src/generate/analysis.cppm:40`
 
-Definition: `generate/analysis.cppm:281`
+Definition: `src/generate/analysis.cppm:297`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-The function `clore::generate::parse_markdown_prompt_output` accepts two `std::string_view` arguments and returns an `int`. Callers supply the raw markdown text produced by a prompt invocation—typically the output of a language model—and a second string that identifies the expected output structure (for example, a prompt key or format identifier). The function interprets the markdown content according to the specified format and returns an integer representing the outcome: a non‑negative value indicates success (often the number of parsed items or a status code), while a negative value signals a parse failure or contract violation. This function is the caller‑facing entry point for extracting structured information from unstructured model responses; it does not modify the input strings and assumes the markdown is well‑formed as per the associated prompt specification.
+The function `clore::generate::parse_markdown_prompt_output` interprets the raw text output produced in response to a markdown-based prompt, extracting or validating its content for subsequent processing. It accepts two `std::string_view` arguments: the first is the markdown output string to be parsed, and the second supplies contextual metadata (such as a prompt kind or expected schema). The return value is an integer that signals the outcome—typically the number of successfully parsed elements or a status code indicating success or failure. This function is part of the pipeline that consumes LLM-generated markdown responses within the generation framework.
 
 #### Usage Patterns
 
-- Used as a wrapper to normalize markdown prompt output fragments.
-- Likely called when processing raw text from LLM responses or similar sources.
+- Used to parse and normalize markdown output from prompt responses before further processing.
+- Called with the raw prompt output and the context in which the output was generated.
 
 ### `clore::generate::parse_structured_response`
 
-Declaration: `generate/analysis.cppm:18`
+Declaration: `src/generate/analysis.cppm:34`
 
-Definition: `generate/analysis.cppm:252`
+Definition: `src/generate/analysis.cppm:268`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-The function `clore::generate::parse_structured_response` is a template function parameterized by type `<typename T>`. It accepts two `std::string_view` arguments: a raw response string and a format or schema descriptor. The function returns an `int` representing the result status or parsed identifier. Callers must supply a well‑formed response that matches the specified format and ensure that the chosen type `T` is compatible with the expected structure of the parsed output.
+The template function `clore::generate::parse_structured_response` accepts two `std::string_view` arguments: the first is the raw structured response text, and the second provides a contextual identifier or expected format. It returns an `int` indicating the outcome, such as a count of items parsed or a success code.  
+
+The template parameter `T` lets the caller specify the expected structure type, enabling the function to perform appropriate parsing and validation. This design ties the caller’s knowledge of the response format to the function’s logic without exposing internal data structures.
 
 #### Usage Patterns
 
-- parsing structured responses from AI prompts
-- handling JSON parse errors with context
-- normalizing parsed analysis objects
+- Used to parse and validate structured AI responses within the generation pipeline.
+- Typically called after receiving a prompt output, passing the raw response and a contextual identifier for error messages.
 
 ### `clore::generate::parse_symbol_target_key`
 
-Declaration: `generate/model.cppm:143`
+Declaration: `src/generate/model.cppm:159`
 
-Definition: `generate/model.cppm:312`
+Definition: `src/generate/model.cppm:328`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The `clore::generate::parse_symbol_target_key` function converts an encoded integer representation of a symbol target key into a lightweight `SymbolTargetKeyView`. Callers pass a key value (likely from a previously recorded or computed identifier) and receive a view that provides structured access to the decomposed components of that key without copying or owning the underlying data. The function assumes the input integer represents a valid, well‑formed symbol target key; no validation is performed, so callers must ensure the key was produced by a trusted source such as `make_symbol_target_key`. This parse operation is intended for contexts where the raw key must be inspected or used for lookups within the generation pipeline, but the caller does not need to manage its lifetime separately.
+The function `clore::generate::parse_symbol_target_key` accepts a `std::string_view` and returns a `SymbolTargetKeyView`. It is responsible for parsing a string representation of a symbol target key into a structured view that can be used to identify and locate symbols within the generation pipeline. Callers should provide a string that conforms to the expected key format; the returned view offers a lightweight, non‑owning reference to the parsed components.
 
 #### Usage Patterns
 
-- Converting a raw target key string into a `SymbolTargetKeyView` for subsequent processing
+- Used to parse symbol target keys for lookups or formatting.
 
 ### `clore::generate::prompt_kind_name`
 
-Declaration: `generate/model.cppm:32`
+Declaration: `src/generate/model.cppm:48`
 
-Definition: `generate/model.cppm:273`
+Definition: `src/generate/model.cppm:289`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-`clore::generate::prompt_kind_name` converts a `PromptKind` value into an integer that corresponds to the kind’s name.  Callers can use this to obtain a numeric identifier for a prompt kind, for example when logging, comparing, or indexing.
+Declaration: [Declaration](functions/prompt-kind-name.md)
 
-The returned integer is deterministic and consistent for the same `PromptKind` across different invocations.  No other behavior or side effects are guaranteed; the mapping is intended solely to provide a stable numeric representation of the prompt kind’s name.
+Converts a given `PromptKind` value to its corresponding human-readable string name. The function returns a `std::string_view` that serves as a stable text identifier for the kind, suitable for use in key construction, logging, or diagnostic output. It is called by `prompt_request_key` to obtain the kind portion of a unique request key.
 
 #### Usage Patterns
 
-- obtain a string name for a `PromptKind`
-- map enum value to corresponding string constant
+- Called by `clore::generate::prompt_request_key` to derive a string key for a given prompt request.
 
 ### `clore::generate::prompt_output_of`
 
-Declaration: `generate/render/common.cppm:71`
+Declaration: `src/generate/render/common.cppm:82`
 
-Definition: `generate/render/common.cppm:71`
+Definition: `src/generate/render/common.cppm:82`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::prompt_output_of` retrieves the output text generated for a specific prompt request. Callers supply the prompt's identifier (via `const int &`) along with two additional `int` parameters that further qualify which output to obtain, such as a sub‑index or version. The return value is an `int` that represents or provides access to the prompt's output content, which can be used in subsequent rendering or composition steps. This function is part of the prompt generation pipeline and is expected to be called after the prompt has been produced, typically to extract the result for a given page or symbol.
+`clore::generate::prompt_output_of` returns a pointer to a constant string representing the output text generated for a given prompt request. The first argument is a reference to an identifier (such as a page or session handle), the second argument specifies the prompt kind or variant, and the third argument provides a contextual key (often a symbol name or query). The function yields a pointer to the resulting prompt output, or a null pointer if no output is available for the specified parameters.
+
+The caller must not dereference the returned pointer without first checking for a null value. The function does not transfer ownership of the pointed-to string; the caller must not modify or deallocate the data. The reference parameter will not be modified by this function.
 
 #### Usage Patterns
 
-- Look up existing analysis output
-- Retrieve prompt response for a given kind
-- Check if a prompt has been generated for a symbol
+- Used to look up prompt outputs by kind and target key from a collection of generated results
 
 ### `clore::generate::prompt_request_key`
 
-Declaration: `generate/model.cppm:131`
+Declaration: `src/generate/model.cppm:147`
 
-Definition: `generate/model.cppm:290`
+Definition: `src/generate/model.cppm:306`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The function `clore::generate::prompt_request_key` computes an integer key from a given `const PromptRequest &`. Callers use this key to identify or look up a specific prompt request, for example in caching or deduplication. The returned `int` value uniquely represents the content of the request, and the caller should treat it as opaque.
+The function `clore::generate::prompt_request_key` derives a standardized string key from a given `PromptRequest`. This key uniquely identifies the request for purposes such as caching, comparison, or lookup. The key incorporates the result of `clore::generate::prompt_kind_name` to reflect the kind of prompt. Callers can rely on the returned string to be deterministic for equivalent requests.
 
 #### Usage Patterns
 
-- caching prompt responses
-- creating lookup keys for prompt requests
-- generating identifiers for page key computation
+- caching prompt requests
+- identifying prompt requests
+
+### `clore::generate::push_link_paragraph`
+
+Declaration: `src/generate/render/common.cppm:103`
+
+Definition: `src/generate/render/common.cppm:103`
+
+Implementation: [`Module generate:common`](../../../modules/generate/common.md)
+
+The function `clore::generate::push_link_paragraph` appends a paragraph containing a hyperlink to the document being built. It accepts a mutable reference to a paragraph builder (accumulating onto a document output), a `std::string` for the display text of the paragraph, and a `const int &` that serves as a link target or identifier. The caller is responsible for providing a valid target that has already been associated with a resolvable location; the function does not validate the target but relies on earlier registration. It returns `void` and modifies the builder in place.
+
+#### Usage Patterns
+
+- Building link paragraphs in markdown generation pipelines
+- Similar to `push_location_paragraph` and `push_optional_link_paragraph` for rendering symbol documentation
+
+### `clore::generate::push_location_paragraph`
+
+Declaration: `src/generate/render/common.cppm:410`
+
+Definition: `src/generate/render/common.cppm:410`
+
+Implementation: [`Module generate:common`](../../../modules/generate/common.md)
+
+The function `clore::generate::push_location_paragraph` appends a paragraph containing a hyperlink to a specified location to the document node provided as the first argument. The caller supplies a mutable reference to the document builder (e.g., a `MarkdownNode` handle), a textual label for the link, and a resolved `LinkTarget` that identifies the destination. After the call, the document node is extended with an inline link paragraph that points to the given target, using the supplied text as the visible label. The `LinkTarget` must be a valid, resolved target; if it is absent, use `push_optional_link_paragraph` instead.
+
+#### Usage Patterns
+
+- Constructs a location paragraph node and appends it to the markdown node list.
+
+### `clore::generate::push_optional_link_paragraph`
+
+Declaration: `src/generate/render/common.cppm:122`
+
+Definition: `src/generate/render/common.cppm:122`
+
+Implementation: [`Module generate:common`](../../../modules/generate/common.md)
+
+`clore::generate::push_optional_link_paragraph` appends a paragraph to a document builder (the `int &` parameter) consisting of the provided `std::string` label. If the `const std::optional<LinkTarget> &` argument contains a valid target, the paragraph is rendered as a hyperlink pointing to that target; otherwise, the paragraph is inserted as plain text without a link. The caller is responsible for supplying the label and an optional link target, and the function handles the branching logic for link inclusion.
+
+#### Usage Patterns
+
+- used to conditionally add a paragraph containing a text label and a link to the nodes list
 
 ### `clore::generate::render_file_dependency_diagram_code`
 
-Declaration: `generate/render/diagram.cppm:20`
+Declaration: `src/generate/render/diagram.cppm:34`
 
-Definition: `generate/render/diagram.cppm:222`
+Definition: `src/generate/render/diagram.cppm:236`
 
 Implementation: [`Module generate:diagram`](../../../modules/generate/diagram.md)
 
-The function `clore::generate::render_file_dependency_diagram_code` produces the diagram code (typically a Mermaid or similar representation) that visualizes the dependency relationships for a given source file. Its contract accepts three integer parameters that identify the file, its enclosing namespace or module, and an additional context or configuration identifier. The return value signals success or failure of the rendering operation. Callers must supply valid identifiers that refer to existing elements within the current generation state.
+The function `clore::generate::render_file_dependency_diagram_code` produces a string containing the Mermaid diagram code that visualizes file‑dependency relationships for a given context. It accepts three `const int &` arguments, which together identify the file scope and its relevant dependency information. The caller is responsible for providing valid identifiers that reference the file and its surrounding project or analysis state; the returned `std::string` is complete diagram text suitable for embedding in a Markdown page. This function is part of a family of diagram generators that includes `render_import_diagram_code`, `render_module_dependency_diagram_code`, and `render_namespace_diagram_code`, each tailored to a specific kind of structural graph.
 
 #### Usage Patterns
 
-- Called during page rendering to produce file dependency diagrams
-- Used in combination with `render_cached_diagram` for efficiency
+- Used to generate Mermaid diagram code for file dependency visualization in documentation pages.
 
 ### `clore::generate::render_import_diagram_code`
 
-Declaration: `generate/render/diagram.cppm:15`
+Declaration: `src/generate/render/diagram.cppm:29`
 
-Definition: `generate/render/diagram.cppm:124`
+Definition: `src/generate/render/diagram.cppm:138`
 
 Implementation: [`Module generate:diagram`](../../../modules/generate/diagram.md)
 
-The function `clore::generate::render_import_diagram_code` generates the textual representation of an import diagram for a given entity identified by the parameter. The caller provides a reference to an entity identifier (e.g., a module or file index) and receives an integer result code indicating success or failure of the rendering. This function is part of the diagram-generation subsystem and is intended to produce a complete, embeddable diagram snippet (likely in Mermaid or similar notation) that visualises the import relationships of the specified entity. The caller is responsible for ensuring the provided identifier is valid and that the necessary analysis data has been populated before invocation.
+The function `clore::generate::render_import_diagram_code` accepts a reference to an integer that identifies a code entity (such as a module, file, or namespace) and returns a `std::string` containing the diagram code—typically in Mermaid format—that visualizes the entity’s import dependencies. The returned string is intended for direct embedding into a generated Markdown page. The caller must provide a valid identifier that corresponds to an existing, fully processed entity; the function does not validate the referenced entity and assumes it has been correctly computed beforehand. If the entity has no import relationships or does not support an import diagram, the returned string is empty.
 
 #### Usage Patterns
 
-- Called when building module page documentation to embed an import dependency diagram.
-- Used in the generation of `clore::generate::render_page_markdown` or similar rendering functions.
+- called during module page rendering to generate import dependency diagrams
+- used in conjunction with other diagram renderers like `render_module_dependency_diagram_code`
 
 ### `clore::generate::render_markdown`
 
-Declaration: `generate/markdown.cppm:122`
+Declaration: `src/generate/markdown.cppm:133`
 
-Definition: `generate/markdown.cppm:730`
+Definition: `src/generate/markdown.cppm:741`
 
 Implementation: [`Module generate:markdown`](../../../modules/generate/markdown.md)
 
-The `clore::generate::render_markdown` function accepts a fully constructed `MarkdownDocument` and returns an `int` status code. It is responsible for translating the internal document representation into final rendered Markdown output, typically for writing to a file or stream. The caller must ensure the `MarkdownDocument` argument has been populated with all necessary content; the function handles the output generation and signals success or failure through the returned integer (zero indicates success, non-zero an error).
+`clore::generate::render_markdown` accepts a `MarkdownDocument` and returns the corresponding Markdown text as a `std::string`. The caller provides a document model built from other generation primitives, and the function serializes it into a Markdown buffer, ensuring correct syntax for elements such as headings, code blocks, lists, links, and inline formatting. The returned string is ready for writing to a file or embedding in a larger Markdown output.
 
 #### Usage Patterns
 
-- called to produce the final Markdown output for a document
-- used by page rendering or file writing functions
+- Used to convert a `MarkdownDocument` into a string for writing to a file
+- Called during page generation to produce Markdown output
 
 ### `clore::generate::render_module_dependency_diagram_code`
 
-Declaration: `generate/render/diagram.cppm:24`
+Declaration: `src/generate/render/diagram.cppm:38`
 
-Definition: `generate/render/diagram.cppm:289`
+Definition: `src/generate/render/diagram.cppm:303`
 
 Implementation: [`Module generate:diagram`](../../../modules/generate/diagram.md)
 
-This function generates a Mermaid-formatted module dependency diagram code snippet. It accepts a reference to a module identifier (as a `const int &`) and returns an integer handle to the generated diagram code. The resulting diagram illustrates the dependencies among the selected module and its related modules, intended for embedding within a documentation page. Callers use the returned handle to incorporate the diagram code into a Markdown document, typically in conjunction with `clore::generate::make_mermaid` or similar rendering utilities.
+The function `clore::generate::render_module_dependency_diagram_code` accepts a module identifier (represented as a `const int &`) and returns a `std::string` containing the diagram code that visually depicts the dependency relationships among modules seen from that identifier. The returned string is intended for direct embedding into generated documentation pages, typically as Mermaid or other diagram markup that can be rendered by a documentation tool.
+
+As a caller, you provide the index or reference to the module whose dependencies should be diagrammed. The function assumes that the supplied identifier corresponds to a valid module analysis or index accessible within the generation context; no validation is performed by this function. The output is a complete diagram code fragment suitable for use with the documentation system’s diagram rendering pipeline.
 
 #### Usage Patterns
 
-- Called when generating module dependency diagrams for documentation pages
-- Used in the page rendering pipeline for module overviews
+- Called to produce a Mermaid diagram for module dependency visualization
+- Used in module-level documentation pages
+- Embedded in markdown via a Mermaid code fence
 
 ### `clore::generate::render_namespace_diagram_code`
 
-Declaration: `generate/render/diagram.cppm:17`
+Declaration: `src/generate/render/diagram.cppm:31`
 
-Definition: `generate/render/diagram.cppm:168`
+Definition: `src/generate/render/diagram.cppm:182`
 
 Implementation: [`Module generate:diagram`](../../../modules/generate/diagram.md)
 
-The function `clore::generate::render_namespace_diagram_code` produces the diagram code—typically in Mermaid syntax—that visualizes the structure of a given namespace, including its nested namespaces and their relationships. Callers supply a namespace identifier (as a `const int &`) and an additional integer parameter (likely controlling depth or generation mode), and receive an integer result that either represents the generated code handle or a status indicator. This function is one of a family of diagram code generators used to create visual representations of code organization within the documentation pipeline.
+The function `clore::generate::render_namespace_diagram_code` produces the textual source code for a visual diagram that depicts the structure and dependencies of a given namespace. The caller supplies a namespace identifier via the first argument of type `const int &` and a namespace name or qualifier as a `std::string_view`. The function returns a `std::string` containing the complete diagram code (for example, a Mermaid diagram), which is ready to be embedded into generated documentation. The caller is responsible for passing valid references that correspond to an existing namespace in the analysis data; the exact meaning of the integer handle is an internal implementation detail. This function does not write or render the diagram—it only produces the code.
 
 #### Usage Patterns
 
-- called to generate a namespace dependency diagram for documentation pages
-- result is embedded in Markdown content for namespace overviews
-- invoked within cached diagram generation to avoid redundant computation
+- called when rendering namespace documentation pages
+- used to produce Mermaid diagram embed in namespace overview
 
 ### `clore::generate::render_page_bundle`
 
-Declaration: `generate/render/page.cppm:565`
+Declaration: `src/generate/render/page.cppm:592`
+
+Definition: `src/generate/render/page.cppm:592`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-`clore::generate::render_page_bundle` produces the rendered output for a collection of related documentation pages. Callers supply five integer handles that identify the page bundle components—such as a page plan set, a link resolver, or source locations—and the function returns an integer handle to the rendered bundle. The caller is responsible for providing valid, consistent handles and for interpreting the returned integer as an opaque identifier for the resulting rendered content.
+The function `clore::generate::render_page_bundle` renders a bundle of generated pages. It accepts five integer handles (each passed by const reference) that identify the pages to be combined into the bundle. The caller is responsible for providing the correct handles in the expected order; the function returns an integer result that indicates the outcome of the rendering operation.
 
 #### Usage Patterns
 
-- core orchestration function for page bundle rendering
-- invoked by higher-level page generation workflows
+- Used to generate a page bundle from a plan without symbol analysis
 
 ### `clore::generate::render_page_bundle`
 
-Declaration: `generate/render/page.cppm:573`
+Declaration: `src/generate/render/page.cppm:584`
+
+Definition: `src/generate/render/page.cppm:629`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-The function `clore::generate::render_page_bundle` accepts a set of five integer references that identify the page bundle context and returns an integer indicating the outcome. It is responsible for rendering a complete page bundle—a collection of related documentation pages—into their final output form. Callers invoke this function after setting up the page plan and analysis data; the contract requires that all provided identifiers are valid and that the page bundle has been properly initialized. The return value communicates success (typically zero) or an error code if rendering fails.
+The function `clore::generate::render_page_bundle` accepts six opaque integer references representing internal handles or state identifiers and returns an integer status code. It is responsible for rendering a set of pages as a cohesive bundle, combining the individual page content that would be produced by calls such as `render_page_markdown` into a single output unit. Callers supply the necessary context through the integer references and interpret the return value as a success indicator or a count of rendered elements. The exact mapping of parameters is part of the internal contract and must be provided consistently with the caller's page generation pipeline.
 
 #### Usage Patterns
 
-- core rendering function
-- called by page generation orchestrators
-- used to produce final page content
+- Called from higher-level page generation routines such as `generate_pages` and `generate_pages_async`
+- Used to produce a complete page bundle from a single page plan, including subpages when applicable
 
 ### `clore::generate::render_page_markdown`
 
-Declaration: `generate/render/page.cppm:582`
+Declaration: `src/generate/render/page.cppm:601`
 
-Definition: `generate/render/page.cppm:582`
+Definition: `src/generate/render/page.cppm:601`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-`clore::generate::render_page_markdown` accepts six integer references that collectively describe a complete page plan, and returns an integer representing the outcome of the rendering process. Callers must supply valid, internally consistent identifiers obtained from the page‑building infrastructure; the function then produces the corresponding markdown content for a single documentation page. The returned integer signals success or failure, with callers expected to check that value before further use of the rendered output.
+The function `clore::generate::render_page_markdown` accepts a set of const int references that identify the page’s context—such as its symbol, plan, layout, and analysis components—and returns an int indicating the outcome of the rendering process. It is responsible for producing the complete Markdown representation of a single documentation page, composing the title, sections, code diagrams, and evidence blocks from the provided identifiers. The contract requires that the caller supply valid integers that reference internal page‑building data structures; the function returns a non‑negative value on success or a negative error code on failure.
 
 #### Usage Patterns
 
-- called by higher-level page generation functions
-- used to retrieve markdown for a specific page after a bundle is rendered
+- Called to obtain the final rendered markdown for a specific page plan
+- Used as a high-level entry point for page rendering
 
 ### `clore::generate::render_page_markdown`
 
-Declaration: `generate/render/page.cppm:602`
+Declaration: `src/generate/render/page.cppm:621`
 
-Definition: `generate/render/page.cppm:602`
+Definition: `src/generate/render/page.cppm:621`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-The function `clore::generate::render_page_markdown` is responsible for producing the full Markdown content of a generated documentation page. The caller supplies identifiers (as `const int &` parameters) that specify the page’s source module, symbol, analysis data, and other context needed to compose the page. The returned `int` value indicates the outcome of the rendering process, typically a success code or an error identifier. The caller must ensure that all provided identifiers refer to valid, previously initialized objects within the generation environment; the function assumes that the referenced data is available and consistent.
+`clore::generate::render_page_markdown` renders the complete Markdown content for a single documentation page. It accepts five opaque integer references representing internal identifiers for the page plan, analysis store, page documentation layout, link resolver, and generation configuration. The function returns an `int` status code that indicates success (zero) or failure (non-zero), allowing the caller to check whether the rendering completed without error.
 
 #### Usage Patterns
 
-- Entry point for page rendering
-- Delegating to full overload with empty analysis store
-- Called from page generation pipelines
+- Called to obtain markdown content for a page before writing it to disk
+- Used as a convenience overload when symbol analysis is not required
 
 ### `clore::generate::short_name_of`
 
-Declaration: `generate/render/common.cppm:45`
+Declaration: `src/generate/render/common.cppm:56`
 
-Definition: `generate/render/common.cppm:45`
+Definition: `src/generate/render/common.cppm:56`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::short_name_of` derives a shortened, caller-facing name from an integral identifier.  It is used to produce concise labels for symbols or entities within generated documentation output.  The caller provides a valid identifier (typically representing a symbol or object key), and the function returns a corresponding short name suitable for embedding in rendered pages or references.
+Given a fully qualified name as `std::string_view`, `clore::generate::short_name_of` returns the local, unqualified portion of that name — typically the last segment after the last `::` or similar delimiter. The function assumes the input is a syntactically valid qualified name (e.g., `"ns::Foo::bar"` becomes `"bar"`). It does not modify or escape the returned portion. This is a pure, side‑effect‑free transformation used when a short display label is needed instead of the full qualified path.
 
 #### Usage Patterns
 
-- extract unqualified symbol names from fully qualified identifiers
-- build short display names for namespaces, classes, and functions
-- strip leading namespace or module qualifiers when presenting symbol names
+- extracting short symbol names for display
+- stripping namespace prefixes from qualified names
 
 ### `clore::generate::should_emit_mermaid`
 
-Declaration: `generate/render/diagram.cppm:11`
+Declaration: `src/generate/render/diagram.cppm:25`
 
-Definition: `generate/render/diagram.cppm:105`
+Definition: `src/generate/render/diagram.cppm:119`
 
 Implementation: [`Module generate:diagram`](../../../modules/generate/diagram.md)
 
-The function `clore::generate::should_emit_mermaid` determines whether a Mermaid diagram should be emitted based on two integer inputs. It returns `true` if the diagram is warranted, and `false` otherwise. Callers use this to decide whether to generate diagram code via related rendering functions. The exact threshold or condition is not part of the public contract.
+The function `clore::generate::should_emit_mermaid` takes two `std::size_t` arguments and returns a `bool`. It determines whether a Mermaid diagram should be generated for the given dimensions. Callers provide the sizes that characterize the diagram’s complexity (for example, the number of nodes and edges), and the function decides if the resulting diagram is worth emitting. This allows diagram-rendering code to skip trivial or overly large diagrams that would not be useful in the output.
 
 #### Usage Patterns
 
-- Used by diagram rendering functions such as `render_file_dependency_diagram_code` and `make_mermaid` to conditionally include diagrams
+- Called by diagram rendering functions to decide whether to include a Mermaid diagram
 
 ### `clore::generate::store_fallback_analysis`
 
-Declaration: `generate/analysis.cppm:35`
+Declaration: `src/generate/analysis.cppm:51`
 
-Definition: `generate/analysis.cppm:335`
+Definition: `src/generate/analysis.cppm:351`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-The function `clore::generate::store_fallback_analysis` stores a fallback analysis into a caller‑supplied storage location. The first argument is a mutable reference of type `int &` that will be overwritten with the computed fallback result. The second and third arguments, both of type `const int &`, provide the input data from which the fallback analysis is derived. This function is intended for use when primary analysis is unavailable or incomplete, ensuring that a default analysis is always present for downstream consumers.
+The function `clore::generate::store_fallback_analysis` accepts a mutable reference to an integer (likely representing a symbol analysis store or context) and two constant integer references representing identifiers or keys for a symbol and its associated entity. It stores a fallback analysis into the provided store, using the given identifiers to locate or derive the corresponding analysis data. The function returns `void` and is intended to be called when a primary, more specific analysis is unavailable or incomplete; it populates the store with a default or summary-level analysis for the referenced symbol. Callers must ensure that the first argument refers to a valid mutable analysis store and that the two constant integer arguments correspond to existing symbols or entities within the generation context.
 
 #### Usage Patterns
 
-- Called to store a fallback analysis for a symbol when direct analysis is missing or incomplete.
-- Used in contexts where a symbol must have an analysis entry before further processing.
+- called when a symbol's analysis fails or is missing
+- used as a default handler in analysis building pipelines
 
 ### `clore::generate::strip_inline_markdown`
 
-Declaration: `generate/render/common.cppm:33`
+Declaration: `src/generate/render/common.cppm:44`
 
-Definition: `generate/render/common.cppm:33`
+Definition: `src/generate/render/common.cppm:44`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::strip_inline_markdown` accepts an input (represented as an `int` handle) and returns a new `int` handle representing the same content with all inline Markdown formatting removed. Callers use this utility to obtain a plain‑text version of a string that originally contained inline markup such as bold, italic, code spans, or links. The function does not modify the original input; it returns a fresh handle to the stripped result.
+`clore::generate::strip_inline_markdown` accepts a `std::string_view` representing inline Markdown text and returns a `std::string` with all inline formatting removed. The function strips standard inline Markdown constructs such as bold, italic, code spans, and links, returning plain text content. It is intended to produce a clean, readable string suitable for contexts where Markdown syntax must be eliminated, such as generating plain-text summaries or labels.
+
+The caller is responsible for providing a valid Markdown fragment. The function does not handle block-level Markdown structures or preserve any markup. The resulting string is trimmed of leading and trailing whitespace via `clore::generate::trim_ascii`. The operation is purely syntactic and does not interpret semantic content.
+
+#### Usage Patterns
+
+- sanitizing user-provided or generated markdown text before comparison or display in plain text contexts
+- stripping inline formatting from markdown strings during rendering or evidence building
 
 ### `clore::generate::symbol_analysis_markdown_for`
 
-Declaration: `generate/render/common.cppm:161`
+Declaration: `src/generate/render/common.cppm:172`
 
-Definition: `generate/render/common.cppm:161`
+Definition: `src/generate/render/common.cppm:172`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-The function `clore::generate::symbol_analysis_markdown_for` produces a Markdown fragment that represents the analysis of a specific symbol. It accepts three arguments—likely a symbol identifier, an analysis store, and an additional context parameter—and returns an integer handle to the generated Markdown node. Callers use this function when they need to embed the detailed analysis of a symbol into a larger Markdown document, such as a declaration or summary page. The returned handle can be composed with other Markdown structures via the library’s rendering pipeline.
+The function `clore::generate::symbol_analysis_markdown_for` retrieves the precomputed Markdown content for a given symbol’s analysis. It accepts three parameters that together identify the symbol and its analysis context. It returns a pointer to a constant `std::string` containing the Markdown fragment, or `nullptr` if no such analysis exists for the specified symbol. The caller can safely dereference the pointer when it is non-null; the pointed-to string remains valid as long as the underlying analysis store is not modified. This function is used by higher-level rendering routines to embed analysis results into generated documentation pages.
 
 #### Usage Patterns
 
-- Used during page generation to retrieve symbol analysis markdown for rendering
-- Called by functions like `render_page_markdown` to obtain analysis content
+- Used to select the appropriate analysis markdown for a symbol based on the page type
+- Dispatches to overview or detail markdown generation
 
 ### `clore::generate::symbol_doc_view_for`
 
-Declaration: `generate/render/common.cppm:269`
+Declaration: `src/generate/render/common.cppm:280`
 
-Definition: `generate/render/common.cppm:269`
+Definition: `src/generate/render/common.cppm:280`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-Constructs a `SymbolDocView` for the symbol identified by the two integer arguments. The caller provides the symbol’s identifier together with a context identifier, typically a page or scope index. The returned `SymbolDocView` provides a structured, read-only representation of the documentation content associated with that symbol, suitable for subsequent rendering steps such as page layout and markdown generation.
-
-This function is called during the page generation pipeline to obtain the documentation view for a given symbol without exposing the underlying storage or creation logic. The contract assumes the provided identifiers refer to a valid, already-resolved symbol and context; behavior is undefined otherwise.
+The function `clore::generate::symbol_doc_view_for` creates and returns a `SymbolDocView` for a given symbol identified by two opaque handles (passed as `const int &` references). Callers provide the necessary symbol identifiers, and the function produces a view that can be used to retrieve doc labels or other documentation-related information for that symbol. The returned `SymbolDocView` is intended to be passed to related utilities such as `clore::generate::doc_label`.
 
 #### Usage Patterns
 
-- Called when building documentation views to determine the detail level of a symbol on a page
-- Used in rendering logic to decide whether to show declaration, implementation, or full details
+- called during page generation to select the appropriate documentation view for a symbol
+- used to distinguish between declaration, details, and implementation views per page type
 
 ### `clore::generate::symbol_prompt_kinds_for_symbol`
 
-Declaration: `generate/analysis.cppm:29`
+Declaration: `src/generate/analysis.cppm:45`
 
-Definition: `generate/analysis.cppm:299`
+Definition: `src/generate/analysis.cppm:315`
 
 Implementation: [`Module generate:analysis`](../../../modules/generate/analysis.md)
 
-Given a symbol identifier, `clore::generate::symbol_prompt_kinds_for_symbol` returns a bitmask of `PromptKind` values that are applicable to that symbol. Callers use this function to determine which prompting contexts (e.g., declaration summary, function analysis) are relevant for the symbol when building generation plans or evidence packs.
-
-The function accepts the symbol identifier as a `const int &` and returns an `int` whose bits correspond to the set of active prompt kinds. The caller is responsible for ensuring that the symbol identifier is valid within the current analysis store; the function performs no validation and assumes the identifier refers to an already‑registered symbol.
+The function `clore::generate::symbol_prompt_kinds_for_symbol` takes a symbol identifier (as a `const int &`) and returns an `int` representing the set of prompt kinds applicable to that symbol. The caller can use the returned integer as a bitmask or enumeration to determine which prompts (e.g., declaration summary, analysis details) should be generated for the given symbol. This function encapsulates the mapping from a symbol to its relevant prompt categories, allowing the generation pipeline to select the appropriate prompting strategy without exposing the decision logic.
 
 #### Usage Patterns
 
-- Called to decide which prompt variants to generate for a symbol (e.g., declaration summary, implementation summary).
+- Determining the set of analysis prompts to generate for a symbol in page generation
 
 ### `clore::generate::trim_ascii`
 
-Declaration: `generate/render/common.cppm:23`
+Declaration: `src/generate/render/common.cppm:34`
 
-Definition: `generate/render/common.cppm:23`
+Definition: `src/generate/render/common.cppm:34`
 
 Implementation: [`Module generate:common`](../../../modules/generate/common.md)
 
-`clore::generate::trim_ascii` accepts an integer parameter representing a string (likely an identifier or handle into an internal string table) and returns a new integer that refers to the same string with leading and trailing ASCII whitespace characters removed. The caller is responsible for supplying a valid input handle; the function guarantees that the returned handle is valid and points to a freshly trimmed copy of the original text. This utility is used within the documentation generation pipeline to sanitize or normalize ASCII content before further processing.
+Declaration: [Declaration](functions/trim-ascii.md)
+
+`clore::generate::trim_ascii` is a utility function that accepts a `std::string_view` and returns a `std::string_view` pointing to the same underlying characters with all leading and trailing ASCII whitespace removed. The result is a non-owning view; no heap allocation or copying occurs. Callers use this function to normalize short text fragments—for example, after stripping inline Markdown syntax from a string, or before checking whether a raw text output is non‑empty. By trimming whitespace boundaries, the function helps ensure that further processing (such as appending content to a section or evaluating emptiness) operates only on meaningful content.
 
 #### Usage Patterns
 
-- preprocess text before analysis
-- sanitize leading/trailing whitespace
-- normalize markdown fragment content
+- Used to trim whitespace from prompt texts
+- Used in stripping inline markdown
+- Used when adding prompt output
 
 ### `clore::generate::validate_no_path_conflicts`
 
-Declaration: `generate/model.cppm:216`
+Declaration: `src/generate/model.cppm:232`
 
-Definition: `generate/model.cppm:644`
+Definition: `src/generate/model.cppm:660`
 
 Implementation: [`Module generate:model`](../../../modules/generate/model.md)
 
-The function `clore::generate::validate_no_path_conflicts` accepts a single `int` argument representing a path or resource identifier and returns an `int` indicating whether a conflict exists. A return value of zero signals that no conflict is present; a non-zero value indicates that the path would collide with an already‑registered path. Callers should invoke this function before committing a new path to the generation output to guarantee that generated files, page routes, or resource names remain unique.
+The function `clore::generate::validate_no_path_conflicts` checks whether a given set of path information (represented by its integer parameter) would cause any path conflicts during the page generation process. It accepts a single `const int &` parameter that identifies the paths to validate, and returns a `std::expected<void, PathError>`. On success the call completes normally; on failure it yields a `PathError` describing the conflicting path(s). Callers should invoke this function before committing a path that must be unique across the generated output, and must handle the error case to avoid producing invalid or overlapping output paths.
 
 #### Usage Patterns
 
-- validate path uniqueness before building page plans
-- ensure no duplicate keys in symbol-to-page mapping
+- called before inserting path mappings to ensure uniqueness
+- used in page path computation to avoid collisions
 
 ### `clore::generate::write_page`
 
-Declaration: `generate/render/page.cppm:666`
+Declaration: `src/generate/render/page.cppm:685`
 
-Definition: `generate/render/page.cppm:666`
+Definition: `src/generate/render/page.cppm:685`
 
 Implementation: [`Module generate:page`](../../../modules/generate/page.md)
 
-The function `clore::generate::write_page` is responsible for writing a single documentation page to the output filesystem. It accepts a page plan (identified by the first `const int &` parameter) and a page index (the second `int` parameter). The function returns an `int` that typically indicates success or signals an error condition. As a caller, you provide the necessary identifiers for the page to be persisted; the function handles the actual file I/O and ensures the page is written as part of the generation pipeline.
+The function `clore::generate::write_page` writes a single generated documentation page to a file. It accepts a page identifier as `const int &` and an output file path as `std::string_view`. The function returns an `int` serving as a status code (zero on success, non‑zero on failure). Callers must supply a valid page identifier that refers to a fully constructed page (for example, produced by one of the `build_*_page_root` functions), and must ensure the output path is writable. The content is serialized in the page’s designated format, typically Markdown.
 
 #### Usage Patterns
 
-- Called during the page output phase after generation
-- Likely invoked in a loop by `write_pages` or similar batch writer
-- Part of the `clore::generate` module's rendering pipeline
+- called by page generation pipeline to persist rendered pages
+- used as a final step in file-based output generation
 
 ### `clore::generate::write_pages`
 
-Declaration: `generate/generate.cppm:44`
+Declaration: `src/generate/generate.cppm:61`
 
-Definition: `generate/scheduler.cppm:2010`
+Definition: `src/generate/scheduler.cppm:2035`
 
 Implementation: [`Module generate:scheduler`](../../../modules/generate/scheduler.md) | [`Module generate`](../../../modules/generate/index.md)
 
-`clore::generate::write_pages` accepts a reference to an internal generation context (the `const int &`) and an output base specification (`std::string_view`). It writes all generated documentation pages to the location indicated by the string argument. The function returns an `int` status code: zero indicates success, and a nonzero value signals an error condition.
+The function `clore::generate::write_pages` writes the fully constructed page set to a specified output location. It accepts a reference to the page plan or root handle (represented as a `const int &`) and a `std::string_view` indicating the destination directory or path, and returns an `int` status code.
 
-The caller is responsible for providing a valid context handle and a meaningful path string. After a successful call, the output directory will contain the complete set of rendered pages produced by the generation process.
-
-#### Usage Patterns
-
-- likely invoked during the page generation pipeline
-- probably called from higher-level generators such as `clore::generate::generate_pages`
+The caller is responsible for ensuring that all page structures have been built (e.g., via calls to `build_page_root` or similar) and that the output path is valid and writable. A zero return typically signals success; a nonzero value indicates an error that prevented some or all pages from being written.
 
 ## Related Pages
 

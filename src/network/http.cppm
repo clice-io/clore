@@ -4,12 +4,26 @@ module;
 #define NOMINMAX
 #endif
 
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <expected>
+#include <format>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <unordered_map>
+#include <utility>
+
 #include "kota/async/async.h"
 #include "kota/http/http.h"
 
 export module http;
-
-import std;
 import support;
 
 export namespace clore::net {

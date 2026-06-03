@@ -1,6 +1,18 @@
+module;
+
+#include <array>
+#include <cstdint>
+#include <expected>
+#include <format>
+#include <limits>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_set>
+#include <utility>
+
 export module generate:evidence;
 
-import std;
 import :model;
 import extract;
 

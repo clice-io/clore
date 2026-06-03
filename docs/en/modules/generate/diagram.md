@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:diagram'
-description: 'The generate:diagram module is responsible for producing visual diagram code—typically in Mermaid syntax—that represents structural relationships within a codebase. It owns a family of public rendering functions that generate diagram snippets for file dependencies, import relationships, namespace hierarchies, and module dependencies. Each function accepts identifiers for the relevant entity and returns a handle to the resulting diagram code, which is intended for embedding into documentation pages.'
+description: 'The generate:diagram module is responsible for converting internal analysis data into textual diagram code (typically in Mermaid format) suitable for embedding into generated documentation pages. It provides a family of public rendering functions—render_namespace_diagram_code, render_file_dependency_diagram_code, render_import_diagram_code, and render_module_dependency_diagram_code—each tailored to a specific kind of structural graph. The module also exposes utility functions escape_mermaid_label to sanitize text for safe inclusion in Mermaid labels and should_emit_mermaid to decide, based on node and edge counts, whether a diagram is worth generating. Internally, it uses helper functions (e.g., collect_implementation_symbols_for_diagram, short_name_of_local, is_std_name, is_variable_kind_local, render_cached_diagram) and constants (kMermaidMinNodes, kMermaidMinEdges) to construct the output, relying on the config, extract, generate:model, and support modules for configuration, extraction results, data models, and foundational utilities.'
 layout: doc
 template: doc
 ---
@@ -9,16 +9,13 @@ template: doc
 
 ## Summary
 
-The `generate:diagram` module is responsible for producing visual diagram code—typically in Mermaid syntax—that represents structural relationships within a codebase. It owns a family of public rendering functions that generate diagram snippets for file dependencies, import relationships, namespace hierarchies, and module dependencies. Each function accepts identifiers for the relevant entity and returns a handle to the resulting diagram code, which is intended for embedding into documentation pages.
-
-The module also exposes a utility to determine whether a diagram should be emitted based on configurable thresholds, and an escaping function to ensure that labels containing special characters can be safely included in Mermaid diagrams. Internal helper functions handle caching, symbol collection, and name resolution, supporting the public API within the documentation generation pipeline.
+The `generate:diagram` module is responsible for converting internal analysis data into textual diagram code (typically in Mermaid format) suitable for embedding into generated documentation pages. It provides a family of public rendering functions—`render_namespace_diagram_code`, `render_file_dependency_diagram_code`, `render_import_diagram_code`, and `render_module_dependency_diagram_code`—each tailored to a specific kind of structural graph. The module also exposes utility functions `escape_mermaid_label` to sanitize text for safe inclusion in Mermaid labels and `should_emit_mermaid` to decide, based on node and edge counts, whether a diagram is worth generating. Internally, it uses helper functions (e.g., `collect_implementation_symbols_for_diagram`, `short_name_of_local`, `is_std_name`, `is_variable_kind_local`, `render_cached_diagram`) and constants (`kMermaidMinNodes`, `kMermaidMinEdges`) to construct the output, relying on the `config`, `extract`, `generate:model`, and `support` modules for configuration, extraction results, data models, and foundational utilities.
 
 ## Imports
 
 - [`config`](../config/index.md)
 - [`extract`](../extract/index.md)
 - [`generate:model`](model.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Imported By
@@ -43,13 +40,15 @@ graph LR
 
 ### `clore::generate::escape_mermaid_label`
 
-Declaration: `generate/render/diagram.cppm:13`
+Declaration: `src/generate/render/diagram.cppm:27`
 
-Definition: `generate/render/diagram.cppm:109`
+Definition: `src/generate/render/diagram.cppm:123`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::escape_mermaid_label` processes each character in the input `text` via a simple `for` loop and a `switch` statement. For backslashes and double quotes, it appends their escaped Mermaid equivalents (`"\\\\"` for `'\\'`, `"\\\""` for `'\"'`). Carriage return and newline characters are replaced with a single space; all other characters are copied verbatim. The output `escaped` string pre-allocates storage matching the input size to minimize reallocations. The implementation relies only on `std::string` and `std::string_view` and has no other internal or external dependencies.
+Implementation: [Implementation](functions/escape-mermaid-label.md)
+
+The function iterates character by character through the input `std::string_view`, pre-allocating a `std::string` with `reserve` to avoid reallocation. The core logic is a `switch` that transforms special characters: a backslash is doubled (`"\\\\"`), a double quote is preceded by a backslash (`"\\\""`), and line breaks (`\n`, `\r`) are replaced with a single space; all other characters are copied unchanged. This ensures that Mermaid labels are properly quoted and do not break the diagram syntax. The function relies solely on standard library types (`std::string_view`, `std::string`) and has no other dependencies, serving as a low-level utility called by the various Mermaid diagram rendering functions in the same translation unit.
 
 #### Side Effects
 
@@ -57,61 +56,59 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the input parameter `text` of type `std::string_view`
+- parameter `text` (`std::string_view`)
 
 #### Writes To
 
-- the returned `std::string` containing the escaped label
+- returned `std::string` (the escaped label)
 
 #### Usage Patterns
 
-- used to prepare label strings for Mermaid diagram generation
-- called when constructing Mermaid diagram code to ensure label text does not break syntax
+- Sanitizing labels for Mermaid diagrams
+- Called by `clore::generate::render_namespace_diagram_code`
 
 ### `clore::generate::render_file_dependency_diagram_code`
 
-Declaration: `generate/render/diagram.cppm:20`
+Declaration: `src/generate/render/diagram.cppm:34`
 
-Definition: `generate/render/diagram.cppm:222`
+Definition: `src/generate/render/diagram.cppm:236`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function first checks whether the page plan contains any owner keys; if none are present it returns an empty string. It then delegates to `render_cached_diagram`, which wraps the actual generation logic. Inside the lambda, it retrieves the file record from the `extract::ProjectModel` for the first owner key; if no record is found, an empty string is returned.  
+The function `clore::generate::render_file_dependency_diagram_code` generates a Mermaid `graph LR` diagram for a single file’s includes and locally defined symbols. It first performs early‑exits: if `plan.owner_keys` is empty, or if the file is not found in `model.files`, it returns an empty string. The core work is wrapped in `render_cached_diagram` to avoid recomputation. Inside the lambda, the file’s include paths are made source‑relative via `make_source_relative`, sorted, and deduplicated. Then `collect_implementation_symbols_for_diagram` gathers symbols that satisfy a predicate (type kinds, variable‑local, or function kinds). The total number of edges is the sum of includes and symbols; `node_count` is one plus that total. If `should_emit_mermaid` returns `false` (typically when counts are too small), an empty string is returned. Otherwise, the Mermaid code is built: a file node `F` with an escaped relative path, followed by include nodes (`I0`, `I1`, …) each with a directed edge to `F`, and symbol nodes (`S0`, `S1`, …) with a directed edge from `F` to each symbol node. Symbol labels are shortened using `short_name_of_local`, with a fallback to the symbol’s name or qualified name. The final string is returned through the caching layer.
 
-The algorithm constructs two sets of edges: include dependencies and symbols defined in the file. Include paths are extracted from the file record, made relative to the project root via `make_source_relative`, sorted, and deduplicated. Symbols are collected by calling `collect_implementation_symbols_for_diagram` with a predicate that selects symbols whose kind is a type, a local variable, or a function. Edge count is computed as the sum of include labels and symbols, node count as one plus the edge count. If `should_emit_mermaid` returns false, the diagram is suppressed. Otherwise, a Mermaid `graph LR` is built: a single node for the file, include nodes (prefixed `I`) with edges pointing to the file, and symbol nodes (prefixed `S`) with edges from the file to the symbol. Each label is escaped via `escape_mermaid_label`, and symbol labels are shortened with `short_name_of_local` if non‑empty. The constructed Mermaid code is returned from the lambda and cached by the outer `render_cached_diagram` call.
+Key dependencies include `make_source_relative`, `escape_mermaid_label`, `short_name_of_local`, and the project‑wide utilities `collect_implementation_symbols_for_diagram` and `should_emit_mermaid`. The control flow is straightforward: early returns guard against missing data, then a linear scan collects and processes includes and symbols into Mermaid node/edge declarations.
 
 #### Side Effects
 
-- Cache write via `render_cached_diagram`
-- Allocation and construction of a `std::string` for the diagram code
+No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `plan.owner_keys`
-- `model.files`
-- `config.project_root`
-- `file_it->second.includes`
-- Symbol info from model filtered by `is_type_kind`, `is_variable_kind_local`, `is_function_kind`
-
-#### Writes To
-
-- Cache state via `render_cached_diagram`
-- Returned `std::string`
+- plan
+- config
+- model
+- plan`.owner_keys`
+- model`.files`
+- `file_it`->second`.includes`
+- config`.project_root`
+- `collect_implementation_symbols_for_diagram`
 
 #### Usage Patterns
 
-- Called during page rendering to produce file dependency diagrams
-- Used in combination with `render_cached_diagram` for efficiency
+- Used to generate Mermaid diagram code for file dependency visualization in documentation pages.
 
 ### `clore::generate::render_import_diagram_code`
 
-Declaration: `generate/render/diagram.cppm:15`
+Declaration: `src/generate/render/diagram.cppm:29`
 
-Definition: `generate/render/diagram.cppm:124`
+Definition: `src/generate/render/diagram.cppm:138`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::render_import_diagram_code` produces a Mermaid `graph LR` string representing the import dependencies of a given module unit. It delegates its work to the cached helper `render_cached_diagram`, which avoids redundant regeneration. Inside the lambda, it first short‑circuits if the unit’s `imports` list is empty or if the module’s own top‑level name (obtained via a local `top_module` lambda that extracts the part before the first colon) is identified as a standard library name by `is_std_name`. It then deduplicates the imports: for each import, it computes its top‑level name, discarding entries that match the module’s own name, are standard library names, or have already been seen. The surviving top‑level names are collected into a vector, and the edge count and node count are derived. If `should_emit_mermaid` returns `false`, an empty string is returned; otherwise the imports are sorted alphabetically, and a Mermaid graph is built with a node `M0` for the module and nodes `I0`, `I1`, … for each import, each connected by a directed edge to `M0`. Labels are escaped using `escape_mermaid_label`. The final string is returned and cached.
+The function `render_import_diagram_code` generates a Mermaid dependency diagram showing which external top‑level modules a given `extract::ModuleUnit` imports. It delegates to `render_cached_diagram` for memoization. Inside the lambda, it first short‑circuits if `mod_unit.imports` is empty or if the module’s own top‑level name (extracted via a small `top_module` helper that truncates at the first colon) is classified as a standard library name by `is_std_name`. It then iterates over every import, computing its top‑level label; entries that match the module’s own label, are standard‑library names, or have already been seen are skipped. The remaining unique labels are collected into a vector.
+
+After collecting, it computes `node_count` (1 for the module plus the number of distinct imports) and `edge_count` (same as import count). If `should_emit_mermaid` returns `false` (typically because the graph is too small or too large), the function returns an empty string. Otherwise, the import labels are sorted, and a `"graph LR"` Mermaid string is built: one node `M0` for the module, then for each import a node `I<i>` with an arrow `--> M0`. Labels are escaped via `escape_mermaid_label`. The assembled string is returned. Dependencies include the caching layer, size‑threshold policy, label escaping, and the standard‑library predicate.
 
 #### Side Effects
 
@@ -119,26 +116,25 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `mod_unit.name`
 - `mod_unit.imports`
-- `is_std_name`
-- `escape_mermaid_label`
-- `should_emit_mermaid`
+- `mod_unit.name`
 
 #### Usage Patterns
 
-- Called when building module page documentation to embed an import dependency diagram.
-- Used in the generation of `clore::generate::render_page_markdown` or similar rendering functions.
+- called during module page rendering to generate import dependency diagrams
+- used in conjunction with other diagram renderers like `render_module_dependency_diagram_code`
 
 ### `clore::generate::render_module_dependency_diagram_code`
 
-Declaration: `generate/render/diagram.cppm:24`
+Declaration: `src/generate/render/diagram.cppm:38`
 
-Definition: `generate/render/diagram.cppm:289`
+Definition: `src/generate/render/diagram.cppm:303`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function constructs a Mermaid directed graph representing module dependencies. It first iterates over the `model.modules` collection, filtering for interface units only. For each interface module, it extracts the top-level module name (the part before the first colon) using the local lambda `top_module`, skips names that satisfy `is_std_name`, and records the module as a node. For each import of that module, it computes the top-level target name and, if distinct from the source and not a standard name, adds a directed edge from the target to the source in `deps`. If fewer than two distinct modules are found, an empty string is returned. Otherwise, the total edge count is summed, and `should_emit_mermaid` is called with the node and edge counts; if it returns false, an empty string is returned. The unique module names are sorted alphabetically, each assigned a node ID (`M0`, `M1`, …) via `node_ids`. The Mermaid graph header `graph LR` is emitted, then each module appears as a node with its escaped label (using `escape_mermaid_label`). Finally, for each source module in sorted order, its targets (sorted) are written as edges in the form `node_ids[to] --> node_ids[from]`. The entire construction is wrapped inside a lambda passed to `render_cached_diagram`, which presumably caches the result per model.
+The function first wraps the core construction inside `render_cached_diagram` to support result caching. It builds a directed graph of top‑level module names by iterating over interface units in the project model. For each interface module, a local lambda extracts its top‑level name by taking the substring before the first colon; if `is_std_name` returns true, the module is skipped. Each unique non‑standard top‑level name is inserted into the `modules` set, and for every import of that module, the imported top‑level name (if different and non‑standard) is recorded as a dependency from the importing module to the imported module inside `deps`. After populating the graph, the function tests a minimum module count (fewer than two yields an empty string) and then calls `should_emit_mermaid` with the node and edge counts; a false return also produces an empty string.
+
+If emission proceeds, the modules are sorted alphabetically, and each is assigned a numeric node identifier (e.g. `M0` through `M{N-1}`) via a `std::unordered_map`. The result string begins with `"graph LR\n"`, then emits one node per module using `escape_mermaid_label` to sanitize the label text. Finally, for each source module in sorted order, its dependency targets are sorted and an edge of the form `node_ids.at(to) --> node_ids.at(from)` is appended, producing a Mermaid diagram where the arrow points from the imported module to the importing module. The assembled diagram string is returned. The implementation relies on `should_emit_mermaid`, `escape_mermaid_label`, `is_std_name`, and the data structures from `extract::ProjectModel`.
 
 #### Side Effects
 
@@ -146,30 +142,29 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `model.modules`
-- `mod_unit.name`
-- `mod_unit.is_interface`
-- `mod_unit.imports`
-- `is_std_name`
-- `escape_mermaid_label`
-- `should_emit_mermaid`
+- model`.modules`
+- `mod_unit``.name`
+- `mod_unit``.is_interface`
+- `mod_unit``.imports`
+- `is_std_name()`
+- `escape_mermaid_label()`
+- `should_emit_mermaid()`
 
 #### Usage Patterns
 
-- Called when generating module dependency diagrams for documentation pages
-- Used in the page rendering pipeline for module overviews
+- Called to produce a Mermaid diagram for module dependency visualization
+- Used in module-level documentation pages
+- Embedded in markdown via a Mermaid code fence
 
 ### `clore::generate::render_namespace_diagram_code`
 
-Declaration: `generate/render/diagram.cppm:17`
+Declaration: `src/generate/render/diagram.cppm:31`
 
-Definition: `generate/render/diagram.cppm:168`
+Definition: `src/generate/render/diagram.cppm:182`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The implementation first uses `render_cached_diagram` to wrap a lambda that performs the core logic. Inside the lambda, the function retrieves an iterator into `model.namespaces` for the given `namespace_name`; if the namespace is not found, an empty string is returned. Otherwise, it gathers all type symbols belonging to that namespace by iterating over `ns_it->second.symbols`, looking up each symbol via `extract::lookup_symbol`, filtering only those where `is_type_kind(sym->kind)` is true, and deduplicating by `sym->id` into a vector sorted by `qualified_name`. Simultaneously, it collects child namespace names from `ns_it->second.children`, excluding entries that contain `"(anonymous namespace)"` or satisfy `is_std_name`, then transforms each with `short_name_of_local`, sorts, and deduplicates.
-
-The total `edge_count` is computed as the sum of type count and child count, with `node_count` equal to one more (the namespace node itself). If `should_emit_mermaid(node_count, edge_count)` returns false, an empty string is returned to skip the diagram. Otherwise, the Mermaid code string is built: a `graph TD` header, a node for the namespace (using `escape_mermaid_label` on its short name), then for each type symbol a node with ID `T0`, `T1`, … and a directed edge from `NS` to that node, and similarly for each child namespace (ID `NSC0`, `NSC1`, …). The final string is returned, effectively cached by the outer `render_cached_diagram` call.
+The function first looks up the given `namespace_name` in the project `model`. If the namespace is not found, an empty string is returned immediately. Otherwise, it collects all type symbols (filtered by a kind predicate and deduplicated via `seen_types`) and sorts them by qualified name. It also collects child namespace names, filtering out anonymous and standard library entries, then transforms each with `short_name_of_local`, sorts, and deduplicates. After computing the expected node and edge counts, it calls `should_emit_mermaid` to decide whether the diagram exceeds configurable thresholds; if so, an empty string is returned. When the diagram passes the size gate, a Mermaid `graph TD` string is built: the root node is labeled with the short name of the namespace, each type symbol gets a dedicated node (ID pattern `T` + index), and each child namespace gets a node (ID pattern `NSC` + index). All label text is escaped via `escape_mermaid_label`. For every type and child, an edge from the root `NS` node is appended. The entire construction is wrapped inside `render_cached_diagram`, which provides memoization by hashing the inputs.
 
 #### Side Effects
 
@@ -177,30 +172,27 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `extract::ProjectModel` object (the `model` parameter)
-- `model.namespaces` map
-- symbol lookup via `extract::lookup_symbol(model, sym_id)`
-- `namespace_name` parameter
-
-#### Writes To
-
-- returned `std::string` (Mermaid diagram code)
+- model`.namespaces`
+- `ns_it`->second`.symbols`
+- `ns_it`->second`.children`
+- sym->kind
+- sym->`qualified_name`
+- sym->id
 
 #### Usage Patterns
 
-- called to generate a namespace dependency diagram for documentation pages
-- result is embedded in Markdown content for namespace overviews
-- invoked within cached diagram generation to avoid redundant computation
+- called when rendering namespace documentation pages
+- used to produce Mermaid diagram embed in namespace overview
 
 ### `clore::generate::should_emit_mermaid`
 
-Declaration: `generate/render/diagram.cppm:11`
+Declaration: `src/generate/render/diagram.cppm:25`
 
-Definition: `generate/render/diagram.cppm:105`
+Definition: `src/generate/render/diagram.cppm:119`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-The function `clore::generate::should_emit_mermaid` determines whether a Mermaid diagram should be generated based on the size of the diagram. It accepts two `std::size_t` parameters: `node_count` and `edge_count`. Internally, it evaluates a logical disjunction: the function returns `true` if `node_count` meets or exceeds the threshold defined by the anonymous namespace constant `kMermaidMinNodes` or if `edge_count` meets or exceeds the threshold defined by `kMermaidMinEdges`. Control flow is linear and unconditional, with no branching beyond the single `||` `operator`. The function depends only on these two constant values, which are assumed to be defined elsewhere in the anonymous namespace of the same translation unit.
+The function `clore::generate::should_emit_mermaid` implements a simple threshold check to decide whether a Mermaid diagram should be produced. It accepts two `std::size_t` parameters: `node_count` and `edge_count`. The algorithm returns `true` if either `node_count` is greater than or equal to `kMermaidMinNodes` or `edge_count` is greater than or equal to `kMermaidMinEdges`; otherwise it returns `false`. This guard prevents generating diagrams for trivial or empty graphs, deferring to the caller only when the diagram would contain enough elements to be useful. The only dependencies are the two anonymous‑namespace constants `kMermaidMinNodes` and `kMermaidMinEdges`, which define the minimum complexity thresholds.
 
 #### Side Effects
 
@@ -208,16 +200,18 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the parameters `node_count` and `edge_count`
-- the constants `kMermaidMinNodes` and `kMermaidMinEdges`
+- `node_count`
+- `edge_count`
+- `kMermaidMinNodes`
+- `kMermaidMinEdges`
 
 #### Usage Patterns
 
-- Used by diagram rendering functions such as `render_file_dependency_diagram_code` and `make_mermaid` to conditionally include diagrams
+- Called by diagram rendering functions to decide whether to include a Mermaid diagram
 
 ## Internal Structure
 
-The module `generate:diagram` is responsible for producing Mermaid-formatted diagram code that visualises various relationships within a codebase, such as file dependencies, import diagrams, namespace structure, and module dependencies. It is decomposed into several public entry points—`render_file_dependency_diagram_code`, `render_import_diagram_code`, `render_namespace_diagram_code`, and `render_module_dependency_diagram_code`—each accepting entity identifiers and returning an integer handle to the generated diagram text. A separate helper, `escape_mermaid_label`, ensures labels are safe for Mermaid syntax. Internal layering is achieved through anonymous‑namespace utilities (e.g., `is_std_name`, `short_name_of_local`, `is_variable_kind_local`, `collect_implementation_symbols_for_diagram`, and the generic caching wrapper `render_cached_diagram`) that encapsulate common traversal, symbol collection, and caching logic. The module imports `generate:model` for core data structures, `extract` for project metadata, and `support` for foundational utilities, while relying on constants like `kMermaidMinNodes` and `kMermaidMinEdges` to determine when a diagram is meaningful enough to emit via `should_emit_mermaid`.
+The `generate:diagram` module is the rendering backend for structural diagrams, producing Mermaid markup from analysis data. It imports `generate:model` for core data types, `extract` for the underlying symbol and dependency information, `config` for rendering thresholds, and `support` for text sanitization. The module is internally decomposed into a set of public diagram generators—`render_namespace_diagram_code`, `render_import_diagram_code`, `render_module_dependency_diagram_code`, `render_file_dependency_diagram_code`—each responsible for a specific kind of code‑structure visualization. A shared utility layer, implemented in an anonymous namespace, provides label escaping (`escape_mermaid_label`), size‑based emission gating (`should_emit_mermaid`), symbol collection helpers (`collect_implementation_symbols_for_diagram`), and a caching wrapper (`render_cached_diagram`) that avoids re‑generation for repeated identifiers. This layering keeps each public function focused on building its specific graph while reusing common formatting and decision logic.
 
 ## Related Pages
 

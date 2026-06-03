@@ -1,6 +1,6 @@
 ---
 title: 'Module generate:analysis'
-description: '该模块负责处理代码生成管线中从大语言模型获取的分析响应。它将原始输出（通常为 Markdown 格式）解析为结构化的符号分析数据，并提供规范化、回退降级和合并机制。核心职责包括：构建用于符号分析的 LLM 提示、判定提示种类（如声明摘要或基础符号分析）、解析结构化响应和 Markdown 输出，以及存储和应用分析结果。模块同时管理分析过程中的中间状态（如原始响应、解析后的数据、回退标记），确保在主要分析失败时能够平滑降级。'
+description: '该模块负责符号分析提示的构建、LLM 响应的解析与归一化，以及回退分析的管理。它提供了构建符号分析提示、解析 Markdown 和结构化响应、判断提示类型（如基础符号分析、声明摘要）等公共函数，并封装了多种针对函数、变量、类型的回退与合并逻辑，确保生成管线能够从分析结果中提取一致的文档内容。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-该模块负责处理代码生成管线中从大语言模型获取的分析响应。它将原始输出（通常为 Markdown 格式）解析为结构化的符号分析数据，并提供规范化、回退降级和合并机制。核心职责包括：构建用于符号分析的 LLM 提示、判定提示种类（如声明摘要或基础符号分析）、解析结构化响应和 Markdown 输出，以及存储和应用分析结果。模块同时管理分析过程中的中间状态（如原始响应、解析后的数据、回退标记），确保在主要分析失败时能够平滑降级。
-
-公开接口涵盖多个关键入口点：`parse_structured_response` 和 `parse_markdown_prompt_output` 分别处理结构化与非结构化的 LLM 输出；`normalize_markdown_fragment` 对获取的 Markdown 片段进行格式化统一；`store_fallback_analysis` 和 `apply_symbol_analysis_response` 用于持久化或应用分析状态；而 `build_symbol_analysis_prompt`、`symbol_prompt_kinds_for_symbol`、`analysis_prompt_kind_for_symbol` 等函数则支撑提示的构建与类型查询。此外，`is_declaration_summary_prompt` 和 `is_base_symbol_analysis_prompt` 为调用方提供了提示种类的快速判断能力。这些接口共同构成了模块对下游生成流程的完整服务边界。
+该模块负责符号分析提示的构建、LLM 响应的解析与归一化，以及回退分析的管理。它提供了构建符号分析提示、解析 Markdown 和结构化响应、判断提示类型（如基础符号分析、声明摘要）等公共函数，并封装了多种针对函数、变量、类型的回退与合并逻辑，确保生成管线能够从分析结果中提取一致的文档内容。
 
 ## Imports
 
@@ -20,7 +18,6 @@ template: doc
 - [`generate:evidence`](evidence.md)
 - [`generate:markdown`](markdown.md)
 - [`generate:model`](model.md)
-- `std`
 - [`support`](../support/index.md)
 
 ## Imported By
@@ -45,13 +42,15 @@ graph LR
 
 ### `clore::generate::analysis_prompt_kind_for_symbol`
 
-Declaration: `generate/analysis.cppm:27`
+Declaration: `src/generate/analysis.cppm:43`
 
-Definition: `generate/analysis.cppm:286`
+Definition: `src/generate/analysis.cppm:302`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::analysis_prompt_kind_for_symbol` 将符号种类的判定直接映射到分析提示词的种类。它接收一个 `const extract::SymbolInfo&` 参数 `sym`，并依次检查 `is_function_kind`、`is_type_kind` 和 `is_variable_kind` 这三个谓词对 `sym.kind` 的计算结果。当某个谓词成立时，立即返回对应的 `PromptKind` 枚举值（`PromptKind::FunctionAnalysis`、`PromptKind::TypeAnalysis` 或 `PromptKind::VariableAnalysis`）；若均不匹配，则返回 `std::nullopt`。该函数不依赖其他模块的复杂算法，仅以 `extract::SymbolInfo::kind` 为唯一输入，通过链式条件分支完成决策。
+该函数通过简单的条件分支将符号类型映射到对应的分析提示类型。它依次检查 `is_function_kind`、`is_type_kind` 和 `is_variable_kind` 三个谓词，分别返回 `PromptKind::FunctionAnalysis`、`PromptKind::TypeAnalysis` 或 `PromptKind::VariableAnalysis`。若符号不属于任何已知种类，则返回 `std::nullopt`。控制流清晰且无循环，整个实现仅依赖符号的 `kind` 成员和对应的 kind 判定函数。
+
+该函数内部没有调用任何命名空间内的辅助函数，只有对 `extract` 命名空间中谓词函数的直接调用。其输出直接作为后续生成流程中提示类型的依据，在分析阶段被 `clore::generate::symbol_prompt_kinds_for_symbol` 等更高级函数引用。
 
 #### Side Effects
 
@@ -59,60 +58,55 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `sym.kind`
+- sym`.kind`
 
 #### Usage Patterns
 
-- Called to select the analysis prompt kind for a symbol during prompt construction
-- Used in `build_symbol_analysis_prompt` to determine which analysis to perform
-- Central dispatch for mapping symbol kinds to analysis prompt types
+- used to select the analysis prompt kind for a symbol
+- called during symbol documentation generation to determine the prompt type
 
 ### `clore::generate::apply_symbol_analysis_response`
 
-Declaration: `generate/analysis.cppm:39`
+Declaration: `src/generate/analysis.cppm:55`
 
-Definition: `generate/analysis.cppm:348`
+Definition: `src/generate/analysis.cppm:364`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::apply_symbol_analysis_response` 根据 `PromptKind` 对原始响应进行分派处理。首先通过 `make_symbol_target_key` 生成目标键，然后按分支解析：对于 `FunctionAnalysis`、`TypeAnalysis`、`VariableAnalysis`，它调用对应的长度宽松解析函数（如 `parse_function_analysis_lenient`），解析失败则立即返回错误；成功后再调用后备分析函数（如 `fallback_function_analysis`），并调用对应的合并函数（如 `merge_function_analysis`）将后备与解析结果合并到 `analyses` 的对应映射中。对于 `FunctionDeclarationSummary`、`FunctionImplementationSummary`、`TypeDeclarationSummary`、`TypeImplementationSummary` 等摘要类种类，则调用 `parse_markdown_prompt_output` 解析出纯文本，并直接赋值给对应分析的 `overview_markdown` 或 `details_markdown` 字段。未知种类返回 `std::unexpected`。
-
-关键依赖包括 `prompt_request_key`、`make_symbol_target_key`，以及各命名空间内的解析、后备、合并辅助函数（如 `parse_function_analysis_lenient`、`fallback_function_analysis`、`merge_function_analysis`、`parse_type_analysis_lenient`、`fallback_type_analysis`、`merge_type_analysis`、`parse_variable_analysis_lenient`）。这些函数各自负责解析 LLM 返回的结构化文本、生成默认后备分析以及将结果合并到已有的分析结构中，实现了对分析结果的统一处理流程。
+该函数根据 `kind` 进行分发，对每种 `PromptKind` 采用不同的解析与合并策略。对于 `FunctionAnalysis`、`TypeAnalysis` 和 `VariableAnalysis` 三类，先调用对应的 `parse_*_lenient` 解析原始响应 `raw_response`；若解析失败则返回错误，否则生成一个 fallback 值（通过 `fallback_*` 系列函数）并与解析结果合并后存入 `analyses` 中对应的容器（`functions`、`types` 或 `variables`），合并操作用于新数据更新。对于 `FunctionDeclarationSummary`、`FunctionImplementationSummary`、`TypeDeclarationSummary` 和 `TypeImplementationSummary` 这四类，则使用 `parse_markdown_prompt_output` 解析，成功后将解析结果直接赋给 `overview_markdown` 或 `details_markdown` 字段。默认分支返回一个描述错误的 `std::unexpected`。整个流程依赖 `make_symbol_target_key` 生成目标键，并利用 `prompt_request_key` 构造请求标识传递给解析器，各解析器、 fallback 生成器及合并器均在匿名命名空间中定义。
 
 #### Side Effects
 
-- mutates the passed `SymbolAnalysisStore& analyses` by writing to its `functions`, `types`, or `variables` map entries
+- 修改传入的 `SymbolAnalysisStore` 对象中的符号分析数据
 
 #### Reads From
 
-- `analyses` (symbol analysis store)
-- `sym` (symbol info)
-- `model` (project model)
-- `kind` (prompt kind)
-- `raw_response` (input string)
-- internally generated `target_key` via `make_symbol_target_key`
+- analyses
+- sym
+- model
+- kind
+- `raw_response`
+- `prompt_request_key`
+- `make_symbol_target_key`
 
 #### Writes To
 
-- `analyses.functions[target_key]`
-- `analyses.types[target_key]`
-- `analyses.variables[target_key]`
+- analyses (通过引用参数写入其 functions、types、variables 映射)
 
 #### Usage Patterns
 
-- called after receiving an LLM response for a symbol analysis prompt
-- used in the generation pipeline to update the symbol analysis cache
-- dispatches based on `PromptKind` to the appropriate analysis type
+- 处理 AI 分析响应并更新符号分析存储
+- 作为生成管线的一部分被调用
 
 ### `clore::generate::build_symbol_analysis_prompt`
 
-Declaration: `generate/analysis.cppm:46`
+Declaration: `src/generate/analysis.cppm:62`
 
-Definition: `generate/analysis.cppm:429`
+Definition: `src/generate/analysis.cppm:445`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::build_symbol_analysis_prompt` 根据传入的 `sym`、`kind`、`model`、`config` 和 `analyses` 构建用于符号分析的提示词。内部控制流首先通过 `switch` 语句，依据 `kind` 的枚举值（如 `FunctionAnalysis`、`TypeDeclarationSummary`、`VariableAnalysis` 等）调用对应的 `build_evidence_for_*` 函数，获得一个 `EvidencePack` 实例。随后配置该证据包的 `page_id`、`prompt_kind`（通过 `prompt_kind_name` 转换）和 `subject_name`。最后委托给 `build_prompt(kind, evidence)` 生成最终的提示字符串；若构造失败则返回 `std::unexpected(GenerateError)`。该函数依赖于 `extract::SymbolInfo`、`extract::ProjectModel`、`config::TaskConfig`、`SymbolAnalysisStore` 以及多个专门的证据构建函数和 `build_prompt` 等基础设施。
+函数首先声明一个本地 `EvidencePack` 对象，然后基于传入的 `PromptKind` 枚举值通过 `switch` 语句分派到不同的证据收集过程，例如 `build_evidence_for_function_analysis`、`build_evidence_for_type_analysis` 或 `build_evidence_for_variable_analysis` 等。每个分支使用 `sym`、`model`、`analyses` 以及 `config.project_root` 来填充 `EvidencePack` 结构。遇到未知的 `PromptKind` 时，函数立即返回一个包含错误信息的 `std::unexpected<GenerateError>`。成功收集证据后，函数设置 `evidence` 的 `page_id`、`prompt_kind` 和 `subject_name` 字段，然后委托给 `build_prompt` 基于 `kind` 和 `evidence` 生成最终的提示字符串。如果 `build_prompt` 失败，错误会转换为 `std::unexpected<GenerateError>` 返回；否则返回移动后的 `*prompt`。
 
 #### Side Effects
 
@@ -120,29 +114,29 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `sym` (const `extract::SymbolInfo&`)
-- `kind` (`PromptKind`)
-- `model` (const `extract::ProjectModel&`)
-- `config` (const `config::TaskConfig&`)
-- `analyses` (const `SymbolAnalysisStore&`)
-- `prompt_kind_name(kind)`
-- `sym.qualified_name`
-- `make_symbol_target_key(sym)`
+- parameter `sym` of type `const extract::SymbolInfo&`
+- parameter `kind` of type `PromptKind`
+- parameter `model` of type `const extract::ProjectModel&`
+- parameter `config` of type `const config::TaskConfig&`
+- parameter `analyses` of type `const SymbolAnalysisStore&`
+- field `config.project_root`
+- field `sym.qualified_name`
+- return value of `prompt_kind_name(kind)`
 
 #### Usage Patterns
 
-- Called during symbol analysis prompt generation
-- Used to create prompts for different analysis kinds such as function, type, or variable analysis
+- called from documentation generation pipeline to create prompts for symbol analysis
+- used where a prompt string for a specific symbol and analysis kind is needed
 
 ### `clore::generate::is_base_symbol_analysis_prompt`
 
-Declaration: `generate/analysis.cppm:31`
+Declaration: `src/generate/analysis.cppm:47`
 
-Definition: `generate/analysis.cppm:325`
+Definition: `src/generate/analysis.cppm:341`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数通过简单的相等性检查实现：将传入的 `PromptKind` 枚举值逐一与三个已知的基符号分析类型（`FunctionAnalysis`、`TypeAnalysis` 和 `VariableAnalysis`）进行比较，若匹配任一则返回 `true`，否则返回 `false`。控制流是直接的短路逻辑序列，没有任何分支嵌套或副作用。依赖仅限于 `PromptKind` 枚举类型的定义，无需调用任何其他函数或访问外部状态。
+该函数通过单一的逻辑测试实现：将传入的 `PromptKind` 枚举值 `kind` 与三个预定义的符号级别分析提示类型（`FunctionAnalysis`、`TypeAnalysis` 和 `VariableAnalysis`）逐一比较，如果匹配其中任何一个则返回 `true`，否则返回 `false`。整个控制流仅包含一条 `return` 语句，内部依赖 `PromptKind` 枚举定义以及 `clore::generate` 命名空间下的常量枚举值。该函数作为谓词，用于上游调用方筛选出仅针对基础符号分析类别的提示类型，不涉及任何状态变更或副作用。
 
 #### Side Effects
 
@@ -154,20 +148,18 @@ No observable side effects are evident from the extracted code.
 
 #### Usage Patterns
 
-- used to classify a `PromptKind` as a base symbol analysis prompt
-- likely used in control flow to branch on analysis type
+- classifying prompt kinds in generation logic
+- branching on symbol analysis prompt type
 
 ### `clore::generate::is_declaration_summary_prompt`
 
-Declaration: `generate/analysis.cppm:33`
+Declaration: `src/generate/analysis.cppm:49`
 
-Definition: `generate/analysis.cppm:330`
+Definition: `src/generate/analysis.cppm:346`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数作为简短的谓词，将传入的 `kind`（`PromptKind` 枚举）与两个已知值匹配。内部仅包含一条返回表达式，通过逻辑或运算符检查 `kind` 是否等于 `PromptKind::FunctionDeclarationSummary` 或 `PromptKind::TypeDeclarationSummary`，结果是 `true` 或 `false`。  
-
-不依赖其他内部函数或复杂分支；唯一的外部依赖是 `PromptKind` 类型的定义及其枚举成员。该实现直接封装了声明摘要类的 prompt 种类判据，用于后续的 prompt 路由或条件逻辑。
+该函数的核心逻辑是一个简单的枚举比较：它接收一个 `PromptKind` 类型的参数 `kind`，然后依次判断该值是否等于 `PromptKind::FunctionDeclarationSummary` 或 `PromptKind::TypeDeclarationSummary`，并将两个判断结果通过逻辑或合并后直接作为 `bool` 返回值。整个实现不依赖任何辅助函数或外部状态，唯一的依赖项是 `PromptKind` 枚举类型及其定义的两个成员常量。
 
 #### Side Effects
 
@@ -175,25 +167,22 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- parameter `kind`
+- parameter `kind` of type `PromptKind`
 
 #### Usage Patterns
 
-- classification of prompt kinds
-- guarding generation of declaration summary prompts
-- filtering in prompt dispatch logic
+- used to classify prompt kinds for routing or conditional logic
+- called when building evidence sections for declaration summaries
 
 ### `clore::generate::normalize_markdown_fragment`
 
-Declaration: `generate/analysis.cppm:21`
+Declaration: `src/generate/analysis.cppm:37`
 
-Definition: `generate/analysis.cppm:267`
+Definition: `src/generate/analysis.cppm:283`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::normalize_markdown_fragment` 实现了一个多步规范化流水线，用于处理 LLM 返回的原始 Markdown 片段。它首先通过 `clore::support::ensure_utf8` 确保输入是合法的 UTF-8，接着调用 `clore::support::strip_utf8_bom` 剥离 BOM 标记，然后使用匿名命名空间的 `trim_trailing_ascii_whitespace` 去除尾部 ASCII 空白。若结果字符串不包含任何非空白字符（通过 `contains_non_whitespace` 检测），函数立即返回 `std::unexpected`，携带一个消息中嵌入 `context` 参数的 `GenerateError`；否则，将字符串传递给 `normalize_analysis_markdown` 进行进一步的格式修复（如调整空白、统一换行风格），最后返回规范化后的 `std::string`。
-
-在依赖方面，本函数依赖于 `clore::support` 模块的 UTF-8 处理工具（`ensure_utf8` 与 `strip_utf8_bom`），以及同翻译单元内定义的三个匿名命名空间辅助函数：`trim_trailing_ascii_whitespace`、`contains_non_whitespace` 和 `normalize_analysis_markdown`。这些辅助函数均被置于内部链接域，避免与外部符号冲突。整个控制流呈线性顺序，仅在空白检测处分支到错误路径，确保规范化后片段非空且格式一致。
+函数首先通过 `clore::support::ensure_utf8` 将原始片段转换为有效的 UTF-8 编码，随后由 `clore::support::strip_utf8_bom` 移除可能存在的字节顺序标记。接着调用 `trim_trailing_ascii_whitespace` 去除尾部空白字符，并通过 `contains_non_whitespace` 检查剩余内容是否仅为空白；若完全空白，则立即返回一个包含 `GenerateError` 的意外值。最后，对经初步处理后的字符串调用 `normalize_analysis_markdown` 执行进一步的 Markdown 规范化（如统一换行符、压缩多余空格等），并将结果作为预期的成功值返回。
 
 #### Side Effects
 
@@ -201,23 +190,23 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `raw`
-- `context`
+- parameter `raw`
+- parameter `context`
 
 #### Usage Patterns
 
-- Called as a preprocessing step before embedding markdown into generated documentation
-- Used in rendering pipelines to ensure fragments are valid and consistently formatted
+- Used by other generation functions to clean and validate markdown fragments before embedding them in larger documents
+- Called with a raw fragment and a descriptive context string for error reporting
 
 ### `clore::generate::parse_markdown_prompt_output`
 
-Declaration: `generate/analysis.cppm:24`
+Declaration: `src/generate/analysis.cppm:40`
 
-Definition: `generate/analysis.cppm:281`
+Definition: `src/generate/analysis.cppm:297`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::parse_markdown_prompt_output` 的实现极为精简：它将所有工作委托给 `clore::generate::normalize_markdown_fragment`，后者负责实际的解析与规范化逻辑。传入的 `raw` 和 `context` 参数被原样转发，最终返回一个 `std::expected<std::string, GenerateError>` 类型的值。整个控制流仅包含一次调用，没有分支或循环。该函数的主要依赖是 `normalize_markdown_fragment`，它处理了 Markdown 内容的修整、格式调整和错误转换。
+函数 `clore::generate::parse_markdown_prompt_output` 是 `normalize_markdown_fragment` 的一个轻量包装。它接受两个 `std::string_view` 参数——原始模型输出 `raw` 和上下文字符串 `context`，并将调用直接转发给 `normalize_markdown_fragment`。该调用返回 `std::expected<std::string, GenerateError>`，表示规范化后的 Markdown 文本，或一个错误状态。该函数自身不执行任何额外的验证、分支或状态修改；其全部逻辑由 `normalize_markdown_fragment` 提供，因此整个实现的正确性依赖于该下层函数。
 
 #### Side Effects
 
@@ -225,85 +214,86 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- the `raw` parameter (a `std::string_view`)
-- the `context` parameter (a `std::string_view`)
+- the `raw` string view parameter
+- the `context` string view parameter
 
 #### Usage Patterns
 
-- Called to normalize the raw markdown output of a prompt request before further analysis or rendering.
+- processing raw LLM prompt responses
+- normalizing markdown output from analysis generation
+- converting unformatted prompt results into structured markdown fragments
 
 ### `clore::generate::parse_structured_response`
 
-Declaration: `generate/analysis.cppm:18`
+Declaration: `src/generate/analysis.cppm:34`
 
-Definition: `generate/analysis.cppm:252`
+Definition: `src/generate/analysis.cppm:268`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数首先尝试使用 `json::from_json<T>` 将原始字符串 `raw` 反序列化为模板参数 `T` 的实例。如果解析失败，则立即返回一个包含格式化错误消息的 `GenerateError`，其中引用 `context` 说明解析的用途。解析成功后，将结果值移动给局部变量 `value`，然后调用 `normalize_analysis(value)` 对解析后的分析对象进行后处理（例如合并、修剪或规范化字段）。最后返回正常的 `std::expected<T, GenerateError>` 值。内部控制流仅包含一条失败分支和两步骤的顺利路径；关键外部依赖是 JSON 解析组件 `json::from_json` 和内部符号级规范化函数 `normalize_analysis`。
+函数 `clore::generate::parse_structured_response` 首先调用 `json::parse<T>` 将原始字符串 `raw` 解析为目标类型 `T`，若解析失败则返回包含格式化错误信息的 `std::unexpected`，其中 `context` 参数用于标识解析场景。成功时，移动解析得到的值并对其执行 `normalize_analysis` 进行内部规范化，最后返回该值。该函数依赖于外部的 `json::parse` 模板以及匿名命名空间中的 `normalize_analysis`，后者进一步调用 `normalize_analysis_list`、`normalize_markdown_fragment` 等辅助函数完成数据结构清洗。
 
 #### Side Effects
 
-No observable side effects are evident from the extracted code.
+- Parses a JSON string into an object of type T
+- Modifies the parsed object via `normalize_analysis`
+- May allocate error strings
 
 #### Reads From
 
-- `raw` parameter (the JSON string)
-- `context` parameter (used in error message)
-- `json::from_json<T>()` (reads from `raw`)
+- parameter `raw`
+- parameter `context`
 
 #### Writes To
 
-- returned value of type `T` (allocated and normalized)
+- the parsed object of type T after normalization
 
 #### Usage Patterns
 
-- parsing structured JSON responses from AI models
-- handling deserialization errors gracefully
-- normalizing parsed data before use
+- Parsing JSON responses from language model outputs
+- Deserializing structured data and normalizing it for further analysis in the generation pipeline
 
 ### `clore::generate::store_fallback_analysis`
 
-Declaration: `generate/analysis.cppm:35`
+Declaration: `src/generate/analysis.cppm:51`
 
-Definition: `generate/analysis.cppm:335`
+Definition: `src/generate/analysis.cppm:351`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-该函数根据符号类别选择对应的回退分析生成器：对于函数符号调用 `fallback_function_analysis`，对于类型符号调用 `fallback_type_analysis`（额外传入 `model` 参数以利用项目模型），对于变量符号调用 `fallback_variable_analysis`。生成的回退分析对象通过 `make_symbol_target_key` 生成的键存入 `analyses` 的相应映射（`functions`、`types` 或 `variables`）。该函数不处理其他符号类别，调用者需确保只传入已识别的符号。依赖 `extract::SymbolInfo` 的种类检查函数（`is_function_kind`、`is_type_kind`、`is_variable_kind`）以及三个匿名命名空间中的回退分析实现，这些实现各自负责构造特定种类的默认分析内容。
+函数 `clore::generate::store_fallback_analysis` 根据符号 `sym` 的种类将对应的回退分析结果存储到 `analyses` 中。内部流程首先调用 `make_symbol_target_key(sym)` 生成目标键，随后基于 `is_function_kind`、`is_type_kind` 或 `is_variable_kind` 的检查，分别委托给匿名命名空间内的 `fallback_function_analysis`、`fallback_type_analysis` 或 `fallback_variable_analysis`。其中 `fallback_type_analysis` 额外依赖于 `model` 参数。该函数是分析降级链的最后一步，确保在生成失败或缺少输入时仍能为每个符号提供合理的默认分析条目。
 
 #### Side Effects
 
-- Modifies `SymbolAnalysisStore` by inserting fallback analysis objects into `functions`, `types`, or `variables` maps.
+- Modifies the `analyses` reference by inserting a fallback analysis into one of its maps (`analyses.functions`, `analyses.types`, or `analyses.variables`)
 
 #### Reads From
 
-- `sym.kind` to determine symbol category
-- `sym` for constructing the target key
-- `model` for `fallback_type_analysis`
+- `analyses` (the store to be modified, its maps are read for key existence? Not sure; minimal read)
+- `sym` (for kind and target key generation)
+- `model` (used in `fallback_type_analysis`)
+- Internal functions: `make_symbol_target_key`, `is_function_kind`, `is_type_kind`, `is_variable_kind`
 
 #### Writes To
 
-- `analyses.functions` map (via `fallback_function_analysis`)
-- `analyses.types` map (via `fallback_type_analysis`)
-- `analyses.variables` map (via `fallback_variable_analysis`)
+- `analyses.functions` (if symbol kind is a function)
+- `analyses.types` (if symbol kind is a type)
+- `analyses.variables` (if symbol kind is a variable)
 
 #### Usage Patterns
 
-- Used to populate a `SymbolAnalysisStore` with fallback analyses when detailed analysis is missing
-- Invoked during generation pipeline to ensure every symbol has at least a default analysis
+- Called when a symbol lacks a previously computed analysis, to populate a fallback default analysis
+- Used during generation of analysis for symbols without explicit analysis
 
 ### `clore::generate::symbol_prompt_kinds_for_symbol`
 
-Declaration: `generate/analysis.cppm:29`
+Declaration: `src/generate/analysis.cppm:45`
 
-Definition: `generate/analysis.cppm:299`
+Definition: `src/generate/analysis.cppm:315`
 
 Declaration: [`Namespace clore::generate`](../../namespaces/clore/generate/index.md)
 
-函数 `clore::generate::symbol_prompt_kinds_for_symbol` 接受一个 `extract::SymbolInfo` 引用 `sym`，通过调用 `analysis_prompt_kind_for_symbol` 获取基础提示种类 `base_kind`。如果 `base_kind` 无值，立即返回空向量。否则，根据 `base_kind` 的值分支选择不同的 `PromptKind` 集合。
-
-对于 `PromptKind::FunctionAnalysis`，返回包含 `FunctionAnalysis`、`FunctionDeclarationSummary` 和 `FunctionImplementationSummary` 的三个元素向量；对于 `PromptKind::TypeAnalysis`，类似地返回 `TypeAnalysis`、`TypeDeclarationSummary` 和 `TypeImplementationSummary`；对于 `PromptKind::VariableAnalysis`，仅返回 `VariableAnalysis` 本身。若 `base_kind` 不属于以上三种，则返回空向量。该函数实际是 `analysis_prompt_kind_for_symbol` 的扩展，用于确定应对给定符号发起哪些分析/摘要提示，依赖 `PromptKind` 枚举和符号分析种类判定。
+函数 `clore::generate::symbol_prompt_kinds_for_symbol` 首先委托给 `analysis_prompt_kind_for_symbol`，以获取给定符号的基础提示种类。若该调用返回 `std::nullopt`，则立即返回空 `std::vector<PromptKind>`。否则，根据 `base_kind` 的值，通过简单的分支构造结果向量：当基础种类为 `PromptKind::FunctionAnalysis` 时，生成包含该基础种类、`PromptKind::FunctionDeclarationSummary` 和 `PromptKind::FunctionImplementationSummary` 的三元素向量；当为 `PromptKind::TypeAnalysis` 时，类似地生成包含 `PromptKind::TypeDeclarationSummary` 和 `PromptKind::TypeImplementationSummary` 的向量；当为 `PromptKind::VariableAnalysis` 时，直接返回仅含该基础种类本身的单元素向量；其余情形均返回空向量。该函数不处理任何格式解析或回退，其控制流完全取决于 `analysis_prompt_kind_for_symbol` 的返回值，且仅依赖于 `PromptKind` 枚举的特定值。
 
 #### Side Effects
 
@@ -311,18 +301,18 @@ No observable side effects are evident from the extracted code.
 
 #### Reads From
 
-- `analysis_prompt_kind_for_symbol` function result
-- `sym` parameter
+- the parameter `sym` of type `const extract::SymbolInfo&`
+- the return value of `analysis_prompt_kind_for_symbol(sym)`
+- enumerators `FunctionAnalysis`, `TypeAnalysis`, `VariableAnalysis`, `FunctionDeclarationSummary`, `FunctionImplementationSummary`, `TypeDeclarationSummary`, `TypeImplementationSummary`
 
 #### Usage Patterns
 
-- Called to decide which prompt kinds to generate for a symbol during documentation page creation
+- called to determine which prompts to generate for a given symbol during page building
+- used within the generation pipeline to select appropriate prompt kinds for analysis
 
 ## Internal Structure
 
-该模块位于 `clore::generate` 命名空间，负责将 LLM 生成的原始分析响应转化为结构化、可合并的内部表示，并驱动后续的文档生成流程。它导入 `config`、`extract`、`generate:evidence`、`generate:markdown`、`generate:model` 和 `support`，形成清晰的分层依赖：下层提供配置、源码提取、证据收集、Markdown 渲染和通用工具，上层则在本模块集中处理分析数据的解析、验证、回退和合并。
-
-内部实现按责任划分为三个层次：底层是一组匿名命名空间中的辅助函数（如 `trim_trailing_ascii_whitespace`、`contains_non_whitespace` 和 `normalize_analysis_markdown`），用于文本清理与格式统一；中间层是针对不同分析类型（函数、类型、变量）专有解析器（`parse_*_analysis_lenient`）和合并函数（`merge_*_analysis`），将原始字符串解析为强类型分析记录并合并到已有结果；上层是公共接口，包括提示构建（`build_symbol_analysis_prompt`）、响应应用（`apply_symbol_analysis_response`）和回退存储（`store_fallback_analysis`），它们通过组合中间层函数实现端到端流程，并依赖 `generate:model` 中的数据结构（如 `SymbolAnalysisStore`、`FunctionAnalysis` 等）来承载最终结果。
+模块 `generate:analysis` 是文档生成管线中负责符号分析的核心模块，对 `generate:model` 和 `generate:evidence` 提供分析结果的解析与整合。它依赖于 `config`、`extract`、`generate:evidence`、`generate:markdown`、`generate:model` 和 `support` 六个模块，分别用于配置读取、符号提取、证据收集、Markdown 渲染、数据模型定义和通用工具支持。内部按功能划分为多层：解析层（如 `parse_type_analysis_lenient`、`parse_function_analysis_lenient`）将 LLM 输出的原始文本转换为结构化分析；规范化层（如 `normalize_analysis_markdown`、`normalize_analysis`）统一格式；合并层（如 `merge_type_analysis`、`merge_function_analysis`）将多次分析结果融合；回退层（如 `fallback_type_analysis`、`fallback_function_analysis`）在分析失败时提供默认值。公开接口如 `build_symbol_analysis_prompt`、`apply_symbol_analysis_response` 和 `parse_markdown_prompt_output` 将这些内部层组合成完整的工作流，外部调用者通过 `context`（`ToolContext` 引用）传递工具执行上下文，以获取符号信息、配置参数等依赖。
 
 ## Related Pages
 

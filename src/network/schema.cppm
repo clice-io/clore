@@ -1,6 +1,17 @@
 module;
 
-#include "kota/codec/json/error.h"
+#include <array>
+#include <cstdint>
+#include <expected>
+#include <format>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
 #include "kota/codec/json/json.h"
 #include "kota/meta/attrs.h"
 #include "kota/meta/name.h"
@@ -8,7 +19,6 @@ module;
 
 export module schema;
 
-import std;
 import http;
 import protocol;
 import support;
@@ -359,11 +369,11 @@ auto validate_required_properties(clore::net::detail::ObjectView properties,
     }
 
     for(auto entry: properties) {
-        if(!required_names.contains(std::string(entry.key))) {
+        if(!required_names.contains(std::string(entry.first))) {
             return std::unexpected(LLMError(std::format(
                 "{} property '{}' must be listed in required " "when using strict structured output",
                 path,
-                entry.key)));
+                entry.first)));
         }
     }
 
@@ -472,8 +482,8 @@ auto validate_openai_schema(const json::Object& object, std::string_view path, b
 
         for(auto entry: *properties) {
             auto status =
-                validate_openai_schema_value(entry.value,
-                                             std::format("{}.properties.{}", path, entry.key),
+                validate_openai_schema_value(entry.second,
+                                             std::format("{}.properties.{}", path, entry.first),
                                              false);
             if(!status.has_value()) {
                 return std::unexpected(std::move(status.error()));
@@ -497,8 +507,8 @@ auto validate_openai_schema(const json::Object& object, std::string_view path, b
             return std::unexpected(std::move(defs.error()));
         }
         for(auto entry: *defs) {
-            auto status = validate_openai_schema_value(entry.value,
-                                                       std::format("{}.$defs.{}", path, entry.key),
+            auto status = validate_openai_schema_value(entry.second,
+                                                       std::format("{}.$defs.{}", path, entry.first),
                                                        false);
             if(!status.has_value()) {
                 return std::unexpected(std::move(status.error()));

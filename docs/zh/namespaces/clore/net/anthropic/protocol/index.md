@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::anthropic::protocol'
-description: 'clore::net::anthropic::protocol 命名空间封装了与 Anthropic 消息 API 进行交互的底层协议逻辑。它负责将上层请求转换为符合 API 规范的 JSON 格式（通过 build_request_json），构造正确端点地址（build_messages_url），并解析 API 返回的原始响应。该命名空间提供了从响应中提取文本内容（parse_response_text、text_from_response）和处理工具调用结果（parse_tool_arguments、append_tool_outputs）的函数，同时暴露了协议相关的常量变量（如 model_value、stop_reason_value）以支持配置和验证。'
+description: '命名空间 clore::net::anthropic::protocol 封装了与 Anthropic API 交互的协议层逻辑。它负责构建消息 API 的完整 URL（如 build_messages_url）、生成请求的 JSON 载荷（build_request_json），以及解析 API 返回的响应数据（parse_response）并提取其中包含的文本内容（text_from_response、parse_response_text）、工具调用参数（parse_tool_arguments），并支持追加工具输出到当前消息（append_tool_outputs）。该命名空间还包含多个与请求、响应、历史、状态、工具选择等协议相关的内部变量，构成了协议数据模型的骨架，为上层模块提供统一、可复用的交互接口。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,7 @@ template: doc
 
 ## Summary
 
-`clore::net::anthropic::protocol` 命名空间封装了与 Anthropic 消息 API 进行交互的底层协议逻辑。它负责将上层请求转换为符合 API 规范的 JSON 格式（通过 `build_request_json`），构造正确端点地址（`build_messages_url`），并解析 API 返回的原始响应。该命名空间提供了从响应中提取文本内容（`parse_response_text`、`text_from_response`）和处理工具调用结果（`parse_tool_arguments`、`append_tool_outputs`）的函数，同时暴露了协议相关的常量变量（如 `model_value`、`stop_reason_value`）以支持配置和验证。
-
-作为 `clore::net::anthropic` 库的核心协议层，该命名空间将上游调用与 Anthropic 的 REST 接口细节隔离，确保数据格式和状态码的正确性。其函数通常返回整数句柄或状态码，由上层模块（如 `clore::net::anthropic::detail::Protocol`）调度使用，从而构建起从请求构建到响应解析的完整通信管线。
+命名空间 `clore::net::anthropic::protocol` 封装了与 Anthropic API 交互的协议层逻辑。它负责构建消息 API 的完整 URL（如 `build_messages_url`）、生成请求的 JSON 载荷（`build_request_json`），以及解析 API 返回的响应数据（`parse_response`）并提取其中包含的文本内容（`text_from_response`、`parse_response_text`）、工具调用参数（`parse_tool_arguments`），并支持追加工具输出到当前消息（`append_tool_outputs`）。该命名空间还包含多个与请求、响应、历史、状态、工具选择等协议相关的内部变量，构成了协议数据模型的骨架，为上层模块提供统一、可复用的交互接口。
 
 ## Subnamespaces
 
@@ -21,110 +19,111 @@ template: doc
 
 ### `clore::net::anthropic::protocol::append_tool_outputs`
 
-Declaration: `network/anthropic.cppm:209`
+Declaration: `src/network/anthropic.cppm:218`
 
-Definition: `network/anthropic.cppm:628`
+Definition: `src/network/anthropic.cppm:637`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-调用方使用 `append_tool_outputs` 将一个工具调用的输出追加到当前正在构建的协议消息中。该函数接受三个参数，分别代表工具调用标识符、输出内容以及一个可选的索引或状态值，并在操作完成后返回一个 `int` 值以指示结果（例如成功或失败，或更新后的元素计数）。契约要求：调用方必须在调用前确保工具调用的标识符已在消息上下文中注册，且提供的输出内容格式符合 Anthropic API 规范；返回值的语义由上层调用约定定义，调用方应根据此返回值判断后续处理流程。
+`clore::net::anthropic::protocol::append_tool_outputs` 向当前正在构建的协议消息中追加一个工具调用的输出。调用者需提供该输出的标识符及具体内容（通过前两个参数），并指定一个与追加顺序或分组相关的整数。函数返回一个 `int` 状态值，指示追加操作是否成功；非零值通常表示错误。此函数不负责验证工具输出格式的有效性，只负责按协议要求将数据添加到消息中。
 
 #### Usage Patterns
 
-- Used to incorporate tool call results into the message history
-- Called after parsing a response that contains tool use blocks
+- Callers use this to incorporate tool outputs into a message history after receiving a response from the Anthropic API.
+- Typically invoked after a completion response that requested tool use, to prepare the next request.
 
 ### `clore::net::anthropic::protocol::build_messages_url`
 
-Declaration: `network/anthropic.cppm:201`
+Declaration: `src/network/anthropic.cppm:210`
 
-Definition: `network/anthropic.cppm:224`
+Definition: `src/network/anthropic.cppm:233`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
 Declaration: [Declaration](functions/build-messages-url.md)
 
-此函数负责构建与 Anthropic Messages API 交互所用的目标 URL。它接受一个 `std::string_view` 参数，通常代表模型标识符或资源路径，并返回一个 `std::string` 类型的完整 URL。调用者应将此 URL 直接用于 HTTP 请求的构造。
-
-该函数是 `clore::net::anthropic::protocol` 命名空间的一部分，由更上层的 `clore::net::anthropic::detail::Protocol::build_url` 方法调用。作为合约，调用方只需确保传入的字符串视图指向有效的标识符；函数保证返回一个格式正确、可用于 Messages API 的端点地址。返回的 URL 不包含查询参数或认证信息，这些应由调用方在后续步骤中自行添加。
+该函数接受一个表示 API 端点基础路径的 `std::string_view`，并返回一个完整的 `std::string` 形式的消息 API URL。调用方有责任提供正确的基础路径（例如原始 API 服务器地址），而无需关心 URL 内部拼接逻辑。返回值可直接用于 HTTP 请求中的目标地址。
 
 #### Usage Patterns
 
-- 被 `clore::net::anthropic::detail::Protocol::build_url` 调用
+- used by `clore::net::anthropic::detail::Protocol::build_url` to produce the final messages request URL
+- called with various API base `URLs` to generate the appropriate versioned endpoint
 
 ### `clore::net::anthropic::protocol::build_request_json`
 
-Declaration: `network/anthropic.cppm:203`
+Declaration: `src/network/anthropic.cppm:212`
 
-Definition: `network/anthropic.cppm:235`
+Definition: `src/network/anthropic.cppm:244`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-函数 `clore::net::anthropic::protocol::build_request_json` 接受一个 `const int &` 参数并返回一个 `int`。调用者应提供与该协议相关的整数引用（可能表示请求标识或参数），该函数将据此构建请求 JSON。返回值指示操作结果，通常用于成功或错误报告。
+函数 `clore::net::anthropic::protocol::build_request_json` 接受一个 `const int &` 参数并返回一个 `int`。调用者应提供一个整数，该整数代表请求的配置或标识符；函数负责基于该输入构造一个请求 JSON 对象。返回的整数可能是操作的状态码或生成的 JSON 对象的句柄。该函数是 `clore::net::anthropic::protocol` 命名空间中协议处理逻辑的一部分，用于生成 Anthropic API 请求的 JSON 载荷。
 
 #### Usage Patterns
 
-- Called by higher‑level network code to prepare the Anthropic request body
-- Consumed as the payload for HTTP POST requests to the Anthropic Messages API
+- building HTTP request body for Anthropic API
+- serializing a `CompletionRequest` to JSON before sending
 
 ### `clore::net::anthropic::protocol::parse_response`
 
-Declaration: `network/anthropic.cppm:205`
+Declaration: `src/network/anthropic.cppm:214`
 
-Definition: `network/anthropic.cppm:460`
+Definition: `src/network/anthropic.cppm:469`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-函数 `clore::net::anthropic::protocol::parse_response` 接受一个表示原始响应的 `std::string_view`，解析后返回一个整数句柄。调用者应保留该句柄，并传递给同命名空间下的其他函数（如 `text_from_response`、`parse_response_text` 等）来提取响应中的特定数据。返回值为负表示解析失败，调用者无需关心内部细节。
+调用者需传入一个来自 Anthropic API 的原始响应字符串（作为 `std::string_view`），该函数将解析该响应并返回一个整数标识符，代表解析后的内部状态。此标识符可被后续协议函数（如 `parse_response_text`、`parse_tool_arguments`）使用，以提取具体字段。调用者有责任确保传入的字符串是有效的、符合预期间结构（一般为 JSON 格式）的响应；函数未报告格式错误的语义（可能通过返回值表示失败）。返回的整数标识符仅在当前协议生命周期内有效，不应被持久化或跨上下文使用。
 
 #### Usage Patterns
 
-- After receiving an Anthropic API response body
-- To convert raw JSON to `CompletionResponse`
+- Used to deserialize Anthropic API HTTP response bodies into structured types
+- Called by higher-level network or request functions to convert raw JSON to `CompletionResponse`
+- Utilized in error handling paths to map API error payloads to `LLMError`
 
 ### `clore::net::anthropic::protocol::parse_response_text`
 
-Declaration: `network/anthropic.cppm:215`
+Declaration: `src/network/anthropic.cppm:224`
 
-Definition: `network/anthropic.cppm:636`
+Definition: `src/network/anthropic.cppm:645`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-`clore::net::anthropic::protocol::parse_response_text` 是一个函数模板，它解析给定的响应对象并返回一个整数，该整数代表从该响应中提取的文本内容。调用者负责提供有效的响应引用；返回的整数值应根据程序中该类型上下文的具体约定进行解释。
+`clore::net::anthropic::protocol::parse_response_text` 是一个模板函数，负责从 Anthropic API 响应中解析并提取文本内容。调用者应提供响应对象（类型 `T`），函数返回解析后的文本数据；具体返回类型由响应内容和模板实例化决定。该函数是协议层对外暴露的接口，调用者应确保传入的响应对象符合预期格式。
 
 #### Usage Patterns
 
-- Used to deserialize the text portion of an Anthropic API response into a specific type.
+- 从 Anthropic API 响应中提取结构化文本
+- 作为 `protocol` 模块的通用解析入口
 
 ### `clore::net::anthropic::protocol::parse_tool_arguments`
 
-Declaration: `network/anthropic.cppm:218`
+Declaration: `src/network/anthropic.cppm:227`
 
-Definition: `network/anthropic.cppm:641`
+Definition: `src/network/anthropic.cppm:650`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-此函数解析来自工具使用响应的参数，将原始参数数据转换为目标类型 `T`。调用者应确保提供的整数引用表示有效的工具参数负载；函数返回一个整数状态码，指示解析是否成功。模板参数 `T` 必须满足协议指定的可反序列化要求，否则行为未定义。
+`clore::net::anthropic::protocol::parse_tool_arguments` 是一个模板函数，接受一个 `const int&` 类型的参数并返回一个 `int`。它的职责是从工具响应中解析参数，返回的整数值通常反映解析结果的状态或相关数据索引。调用者应提供一个有效的引用输入，并根据返回码进行后续处理。该函数与 `clore::net::anthropic::protocol` 命名空间中的其他解析函数共同构成工具交互流程的一部分。
 
 #### Usage Patterns
 
-- Delegates to `clore::net::protocol::parse_tool_arguments`
-- Parses tool arguments into type `T`
+- 从 tool call 中反序列化参数对象
+- 作为解析 tool 调用结果的统一接口
 
 ### `clore::net::anthropic::protocol::text_from_response`
 
-Declaration: `network/anthropic.cppm:207`
+Declaration: `src/network/anthropic.cppm:216`
 
-Definition: `network/anthropic.cppm:623`
+Definition: `src/network/anthropic.cppm:632`
 
 Implementation: [`Module anthropic`](../../../../../modules/anthropic/index.md)
 
-函数 `clore::net::anthropic::protocol::text_from_response` 从给定的 API 响应中提取文本内容。它接受一个响应对象的常量引用（`const int &`），返回一个整数，该整数表示提取的结果（例如状态码或指向文本的句柄）。调用者必须确保传入的响应引用已由 `parse_response` 或类似函数正确解析，且包含有效的文本有效载荷。返回的非零值可能指示错误或需要进一步处理的特殊条件。
+函数 `clore::net::anthropic::protocol::text_from_response` 从给定的响应对象中提取文本内容。它接受一个 `const int&` 类型的响应标识，该标识应代表一个有效的、已解析的响应，并返回一个 `int` 类型的值，表示该响应中包含的文本数据（例如，文本长度或编码标识）。调用者负责确保传入的响应标识有效且符合预设格式，否则函数的行为未定义。
 
 #### Usage Patterns
 
-- Called by higher-level Anthropic protocol code when a completion response is received
-- Used to obtain the textual content of a response for further processing
+- 从 Anthropic 的 `CompletionResponse` 中提取文本
+- 作为 `clore::net::protocol::text_from_response` 的 Anthropic 特定封装
 
 ## Related Pages
 

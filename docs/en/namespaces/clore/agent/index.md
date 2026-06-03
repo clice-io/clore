@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::agent'
-description: 'The clore::agent namespace encapsulates the core agent functionality for exploring a codebase and generating guide documents. It provides the agent loop (run_agent and its asynchronous variant run_agent_async), tool dispatch (dispatch_tool_call), tool definition registration (build_tool_definitions), and utility functions for extracting arguments from JSON (extract_string_arg). Error handling is represented by the ToolError and AgentError structures.'
+description: 'The clore::agent namespace encapsulates the primary agent loop and tool‑execution infrastructure for a code‑exploration and documentation‑generation system. It defines the core lifecycle functions run_agent and run_agent_async, which orchestrate a cycle of LLM‑driven tool calls and produce output artefacts (e.g., guide documents) under a designated output root. Supporting utilities include build_tool_definitions to initialise the set of available tools, extract_string_arg for safe retrieval of JSON‑encoded string parameters, and dispatch_tool_call to invoke a named tool with validated arguments. The namespace declares two error types (AgentError for loop‑level failures and ToolError for per‑call extraction or execution errors) and manages key state variables such as project_root, output_root, model, config, and cache. Architecturally, clore::agent is the orchestrator that bridges an external LLM interface with a tool‑based workspace; it coordinates the asynchronous or synchronous iteration, argument handling, and result accumulation that drive the agent’s behaviour.'
 layout: doc
 template: doc
 ---
@@ -9,17 +9,15 @@ template: doc
 
 ## Summary
 
-The `clore::agent` namespace encapsulates the core agent functionality for exploring a codebase and generating guide documents. It provides the agent loop (`run_agent` and its asynchronous variant `run_agent_async`), tool dispatch (`dispatch_tool_call`), tool definition registration (`build_tool_definitions`), and utility functions for extracting arguments from JSON (`extract_string_arg`). Error handling is represented by the `ToolError` and `AgentError` structures.
-
-Architecturally, this namespace serves as the central controller for agent‑driven analysis, managing the lifecycle of the agent session, the set of available tools, and the interactions between the language model and the codebase. It relies on an event loop (from the `kota` library) for asynchronous execution and writes its results to a specified output root directory.
+The `clore::agent` namespace encapsulates the primary agent loop and tool‑execution infrastructure for a code‑exploration and documentation‑generation system. It defines the core lifecycle functions `run_agent` and `run_agent_async`, which orchestrate a cycle of LLM‑driven tool calls and produce output artefacts (e.g., guide documents) under a designated output root. Supporting utilities include `build_tool_definitions` to initialise the set of available tools, `extract_string_arg` for safe retrieval of JSON‑encoded string parameters, and `dispatch_tool_call` to invoke a named tool with validated arguments. The namespace declares two error types (`AgentError` for loop‑level failures and `ToolError` for per‑call extraction or execution errors) and manages key state variables such as `project_root`, `output_root`, `model`, `config`, and `cache`. Architecturally, `clore::agent` is the orchestrator that bridges an external LLM interface with a tool‑based workspace; it coordinates the asynchronous or synchronous iteration, argument handling, and result accumulation that drive the agent’s behaviour.
 
 ## Types
 
 ### `clore::agent::AgentError`
 
-Declaration: `agent/agent.cppm:21`
+Declaration: `src/agent/agent.cppm:35`
 
-Definition: `agent/agent.cppm:21`
+Definition: `src/agent/agent.cppm:35`
 
 Implementation: [`Module agent`](../../../modules/agent/index.md)
 
@@ -27,23 +25,22 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- The `message` member always contains a valid `std::string` object
-- The `message` string may be empty
+- `message` is a valid `std::string` object
 
 #### Key Members
 
-- `std::string message` — the error description
+- `message`
 
 #### Usage Patterns
 
-- Created with a descriptive string when an error occurs in agent operations
-- Likely used as a member of a `std::expected` or thrown as an exception
+- Returned from functions to indicate an error condition
+- Stores a human-readable error description
 
 ### `clore::agent::ToolError`
 
-Declaration: `agent/tools.cppm:16`
+Declaration: `src/agent/tools.cppm:28`
 
-Definition: `agent/tools.cppm:16`
+Definition: `src/agent/tools.cppm:28`
 
 Implementation: [`Module agent:tools`](../../../modules/agent/tools.md)
 
@@ -51,93 +48,92 @@ Insufficient evidence to summarize; provide more EVIDENCE.
 
 #### Invariants
 
-- holds an error description in `message`
-- aggregate-style struct with public data
+- The `message` string is not guaranteed to be non-empty.
 
 #### Key Members
 
-- `std::string message` field carrying the error text
+- `message`: stores the error description as a `std::string`.
 
 #### Usage Patterns
 
-- constructed to convey tool-related error details within `clore::agent`
+- Used to convey tool-level errors in the agent's error handling flow.
+- Likely returned or thrown when a tool operation fails.
 
 ## Functions
 
 ### `clore::agent::build_tool_definitions`
 
-Declaration: `agent/tools.cppm:23`
+Declaration: `src/agent/tools.cppm:35`
 
-Definition: `agent/tools.cppm:887`
+Definition: `src/agent/tools.cppm:899`
 
 Implementation: [`Module agent:tools`](../../../modules/agent/tools.md)
 
-The function `clore::agent::build_tool_definitions` constructs and registers the tool definitions that the agent can dispatch. It returns an `int` indicating the outcome of the build process, typically a success code or a count of definitions created. Callers must invoke this function before calling `clore::agent::dispatch_tool_call` or any other tool-dependent operation to ensure that the set of available tools is fully populated.
+The function `clore::agent::build_tool_definitions` constructs and returns an integer that represents the tool definitions available to the agent. It is designed to be called before any tool dispatch or extraction operations; callers should treat it as a prerequisite step that establishes the tool definition environment. The returned `int` indicates success or a count of definitions, and a non-negative value signals that the tool definitions are ready for use by functions such as `clore::agent::dispatch_tool_call` or `clore::agent::extract_string_arg`.
 
 #### Usage Patterns
 
-- Called during agent initialization to obtain tool definitions for network interactions
+- called to collect all tool definitions for agent use
+- used during initialization of `run_agent` and similar orchestration functions
 
 ### `clore::agent::dispatch_tool_call`
 
-Declaration: `agent/tools.cppm:26`
+Declaration: `src/agent/tools.cppm:38`
 
-Definition: `agent/tools.cppm:902`
+Definition: `src/agent/tools.cppm:914`
 
 Implementation: [`Module agent:tools`](../../../modules/agent/tools.md)
 
-The function `clore::agent::dispatch_tool_call` accepts a tool name as a `std::string_view`, tool arguments as a `const json::Value &`, a session identifier as a `const int &`, and two additional `std::string_view` parameters that provide tool call identification. It returns a `std::expected<std::string, ToolError>` containing either the tool’s output on success or a `ToolError` on failure. The caller is responsible for supplying a valid tool name that can be resolved within the session context, along with correctly structured arguments and identifiers; the function does not manage session lifecycle or tool registration.
+The `clore::agent::dispatch_tool_call` function is the public interface for executing a tool by name. It accepts a tool name, its arguments as a JSON value, a context identifier as a `const int &`, a conversation identifier, and an additional string view. On success it returns a `std::string` containing the tool’s output; on failure it returns a `ToolError` indicating the reason. Callers must supply a valid tool name and well‑formed JSON arguments matching the tool’s expected schema; otherwise an error is reported. The returned string is not guaranteed to be stable across calls and the function does not provide transactional isolation for side effects.
 
 #### Usage Patterns
 
-- called by agent execution functions like `run_agent_async` or `run_agent`
-- used to invoke named tools with automatic caching of successful results
+- Used to dispatch tool calls with caching
+- Called from agent execution loops like `run_agent` or `run_agent_async`
 
 ### `clore::agent::extract_string_arg`
 
-Declaration: `agent/tools.cppm:20`
+Declaration: `src/agent/tools.cppm:32`
 
-Definition: `agent/tools.cppm:865`
+Definition: `src/agent/tools.cppm:877`
 
 Implementation: [`Module agent:tools`](../../../modules/agent/tools.md)
 
-`clore::agent::extract_string_arg` retrieves a string value from a JSON object by a given key. The caller passes a `json::Value` object (expected to represent a JSON object) and a `std::string_view` naming the key. If the key exists and its associated value is a JSON string, the function returns that string wrapped in a `std::expected<std::string, ToolError>`. Otherwise it returns a `ToolError` indicating why extraction failed—for example, the key is missing or the value is not a string. The function never modifies the input JSON object.
+The function `clore::agent::extract_string_arg` is responsible for safely retrieving a string value identified by a given property name from a `json::Value` object. The caller provides a reference to the JSON object and a `std::string_view` naming the expected property. The function returns a `std::expected<std::string, ToolError>`, either yielding the extracted string or a `ToolError` if the property is missing or its value is not a string. Callers should use this function when they need to obtain a required string argument from a structured JSON input and handle extraction failures explicitly via the expected result.
 
 #### Usage Patterns
 
-- Called by `clore::agent::dispatch_tool_call` to extract a required string argument from a tool call's JSON parameters
-- Used within the tool‑call dispatch flow to parse individual fields of the argument object
+- Extract required string field from tool call arguments
 
 ### `clore::agent::run_agent`
 
-Declaration: `agent/agent.cppm:27`
+Declaration: `src/agent/agent.cppm:41`
 
-Definition: `agent/agent.cppm:524`
+Definition: `src/agent/agent.cppm:538`
 
 Implementation: [`Module agent`](../../../modules/agent/index.md)
 
-The `clore::agent::run_agent` function runs the agent loop, which explores the codebase via tool calls and generates guide documents under the output root directory. The caller provides two integer references, a string view, and a string; the function returns an `std::expected<std::size_t, AgentError>` indicating the number of guides produced or an error if the loop fails.
+The function `clore::agent::run_agent` executes the agent loop, which explores the codebase by making tool calls and produces guide documents under the designated output root directory. Callers supply two integer references (typically representing agent limits or configuration), a `std::string_view` for the output root path, and a `std::string` for additional parameters. On success it returns a `std::expected<std::size_t, AgentError>` containing a count (e.g., number of produced documents), or an `AgentError` if the loop fails.
 
 #### Usage Patterns
 
-- Invoked as the synchronous top-level driver to execute the agent loop
-- Callers branch on the returned `std::expected` to handle `AgentError` or consume the produced guide count
+- called to start the agent from a synchronous context
+- used as a wrapper around the asynchronous `run_agent_async`
 
 ### `clore::agent::run_agent_async`
 
-Declaration: `agent/agent.cppm:34`
+Declaration: `src/agent/agent.cppm:48`
 
-Definition: `agent/agent.cppm:507`
+Definition: `src/agent/agent.cppm:521`
 
 Implementation: [`Module agent`](../../../modules/agent/index.md)
 
-The function `clore::agent::run_agent_async` launches an asynchronous agent loop that operates on the provided `kota::event_loop`. The caller must schedule the returned `int` (interpreted as a task handle) on that event loop and run it to drive the agent. It accepts two `const int &` parameters (typically identifiers for the agent and conversation), two `std::string` parameters (likely a system prompt and user input), and a reference to a `kota::event_loop`. The asynchronous variant mirrors the contract of `clore::agent::run_agent` but is designed for non‑blocking execution in an event‑driven context; the caller owns the responsibility of properly integrating the returned task with the loop’s lifecycle.
+The function `clore::agent::run_agent_async` initiates an asynchronous agent loop on the provided `kota::event_loop`. It accepts two integer references, two `std::string` arguments, and the event loop. The function returns a task handle that the caller must schedule on the loop and then run. This contract ensures the agent operates non‑blockingly within the given event‑driven context.
 
 #### Usage Patterns
 
-- Called to start an asynchronous agent session with caching
-- Callers schedule the returned task on the provided `kota::event_loop`
-- Used in higher-level agent orchestration code
+- Callers schedule the returned task on the event loop
+- Used to orchestrate the asynchronous agent workflow
 
 ## Related Pages
 

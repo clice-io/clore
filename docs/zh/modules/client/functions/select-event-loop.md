@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::detail::selecteventloop'
-description: '该函数的行为基于一个简单的三元分支：如果传入的 loop 指针非空，则直接解引用并返回该 kota::event_loop 对象；否则，调用静态方法 kota::event_loop::current() 获取当前线程的活动事件循环引用。其内部依赖 kota::event_loop 的 current() 实现，该实现必须返回一个有效的事件循环——若当前线程无关联的活跃循环，行为未定义。此函数是 clore::net::detail 命名空间下的一个简化的返回引用工具，用于在其他异步调用函数（如 call_llm_async）中统一获取事件循环实例，避免重复执行空指针检查或默认回退逻辑。'
+description: 'clore::net::detail::select_event_loop 的实现遵循一个简单的分支策略。它首先检查 loop 参数是否为非空指针；若不为空，则立即返回通过解引用该指针获得的 kota::event_loop 引用。否则，它将依赖项委托给静态成员函数 kota::event_loop::current()，该函数按约定返回一个与调用线程关联的事件循环引用。如果当前线程上没有已注册的事件循环，此回退路径的行为是未定义的。'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module client](../index.md)
 
-Declaration: `network/client.cppm:45`
+Declaration: `src/network/client.cppm:53`
 
-Definition: `network/client.cppm:45`
+Definition: `src/network/client.cppm:53`
 
 Declaration: [`Namespace clore::net::detail`](../../../namespaces/clore/net/detail/index.md)
 
@@ -28,7 +28,9 @@ auto select_event_loop(kota::event_loop* loop) -> kota::event_loop& {
 }
 ```
 
-该函数的行为基于一个简单的三元分支：如果传入的 `loop` 指针非空，则直接解引用并返回该 `kota::event_loop` 对象；否则，调用静态方法 `kota::event_loop::current()` 获取当前线程的活动事件循环引用。其内部依赖 `kota::event_loop` 的 `current()` 实现，该实现必须返回一个有效的事件循环——若当前线程无关联的活跃循环，行为未定义。此函数是 `clore::net::detail` 命名空间下的一个简化的返回引用工具，用于在其他异步调用函数（如 `call_llm_async`）中统一获取事件循环实例，避免重复执行空指针检查或默认回退逻辑。
+`clore::net::detail::select_event_loop` 的实现遵循一个简单的分支策略。它首先检查 `loop` 参数是否为非空指针；若不为空，则立即返回通过解引用该指针获得的 `kota::event_loop` 引用。否则，它将依赖项委托给静态成员函数 `kota::event_loop::current()`，该函数按约定返回一个与调用线程关联的事件循环引用。如果当前线程上没有已注册的事件循环，此回退路径的行为是未定义的。
+
+该函数的核心控制流仅有两条路径，没有循环或递归。其正确性依赖于调用方要么提供一个有效的 `loop` 指针，要么确保 `kota::event_loop::current()` 在当前线程上下文中有可返回的合法对象。它没有额外的错误检查或日志记录，因此性能开销极低。
 
 ## Side Effects
 
@@ -36,13 +38,12 @@ No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- `loop` 参数
-- `kota::event_loop::current()` 返回的当前线程事件循环状态
+- parameter `loop` (pointer to `kota::event_loop`)
+- current event loop via `kota::event_loop::current()`
 
 ## Usage Patterns
 
-- 用于将可选的 `event_loop*` 解析为确定的引用
-- 被 `call_completion_async`、`call_llm_async` 等高层函数调用以获取事件循环
+- callers like `clore::net::call_llm_async` and `clore::net::call_completion_async` pass an optional `kota::event_loop*` to obtain a guaranteed valid reference for async operations
 
 ## Called By
 

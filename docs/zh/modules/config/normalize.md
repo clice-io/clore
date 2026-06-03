@@ -1,6 +1,6 @@
 ---
 title: 'Module config:normalize'
-description: '模块 config:normalize 负责将 CLORE 的配置参数（尤其是数值或路径类配置项）转换为统一的规范化形式，确保后续处理的一致性。它公开了核心函数 clore::config::normalize，该函数接受一个 int 左值引用，对值进行规范化并返回状态码（0 表示成功，非零表示特定错误）；同时公开了 NormalizeError 结构体，用于携带规范过程中产生的错误信息。该模块依赖 config:schema 提供的配置类型骨架，并借助标准库实现路径分隔符归一化、绝对路径转换等内部逻辑。'
+description: '模块 config:normalize 负责对配置值进行规范化处理，当前公开的规范化函数面向整数类型的配置。它通过 clore::config::normalize 函数（接受 int&，返回 std::expected<void, NormalizeError>）对外提供服务，若规范化失败则返回含错误消息的 NormalizeError 结构体。此外，该模块公开了 normalize_separators 等变量，作为规范化过程中使用的配置参数。整体上，模块聚焦于将外部输入的配置值转换成内部一致、可用的形式，并为调用方提供明确的错误反馈。'
 layout: doc
 template: doc
 ---
@@ -9,83 +9,72 @@ template: doc
 
 ## Summary
 
-模块 `config:normalize` 负责将 CLORE 的配置参数（尤其是数值或路径类配置项）转换为统一的规范化形式，确保后续处理的一致性。它公开了核心函数 `clore::config::normalize`，该函数接受一个 `int` 左值引用，对值进行规范化并返回状态码（0 表示成功，非零表示特定错误）；同时公开了 `NormalizeError` 结构体，用于携带规范过程中产生的错误信息。该模块依赖 `config:schema` 提供的配置类型骨架，并借助标准库实现路径分隔符归一化、绝对路径转换等内部逻辑。
+模块 `config:normalize` 负责对配置值进行规范化处理，当前公开的规范化函数面向整数类型的配置。它通过 `clore::config::normalize` 函数（接受 `int&`，返回 `std::expected<void, NormalizeError>`）对外提供服务，若规范化失败则返回含错误消息的 `NormalizeError` 结构体。此外，该模块公开了 `normalize_separators` 等变量，作为规范化过程中使用的配置参数。整体上，模块聚焦于将外部输入的配置值转换成内部一致、可用的形式，并为调用方提供明确的错误反馈。
 
 ## Imports
 
 - [`config:schema`](schema.md)
-- `std`
 
 ## Types
 
 ### `clore::config::NormalizeError`
 
-Declaration: `config/normalize.cppm:10`
+Declaration: `src/config/normalize.cppm:17`
 
-Definition: `config/normalize.cppm:10`
+Definition: `src/config/normalize.cppm:17`
 
 Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
-`clore::config::NormalizeError` 是一个仅包含一个 `std::string` 类型成员 `message` 的平凡聚合结构体。其实现完全依赖于编译器生成的默认成员，未定义任何自定义构造函数、析构函数或赋值运算符，因此内部结构简单且无额外开销。该结构体不维护任何内部不变量；`message` 成员仅用于存储描述性错误文本，但其内容不受约束，完全由使用者决定。简而言之，实现的唯一职责就是直接持有这个字符串。
+结构体 `clore::config::NormalizeError` 内部仅包含一个 `std::string message` 成员，用作错误描述信息的载体。没有额外的数据成员或自定义构造函数、赋值运算符，因此整个类型是平凡可复制、可移动的。其实现不维护任何强约束性的不变式——`message` 可以持有任意字符串（包括空串），调用方可根据惯用法自行约定其内容格式（例如非空或可打印文本）。所有编译器生成的默认成员函数均被保留，使得该结构体可以直接通过聚合初始化或拷贝/移动语义快速构建和传递错误对象，无需额外的错误码或类型标记。
 
 #### Invariants
 
-- No documented invariants beyond the usual validity of `std::string`.
+- `message` 成员存储错误描述
+- 无其他隐式约束或保证
 
 #### Key Members
 
-- `message` – a `std::string` that stores the error description.
+- `message` 成员
 
 #### Usage Patterns
 
-- Used as an error type in normalization-related operations.
-- Likely returned or caught in code paths that validate or transform configuration data.
+- 作为 `clore::config` 命名空间中规范化操作失败时的错误类型
+- 可被 `catch` 或用于返回错误信息
 
 ## Functions
 
 ### `clore::config::normalize`
 
-Declaration: `config/normalize.cppm:14`
+Declaration: `src/config/normalize.cppm:21`
 
-Definition: `config/normalize.cppm:22`
+Definition: `src/config/normalize.cppm:29`
 
 Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
-该函数首先通过检查 `config.workspace_root` 是否为空来填充默认工作区根目录，若为空则将其设为 `std::filesystem::current_path` 的字符串表示。随后依次对 `workspace_root`、`compile_commands_path`、`project_root` 和 `output_root` 应用局部 lambda `make_absolute`，该 lambda 在路径为空时返回 `NormalizeError`，否则利用 `std::filesystem::path` 解析相对路径（可选的 `base` 参数由上一处理步骤中已确定的工作区根提供），最后通过 `lexically_normal` 进行词法规范化。每个调用通过返回的 `std::expected` 立即检查错误，若任一失败则提前返回未预期的错误。
-
-在处理完绝对化和规范化后，第二个 lambda `normalize_separators` 将 `config` 中所有路径字段（包括 `compile_commands_path`、`project_root`、`output_root`、`workspace_root`）以及 `config.filter.include` 与 `config.filter.exclude` 向量中的每个字符串中的反斜杠 `\` 替换为正斜杠 `/`。此过程不涉及文件系统交互，仅进行字符串就地转换。函数最终返回一个表示成功的 `std::expected` 对象。
+函数 `clore::config::normalize` 首先检查 `config.workspace_root` 是否为空，若为空则将其设置为 `fs::current_path().string()`。随后通过内部 lambda `make_absolute` 依次处理 `workspace_root`、`compile_commands_path`、`project_root` 和 `output_root`：`make_absolute` 对每个路径字符串进行非空校验（返回包含 `NormalizeError` 的 `std::unexpected`），将相对路径转换为绝对路径（若提供了可选的 `base` 参数则拼接到该基路径下，否则使用 `fs::absolute`），并应用 `lexically_normal` 进行词法归一化。完成绝对化后，使用第二个 lambda `normalize_separators` 遍历上述四个字段以及 `config.filter.include`、`config.filter.exclude` 中的所有路径，将反斜杠统一替换为正斜杠。整个流程依赖 `std::filesystem` 进行路径操作、`std::expected` 错误传递以及 `NormalizeError` 结构体承载错误消息。
 
 #### Side Effects
 
-- Modifies the provided `TaskConfig` object by altering its string path fields.
+- Modifies the provided `TaskConfig` object in place
+- Calls `std::filesystem::current_path()` to set default workspace root
 
 #### Reads From
 
-- `config.workspace_root`
-- `config.compile_commands_path`
-- `config.project_root`
-- `config.output_root`
-- `config.filter.include`
-- `config.filter.exclude`
-- `std::filesystem::current_path()`
+- The `TaskConfig` object's fields: `workspace_root`, `compile_commands_path`, `project_root`, `output_root`, and `filter.include`, `filter.exclude`
+- The current working directory via `std::filesystem::current_path()`
 
 #### Writes To
 
-- `config.workspace_root`
-- `config.compile_commands_path`
-- `config.project_root`
-- `config.output_root`
-- `config.filter.include` elements
-- `config.filter.exclude` elements
+- The same fields in the `TaskConfig` object: `workspace_root`, `compile_commands_path`, `project_root`, `output_root`, and `filter.include`, `filter.exclude`
 
 #### Usage Patterns
 
-- Called after `clore::config::load_config` to normalize configuration paths
-- Used as part of configuration validation and preparation before further processing
+- Used after loading a configuration to ensure paths are normalized before further processing
+- Expected to be called on a `TaskConfig` instance that has been populated by functions like `load_config` or `load_config_from_string`
 
 ## Internal Structure
 
-模块 `config:normalize` 负责将配置值调整至内部标准形式，其实现依赖于 `config:schema` 提供的类型骨架以及标准库的基础设施。公开的接口包括 `NormalizeError` 错误类型和 `normalize` 函数，后者通过一个 `int&` 参数接收待规范化的值并返回状态码。内部层次上，模块将规范化逻辑分解为一组局部变量或函数对象（如 `normalize_separators`、`path`、`workspace_root` 和 `make_absolute`），这些元素封装了具体的规范化规则（分隔符处理、路径绝对化等），并通过多次出现的变量 `r` 暂存中间结果，从而在单一函数中实现多步骤的修正流程。这种分解使规范化规则集中管理，同时保持公开入口的简洁性。
+模块 `config:normalize` 依赖于 `config:schema` 提供的配置数据结构，将规范化操作封装为一个独立的公共函数 `normalize`，该函数接受一个 `int` 引用并返回 `expected<void, NormalizeError>`。内部实现通过变量如 `normalize_separators`、`make_absolute` 以及多个表示中间状态的 `r`、`config`、`path`、`base`、`workspace_root` 等，将路径处理与字段匹配分解为若干步骤，同时结构体 `NormalizeError` 通过 `message` 字段提供失败原因。这种分解使得整个规范化逻辑集中在一个入口中，调用者只需检查返回值即可获知操作是否成功。
 
 ## Related Pages
 

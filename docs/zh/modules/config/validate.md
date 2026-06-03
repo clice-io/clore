@@ -1,6 +1,6 @@
 ---
 title: 'Module config:validate'
-description: 'config:validate 模块负责对 CLORE 工具的配置进行校验，确保其符合预定义的规则。其公开实现面向调用方提供统一的校验入口，通过 clore::config::validate 函数接受一个配置表示（以 const int & 传入），并在校验通过时返回 0，非零值则标志具体的失败原因。该模块还公开了 ValidationError 结构体，用于携带校验失败的错误信息（其 message 字段存储描述）。内部实现包含针对数值非零和容器非空的辅助校验逻辑，这些逻辑在库内部使用，不暴露给外部。整个模块依赖于 config:schema 模块提供的配置数据结构定义，可配合配置加载或归一化流程使用，以确保配置状态的安全性。'
+description: '模块 config:validate 负责对已加载并归一化的配置值执行约束检查，确保配置满足有效运行所需的条件。其公开接口包括函数 clore::config::validate，它接受 const int & 类型的配置值（通常由 load_config、load_config_from_string 或 normalize 等函数获得），并返回一个 std::expected<void, ValidationError>：若验证通过则返回空 expected，否则返回描述错误的 ValidationError 对象。ValidationError 结构体仅包含一个 message 字段，用于以类型安全的方式向调用方传递具体的验证失败原因。在内部实现中，模块使用匿名命名空间中的辅助函数（如 validate_nonzero 和 validate_nonempty）来检查数值非零、字符串非空等常见约束。该模块依赖 config:schema 模块提供的配置数据结构定义，是整个配置系统中负责数据合规性检查的核心组件。'
 layout: doc
 template: doc
 ---
@@ -9,72 +9,54 @@ template: doc
 
 ## Summary
 
-`config:validate` 模块负责对 CLORE 工具的配置进行校验，确保其符合预定义的规则。其公开实现面向调用方提供统一的校验入口，通过 `clore::config::validate` 函数接受一个配置表示（以 `const int &` 传入），并在校验通过时返回 `0`，非零值则标志具体的失败原因。该模块还公开了 `ValidationError` 结构体，用于携带校验失败的错误信息（其 `message` 字段存储描述）。内部实现包含针对数值非零和容器非空的辅助校验逻辑，这些逻辑在库内部使用，不暴露给外部。整个模块依赖于 `config:schema` 模块提供的配置数据结构定义，可配合配置加载或归一化流程使用，以确保配置状态的安全性。
+模块 `config:validate` 负责对已加载并归一化的配置值执行约束检查，确保配置满足有效运行所需的条件。其公开接口包括函数 `clore::config::validate`，它接受 `const int &` 类型的配置值（通常由 `load_config`、`load_config_from_string` 或 `normalize` 等函数获得），并返回一个 `std::expected<void, ValidationError>`：若验证通过则返回空 expected，否则返回描述错误的 `ValidationError` 对象。`ValidationError` 结构体仅包含一个 `message` 字段，用于以类型安全的方式向调用方传递具体的验证失败原因。在内部实现中，模块使用匿名命名空间中的辅助函数（如 `validate_nonzero` 和 `validate_nonempty`）来检查数值非零、字符串非空等常见约束。该模块依赖 `config:schema` 模块提供的配置数据结构定义，是整个配置系统中负责数据合规性检查的核心组件。
 
 ## Imports
 
 - [`config:schema`](schema.md)
-- `std`
 
 ## Types
 
 ### `clore::config::ValidationError`
 
-Declaration: `config/validate.cppm:8`
+Declaration: `src/config/validate.cppm:14`
 
-Definition: `config/validate.cppm:8`
+Definition: `src/config/validate.cppm:14`
 
 Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
-`clore::config::ValidationError` 的内部结构极其精简，仅包含一个 `std::string` 类型的 `message` 数据成员。该成员是验证错误的唯一载体，其生命周期伴随整个结构体实例；通过默认生成的构造、析构、拷贝与移动操作，`message` 的字符串存储与管理完全委托给标准库。结构体不维护其他不变性：只要 `message` 持有有效的 `std::string` 对象（即使在默认构造的空字符串状态下），该结构体便处于合法状态。所有对错误信息的修改直接作用于 `message`，不涉及额外约束或状态同步。
-
-#### Invariants
-
-- `message` 存储验证失败时的描述文本
-- 不包含任何运行时或编译期约束
+`clore::config::ValidationError` 是一个聚合类型，其唯一的数据成员是 `std::string message`。该结构体作为验证错误信息的载体，内部状态完全由 `message` 持有，除此之外不包含任何自定义构造函数、赋值操作或其它成员函数。所有特殊成员函数（默认构造、拷贝/移动构造、拷贝/移动赋值、析构）均由编译器隐式生成，因此该类型满足平凡可复制性（trivially copyable）的判定取决于 `std::string` 的平凡性——实际上它并非平凡类型，但隐式生成的特殊成员函数使得对象可以按常规方式传递和存储。实现中未定义任何不变式约束，`message` 的内容可以任意赋值，但典型用法要求其非空且描述了具体的验证失败原因。结构体的设计意图是保持极简，仅作为轻量级错误传递单元，避免引入额外逻辑或资源管理职责。
 
 #### Key Members
 
-- `std::string message`
+- message
 
 #### Usage Patterns
 
-- 在验证函数中作为返回值类型使用，报告具体的验证失败原因
-- 创建 `ValidationError` 实例并设置 `message` 后传递给调用方
+- Created by validation logic and returned or stored in a collection to report config problems.
+- Consumed by error-handling code that reads the `message` field to present to the user or log.
 
 ## Functions
 
 ### `clore::config::validate`
 
-Declaration: `config/validate.cppm:12`
+Declaration: `src/config/validate.cppm:18`
 
-Definition: `config/validate.cppm:42`
+Definition: `src/config/validate.cppm:48`
 
 Declaration: [`Namespace clore::config`](../../namespaces/clore/config/index.md)
 
-函数 `clore::config::validate` 按照多阶段顺序检查 `TaskConfig` 各个字段的有效性。它首先利用 `std::filesystem` 验证 `compile_commands_path` 和 `project_root` 必须非空、必须存在且分别为常规文件和目录；`output_root` 必须非空，若存在则必须是目录。每项失败会立即返回一个包装在 `std::unexpected` 中的 `ValidationError`，其 `message` 字段包含 `std::format` 生成的描述。在路径校验之后，它依靠匿名命名空间中的辅助函数 `validate_nonempty` 和 `validate_nonzero` 对 LLM 子配置的 `system_prompt` 和 `retry_limit` 进行非空与非零检查。所有检查通过后返回空的 `expected<void>`。整个验证流程中，每次判断均会短路返回首个错误，使得错误报告清晰且顺序固定。
+函数 `clore::config::validate` 的实现采用顺序验证策略，对输入的 `TaskConfig` 对象逐字段执行约束检查。验证依次处理 `compile_commands_path`、`project_root` 和 `output_root`，利用 `std::filesystem` 库确保路径非空、存在且类型正确（文件或目录）；其中 `output_root` 允许不存在，但若存在则必须是目录。随后转入 LLM 子配置验证，分别委托匿名命名空间内的辅助函数 `validate_nonempty` 和 `validate_nonzero` 校验 `llm.system_prompt` 非空及 `llm.retry_limit` 非零。任何检查失败均立即返回 `std::unexpected` 携带 `ValidationError` 实例，成功则返回空 `std::expected<void, ValidationError>`。该实现无复杂分支或递归，依赖仅限于标准库文件系统与两个本地辅助函数。
 
 #### Side Effects
 
-- reads filesystem metadata (exists, `is_regular_file`, `is_directory`) for `compile_commands_path`, `project_root`, `output_root`
-
-#### Reads From
-
-- `config.compile_commands_path`
-- `config.project_root`
-- `config.output_root`
-- `config.llm.system_prompt`
-- `config.llm.retry_limit`
-- filesystem metadata for the above paths
-
-#### Usage Patterns
-
-- called after `load_config` to validate the configuration before use
-- used in configuration parsing pipeline to ensure correctness
+No observable side effects are evident from the extracted code.
 
 ## Internal Structure
 
-模块 `config:validate` 通过导入 `config:schema` 获得配置数据结构骨架，并依赖 `std` 提供基础设施。其公开入口为 `clore::config::validate`，接受配置的胶合表示（`const int &`）并返回整数以指示验证是否成功（0 为成功，非零为具体失败码）。实现内部利用匿名命名空间封装了 `validate_nonzero` 和 `validate_nonempty` 等私有辅助函数，分别负责检查字段值是否非零或容器是否非空，从而将验证规则分解为可独立测试的小步骤。该模块还定义了 `ValidationError` 结构体（内含 `message` 字符串），用于在验证失败时携带错误描述，但当前公开接口仅通过整数返回码报告结果，错误消息的传递方式可能仅限于内部或通过外部机制（如日志）暴露。整体上，实现层在匿名命名空间中隐藏细节，保持对外接口简洁，与 `config:schema` 的紧耦合确保了验证逻辑能与配置结构同步演进。
+`config:validate` 模块提供核心的配置验证功能，对外仅暴露 `clore::config::validate` 函数。该模块通过导入 `config:schema` 获取配置数据结构定义，并利用 `std::expected` 实现无异常的错误返回。验证结果类型 `ValidationError` 包含一个描述性字符串字段 `message`，用于向调用者传达失败原因。
+
+在实现上，模块使用匿名命名空间封装了两个内部验证辅助函数：`validate_nonzero`（检查 `uint32_t` 值非零）和 `validate_nonempty`（检查字符串非空）。这些辅助函数接受待验证的值和字段名称，返回与公开函数相同的错误类型。公开的 `validate` 函数接收一个 `const int&` 配置值，通过组合或调用这些内部验证逻辑来判定配置是否合规，从而保持模块内部层次清晰，验证逻辑可复用。
 
 ## Related Pages
 

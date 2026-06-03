@@ -1,6 +1,6 @@
 ---
 title: 'Namespace clore::net::openai::protocol::detail'
-description: 'clore::net::openai::protocol::detail 是 OpenAI 协议实现中的内部辅助命名空间，专门处理与 JSON 序列化、反序列化及请求验证相关的底层细节。其函数集合包括工具调用解析、内容部分解析，以及消息、工具定义、响应格式和工具选择的序列化，同时提供请求的合法性验证。这些函数并非面向外部用户，而是作为协议层的内部基础设施，被上层协议函数间接使用，确保与 OpenAI 兼容的交互格式能被正确编码和解码。'
+description: '该命名空间提供了与 OpenAI 协议相关的底层序列化和解析功能，仅为内部实现细节，不应对库的其他部分直接暴露。它包含一系列函数，分别负责序列化工具选择、工具定义、消息和响应格式，以及解析工具调用和内容部分，同时提供请求验证。这些函数均使用整数返回码指示操作状态，并通过 json::Object 或 json::Array 引用作为输出或输入。作为 clore::net::openai::protocol 的 detail 层，它封装了协议中结构化的 JSON 处理逻辑，使得上层接口可以专注于业务逻辑而无需处理具体的 JSON 操作细节。'
 layout: doc
 template: doc
 ---
@@ -9,123 +9,116 @@ template: doc
 
 ## Summary
 
-`clore::net::openai::protocol::detail` 是 `OpenAI` 协议实现中的内部辅助命名空间，专门处理与 JSON 序列化、反序列化及请求验证相关的底层细节。其函数集合包括工具调用解析、内容部分解析，以及消息、工具定义、响应格式和工具选择的序列化，同时提供请求的合法性验证。这些函数并非面向外部用户，而是作为协议层的内部基础设施，被上层协议函数间接使用，确保与 `OpenAI` 兼容的交互格式能被正确编码和解码。
+该命名空间提供了与 `OpenAI` 协议相关的底层序列化和解析功能，仅为内部实现细节，不应对库的其他部分直接暴露。它包含一系列函数，分别负责序列化工具选择、工具定义、消息和响应格式，以及解析工具调用和内容部分，同时提供请求验证。这些函数均使用整数返回码指示操作状态，并通过 `json::Object` 或 `json::Array` 引用作为输出或输入。作为 `clore::net::openai::protocol` 的 `detail` 层，它封装了协议中结构化的 JSON 处理逻辑，使得上层接口可以专注于业务逻辑而无需处理具体的 JSON 操作细节。
 
 ## Functions
 
 ### `clore::net::openai::protocol::detail::parse_content_parts`
 
-Declaration: `network/openai.cppm:288`
+Declaration: `src/network/openai.cppm:298`
 
-Definition: `network/openai.cppm:288`
+Definition: `src/network/openai.cppm:298`
 
 Implementation: [`Module openai`](../../../../../../modules/openai/index.md)
 
-函数 `clore::net::openai::protocol::detail::parse_content_parts` 负责从给定的 `const json::Array &` 中解析出 `OpenAI` 协议响应中的内容部分。调用者需要提供一个包含正确结构的 JSON 数组，该函数会解析其中的内容部分并返回一个 `int` 值指示操作结果（例如成功码或错误码）。返回值的具体含义由协议内部约定，调用者应据此判断解析是否成功。
+函数 `clore::net::openai::protocol::detail::parse_content_parts` 接受一个 `json::Array` 引用，用于解析协议中的内容部分。调用者应确保输入数组符合预期的结构，函数将对其执行解析并返回一个 `int`，表示解析的结果状态或已处理的内容部分数量。
 
 #### Usage Patterns
 
-- Used to parse the `content` array of a chat completion response into an `AssistantOutput` object
-- Called during response deserialization in the `OpenAI` protocol layer
+- called to parse `content` arrays from `OpenAI` API response messages
+- used in the deserialization path for assistant messages
 
 ### `clore::net::openai::protocol::detail::parse_tool_calls`
 
-Declaration: `network/openai.cppm:369`
+Declaration: `src/network/openai.cppm:379`
 
-Definition: `network/openai.cppm:369`
+Definition: `src/network/openai.cppm:379`
 
 Implementation: [`Module openai`](../../../../../../modules/openai/index.md)
 
-`clore::net::openai::protocol::detail::parse_tool_calls` 接受一个 `json::Array`，解析其中的工具调用条目并将其转换为协议内部表示。调用者应保证传入的数组包含符合 `OpenAI` 工具调用格式的元素；函数返回一个 `int` 值指示处理结果（例如成功解析的条目数量或错误状态）。该函数是协议实现细节的一部分，仅供同一命名空间下的序列化与验证函数内部使用。
+该函数负责将传入的 JSON 数组解析为工具调用（tool calls）。它位于 `clore::net::openai::protocol::detail` 命名空间，属于 `OpenAI` 协议序列化/反序列化组件的一部分，供上层校验或消息构建流程调用。
+
+调用者需要提供一个 `const json::Array &` 类型的参数，表示待解析的工具调用列表。函数返回一个 `int`，通常指示解析结果的状态或成功解析的工具调用数量；返回值的具体语义由调用方根据协议上下文解释。
 
 #### Usage Patterns
 
-- Used by `OpenAI` protocol message parsing logic
-- Called during response deserialization to extract tool calls
+- Parsing tool calls from an `OpenAI` API response
+- Validating structure of tool call JSON array
+- Converting raw JSON tool calls into structured `ToolCall` objects
 
 ### `clore::net::openai::protocol::detail::serialize_message`
 
-Declaration: `network/openai.cppm:27`
+Declaration: `src/network/openai.cppm:37`
 
-Definition: `network/openai.cppm:27`
+Definition: `src/network/openai.cppm:37`
 
 Implementation: [`Module openai`](../../../../../../modules/openai/index.md)
 
-函数 `clore::net::openai::protocol::detail::serialize_message` 负责将一条消息序列化并追加到给定的 `json::Array` 中，该数组作为输出目标。调用者需提供一个可变的 `json::Array` 引用和一个 `const int` 参数（通常标识待序列化的消息）。函数返回一个 `int` 值，指示序列化操作的结果（例如成功写入的元素数量或状态码）。此函数是协议序列化细节的一部分，仅应在 `clore::net::openai::protocol` 内部使用；调用者应确保提供的数组处于有效状态，并正确解释返回值所代表的契约含义。
+负责将一条消息序列化到给定的 `json::Array` 中。调用者需提供一个有效的 `json::Array` 引用以及一个 `const int &` 参数（通常表示消息标识符），函数执行后返回一个 `int` 值，用以指示操作的结果（例如操作是否成功或写入的元素数量）。
 
 #### Usage Patterns
 
-- called by higher-level request serialization functions
-- used to convert a `Message` variant (e.g., from a chat history) into JSON for the `OpenAI` API
-- part of the protocol detail layer for building request bodies
+- Called during construction of a chat completion request to serialize all messages
+- Used in a loop over a collection of `Message` variants
+- Part of the `OpenAI` protocol serialization pipeline in `clore::net::openai`
 
 ### `clore::net::openai::protocol::detail::serialize_response_format`
 
-Declaration: `network/openai.cppm:209`
+Declaration: `src/network/openai.cppm:219`
 
-Definition: `network/openai.cppm:209`
+Definition: `src/network/openai.cppm:219`
 
 Implementation: [`Module openai`](../../../../../../modules/openai/index.md)
 
-`clore::net::openai::protocol::detail::serialize_response_format` 负责将调用方通过 `const int &` 参数指定的响应格式，序列化到提供的 `json::Object &` 目标对象中。调用方必须保证传入的 JSON 对象可被修改，并且整数标识对应一个合法的响应格式。函数返回一个 `int` 值，表示序列化是否成功（通常为 0 表示成功，非零表示错误）。
-
-该函数位于 `detail` 命名空间，是协议序列化层的内部实现，外部组件一般通过上层 API 间接触发其功能，而非直接手动调用。
+此函数负责将特定的响应格式配置序列化到给定的 `json::Object` 中，作为 `OpenAI` 请求构建过程的一部分。调用者需要提供一个已构造的 `json::Object` 引用以及一个整数标识符（通常表示请求的 `response_format` 选项，例如 `text` 或 `json_object`），函数会根据该标识符将对应的格式字段写入对象。返回值指示操作是否成功，按协议约定，非零值表示发生了错误。
 
 #### Usage Patterns
 
-- Called during serialization of `OpenAI` API requests
-- Used to convert a `ResponseFormat` into a JSON representation nested within a larger request object
-- Likely invoked from higher-level serialization routines such as `serialize_message` or `validate_request`
+- Called during serialization of an `OpenAI` API request to construct the `response_format` field
+- Used by higher-level serialization functions that assemble the full request JSON
 
 ### `clore::net::openai::protocol::detail::serialize_tool_choice`
 
-Declaration: `network/openai.cppm:167`
+Declaration: `src/network/openai.cppm:177`
 
-Definition: `network/openai.cppm:167`
+Definition: `src/network/openai.cppm:177`
 
 Implementation: [`Module openai`](../../../../../../modules/openai/index.md)
 
-此函数序列化工具选择配置，将其写入传入的 `json::Object` 引用中。调用方需提供一个可修改的 JSON 对象和一个表示工具选择的整数常量引用。函数负责将该整数代表的工具选择信息正确编码到目标 JSON 对象内，并返回一个整数值表示操作结果（通常零值表示成功，非零表示错误）。
-
-调用方需确保提供的 JSON 对象处于有效状态且可被修改，同时传入的整数参数应代表一个有效的工具选择标识。该函数不涉及网络通信或高层业务逻辑，仅专注于协议层面的序列化契约。
+该函数负责将工具选择参数序列化到给定的 JSON 对象中。调用者应传入一个可修改的 `json::Object &` 作为输出目标，以及一个 `const int &` 标识具体的工具选择选项（例如某个枚举值或索引）。函数会在目标对象中写入表示工具选择的字段，并返回一个整数状态码，通常为 0 表示成功，非零值表示序列化过程中发生的错误。调用者必须确保传入的对象处于可写入状态，且提供的整数参数在预定义范围内；否则行为未定义。
 
 #### Usage Patterns
 
-- 用于将 `ToolChoice` 配置序列化为 JSON 对象，作为 `OpenAI` API 请求的一部分
-- 在序列化对话请求时被调用，类似 `serialize_response_format` 或 `serialize_tool_definition`
+- 在 `OpenAI` 协议序列化过程中调用，用于将工具选择设置写入 JSON 请求体
 
 ### `clore::net::openai::protocol::detail::serialize_tool_definition`
 
-Declaration: `network/openai.cppm:248`
+Declaration: `src/network/openai.cppm:258`
 
-Definition: `network/openai.cppm:248`
+Definition: `src/network/openai.cppm:258`
 
 Implementation: [`Module openai`](../../../../../../modules/openai/index.md)
 
-函数 `clore::net::openai::protocol::detail::serialize_tool_definition` 负责将一个 `OpenAI` 工具定义序列化并追加到指定的 `json::Array` 中。调用方需提供目标数组的引用以及一个 `const int` 类型的索引（或标识符），该索引用于定位待序列化的工具定义。函数返回一个 `int`，通常表示操作结果（例如成功时为 0，失败时为错误码）。
-
-此函数作为协议细节的一部分，专由 `clore::net::openai::protocol` 命名空间内部的序列化流程调用，不应对用户代码直接暴露其内部约定。调用方应确保所传入的索引值有效，且数组引用已正确初始化；函数本身不会负责数组的创建或调整大小。
+调用 `clore::net::openai::protocol::detail::serialize_tool_definition` 会将一个由整型标识符指定的工具定义序列化并追加到目标 `json::Array` 中。第一个参数是待填充的输出数组，第二个参数是工具定义的唯一标识。返回值表示序列化结果，通常为成功写入的条目数量或指示失败的错误码。调用者需确保提供的 `json::Array` 已正确初始化，并且传入的整型参数对应一个有效的工具定义。
 
 #### Usage Patterns
 
-- 用于构造 `OpenAI` 工具定义请求
-- 被更高层序列化函数调用
-- 在构建工具列表时逐个处理工具定义
+- Called during request serialization in `OpenAI` protocol to construct the tools array.
+- Used to build the list of tool definitions for function calling in chat completions.
 
 ### `clore::net::openai::protocol::detail::validate_request`
 
-Declaration: `network/openai.cppm:23`
+Declaration: `src/network/openai.cppm:33`
 
-Definition: `network/openai.cppm:23`
+Definition: `src/network/openai.cppm:33`
 
 Implementation: [`Module openai`](../../../../../../modules/openai/index.md)
 
-该函数验证传入的请求参数，并返回一个整型状态码。成功验证时返回零，非零值指示某种验证失败。调用者应在发起网络请求之前调用 `clore::net::openai::protocol::detail::validate_request`，以确保请求结构合法；若返回值非零，调用者应停止发送请求并处理错误。该函数仅检查请求的语法或约束，不修改参数本身。
+函数 `clore::net::openai::protocol::detail::validate_request` 负责验证给定的请求是否有效。它接受一个 `const int &` 参数（请求标识），并返回一个 `int` 值指示验证是否通过。调用者应在使用请求之前调用该函数，并检查返回值；如果返回非零，则请求不合法，不应继续用于后续序列化或网络操作。
 
 #### Usage Patterns
 
-- Called internally before sending a request to the `OpenAI` API to ensure the request is well-formed.
-- Used as a precondition check for other protocol serialization functions.
+- 在构造或发送请求前用于验证 `CompletionRequest` 对象的有效性
 
 ## Related Pages
 

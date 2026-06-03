@@ -1,5 +1,21 @@
 module;
 
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
+
 #include "kota/async/async.h"
 #include "kota/codec/json/json.h"
 
@@ -8,8 +24,6 @@ module;
 export module agent;
 
 export import :tools;
-
-import std;
 import config;
 import extract;
 import generate;

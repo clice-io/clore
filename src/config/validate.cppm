@@ -1,6 +1,12 @@
+module;
+
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <string>
+
 export module config:validate;
 
-import std;
 import :schema;
 
 export namespace clore::config {

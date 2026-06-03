@@ -1,6 +1,6 @@
 ---
 title: 'clore::net::icontains'
-description: 'The function clore::net::icontains performs a case‑insensitive substring search using a brute‑force sliding‑window algorithm. It first rejects empty or oversized needles with an early return when needle.size() exceeds haystack.size(). The outer loop iterates over every possible starting offset i in haystack, up to haystack.size() - needle.size(). For each offset, an inner loop compares the needle character by character; both characters are lowercased via std::tolower with an explicit cast to unsigned char to avoid implementation‑defined behavior on negative char values. If all positions match, the function returns true; otherwise it continues searching. If no offset produces a full match, it returns false. The implementation relies solely on the standard library (function template std::tolower, class std::string_view); no locale or external data structures are involved, and the algorithm completes in O(n·m) time where n is the length of haystack and m the length of needle.'
+description: 'The function clore::net::icontains performs a case‑insensitive substring search over two std::string_view parameters haystack and needle. The algorithm first short‑circuits when needle.size() exceeds haystack.size(), immediately returning false. Otherwise, it slides a window of size needle.size() across haystack using a pair of nested loops: the outer loop advances a starting index i up to haystack.size() - needle.size(), and the inner loop compares each corresponding character after normalizing both to lowercase via std::tolower with a cast to unsigned char to avoid undefined behavior for negative char values. If all characters in a window match, the function returns true; if no window completes, it returns false.'
 layout: doc
 template: doc
 ---
@@ -9,9 +9,9 @@ template: doc
 
 Owner: [Module protocol](../index.md)
 
-Declaration: `network/protocol.cppm:768`
+Declaration: `src/network/protocol.cppm:780`
 
-Definition: `network/protocol.cppm:768`
+Definition: `src/network/protocol.cppm:780`
 
 Declaration: [`Namespace clore::net`](../../../namespaces/clore/net/index.md)
 
@@ -39,7 +39,9 @@ auto icontains(std::string_view haystack, std::string_view needle) -> bool {
 }
 ```
 
-The function `clore::net::icontains` performs a case‑insensitive substring search using a brute‑force sliding‑window algorithm. It first rejects empty or oversized needles with an early return when `needle.size()` exceeds `haystack.size()`. The outer loop iterates over every possible starting offset `i` in `haystack`, up to `haystack.size() - needle.size()`. For each offset, an inner loop compares the `needle` character by character; both characters are lowercased via `std::tolower` with an explicit cast to `unsigned char` to avoid implementation‑defined behavior on negative char values. If all positions match, the function returns `true`; otherwise it continues searching. If no offset produces a full match, it returns `false`. The implementation relies solely on the standard library (function template `std::tolower`, class `std::string_view`); no locale or external data structures are involved, and the algorithm completes in `O(n·m)` time where `n` is the length of `haystack` and `m` the length of `needle`.
+The function `clore::net::icontains` performs a case‑insensitive substring search over two `std::string_view` parameters `haystack` and `needle`. The algorithm first short‑circuits when `needle.size()` exceeds `haystack.size()`, immediately returning `false`. Otherwise, it slides a window of size `needle.size()` across `haystack` using a pair of nested loops: the outer loop advances a starting index `i` up to `haystack.size() - needle.size()`, and the inner loop compares each corresponding character after normalizing both to lowercase via `std::tolower` with a cast to `unsigned char` to avoid undefined behavior for negative `char` values. If all characters in a window match, the function returns `true`; if no window completes, it returns `false`.
+
+The implementation relies only on the C++ standard library (`std::tolower`, `std::size_t`, `std::string_view`) and contains no project‑specific dependencies. Its control flow is linear: an early size guard, a forward scan with a character‑by‑character equality check, and an immediate early exit on success.
 
 ## Side Effects
 
@@ -47,13 +49,12 @@ No observable side effects are evident from the extracted code.
 
 ## Reads From
 
-- parameter `haystack` contents and size
-- parameter `needle` contents and size
+- `haystack`
+- `needle`
 
 ## Usage Patterns
 
-- invoked by `clore::net::is_feature_rejection_error` to detect feature-rejection keywords inside error message text
-- general case-insensitive substring matching within the `clore::net` module
+- Used in `is_feature_rejection_error` to perform case-insensitive substring checks on error messages.
 
 ## Called By
 
