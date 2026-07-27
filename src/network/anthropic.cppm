@@ -27,6 +27,12 @@ namespace clore::net::anthropic::protocol::detail {
 namespace json = clore::json;
 
 constexpr std::uint32_t kDefaultMaxTokens = 2048;
+constexpr std::string_view kEndTurn = "end_turn";
+constexpr std::string_view kStopSequence = "stop_sequence";
+constexpr std::string_view kToolUse = "tool_use";
+constexpr std::string_view kRefusal = "refusal";
+constexpr std::string_view kMaxTokens = "max_tokens";
+constexpr std::string_view kContextWindowExceeded = "model_context_window_exceeded";
 
 auto append_text_with_gap(std::string& target, std::string_view text) -> void {
     if(text.empty()) {
@@ -513,8 +519,14 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
         stop_reason = *parsed_stop_reason;
     }
 
-    if(stop_reason == "max_tokens") {
-        return std::unexpected(LLMError("LLM response was truncated (stop_reason=max_tokens)"));
+    if(stop_reason == detail::kMaxTokens || stop_reason == detail::kContextWindowExceeded) {
+        return std::unexpected(
+            LLMError(std::format("LLM response was truncated (stop_reason={})", stop_reason)));
+    }
+    if(stop_reason != detail::kEndTurn && stop_reason != detail::kStopSequence &&
+       stop_reason != detail::kToolUse && stop_reason != detail::kRefusal) {
+        return std::unexpected(
+            LLMError(std::format("unsupported Anthropic stop_reason '{}'", stop_reason)));
     }
 
     auto content_value = root_view.get("content");
@@ -554,7 +566,7 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
             if(!parsed_text.has_value()) {
                 return std::unexpected(std::move(parsed_text.error()));
             }
-            if(stop_reason == "refusal") {
+            if(stop_reason == detail::kRefusal) {
                 refusal += *parsed_text;
             } else {
                 text += *parsed_text;
@@ -616,6 +628,18 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
     }
     if(!refusal.empty()) {
         output.refusal = std::move(refusal);
+    }
+
+    if(stop_reason == detail::kToolUse && output.tool_calls.empty()) {
+        return std::unexpected(
+            LLMError("Anthropic response stop_reason=tool_use but no tool calls were returned"));
+    }
+    if(stop_reason == detail::kRefusal && !output.refusal.has_value()) {
+        return std::unexpected(
+            LLMError("Anthropic response stop_reason=refusal but no refusal was returned"));
+    }
+    if(!output.text.has_value() && !output.refusal.has_value() && output.tool_calls.empty()) {
+        return std::unexpected(LLMError("Anthropic response has no text, refusal, or tool calls"));
     }
 
     return CompletionResponse{

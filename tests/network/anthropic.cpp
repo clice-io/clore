@@ -62,6 +62,31 @@ TEST_CASE(parse_response_supports_tool_use_blocks) {
     EXPECT_EQ(response->message.tool_calls[0].arguments_json, R"({"query":"llm","limit":1})");
 }
 
+TEST_CASE(parse_response_rejects_unknown_stop_reason) {
+    auto response = anthropic::protocol::parse_response(
+        R"({"id":"msg_pause","model":"claude-sonnet-4-5","stop_reason":"pause_turn","content":[{"type":"text","text":"partial"}]})");
+
+    EXPECT_FALSE(response.has_value());
+    EXPECT_NE(response.error().message.find("unsupported Anthropic stop_reason"),
+              std::string::npos);
+}
+
+TEST_CASE(parse_response_requires_payload_for_tool_use) {
+    auto response = anthropic::protocol::parse_response(
+        R"({"id":"msg_tool","model":"claude-sonnet-4-5","stop_reason":"tool_use","content":[]})");
+
+    EXPECT_FALSE(response.has_value());
+    EXPECT_NE(response.error().message.find("no tool calls"), std::string::npos);
+}
+
+TEST_CASE(parse_response_rejects_empty_terminal_response) {
+    auto response = anthropic::protocol::parse_response(
+        R"({"id":"msg_empty","model":"claude-sonnet-4-5","stop_reason":"end_turn","content":[]})");
+
+    EXPECT_FALSE(response.has_value());
+    EXPECT_NE(response.error().message.find("no text, refusal, or tool calls"), std::string::npos);
+}
+
 TEST_CASE(parse_response_truncates_http_error_body_when_json_is_invalid) {
     std::string oversized_body(260, 'x');
     auto excerpt = clore::net::detail::excerpt_for_error(oversized_body);

@@ -143,8 +143,6 @@ auto make_capability_probe_key(std::string_view provider,
 auto sanitize_request_for_capabilities(CompletionRequest request, const ProbedCapabilities& caps)
     -> CompletionRequest;
 
-auto is_feature_rejection_error(std::string_view error_message) -> bool;
-
 auto parse_rejected_feature_from_error(std::string_view error_message)
     -> std::optional<std::string>;
 
@@ -774,62 +772,51 @@ auto sanitize_request_for_capabilities(CompletionRequest request, const ProbedCa
     return request;
 }
 
-auto icontains(std::string_view haystack, std::string_view needle) -> bool {
-    if(needle.size() > haystack.size()) {
-        return false;
-    }
-    for(std::size_t i = 0; i <= haystack.size() - needle.size(); ++i) {
-        bool match = true;
-        for(std::size_t j = 0; j < needle.size(); ++j) {
-            if(std::tolower(static_cast<unsigned char>(haystack[i + j])) !=
-               std::tolower(static_cast<unsigned char>(needle[j]))) {
-                match = false;
-                break;
-            }
-        }
-        if(match) {
-            return true;
-        }
-    }
-    return false;
-}
-
-auto is_feature_rejection_error(std::string_view error_message) -> bool {
-    constexpr static std::string_view patterns[] = {
-        "unsupported parameter",
-        "unknown field",
-        "unexpected field",
-        "invalid field",
-        "does not support",
-        "not supported",
-        "unrecognized field",
-        "invalid parameter",
-    };
-    for(auto pattern: patterns) {
-        if(icontains(error_message, pattern)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 auto parse_rejected_feature_from_error(std::string_view error_message)
     -> std::optional<std::string> {
-    constexpr static std::pair<std::string_view, std::string_view> field_patterns[] = {
+    auto parsed = clore::json::parse<clore::json::Object>(error_message);
+    if(!parsed.has_value()) {
+        return std::nullopt;
+    }
+
+    constexpr static std::pair<std::string_view, std::string_view> fields[] = {
         {"response_format",     "response_format"    },
         {"json_schema",         "response_format"    },
-        {"schema",              "response_format"    },
         {"tool_choice",         "tool_choice"        },
         {"parallel_tool_calls", "parallel_tool_calls"},
         {"tools",               "tools"              },
         {"functions",           "tools"              },
-        {"temperature",         "temperature"        },
-        {"max_tokens",          "max_tokens"         },
     };
 
-    for(const auto& [keyword, field]: field_patterns) {
-        if(icontains(error_message, keyword)) {
-            return std::string(field);
+    auto match_field =
+        [](const clore::net::detail::ObjectView& object) -> std::optional<std::string> {
+        constexpr static std::string_view field_keys[] = {"param", "parameter", "field"};
+        for(auto field_key: field_keys) {
+            auto value = object.get(field_key);
+            if(!value.has_value()) {
+                continue;
+            }
+            auto field_name = value->get_string();
+            if(!field_name.has_value()) {
+                continue;
+            }
+            for(const auto& [field, feature]: fields) {
+                if(*field_name == field) {
+                    return std::string(feature);
+                }
+            }
+        }
+        return std::nullopt;
+    };
+
+    auto root = clore::net::detail::ObjectView{.value = &*parsed};
+    if(auto feature = match_field(root); feature.has_value()) {
+        return feature;
+    }
+    if(auto error = root.get("error"); error.has_value()) {
+        auto error_object = clore::net::detail::expect_object(*error, "error");
+        if(error_object.has_value()) {
+            return match_field(*error_object);
         }
     }
     return std::nullopt;
