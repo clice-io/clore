@@ -95,30 +95,28 @@ auto call_completion_async(clore::net::CompletionRequest request, kota::event_lo
         auto& raw_response = *raw_response_result;
 
         if(raw_response.http_status >= 400 && raw_response.http_status < 500) {
-            if(is_feature_rejection_error(raw_response.body)) {
-                auto rejected = parse_rejected_feature_from_error(raw_response.body);
-                if(rejected.has_value() && probe_attempt < 3) {
-                    bool changed = false;
-                    if(*rejected == "response_format") {
-                        caps.supports_json_schema.store(false, std::memory_order_relaxed);
-                        changed = true;
-                    } else if(*rejected == "tool_choice") {
-                        caps.supports_tool_choice.store(false, std::memory_order_relaxed);
-                        changed = true;
-                    } else if(*rejected == "parallel_tool_calls") {
-                        caps.supports_parallel_tool_calls.store(false, std::memory_order_relaxed);
-                        changed = true;
-                    } else if(*rejected == "tools") {
-                        caps.supports_tools.store(false, std::memory_order_relaxed);
-                        changed = true;
-                    }
-                    if(changed) {
-                        logging::warn("Provider '{}' rejected '{}', retrying with reduced features",
-                                      Protocol::provider_name(),
-                                      *rejected);
-                        request = std::move(sanitized);
-                        continue;
-                    }
+            auto rejected = parse_rejected_feature_from_error(raw_response.body);
+            if(rejected.has_value() && probe_attempt < 3) {
+                bool changed = false;
+                if(*rejected == "response_format") {
+                    caps.supports_json_schema.store(false, std::memory_order_relaxed);
+                    changed = true;
+                } else if(*rejected == "tool_choice") {
+                    caps.supports_tool_choice.store(false, std::memory_order_relaxed);
+                    changed = true;
+                } else if(*rejected == "parallel_tool_calls") {
+                    caps.supports_parallel_tool_calls.store(false, std::memory_order_relaxed);
+                    changed = true;
+                } else if(*rejected == "tools") {
+                    caps.supports_tools.store(false, std::memory_order_relaxed);
+                    changed = true;
+                }
+                if(changed) {
+                    logging::warn("Provider '{}' rejected '{}', retrying with reduced features",
+                                  Protocol::provider_name(),
+                                  *rejected);
+                    request = std::move(sanitized);
+                    continue;
                 }
             }
         }

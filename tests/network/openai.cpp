@@ -461,6 +461,17 @@ TEST_CASE(capability_probe_key_includes_base_url_and_model) {
     EXPECT_NE(first_key, second_key);
 }
 
+TEST_CASE(capability_rejection_requires_structured_parameter) {
+    EXPECT_FALSE(
+        parse_rejected_feature_from_error(
+            R"({"error":{"message":"unsupported schema: additionalProperties must be false"}})")
+            .has_value());
+    EXPECT_EQ(parse_rejected_feature_from_error(
+                  R"({"error":{"message":"unsupported parameter","param":"response_format"}})")
+                  .value_or(""),
+              "response_format");
+}
+
 TEST_CASE(parse_response_supports_utf8_content) {
     auto result = extract_text_response(
         R"({"id":"resp_utf8","model":"deepseek-chat","choices":[{"finish_reason":"stop","message":{"content":"中文摘要：负责生成文档。"}}]})");
