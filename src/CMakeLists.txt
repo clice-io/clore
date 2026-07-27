@@ -17,21 +17,14 @@ target_sources(clore-core
     ${CLORE_MODULE_SOURCES}
 )
 target_compile_features(clore-core PUBLIC cxx_std_23)
-if(NOT TARGET simdjson)
-    message(FATAL_ERROR "simdjson target is required before configuring clore-core")
-endif()
-get_target_property(json_headers simdjson INTERFACE_INCLUDE_DIRECTORIES)
-if(NOT json_headers)
-    message(FATAL_ERROR "simdjson target does not expose include directories")
-endif()
 target_include_directories(clore-core
     PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
-    ${json_headers}
     PRIVATE
     "${LLVM_INCLUDE_DIRS}"
 )
 target_link_libraries(clore-core PUBLIC
+    simdjson::simdjson
     clangTooling
     clangFrontend
     clangSerialization

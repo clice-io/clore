@@ -21,12 +21,12 @@ module;
 #include <vector>
 
 #include "kota/async/async.h"
-#include "kota/codec/json/json.h"
 
 #include "llvm/Support/xxhash.h"
 
 export module generate:cache;
 
+import http;
 import protocol;
 import support;
 
@@ -132,7 +132,7 @@ auto response_format_fingerprint(const std::optional<clore::net::ResponseFormat>
         return std::format("{}:json_object", response_format->name);
     }
 
-    auto schema_json = kota::codec::json::to_string(*response_format->schema);
+    auto schema_json = clore::json::to_string(*response_format->schema);
     if(!schema_json.has_value()) {
         return std::unexpected(CacheError{
             .message = std::format("failed to serialize response format schema '{}': {}",
@@ -289,7 +289,7 @@ auto load_cache_index(std::string_view workspace_root) -> std::expected<CacheInd
                 continue;
             }
 
-            auto parsed = kota::codec::json::parse<kota::codec::json::Object>(line);
+            auto parsed = clore::json::parse<clore::json::Object>(line);
             if(!parsed.has_value()) {
                 continue;
             }

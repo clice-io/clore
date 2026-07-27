@@ -72,8 +72,7 @@ auto call_completion_async(clore::net::CompletionRequest request, kota::event_lo
             co_await kota::fail(std::move(environment.error()));
         }
 
-        auto& caps =
-            get_probed_capabilities(Protocol::capability_probe_key(*environment, request));
+        auto& caps = get_probed_capabilities(Protocol::capability_probe_key(*environment, request));
         auto sanitized = sanitize_request_for_capabilities(std::move(request), caps);
         const bool tools_stripped = needs_tools && sanitized.tools.empty();
 

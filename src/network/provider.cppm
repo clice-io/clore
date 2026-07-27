@@ -9,7 +9,6 @@ module;
 #include <variant>
 
 #include "kota/async/async.h"
-#include "kota/codec/json/json.h"
 
 export module provider;
 import http;
@@ -32,16 +31,16 @@ auto validate_completion_request(const CompletionRequest& request,
                                  bool validate_tool_schemas) -> std::expected<void, LLMError>;
 
 auto parse_json_object(std::string_view raw, std::string_view context)
-    -> std::expected<kota::codec::json::Object, LLMError>;
+    -> std::expected<clore::json::Object, LLMError>;
 
-auto serialize_tool_arguments(kota::codec::json::Value arguments, std::string_view context)
-    -> std::expected<std::pair<std::string, kota::codec::json::Value>, LLMError>;
+auto serialize_tool_arguments(clore::json::Value arguments, std::string_view context)
+    -> std::expected<std::pair<std::string, clore::json::Value>, LLMError>;
 
 }  // namespace clore::net::detail
 
 namespace clore::net::detail {
 
-namespace json = kota::codec::json;
+namespace json = clore::json;
 
 auto read_credentials(CredentialEnv env) -> std::expected<EnvironmentConfig, LLMError> {
     return read_environment(env.base_url_env, env.api_key_env);

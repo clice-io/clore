@@ -14,7 +14,6 @@ find_package(Clang REQUIRED CONFIG)
 
 set(KOTA_ENABLE_ASYNC ON)
 set(KOTA_ENABLE_HTTP ON)
-set(KOTA_ENABLE_OPTION ON)
 set(KOTA_ENABLE_DECO ON)
 set(KOTA_ENABLE_ZEST ON)
 set(KOTA_ENABLE_CCACHE OFF)
@@ -72,7 +71,7 @@ endif()
 FetchContent_Declare(
     kotatsu
     GIT_REPOSITORY https://github.com/clice-io/kotatsu.git
-    GIT_TAG        229816fe32f690e81e8345c0ce3bb0c48753a3ae
+    GIT_TAG        c516e3ae0ca3c7d7fb35fdcfdc7c6a111adef764
 )
 FetchContent_MakeAvailable(kotatsu)
 

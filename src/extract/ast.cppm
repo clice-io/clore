@@ -2,6 +2,7 @@ module;
 
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -21,8 +22,6 @@ module;
 #include <utility>
 #include <variant>
 #include <vector>
-
-#include <climits>
 
 #include "llvm/Support/Error.h"
 #include "llvm/Support/xxhash.h"

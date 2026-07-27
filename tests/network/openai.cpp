@@ -454,8 +454,7 @@ TEST_CASE(parse_response_api_error) {
 
 TEST_CASE(capability_probe_key_includes_base_url_and_model) {
     auto first_key = make_capability_probe_key("LLM", "https://example.test/v1", "gpt-4.1");
-    auto second_key =
-        make_capability_probe_key("LLM", "https://example.test/v1", "gpt-4.1-mini");
+    auto second_key = make_capability_probe_key("LLM", "https://example.test/v1", "gpt-4.1-mini");
 
     EXPECT_EQ(first_key, "LLM|https://example.test/v1|gpt-4.1");
     EXPECT_EQ(second_key, "LLM|https://example.test/v1|gpt-4.1-mini");

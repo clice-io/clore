@@ -10,12 +10,12 @@ module;
 #include <format>
 #include <functional>
 #include <memory>
-#include <system_error>
 #include <mutex>
 #include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -837,52 +837,48 @@ auto extract_project_async(const config::TaskConfig& config, kota::event_loop& l
                 co_return cache_it->second;
             }
 
-            auto resolved = co_await run_worker_task_async<fs::path>(
-                                [path = std::move(path),
-                                 entry_directory = std::string(entry.directory),
-                                 filter_root = std::filesystem::path(filter_root)]()
-                                    -> std::expected<fs::path, ExtractError> {
-                                    auto resolve =
-                                        [](const fs::path& p) -> std::expected<fs::path, ExtractError> {
-                                        std::error_code ec;
-                                        auto absolute = fs::absolute(p, ec);
-                                        if(ec) {
-                                            return unexpected_extract_value<fs::path>(std::format(
-                                                "failed to resolve absolute path: {}",
-                                                p.string()));
-                                        }
-                                        auto canonical =
-                                            fs::weakly_canonical(absolute.lexically_normal(), ec);
-                                        if(!ec) {
-                                            return canonical;
-                                        }
-                                        return absolute.lexically_normal();
-                                    };
+            auto resolved =
+                co_await run_worker_task_async<fs::path>(
+                    [path = std::move(path),
+                     entry_directory = std::string(entry.directory),
+                     filter_root = std::filesystem::path(
+                         filter_root)]() -> std::expected<fs::path, ExtractError> {
+                        auto resolve =
+                            [](const fs::path& p) -> std::expected<fs::path, ExtractError> {
+                            std::error_code ec;
+                            auto absolute = fs::absolute(p, ec);
+                            if(ec) {
+                                return unexpected_extract_value<fs::path>(
+                                    std::format("failed to resolve absolute path: {}", p.string()));
+                            }
+                            auto canonical = fs::weakly_canonical(absolute.lexically_normal(), ec);
+                            if(!ec) {
+                                return canonical;
+                            }
+                            return absolute.lexically_normal();
+                        };
 
-                                    auto candidate = fs::path(path);
-                                    if(!candidate.is_relative()) {
-                                        return resolve(candidate);
-                                    }
+                        auto candidate = fs::path(path);
+                        if(!candidate.is_relative()) {
+                            return resolve(candidate);
+                        }
 
-                                    auto workspace_candidate =
-                                        (filter_root / candidate).lexically_normal();
-                                    std::error_code exists_error;
-                                    if(fs::exists(workspace_candidate, exists_error) &&
-                                       !exists_error) {
-                                        return resolve(workspace_candidate);
-                                    }
+                        auto workspace_candidate = (filter_root / candidate).lexically_normal();
+                        std::error_code exists_error;
+                        if(fs::exists(workspace_candidate, exists_error) && !exists_error) {
+                            return resolve(workspace_candidate);
+                        }
 
-                                    auto fallback =
-                                        resolve_path_under_directory(path, entry_directory);
-                                    if(!fallback.has_value()) {
-                                        return unexpected_extract_value<fs::path>(
-                                            std::move(fallback.error().message));
-                                    }
-                                    return resolve(*fallback);
-                                },
-                                std::format("symbol location path resolution for {}", path),
-                                loop)
-                                .or_fail();
+                        auto fallback = resolve_path_under_directory(path, entry_directory);
+                        if(!fallback.has_value()) {
+                            return unexpected_extract_value<fs::path>(
+                                std::move(fallback.error().message));
+                        }
+                        return resolve(*fallback);
+                    },
+                    std::format("symbol location path resolution for {}", path),
+                    loop)
+                    .or_fail();
 
             resolved_path_cache[resolved_cache_key] = resolved;
             co_return resolved;
@@ -923,9 +919,9 @@ auto extract_project_async(const config::TaskConfig& config, kota::event_loop& l
             normalized_sym.declaration_location.file = decl_file.generic_string();
             if(normalized_sym.definition_location.has_value() &&
                !normalized_sym.definition_location->file.empty()) {
-                auto definition_path = co_await resolve_symbol_location_path(
-                                           normalized_sym.definition_location->file)
-                                           .or_fail();
+                auto definition_path =
+                    co_await resolve_symbol_location_path(normalized_sym.definition_location->file)
+                        .or_fail();
                 normalized_sym.definition_location->file =
                     definition_path.lexically_normal().generic_string();
             }
@@ -1002,22 +998,23 @@ auto extract_project_async(const config::TaskConfig& config, kota::event_loop& l
     {
         auto model_shared = std::make_shared<ProjectModel>(std::move(model));
         auto snippet_result = co_await kota::queue(
-            [model_shared]() mutable -> bool {
-                for(auto& [symbol_id, symbol]: model_shared->symbols) {
-                    static_cast<void>(symbol_id);
-                    resolve_source_snippet(symbol);
-                }
-                return true;
-            },
-            loop).catch_cancel();
+                                  [model_shared]() mutable -> bool {
+                                      for(auto& [symbol_id, symbol]: model_shared->symbols) {
+                                          static_cast<void>(symbol_id);
+                                          resolve_source_snippet(symbol);
+                                      }
+                                      return true;
+                                  },
+                                  loop)
+                                  .catch_cancel();
 
         if(snippet_result.is_cancelled()) {
             co_await kota::fail(ExtractError{.message = "source snippet resolution cancelled"});
         }
         if(snippet_result.has_error()) {
-            co_await kota::fail(ExtractError{
-                .message = std::format("source snippet resolution failed: {}",
-                                       snippet_result.error().message())});
+            co_await kota::fail(
+                ExtractError{.message = std::format("source snippet resolution failed: {}",
+                                                    snippet_result.error().message())});
         }
 
         model = std::move(*model_shared);

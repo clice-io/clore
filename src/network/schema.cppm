@@ -12,7 +12,7 @@ module;
 #include <utility>
 #include <vector>
 
-#include "kota/codec/json/json.h"
+#include "kota/meta/annotation.h"
 #include "kota/meta/attrs.h"
 #include "kota/meta/name.h"
 #include "kota/meta/struct.h"
@@ -25,7 +25,7 @@ import support;
 
 namespace clore::net::openai::schema::detail {
 
-namespace json = kota::codec::json;
+namespace json = clore::json;
 namespace meta = kota::meta;
 namespace meta_attrs = kota::meta::attrs;
 
@@ -507,9 +507,10 @@ auto validate_openai_schema(const json::Object& object, std::string_view path, b
             return std::unexpected(std::move(defs.error()));
         }
         for(auto entry: *defs) {
-            auto status = validate_openai_schema_value(entry.second,
-                                                       std::format("{}.$defs.{}", path, entry.first),
-                                                       false);
+            auto status =
+                validate_openai_schema_value(entry.second,
+                                             std::format("{}.$defs.{}", path, entry.first),
+                                             false);
             if(!status.has_value()) {
                 return std::unexpected(std::move(status.error()));
             }

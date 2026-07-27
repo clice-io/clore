@@ -198,7 +198,6 @@ auto add_symbol_analysis_detail_sections(std::vector<MarkdownNode>& nodes,
                                          const PagePlan& plan,
                                          const extract::SymbolInfo& sym,
                                          std::uint8_t level) -> void {
-
     auto make_list_node =
         [&](std::string heading,
             const std::vector<std::string>& items) -> std::optional<MarkdownNode> {

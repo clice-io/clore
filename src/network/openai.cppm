@@ -13,9 +13,6 @@ module;
 #include <variant>
 
 #include "kota/async/async.h"
-#include "kota/codec/json/json.h"
-#include "kota/http/http.h"
-
 export module openai;
 
 import http;
@@ -28,7 +25,7 @@ import support;
 // ── protocol serialization ──────────────────────────────────────────────
 namespace clore::net::openai::protocol::detail {
 
-namespace json = kota::codec::json;
+namespace json = clore::json;
 
 auto validate_request(const CompletionRequest& request) -> std::expected<void, LLMError> {
     return clore::net::detail::validate_completion_request(request, true, true);
@@ -531,7 +528,7 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
         root->insert("parallel_tool_calls", *request.parallel_tool_calls);
     }
 
-    auto encoded = kota::codec::json::to_string(*root);
+    auto encoded = clore::json::to_string(*root);
     if(!encoded.has_value()) {
         return std::unexpected(LLMError(
             std::format("failed to serialize request JSON: {}", encoded.error().to_string())));
@@ -540,7 +537,7 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
 }
 
 auto parse_response(std::string_view json_text) -> std::expected<CompletionResponse, LLMError> {
-    auto parsed = kota::codec::json::parse<kota::codec::json::Object>(json_text);
+    auto parsed = clore::json::parse<clore::json::Object>(json_text);
     if(!parsed.has_value()) {
         return std::unexpected(LLMError(
             std::format("failed to parse LLM response JSON: {}", parsed.error().to_string())));
@@ -713,16 +710,16 @@ struct Protocol {
     }
 
     static auto build_headers(const clore::net::detail::EnvironmentConfig& environment)
-        -> std::vector<kota::http::header> {
-        return std::vector<kota::http::header>{
-            kota::http::header{
-                               .name = "Content-Type",
-                               .value = "application/json; charset=utf-8",
-                               },
-            kota::http::header{
-                               .name = "Authorization",
-                               .value = std::format("Bearer {}", environment.api_key),
-                               },
+        -> std::vector<HttpHeader> {
+        return std::vector<HttpHeader>{
+            HttpHeader{
+                       .name = "Content-Type",
+                       .value = "application/json; charset=utf-8",
+                       },
+            HttpHeader{
+                       .name = "Authorization",
+                       .value = std::format("Bearer {}", environment.api_key),
+                       },
         };
     }
 

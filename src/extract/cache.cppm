@@ -17,8 +17,6 @@ module;
 #include <utility>
 #include <vector>
 
-#include "kota/codec/json/json.h"
-
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Process.h"
@@ -29,6 +27,7 @@ export module extract:cache;
 import :ast;
 import :compiler;
 import :scan;
+import http;
 import support;
 
 export namespace clore::extract::cache {
@@ -118,7 +117,7 @@ auto save_clice_cache(std::string_view workspace_root, const CliceCacheData& dat
 namespace clore::extract::cache {
 
 namespace fs = std::filesystem;
-namespace json = kota::codec::json;
+namespace json = clore::json;
 
 namespace {
 

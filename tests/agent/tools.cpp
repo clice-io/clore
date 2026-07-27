@@ -4,13 +4,13 @@ import config;
 import extract;
 import generate;
 import agent;
+import http;
 
 #include "generate/support.h"
-#include "kota/codec/json/json.h"
 
 namespace {
 
-namespace json = kota::codec::json;
+namespace json = clore::json;
 
 auto parse_json_value(std::string_view text) -> std::expected<json::Value, std::string> {
     auto parsed = json::parse<json::Value>(text);

@@ -17,7 +17,6 @@ module;
 #include <vector>
 
 #include "kota/async/async.h"
-#include "kota/codec/json/json.h"
 
 #include "llvm/Support/xxhash.h"
 
@@ -27,6 +26,7 @@ export import :tools;
 import config;
 import extract;
 import generate;
+import http;
 import network;
 import support;
 
@@ -55,7 +55,7 @@ auto run_agent_async(const config::TaskConfig& config,
 
 namespace clore::agent {
 
-namespace json = kota::codec::json;
+namespace json = clore::json;
 
 namespace {
 
@@ -200,7 +200,7 @@ auto serialize_completion_response(const clore::net::CompletionResponse& respons
         root->insert("c", std::move(*calls));
     }
 
-    auto encoded = kota::codec::json::to_string(*root);
+    auto encoded = clore::json::to_string(*root);
     if(!encoded.has_value()) {
         return std::unexpected(clore::net::LLMError(
             std::format("failed to encode agent cache response: {}", encoded.error().to_string())));
@@ -210,7 +210,7 @@ auto serialize_completion_response(const clore::net::CompletionResponse& respons
 
 auto deserialize_completion_response(std::string_view raw_json)
     -> std::expected<clore::net::CompletionResponse, clore::net::LLMError> {
-    auto parsed = kota::codec::json::parse<kota::codec::json::Object>(raw_json);
+    auto parsed = clore::json::parse<clore::json::Object>(raw_json);
     if(!parsed.has_value()) {
         return std::unexpected(clore::net::LLMError("failed to parse cached agent response"));
     }
@@ -262,7 +262,7 @@ auto deserialize_completion_response(std::string_view raw_json)
             }
             auto args_text = args_value->get_string();
             if(args_text.has_value()) {
-                auto parsed_args = kota::codec::json::parse<kota::codec::json::Value>(*args_text);
+                auto parsed_args = clore::json::parse<clore::json::Value>(*args_text);
                 if(!parsed_args.has_value()) {
                     return std::unexpected(
                         clore::net::LLMError("failed to parse tool_call.arguments"));
@@ -277,12 +277,12 @@ auto deserialize_completion_response(std::string_view raw_json)
                 continue;
             }
 
-            auto* raw_args = args_value->unwrap();
+            auto* raw_args = args_value->get_object();
             if(raw_args == nullptr) {
                 return std::unexpected(clore::net::LLMError("failed to copy tool_call.arguments"));
             }
-            auto args_copy = kota::codec::json::Value(*raw_args);
-            auto args_string = kota::codec::json::to_string(args_copy);
+            auto args_copy = clore::json::Value(*raw_args);
+            auto args_string = clore::json::to_string(args_copy);
             if(!args_string.has_value()) {
                 return std::unexpected(
                     clore::net::LLMError("failed to serialize tool_call.arguments"));

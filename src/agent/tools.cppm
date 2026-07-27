@@ -14,11 +14,11 @@ module;
 #include <utility>
 
 #include "kota/async/async.h"
-#include "kota/codec/json/json.h"
 
 export module agent:tools;
 import extract;
 import generate;
+import http;
 import protocol;
 import schema;
 import support;
@@ -29,14 +29,14 @@ struct ToolError {
     std::string message;
 };
 
-auto extract_string_arg(const kota::codec::json::Value& arguments, std::string_view field_name)
+auto extract_string_arg(const clore::json::Value& arguments, std::string_view field_name)
     -> std::expected<std::string, ToolError>;
 
 auto build_tool_definitions()
     -> std::expected<std::vector<clore::net::FunctionToolDefinition>, ToolError>;
 
 auto dispatch_tool_call(std::string_view tool_name,
-                        const kota::codec::json::Value& arguments,
+                        const clore::json::Value& arguments,
                         const extract::ProjectModel& model,
                         std::string_view project_root,
                         std::string_view output_root) -> std::expected<std::string, ToolError>;
@@ -45,7 +45,7 @@ auto dispatch_tool_call(std::string_view tool_name,
 
 namespace clore::agent {
 
-namespace json = kota::codec::json;
+namespace json = clore::json;
 
 namespace {
 

@@ -26,9 +26,25 @@ module;
 export module http;
 import support;
 
+export namespace clore::json {
+
+using Array = kota::codec::json::Array;
+using Cursor = kota::codec::json::Cursor;
+using Object = kota::codec::json::Object;
+using Value = kota::codec::json::Value;
+using error = kota::codec::json::error;
+
+using kota::codec::json::from_json;
+using kota::codec::json::parse;
+using kota::codec::json::to_json;
+using kota::codec::json::to_string;
+
+}  // namespace clore::json
+
 export namespace clore::net {
 
 namespace async = kota;
+using HttpHeader = kota::http::header;
 
 void initialize_llm_rate_limit(std::uint32_t rate_limit);
 
@@ -65,12 +81,12 @@ auto read_environment(std::string_view base_env, std::string_view key_env)
     -> std::expected<EnvironmentConfig, LLMError>;
 
 auto perform_http_request(const std::string& url,
-                          std::span<const kota::http::header> headers,
+                          std::span<const HttpHeader> headers,
                           std::string_view request_json)
     -> std::expected<RawHttpResponse, LLMError>;
 
 auto perform_http_request_async(std::string url,
-                                std::vector<kota::http::header> headers,
+                                std::vector<HttpHeader> headers,
                                 std::string request_json,
                                 kota::event_loop& loop) -> kota::task<RawHttpResponse, LLMError>;
 
@@ -118,20 +134,22 @@ constexpr long kTcpKeepIdleSec = 60;
 constexpr long kTcpKeepIntvlSec = 10;
 
 namespace {
-    auto get_thread_http_client() -> kota::http::client& {
-        thread_local kota::http::client client;
-        thread_local bool configured = false;
-        if(!configured) {
-            client.record_cookie(false);
-            configured = true;
-        }
-        return client;
-    }
 
-    auto current_llm_semaphore() -> std::shared_ptr<kota::semaphore> {
-        std::lock_guard lock(g_llm_semaphore_mutex);
-        return g_llm_semaphore;
+auto get_thread_http_client() -> kota::http::client& {
+    thread_local kota::http::client client;
+    thread_local bool configured = false;
+    if(!configured) {
+        client.record_cookie(false);
+        configured = true;
     }
+    return client;
+}
+
+auto current_llm_semaphore() -> std::shared_ptr<kota::semaphore> {
+    std::lock_guard lock(g_llm_semaphore_mutex);
+    return g_llm_semaphore;
+}
+
 }  // namespace
 
 auto read_required_env(std::string_view name) -> std::expected<std::string, LLMError> {
@@ -162,7 +180,7 @@ auto read_environment(std::string_view base_env, std::string_view key_env)
 }
 
 auto configure_request(kota::http::request& request,
-                       std::span<const kota::http::header> headers,
+                       std::span<const HttpHeader> headers,
                        std::string request_json) -> void {
     for(const auto& header: headers) {
         request.header(header.name, header.value);
@@ -179,11 +197,11 @@ auto configure_request(kota::http::request& request,
 }
 
 auto perform_http_request(const std::string& url,
-                          std::span<const kota::http::header> headers,
+                          std::span<const HttpHeader> headers,
                           std::string_view request_json)
     -> std::expected<RawHttpResponse, LLMError> {
     async::event_loop loop;
-    std::vector<kota::http::header> headers_vec;
+    std::vector<HttpHeader> headers_vec;
     headers_vec.reserve(headers.size());
     headers_vec.assign(headers.begin(), headers.end());
     auto operation = perform_http_request_async(std::string(url),
@@ -207,7 +225,7 @@ auto perform_http_request(const std::string& url,
 }
 
 auto perform_http_request_async(std::string url,
-                                std::vector<kota::http::header> headers,
+                                std::vector<HttpHeader> headers,
                                 std::string request_json,
                                 async::event_loop& loop) -> async::task<RawHttpResponse, LLMError> {
     auto semaphore = current_llm_semaphore();

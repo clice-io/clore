@@ -128,13 +128,12 @@ auto load_config_from_string(std::string_view toml_content)
 
     auto normalized_toml = clore::support::strip_utf8_bom(toml_content);
 
-    ::toml::table table;
-    try {
-        table = ::toml::parse(std::string{normalized_toml});
-    } catch(const ::toml::parse_error& err) {
-        return std::unexpected(
-            ConfigError{.message = std::format("TOML parse error: {}", err.description())});
+    auto parsed_table = ::toml::parse(std::string{normalized_toml});
+    if(!parsed_table) {
+        return std::unexpected(ConfigError{
+            .message = std::format("TOML parse error: {}", parsed_table.error().description())});
     }
+    auto table = std::move(parsed_table).table();
 
     if(auto unknown = reject_unknown_top_level_keys(table); !unknown.has_value()) {
         return std::unexpected(std::move(unknown.error()));

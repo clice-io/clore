@@ -1143,8 +1143,8 @@ public:
                             kota::event_loop& loop,
                             bool dry_run = false) :
         config_(config), model_(model), context_(context), model_version_(llm_model),
-        worker_count_(rate_limit), loop_(loop), scope_(loop), tracker_(context), renderer_(output_root, dry_run) {
-    }
+        worker_count_(rate_limit), loop_(loop), scope_(loop), tracker_(context),
+        renderer_(output_root, dry_run) {}
 
     auto run() -> kota::task<GenerationSummary, GenerateError> {
         {
@@ -1371,11 +1371,9 @@ private:
             logging::info("generation prompt #{}: {}", issued, owner);
         }
 
-        auto result = co_await request_llm_async(model_version_,
-                                                 config_.llm.system_prompt,
-                                                 request,
-                                                 loop_)
-                          .catch_cancel();
+        auto result =
+            co_await request_llm_async(model_version_, config_.llm.system_prompt, request, loop_)
+                .catch_cancel();
 
         auto completed = llm_requests_completed_.fetch_add(1, std::memory_order_relaxed) + 1;
         auto expected_after = expected_llm_requests_.load(std::memory_order_relaxed);
@@ -1391,8 +1389,8 @@ private:
             co_return clore::support::ensure_utf8(*result);
         }
 
-        auto message = result.is_cancelled() ? std::string("LLM request cancelled")
-                                             : result.error().message;
+        auto message =
+            result.is_cancelled() ? std::string("LLM request cancelled") : result.error().message;
         co_await kota::fail(GenerateError{
             .message = std::format("LLM request failed for '{}': {}", owner, message),
         });
@@ -1436,8 +1434,9 @@ private:
                 if(!result.is_cancelled() && !result.has_error()) {
                     reset_consecutive_failures("successful symbol analysis");
                 } else {
-                    auto reason = result.is_cancelled() ? std::string("symbol analysis was cancelled")
-                                                        : result.error().message;
+                    auto reason = result.is_cancelled()
+                                      ? std::string("symbol analysis was cancelled")
+                                      : result.error().message;
                     logging::warn("symbol analysis work '{}' failed: {}", item.target_key, reason);
                     auto limit_reached = record_consecutive_failure(item.target_key, reason);
                     if(limit_reached) {
@@ -1506,8 +1505,8 @@ private:
         auto* sym = extract::lookup_symbol(model_, work.symbol_id);
         if(sym == nullptr) {
             co_await kota::fail(GenerateError{
-                .message = std::format("symbol analysis target '{}' no longer resolves",
-                                       work.target_key),
+                .message =
+                    std::format("symbol analysis target '{}' no longer resolves", work.target_key),
             });
         }
 
@@ -1518,15 +1517,15 @@ private:
 
         auto prompt_result =
             co_await run_queued_worker_call(
-                         [this, sym, kind = work.kind]() {
-                             std::shared_lock lock(analyses_mutex_);
-                             return build_symbol_analysis_prompt(*sym,
-                                                                 kind,
-                                                                 model_,
-                                                                 config_,
-                                                                 prepared_analyses_.analyses);
-                         },
-                         std::format("analysis prompt build for '{}'", work.target_key))
+                [this, sym, kind = work.kind]() {
+                    std::shared_lock lock(analyses_mutex_);
+                    return build_symbol_analysis_prompt(*sym,
+                                                        kind,
+                                                        model_,
+                                                        config_,
+                                                        prepared_analyses_.analyses);
+                },
+                std::format("analysis prompt build for '{}'", work.target_key))
                 .or_fail();
         if(!prompt_result.has_value()) {
             co_await kota::fail(GenerateError{
@@ -1669,19 +1668,19 @@ private:
 
         auto evidence_result =
             co_await run_queued_worker_call(
-                         [this,
-                          plan_index,
-                          request = work.template_request,
-                          page_summaries_snapshot = std::move(page_summaries_snapshot)]() mutable {
-                             std::shared_lock lock(analyses_mutex_);
-                             return build_evidence_for_request(request,
-                                                               context_.plan_set.plans[plan_index],
-                                                               model_,
-                                                               config_,
-                                                               prepared_analyses_.analyses,
-                                                               page_summaries_snapshot);
-                         },
-                         std::format("page evidence build for '{}'", work.cache_identity))
+                [this,
+                 plan_index,
+                 request = work.template_request,
+                 page_summaries_snapshot = std::move(page_summaries_snapshot)]() mutable {
+                    std::shared_lock lock(analyses_mutex_);
+                    return build_evidence_for_request(request,
+                                                      context_.plan_set.plans[plan_index],
+                                                      model_,
+                                                      config_,
+                                                      prepared_analyses_.analyses,
+                                                      page_summaries_snapshot);
+                },
+                std::format("page evidence build for '{}'", work.cache_identity))
                 .or_fail();
 
         if(!evidence_result.has_value()) {
@@ -1823,16 +1822,16 @@ private:
 
         auto page_result =
             co_await run_queued_worker_call(
-                         [this, plan_index, &prompt_outputs]() {
-                             std::shared_lock lock(analyses_mutex_);
-                             return render_generated_pages(context_.plan_set.plans[plan_index],
-                                                           config_,
-                                                           model_,
-                                                           prompt_outputs,
-                                                           prepared_analyses_.analyses,
-                                                           context_.links);
-                         },
-                         std::format("page render for '{}'", plan.page_id))
+                [this, plan_index, &prompt_outputs]() {
+                    std::shared_lock lock(analyses_mutex_);
+                    return render_generated_pages(context_.plan_set.plans[plan_index],
+                                                  config_,
+                                                  model_,
+                                                  prompt_outputs,
+                                                  prepared_analyses_.analyses,
+                                                  context_.links);
+                },
+                std::format("page render for '{}'", plan.page_id))
                 .or_fail();
         if(!page_result.has_value()) {
             co_await kota::fail(std::move(page_result.error()));

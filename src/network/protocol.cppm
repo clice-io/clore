@@ -15,7 +15,6 @@ module;
 #include <vector>
 
 #include "kota/async/async.h"
-#include "kota/codec/json/json.h"
 
 export module protocol;
 
@@ -37,7 +36,7 @@ struct ToolCall {
     std::string id;
     std::string name;
     std::string arguments_json;
-    kota::codec::json::Value arguments;
+    clore::json::Value arguments;
 };
 
 struct AssistantMessage {
@@ -62,14 +61,14 @@ using Message = std::variant<SystemMessage,
 
 struct ResponseFormat {
     std::string name;
-    std::optional<kota::codec::json::Object> schema;
+    std::optional<clore::json::Object> schema;
     bool strict = true;
 };
 
 struct FunctionToolDefinition {
     std::string name;
     std::string description;
-    kota::codec::json::Object parameters;
+    clore::json::Object parameters;
     bool strict = true;
 };
 
@@ -166,9 +165,9 @@ auto make_markdown_fragment_request(std::string prompt) -> PromptRequest {
 export namespace clore::net::detail {
 
 struct ObjectView {
-    const kota::codec::json::Object* value = nullptr;
+    const clore::json::Object* value = nullptr;
 
-    auto get(std::string_view key) const -> std::optional<kota::codec::json::Cursor>;
+    auto get(std::string_view key) const -> std::optional<clore::json::Cursor>;
 
     auto begin() const noexcept {
         return value->begin();
@@ -178,17 +177,17 @@ struct ObjectView {
         return value->end();
     }
 
-    auto operator->() const noexcept -> const kota::codec::json::Object* {
+    auto operator->() const noexcept -> const clore::json::Object* {
         return value;
     }
 
-    auto operator*() const noexcept -> const kota::codec::json::Object& {
+    auto operator*() const noexcept -> const clore::json::Object& {
         return *value;
     }
 };
 
 struct ArrayView {
-    const kota::codec::json::Array* value = nullptr;
+    const clore::json::Array* value = nullptr;
 
     auto empty() const noexcept -> bool {
         return value->empty();
@@ -206,25 +205,25 @@ struct ArrayView {
         return value->end();
     }
 
-    auto operator[](std::size_t index) const -> const kota::codec::json::Value& {
+    auto operator[](std::size_t index) const -> const clore::json::Value& {
         return (*value)[index];
     }
 
-    auto operator->() const noexcept -> const kota::codec::json::Array* {
+    auto operator->() const noexcept -> const clore::json::Array* {
         return value;
     }
 
-    auto operator*() const noexcept -> const kota::codec::json::Array& {
+    auto operator*() const noexcept -> const clore::json::Array& {
         return *value;
     }
 };
 
-auto unexpected_json_error(std::string_view context, const kota::codec::json::error& err)
+auto unexpected_json_error(std::string_view context, const clore::json::error& err)
     -> std::unexpected<LLMError>;
 
 auto normalize_utf8(std::string_view text, std::string_view field_name) -> std::string;
 
-auto insert_string_field(kota::codec::json::Object& object,
+auto insert_string_field(clore::json::Object& object,
                          std::string_view key,
                          std::string_view value,
                          std::string_view context) -> std::expected<void, LLMError>;
@@ -237,57 +236,55 @@ auto excerpt_for_error(std::string_view body) -> std::string;
 template <typename T>
 auto run_task_sync(auto&& make_task) -> std::expected<T, LLMError>;
 
-auto make_empty_object(std::string_view context)
-    -> std::expected<kota::codec::json::Object, LLMError>;
+auto make_empty_object(std::string_view context) -> std::expected<clore::json::Object, LLMError>;
 
-auto make_empty_array(std::string_view context)
-    -> std::expected<kota::codec::json::Array, LLMError>;
+auto make_empty_array(std::string_view context) -> std::expected<clore::json::Array, LLMError>;
 
 template <typename T>
 auto parse_json_value(std::string_view raw, std::string_view context) -> std::expected<T, LLMError>;
 
 template <typename T>
-auto parse_json_value(const kota::codec::json::Value& value, std::string_view context)
+auto parse_json_value(const clore::json::Value& value, std::string_view context)
     -> std::expected<T, LLMError>;
 
-auto serialize_value_to_string(const kota::codec::json::Value& value, std::string_view context)
+auto serialize_value_to_string(const clore::json::Value& value, std::string_view context)
     -> std::expected<std::string, LLMError>;
 
-auto expect_object(const kota::codec::json::Value& value, std::string_view context)
+auto expect_object(const clore::json::Value& value, std::string_view context)
     -> std::expected<ObjectView, LLMError>;
 
-auto expect_object(kota::codec::json::Cursor value, std::string_view context)
+auto expect_object(clore::json::Cursor value, std::string_view context)
     -> std::expected<ObjectView, LLMError>;
 
-auto expect_array(const kota::codec::json::Value& value, std::string_view context)
+auto expect_array(const clore::json::Value& value, std::string_view context)
     -> std::expected<ArrayView, LLMError>;
 
-auto expect_array(kota::codec::json::Cursor value, std::string_view context)
+auto expect_array(clore::json::Cursor value, std::string_view context)
     -> std::expected<ArrayView, LLMError>;
 
-auto expect_string(const kota::codec::json::Value& value, std::string_view context)
+auto expect_string(const clore::json::Value& value, std::string_view context)
     -> std::expected<std::string_view, LLMError>;
 
-auto expect_string(kota::codec::json::Cursor value, std::string_view context)
+auto expect_string(clore::json::Cursor value, std::string_view context)
     -> std::expected<std::string_view, LLMError>;
 
-auto clone_object(const kota::codec::json::Object& source, std::string_view context)
-    -> std::expected<kota::codec::json::Object, LLMError>;
+auto clone_object(const clore::json::Object& source, std::string_view context)
+    -> std::expected<clore::json::Object, LLMError>;
 
 auto clone_object(ObjectView source, std::string_view context)
-    -> std::expected<kota::codec::json::Object, LLMError>;
+    -> std::expected<clore::json::Object, LLMError>;
 
 auto clone_array(ArrayView source, std::string_view context)
-    -> std::expected<kota::codec::json::Array, LLMError>;
+    -> std::expected<clore::json::Array, LLMError>;
 
-auto clone_value(const kota::codec::json::Value& source, std::string_view context)
-    -> std::expected<kota::codec::json::Value, LLMError>;
+auto clone_value(const clore::json::Value& source, std::string_view context)
+    -> std::expected<clore::json::Value, LLMError>;
 
 }  // namespace clore::net::detail
 
 namespace clore::net::detail {
 
-namespace json = kota::codec::json;
+namespace json = clore::json;
 
 auto ObjectView::get(std::string_view key) const -> std::optional<json::Cursor> {
     auto* item = value->find(key);
@@ -498,7 +495,7 @@ auto parse_tool_arguments(const ToolCall& call) -> std::expected<T, LLMError>;
 namespace clore::net::protocol {
 
 auto validate_json_output(std::string_view content) -> std::expected<void, LLMError> {
-    auto parsed = kota::codec::json::parse<kota::codec::json::Value>(content);
+    auto parsed = clore::json::parse<clore::json::Value>(content);
     if(!parsed.has_value()) {
         return std::unexpected(
             LLMError(std::format("LLM output is not valid JSON: {}", parsed.error().to_string())));
@@ -607,7 +604,7 @@ auto parse_response_text(const CompletionResponse& response) -> std::expected<T,
         return std::unexpected(std::move(text.error()));
     }
 
-    auto parsed = kota::codec::json::parse<T>(*text);
+    auto parsed = clore::json::parse<T>(*text);
     if(!parsed.has_value()) {
         return std::unexpected(LLMError(std::format("failed to parse structured LLM response: {}",
                                                     parsed.error().to_string())));
@@ -617,7 +614,7 @@ auto parse_response_text(const CompletionResponse& response) -> std::expected<T,
 
 template <typename T>
 auto parse_tool_arguments(const ToolCall& call) -> std::expected<T, LLMError> {
-    auto encoded = kota::codec::json::to_string(call.arguments);
+    auto encoded = clore::json::to_string(call.arguments);
     if(!encoded.has_value()) {
         return std::unexpected(
             LLMError(std::format("failed to serialize tool arguments for '{}': {}",
@@ -625,7 +622,7 @@ auto parse_tool_arguments(const ToolCall& call) -> std::expected<T, LLMError> {
                                  encoded.error().to_string())));
     }
 
-    auto parsed = kota::codec::json::parse<T>(*encoded);
+    auto parsed = clore::json::parse<T>(*encoded);
     if(!parsed.has_value()) {
         return std::unexpected(LLMError(std::format("failed to parse tool arguments for '{}': {}",
                                                     call.name,

@@ -28,7 +28,6 @@ struct TaskConfig {
 
     FilterRule filter;
     LLMConfig llm;
-
 };
 
 }  // namespace clore::config

@@ -12,9 +12,6 @@ module;
 #include <variant>
 
 #include "kota/async/async.h"
-#include "kota/codec/json/json.h"
-#include "kota/http/http.h"
-
 export module anthropic;
 
 import http;
@@ -27,7 +24,7 @@ import support;
 // ── protocol serialization ──────────────────────────────────────────────
 namespace clore::net::anthropic::protocol::detail {
 
-namespace json = kota::codec::json;
+namespace json = clore::json;
 
 constexpr std::uint32_t kDefaultMaxTokens = 2048;
 
@@ -263,23 +260,23 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
     for(const auto& message: request.messages) {
         auto serialized = std::visit(
             [&](const auto& current)
-                -> std::expected<std::optional<kota::codec::json::Object>, LLMError> {
+                -> std::expected<std::optional<clore::json::Object>, LLMError> {
                 using message_type = std::remove_cvref_t<decltype(current)>;
                 if constexpr(std::same_as<message_type, SystemMessage>) {
                     detail::append_text_with_gap(system_text, current.content);
-                    return std::optional<kota::codec::json::Object>{std::nullopt};
+                    return std::optional<clore::json::Object>{std::nullopt};
                 } else if constexpr(std::same_as<message_type, UserMessage>) {
                     auto object = detail::make_role_message("user", current.content);
                     if(!object.has_value()) {
                         return std::unexpected(std::move(object.error()));
                     }
-                    return std::optional<kota::codec::json::Object>{std::move(*object)};
+                    return std::optional<clore::json::Object>{std::move(*object)};
                 } else if constexpr(std::same_as<message_type, AssistantMessage>) {
                     auto object = detail::make_role_message("assistant", current.content);
                     if(!object.has_value()) {
                         return std::unexpected(std::move(object.error()));
                     }
-                    return std::optional<kota::codec::json::Object>{std::move(*object)};
+                    return std::optional<clore::json::Object>{std::move(*object)};
                 } else if constexpr(std::same_as<message_type, AssistantToolCallMessage>) {
                     auto blocks = clore::net::detail::make_empty_array(
                         "failed to create Anthropic assistant blocks");
@@ -304,7 +301,7 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
                     if(!object.has_value()) {
                         return std::unexpected(std::move(object.error()));
                     }
-                    return std::optional<kota::codec::json::Object>{std::move(*object)};
+                    return std::optional<clore::json::Object>{std::move(*object)};
                 } else {
                     auto blocks = clore::net::detail::make_empty_array(
                         "failed to create Anthropic tool_result blocks");
@@ -320,7 +317,7 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
                     if(!object.has_value()) {
                         return std::unexpected(std::move(object.error()));
                     }
-                    return std::optional<kota::codec::json::Object>{std::move(*object)};
+                    return std::optional<clore::json::Object>{std::move(*object)};
                 }
             },
             message);
@@ -458,7 +455,7 @@ auto build_request_json(const CompletionRequest& request) -> std::expected<std::
         root->insert("tool_choice", std::move(*tool_choice));
     }
 
-    auto encoded = kota::codec::json::to_string(*root);
+    auto encoded = clore::json::to_string(*root);
     if(!encoded.has_value()) {
         return clore::net::detail::unexpected_json_error("failed to serialize request JSON",
                                                          encoded.error());
@@ -595,12 +592,12 @@ auto parse_response(std::string_view json_text) -> std::expected<CompletionRespo
         if(!input.has_value()) {
             return std::unexpected(std::move(input.error()));
         }
-        auto input_json = kota::codec::json::to_string(*input);
+        auto input_json = clore::json::to_string(*input);
         if(!input_json.has_value()) {
             return clore::net::detail::unexpected_json_error("failed to serialize tool input JSON",
                                                              input_json.error());
         }
-        auto arguments = kota::codec::json::parse<kota::codec::json::Value>(*input_json);
+        auto arguments = clore::json::parse<clore::json::Value>(*input_json);
         if(!arguments.has_value()) {
             return std::unexpected(LLMError(
                 std::format("failed to parse tool_use input: {}", arguments.error().to_string())));
@@ -674,20 +671,20 @@ struct Protocol {
     }
 
     static auto build_headers(const clore::net::detail::EnvironmentConfig& environment)
-        -> std::vector<kota::http::header> {
-        return std::vector<kota::http::header>{
-            kota::http::header{
-                               .name = "Content-Type",
-                               .value = "application/json; charset=utf-8",
-                               },
-            kota::http::header{
-                               .name = "x-api-key",
-                               .value = environment.api_key,
-                               },
-            kota::http::header{
-                               .name = "anthropic-version",
-                               .value = std::string(kAnthropicVersion),
-                               },
+        -> std::vector<HttpHeader> {
+        return std::vector<HttpHeader>{
+            HttpHeader{
+                       .name = "Content-Type",
+                       .value = "application/json; charset=utf-8",
+                       },
+            HttpHeader{
+                       .name = "x-api-key",
+                       .value = environment.api_key,
+                       },
+            HttpHeader{
+                       .name = "anthropic-version",
+                       .value = std::string(kAnthropicVersion),
+                       },
         };
     }
 
@@ -705,10 +702,10 @@ struct Protocol {
         auto parsed = clore::net::anthropic::protocol::parse_response(raw_response.body);
         if(!parsed.has_value()) {
             if(raw_response.http_status >= 400) {
-                return std::unexpected(
-                    LLMError(std::format("Anthropic request failed with HTTP {}: {}",
-                                         raw_response.http_status,
-                                         clore::net::detail::excerpt_for_error(raw_response.body))));
+                return std::unexpected(LLMError(
+                    std::format("Anthropic request failed with HTTP {}: {}",
+                                raw_response.http_status,
+                                clore::net::detail::excerpt_for_error(raw_response.body))));
             }
             return std::unexpected(std::move(parsed.error()));
         }

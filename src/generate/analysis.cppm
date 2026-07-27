@@ -1,5 +1,6 @@
 module;
 
+#include <algorithm>
 #include <cstdint>
 #include <expected>
 #include <format>
@@ -17,8 +18,6 @@ module;
 #include <variant>
 #include <vector>
 
-#include "kota/codec/json/json.h"
-
 export module generate:analysis;
 
 import :evidence;
@@ -26,6 +25,7 @@ import :markdown;
 import :model;
 import config;
 import extract;
+import http;
 import support;
 
 export namespace clore::generate {
@@ -70,7 +70,7 @@ auto build_symbol_analysis_prompt(const extract::SymbolInfo& sym,
 
 namespace clore::generate {
 
-namespace json = kota::codec::json;
+namespace json = clore::json;
 
 namespace {
 
